@@ -76,9 +76,23 @@ window.TechnicalIndicatorsPanel = (function () {
     { name: "Darvas Box", key: "darvasBox", cat: "Volatility", type: "darvas" },
     { name: "Smart Money", key: "smartMoney", cat: "Volume", type: "smartMoney" },
     { name: "MTF Alignment", key: "mtfAlignment", cat: "Trend", type: "oscillator", range: [0, 100] },
+    { name: "Chandelier Exit", key: "chandelier", cat: "Volatility", type: "chandelier" },
+    { name: "Heikin-Ashi", key: "heikinAshi", cat: "Trend", type: "heikinAshi" },
+    { name: "Choppiness Index", key: "choppiness", cat: "Volatility", type: "oscillator", range: [0, 100] },
+    { name: "Williams %R", key: "williamsR", cat: "Momentum", type: "oscillator", range: [-100, 0] },
+    { name: "Awesome Oscillator", key: "awesomeOsc", cat: "Momentum", type: "oscillator" },
+    { name: "Force Index", key: "forceIndex", cat: "Volume", type: "volume" },
+    { name: "Fibonacci Levels", key: "fibonacci", cat: "Structure", type: "fibonacci" },
+    { name: "Pivot Points", key: "pivotPoints", cat: "Structure", type: "pivotPoints" },
+    { name: "Williams Fractals", key: "fractals", cat: "Structure", type: "fractals" },
+    { name: "Aroon", key: "aroon", cat: "Trend", type: "aroon" },
+    { name: "Zig Zag", key: "zigZag", cat: "Structure", type: "zigZag" },
+    { name: "Vortex Indicator", key: "vortex", cat: "Trend", type: "vortex" },
+    { name: "RS vs Nifty50", key: "rs_vs_nifty", cat: "Trend", type: "rs" },
+    { name: "Beta vs Nifty50", key: "beta_nifty", cat: "Momentum", type: "line" },
   ];
 
-  var CATEGORIES = ["Trend", "Momentum", "Volatility", "Volume"];
+  var CATEGORIES = ["Trend", "Momentum", "Volatility", "Volume", "Structure"];
 
   function fmt(v, dec) {
     if (v === null || v === undefined || isNaN(v)) return "—";
@@ -207,6 +221,57 @@ window.TechnicalIndicatorsPanel = (function () {
         val.valueAreaHigh && React.createElement("span", null, "VAH: ", fmt(val.valueAreaHigh)),
         val.valueAreaLow && React.createElement("span", null, "VAL: ", fmt(val.valueAreaLow))
       ),
+      ind.type === "chandelier" && val && typeof val === "object" && React.createElement("div", {
+        style: { display: "flex", gap: 12, fontSize: 10, color: "var(--text5)", marginTop: 2 }
+      },
+        React.createElement("span", null, "Long: ", fmt(val.long)),
+        React.createElement("span", null, "Short: ", fmt(val.short)),
+        lastClose && val.long && React.createElement("span", { style: { color: lastClose > val.long ? "#16a34a" : "#ef4444" } }, lastClose > val.long ? "Above Long" : "Below Long")
+      ),
+      ind.type === "heikinAshi" && val && typeof val === "object" && React.createElement("div", {
+        style: { display: "flex", gap: 10, fontSize: 10, color: "var(--text5)", marginTop: 2 }
+      },
+        React.createElement("span", null, "O: ", fmt(val.open)),
+        React.createElement("span", null, "H: ", fmt(val.high)),
+        React.createElement("span", null, "L: ", fmt(val.low)),
+        React.createElement("span", null, "C: ", fmt(val.close)),
+        React.createElement("span", { style: { color: val.trend === "bullish" ? "#16a34a" : val.trend === "bearish" ? "#ef4444" : "var(--text5)" } }, val.trend ? val.trend.toUpperCase() : "—")
+      ),
+      ind.type === "fibonacci" && val && typeof val === "object" && val.retrace && React.createElement("div", {
+        style: { display: "flex", gap: 8, flexWrap: "wrap", fontSize: 10, color: "var(--text5)", marginTop: 2 }
+      },
+        React.createElement("span", null, "SH: ", fmt(val.swingHigh)),
+        React.createElement("span", null, "SL: ", fmt(val.swingLow)),
+        Object.keys(val.retrace).map(function(k) { return React.createElement("span", { key: k }, k + ": " + fmt(val.retrace[k])); })
+      ),
+      ind.type === "pivotPoints" && val && typeof val === "object" && val.classic && React.createElement("div", {
+        style: { display: "flex", gap: 8, flexWrap: "wrap", fontSize: 10, color: "var(--text5)", marginTop: 2 }
+      },
+        React.createElement("span", null, "P: ", fmt(val.classic.P)),
+        React.createElement("span", { style: { color: "#16a34a" } }, "R1: ", fmt(val.classic.R1)),
+        React.createElement("span", { style: { color: "#16a34a" } }, "R2: ", fmt(val.classic.R2)),
+        React.createElement("span", { style: { color: "#ef4444" } }, "S1: ", fmt(val.classic.S1)),
+        React.createElement("span", { style: { color: "#ef4444" } }, "S2: ", fmt(val.classic.S2))
+      ),
+      ind.type === "aroon" && val && typeof val === "object" && React.createElement("div", {
+        style: { display: "flex", gap: 12, fontSize: 10, color: "var(--text5)", marginTop: 2 }
+      },
+        React.createElement("span", null, "Up: ", fmt(val.up)),
+        React.createElement("span", null, "Down: ", fmt(val.down)),
+        React.createElement("span", { style: { color: val.osc > 0 ? "#16a34a" : "#ef4444" } }, "Osc: ", fmt(val.osc))
+      ),
+      ind.type === "vortex" && val && typeof val === "object" && React.createElement("div", {
+        style: { display: "flex", gap: 12, fontSize: 10, color: "var(--text5)", marginTop: 2 }
+      },
+        React.createElement("span", { style: { color: "#16a34a" } }, "VI+: ", fmt(val.plus)),
+        React.createElement("span", { style: { color: "#ef4444" } }, "VI-: ", fmt(val.minus))
+      ),
+      ind.type === "rs" && val && typeof val === "object" && React.createElement("div", {
+        style: { display: "flex", gap: 10, fontSize: 10, color: "var(--text5)", marginTop: 2 }
+      },
+        React.createElement("span", null, "RS: ", fmt(val.rs, 4)),
+        val.mansfield != null && React.createElement("span", { style: { color: val.mansfield > 0 ? "#16a34a" : "#ef4444" } }, "Mansfield: ", fmt(val.mansfield, 2) + "%")
+      ),
       deviation !== null && React.createElement("div", {
         style: {
           fontSize: 10, marginTop: 2,
@@ -226,6 +291,15 @@ window.TechnicalIndicatorsPanel = (function () {
       if (ind.type === "darvas") return val.boxTop ? fmt(val.boxTop) + " / " + fmt(val.boxBottom) : "—";
       if (ind.type === "smartMoney") return val.bos ? val.bos.replace("_", " ").toUpperCase() : "—";
       if (ind.type === "volumeProfile") return val.poc ? "POC: " + fmt(val.poc) : "—";
+      if (ind.type === "chandelier") return "L: " + fmt(val.long) + " / S: " + fmt(val.short);
+      if (ind.type === "heikinAshi") return (val.trend || "—").toUpperCase();
+      if (ind.type === "fibonacci") return val.swingHigh ? fmt(val.swingHigh) + " — " + fmt(val.swingLow) : "—";
+      if (ind.type === "pivotPoints") return val.classic ? "P: " + fmt(val.classic.P) : "—";
+      if (ind.type === "fractals") return (val.up ? val.up.length : 0) + "↑ / " + (val.down ? val.down.length : 0) + "↓";
+      if (ind.type === "aroon") return "Up: " + fmt(val.up) + " / Dn: " + fmt(val.down);
+      if (ind.type === "zigZag") return val ? val.length + " pivots" : "—";
+      if (ind.type === "vortex") return "+: " + fmt(val.plus) + " / -: " + fmt(val.minus);
+      if (ind.type === "rs") return val.rs ? "RS: " + fmt(val.rs, 4) : "—";
       return "—";
     }
     if (ind.type === "volume") return fmtVol(val);

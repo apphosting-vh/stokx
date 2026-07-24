@@ -1,17 +1,22 @@
-const CACHE_NAME = 'stox-v1';
+const CACHE_NAME = 'stox-v2';
 const urlsToCache = [
-  '/',
-  '/Index.html',
-  '/app-core.js',
-  '/manifest.json',
-  'https://unpkg.com/react@18/umd/react.production.min.js',
-  'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
-  'https://unpkg.com/@babel/standalone/babel.min.js'
+  './',
+  './index.html',
+  './app-core.js',
+  './indicators.js',
+  './data-fetcher.js',
+  './technical-panel.js',
+  './reports.js',
+  './backup.js',
+  './manifest.json',
+  'https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.29.7/babel.min.js'
 ];
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
+    caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache)).catch(() => {})
   );
   self.skipWaiting();
 });

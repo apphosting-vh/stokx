@@ -254,6 +254,167 @@ async function fetchMultiplePrices(tickers) {
   return results;
 }
 
+/* ── Historical daily prices fetcher (buyDate → today) ── */
+const fetchHistoricalPrices = async (rawTicker, fromDate) => {
+  const ticker = (rawTicker || "").trim().toUpperCase();
+  if (!ticker || !fromDate) return null;
+  let _resolve;
+  const capTimer = new Promise(r => { _resolve = r; setTimeout(() => _resolve(null), 30000); });
+  const _fetch = async () => {
+    const period1 = Math.floor(new Date(fromDate + "T00:00:00Z").getTime() / 1000);
+    const period2 = Math.floor(Date.now() / 1000) + 86400;
+    const hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
+    const symbols = [ticker + ".NS", ticker + ".BO", ticker];
+    const proxyFns = [
+      u => "https://api.cors.lol/?url=" + encodeURIComponent(u),
+      u => "https://corsproxy.io/?" + encodeURIComponent(u),
+      u => "https://cors.eu.org/" + u,
+      u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+    ];
+    for (const sym of symbols) {
+      for (const host of hosts) {
+        const yUrl = "https://" + host + "/v8/finance/chart/" + encodeURIComponent(sym) + "?interval=1d&period1=" + period1 + "&period2=" + period2;
+        for (const mkProxy of proxyFns) {
+          try {
+            const r = await _fetchX(mkProxy(yUrl), {}, 10000);
+            if (!r.ok) continue;
+            const txt = await _readBody(r, 8000);
+            let json; try { json = JSON.parse(txt); } catch { continue; }
+            const payload = json?.contents ? JSON.parse(json.contents) : json;
+            const result = payload?.chart?.result?.[0];
+            if (!result) continue;
+            const timestamps = result.timestamp || [];
+            const closes = result.indicators?.quote?.[0]?.close || [];
+            if (timestamps.length < 2) continue;
+            const pts = [];
+            for (let i = 0; i < timestamps.length; i++) {
+              const c = closes[i];
+              if (c == null || isNaN(c) || c <= 0) continue;
+              const istMs = timestamps[i] * 1000 + (5.5 * 60 * 60 * 1000);
+              const istDate = new Date(istMs).toISOString().split("T")[0];
+              pts.push({ date: istDate, close: Math.round(c * 100) / 100 });
+            }
+            if (pts.length >= 2) { _resolve(pts); return pts; }
+          } catch {}
+        }
+      }
+    }
+    _resolve(null);
+    return null;
+  };
+  return Promise.race([_fetch(), capTimer]);
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MARKET INDICES FETCHER — NSE India + Stooq commodities
+   ══════════════════════════════════════════════════════════════════════════ */
+const MARKET_INDEX_MAP = [
+  { nseKey: "NIFTY 50", name: "Nifty 50", group: "Broad" },
+  { nseKey: "NIFTY 100", name: "Nifty 100", group: "Broad" },
+  { nseKey: "NIFTY MIDCAP 50", name: "Nifty Midcap 50", group: "Broad" },
+  { nseKey: "NIFTY MIDCAP 100", name: "Nifty Midcap 100", group: "Broad" },
+  { nseKey: "NIFTY BANK", name: "Bank Nifty", group: "Sector" },
+  { nseKey: "NIFTY IT", name: "Nifty IT", group: "Sector" },
+  { nseKey: "NIFTY PHARMA", name: "Nifty Pharma", group: "Sector" },
+  { nseKey: "NIFTY AUTO", name: "Nifty Auto", group: "Sector" },
+  { nseKey: "NIFTY FMCG", name: "Nifty FMCG", group: "Sector" },
+  { nseKey: "NIFTY METAL", name: "Nifty Metal", group: "Sector" },
+  { nseKey: "NIFTY REALTY", name: "Nifty Realty", group: "Sector" },
+  { nseKey: "NIFTY ENERGY", name: "Nifty Energy", group: "Sector" },
+];
+
+const COMMODITY_LIST = [
+  { stooq: "xauusd", name: "Gold", currency: "USD" },
+  { stooq: "xagusd", name: "Silver", currency: "USD" },
+  { stooq: "cl.f", name: "Crude Oil (WTI)", currency: "USD" },
+];
+
+async function fetchMarketIndices() {
+  const out = [];
+  const overallCap = new Promise(r => setTimeout(() => r(null), 18000));
+
+  const _fetch = async () => {
+    /* ── NSE India API for all Indian indexes ── */
+    const nseUrl = "https://www.nseindia.com/api/allIndices";
+    const nseProxies = [
+      "https://corsproxy.io/?" + encodeURIComponent(nseUrl),
+      "https://api.cors.lol/?url=" + encodeURIComponent(nseUrl),
+      "https://cors.eu.org/" + nseUrl,
+      "https://api.allorigins.win/raw?url=" + encodeURIComponent(nseUrl),
+    ];
+    let nseData = null;
+    for (const proxyUrl of nseProxies) {
+      try {
+        const r = await _fetchX(proxyUrl, {}, 10000);
+        if (!r.ok) continue;
+        const txt = await _readBody(r, 8000);
+        let json;
+        try { json = JSON.parse(txt); } catch { continue; }
+        const payload = json?.contents ? JSON.parse(json.contents) : json;
+        if (Array.isArray(payload?.data)) { nseData = payload.data; break; }
+      } catch {}
+    }
+
+    if (nseData) {
+      const bySym = {};
+      nseData.forEach(d => { if (d.indexSymbol) bySym[d.indexSymbol] = d; });
+      for (const cfg of MARKET_INDEX_MAP) {
+        const d = bySym[cfg.nseKey];
+        if (!d) continue;
+        const price = parseFloat(d.last);
+        const prevClose = parseFloat(d.previousClose);
+        const change = parseFloat(d.variation) || 0;
+        const changePct = parseFloat(d.percentChange) || 0;
+        if (isNaN(price)) continue;
+        out.push({
+          symbol: cfg.nseKey, name: cfg.name, group: cfg.group,
+          price, prevClose: !isNaN(prevClose) ? prevClose : null,
+          change, changePct, currency: "INR",
+        });
+      }
+    }
+
+    /* ── Commodities via Stooq ── */
+    const fetchStooq = async (item) => {
+      const stooqUrl = "https://stooq.com/q/l/?s=" + encodeURIComponent(item.stooq) + "&f=sd2t2ohlcv&h&e=csv";
+      const proxies = [
+        "https://api.cors.lol/?url=" + encodeURIComponent(stooqUrl),
+        "https://cors.eu.org/" + stooqUrl,
+        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(stooqUrl),
+      ];
+      for (const proxyUrl of proxies) {
+        try {
+          const r = await _fetchX(proxyUrl, {}, 8000);
+          if (!r.ok) continue;
+          const csv = _unwrap(await _readBody(r, 6000));
+          const lines = csv.trim().split("\n");
+          if (lines.length < 2) continue;
+          const cols = lines[1].split(",");
+          const close = parseFloat(cols[6]);
+          const open = parseFloat(cols[3]);
+          if (isNaN(close) || close <= 0) continue;
+          const change = !isNaN(open) && open > 0 ? close - open : 0;
+          const changePct = !isNaN(open) && open > 0 ? (change / open * 100) : 0;
+          return {
+            symbol: item.stooq, name: item.name, group: "Commodity",
+            price: Math.round(close * 100) / 100, prevClose: null,
+            change: Math.round(change * 100) / 100,
+            changePct: Math.round(changePct * 100) / 100,
+            currency: item.currency,
+          };
+        } catch {}
+      }
+      return null;
+    };
+
+    const commodityResults = await Promise.all(COMMODITY_LIST.map(c => fetchStooq(c)));
+    commodityResults.forEach(r => { if (r) out.push(r); });
+    return out;
+  };
+
+  return Promise.race([_fetch(), overallCap]).then(r => r || []);
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    OHLCV DATA FETCHER — for technical analysis
    ══════════════════════════════════════════════════════════════════════════ */
@@ -365,99 +526,96 @@ const SECTORS = [
    ICONS — SVG icon helpers
    ══════════════════════════════════════════════════════════════════════════ */
 const Icons = {
-  home: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
-    React.createElement("path", { d: "M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" }),
-    React.createElement("polyline", { points: "9 22 9 12 15 12 15 22" })
+  home: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("path", { d: "M4 10.5L12 3l8 7.5V20a1 1 0 0 1-1 1h-4v-5a1 1 0 0 0-1-1h-2a1 1 0 0 0-1 1v5H5a1 1 0 0 1-1-1V10.5z" })
   ),
-  search: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
-    React.createElement("circle", { cx: 11, cy: 11, r: 8 }),
-    React.createElement("line", { x1: 21, y1: 21, x2: 16.65, y2: 16.65 })
+  search: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("circle", { cx: 11, cy: 11, r: 7 }),
+    React.createElement("line", { x1: 16.5, y1: 16.5, x2: 21, y2: 21 })
   ),
-  chart: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  chart: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("polyline", { points: "22 12 18 12 15 21 9 3 6 12 2 12" })
   ),
-  briefcase: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
-    React.createElement("rect", { x: 2, y: 7, width: 20, height: 14, rx: 2, ry: 2 }),
+  briefcase: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("rect", { x: 2, y: 7, width: 20, height: 14, rx: 2 }),
     React.createElement("path", { d: "M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" })
   ),
-  eye: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
-    React.createElement("path", { d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" }),
+  eye: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("path", { d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" }),
     React.createElement("circle", { cx: 12, cy: 12, r: 3 })
   ),
-  settings: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  settings: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("circle", { cx: 12, cy: 12, r: 3 }),
-    React.createElement("path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" })
+    React.createElement("path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" })
   ),
-  plus: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  plus: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("line", { x1: 12, y1: 5, x2: 12, y2: 19 }),
     React.createElement("line", { x1: 5, y1: 12, x2: 19, y2: 12 })
   ),
-  trash: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  trash: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("polyline", { points: "3 6 5 6 21 6" }),
     React.createElement("path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" })
   ),
-  x: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  x: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("line", { x1: 18, y1: 6, x2: 6, y2: 18 }),
     React.createElement("line", { x1: 6, y1: 6, x2: 18, y2: 18 })
   ),
-  refresh: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  refresh: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("polyline", { points: "23 4 23 10 17 10" }),
     React.createElement("path", { d: "M20.49 15a9 9 0 1 1-2.12-9.36L23 10" })
   ),
-  sun: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
-    React.createElement("circle", { cx: 12, cy: 12, r: 5 }),
-    React.createElement("line", { x1: 12, y1: 1, x2: 12, y2: 3 }),
-    React.createElement("line", { x1: 12, y1: 21, x2: 12, y2: 23 }),
-    React.createElement("line", { x1: 4.22, y1: 4.22, x2: 5.64, y2: 5.64 }),
-    React.createElement("line", { x1: 18.36, y1: 18.36, x2: 19.78, y2: 19.78 }),
-    React.createElement("line", { x1: 1, y1: 12, x2: 3, y2: 12 }),
-    React.createElement("line", { x1: 21, y1: 12, x2: 23, y2: 12 }),
-    React.createElement("line", { x1: 4.22, y1: 19.78, x2: 5.64, y2: 18.36 }),
-    React.createElement("line", { x1: 18.36, y1: 5.64, x2: 19.78, y2: 4.22 })
+  sun: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("circle", { cx: 12, cy: 12, r: 4 }),
+    React.createElement("line", { x1: 12, y1: 2, x2: 12, y2: 5 }),
+    React.createElement("line", { x1: 12, y1: 19, x2: 12, y2: 22 }),
+    React.createElement("line", { x1: 4.93, y1: 4.93, x2: 7.05, y2: 7.05 }),
+    React.createElement("line", { x1: 16.95, y1: 16.95, x2: 19.07, y2: 19.07 }),
+    React.createElement("line", { x1: 2, y1: 12, x2: 5, y2: 12 }),
+    React.createElement("line", { x1: 19, y1: 12, x2: 22, y2: 12 }),
+    React.createElement("line", { x1: 4.93, y1: 19.07, x2: 7.05, y2: 16.95 }),
+    React.createElement("line", { x1: 16.95, y1: 7.05, x2: 19.07, y2: 4.93 })
   ),
-  moon: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  moon: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("path", { d: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" })
   ),
-  trendingUp: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  trendingUp: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("polyline", { points: "23 6 13.5 15.5 8.5 10.5 1 18" }),
     React.createElement("polyline", { points: "17 6 23 6 23 12" })
   ),
-  trendingDown: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  trendingDown: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("polyline", { points: "23 18 13.5 8.5 8.5 13.5 1 6" }),
     React.createElement("polyline", { points: "17 18 23 18 23 12" })
   ),
-  arrowUp: (s = 16) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.5, strokeLinecap: "round", strokeLinejoin: "round" },
-    React.createElement("line", { x1: 12, y1: 19, x2: 12, y2: 5 }),
-    React.createElement("polyline", { points: "5 12 12 5 19 12" })
+  arrowUp: (s = 16) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("polyline", { points: "18 15 12 9 6 15" })
   ),
-  arrowDown: (s = 16) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.5, strokeLinecap: "round", strokeLinejoin: "round" },
-    React.createElement("line", { x1: 12, y1: 5, x2: 12, y2: 19 }),
-    React.createElement("polyline", { points: "19 12 12 19 5 12" })
+  arrowDown: (s = 16) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("polyline", { points: "6 9 12 15 18 9" })
   ),
-  rupee: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  rupee: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("path", { d: "M6 3h12" }),
     React.createElement("path", { d: "M6 8h12" }),
     React.createElement("path", { d: "M6 3c0 4.5 6 6 6 11" }),
     React.createElement("path", { d: "M18 3c0 4.5-6 6-6 11" }),
     React.createElement("path", { d: "M6 14c3 2 9 2 12 0" })
   ),
-  star: (s = 20, filled = false) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  star: (s = 20, filled = false) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("polygon", { points: "12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" })
   ),
-  edit: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  edit: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("path", { d: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
     React.createElement("path", { d: "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" })
   ),
-  clock: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  clock: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("circle", { cx: 12, cy: 12, r: 10 }),
     React.createElement("polyline", { points: "12 6 12 12 16 14" })
   ),
-  save: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  save: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("path", { d: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" }),
     React.createElement("polyline", { points: "17 21 17 13 7 13 7 21" }),
     React.createElement("polyline", { points: "7 3 7 8 15 8" })
   ),
-  filter: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+  filter: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("polygon", { points: "22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" })
   ),
 };
@@ -553,9 +711,279 @@ function MiniSparkline({ data, width = 100, height = 32, color }) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   MarketTicker — live scrolling ticker for Indian indices + commodities
+   ══════════════════════════════════════════════════════════════════════════ */
+const MarketTicker = React.memo(function MarketTicker() {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const scrollRef = useRef(null);
+  const autoScrollRef = useRef(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const d = await fetchMarketIndices();
+      if (d.length) { setData(d); setLastUpdated(new Date()); }
+      else setError("Could not fetch market data");
+    } catch (e) { setError(e.message || "Failed to load"); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const iv = setInterval(load, 60000); return () => clearInterval(iv); }, [load]);
+
+  /* Auto-scroll animation */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || data.length < 2) return;
+    let pos = 0, dir = 1, paused = false;
+    const onEnter = () => { paused = true; };
+    const onLeave = () => { paused = false; };
+    el.addEventListener("mouseenter", onEnter);
+    el.addEventListener("touchstart", onEnter, { passive: true });
+    el.addEventListener("mouseleave", onLeave);
+    el.addEventListener("touchend", onLeave);
+    const tick = () => {
+      if (!paused && el.scrollWidth > el.clientWidth) {
+        pos += dir * 0.5;
+        if (pos >= el.scrollWidth - el.clientWidth - 2) dir = -1;
+        if (pos <= 0) dir = 1;
+        el.scrollLeft = pos;
+      }
+      autoScrollRef.current = requestAnimationFrame(tick);
+    };
+    autoScrollRef.current = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(autoScrollRef.current);
+      el.removeEventListener("mouseenter", onEnter);
+      el.removeEventListener("touchstart", onEnter);
+      el.removeEventListener("mouseleave", onLeave);
+      el.removeEventListener("touchend", onLeave);
+    };
+  }, [data]);
+
+  if (!data.length && !loading && !error) return null;
+
+  const fmtPrice = (v, cur) => {
+    if (v == null) return "--";
+    if (cur === "USD") return "$" + v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return "\u20b9" + v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  return React.createElement("div", { style: { marginBottom: 24 } },
+    /* Header row */
+    React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" } },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 7 } },
+        React.createElement("div", { style: { width: 3, height: 14, borderRadius: 2, background: "#16a34a", flexShrink: 0 } }),
+        React.createElement("span", { style: { fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: "var(--text5)" } }, "Market Indices"),
+        loading && React.createElement("span", { style: { fontSize: 12, color: "var(--text6)" } }, "\u27f3")
+      ),
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+        lastUpdated && React.createElement("span", { style: { fontSize: 10, color: "var(--text6)", whiteSpace: "nowrap" } },
+          "Updated " + lastUpdated.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+        ),
+        React.createElement("button", {
+          onClick: load, disabled: loading,
+          style: { fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(22,163,74,.3)", background: loading ? "var(--bg5)" : "rgba(22,163,74,.08)", color: "#16a34a", cursor: loading ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600, opacity: loading ? 0.5 : 1 }
+        }, loading ? "\u27f3 \u2026" : "\u27f3 Refresh")
+      )
+    ),
+    /* Ticker strip */
+    error && !data.length
+      ? React.createElement("div", { style: { padding: "12px 16px", borderRadius: 10, background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.2)", fontSize: 12, color: "#ef4444", textAlign: "center" } }, error)
+      : React.createElement("div", { ref: scrollRef, style: {
+          display: "flex", gap: 10, overflowX: "auto", overflowY: "hidden",
+          paddingBottom: 6, scrollbarWidth: "thin",
+          WebkitOverflowScrolling: "touch",
+        }},
+        data.map((item, idx) => {
+          const isUp = item.change >= 0;
+          const col = isUp ? "#16a34a" : "#ef4444";
+          const bgCol = isUp ? "rgba(22,163,74,.06)" : "rgba(239,68,68,.06)";
+          const borderCol = isUp ? "rgba(22,163,74,.18)" : "rgba(239,68,68,.18)";
+          const groupCol = item.group === "Commodity" ? "#b45309" : item.group === "Sector" ? "#6d28d9" : "#0e7490";
+          return React.createElement("div", { key: item.symbol + idx, style: {
+            flex: "0 0 auto", minWidth: 155, maxWidth: 200,
+            padding: "10px 14px", borderRadius: 10,
+            background: bgCol, border: "1px solid " + borderCol,
+          }},
+            /* Group badge + currency */
+            React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 } },
+              React.createElement("span", { style: { fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: groupCol + "18", color: groupCol, border: "1px solid " + groupCol + "30", textTransform: "uppercase", letterSpacing: 0.6 } }, item.group),
+              item.currency === "USD" && React.createElement("span", { style: { fontSize: 8, fontWeight: 600, color: "var(--text6)" } }, "USD")
+            ),
+            /* Index name */
+            React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 6, lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, item.name),
+            /* Price */
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 15, color: "var(--text)", marginBottom: 4, whiteSpace: "nowrap", fontFamily: "var(--font-mono)" } }, fmtPrice(item.price, item.currency)),
+            /* Change row */
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" } },
+              React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: col, lineHeight: 1 } },
+                isUp ? "\u25b2" : "\u25bc", " ",
+                item.currency === "USD"
+                  ? "$" + Math.abs(item.change).toFixed(2)
+                  : "\u20b9" + Math.abs(item.change).toFixed(2)
+              ),
+              React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: col, background: col + "15", padding: "1px 5px", borderRadius: 4 } },
+                (isUp ? "+" : "") + item.changePct.toFixed(2) + "%"
+              )
+            )
+          );
+        })
+    )
+  );
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MARKET NEWS PANEL — Marketaux API
+   ══════════════════════════════════════════════════════════════════════════ */
+const MARKETAUX_KEY = "2DxOjtOp2p5Nu2hU21aYGPNEIX2dxmOj4oHJta6x";
+
+function MarketNewsPanel({ holdings }) {
+  const [news, setNews] = React.useState([]);
+  const [stockNews, setStockNews] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [stockLoading, setStockLoading] = React.useState(true);
+  const [activeTab, setActiveTab] = React.useState("market");
+  const [expanded, setExpanded] = React.useState({});
+
+  const toggleExpand = (id) => setExpanded((p) => ({ ...p, [id]: !p[id] }));
+
+  const timeAgo = (dateStr) => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return mins + "m ago";
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + "h ago";
+    const days = Math.floor(hrs / 24);
+    return days + "d ago";
+  };
+
+  const stripHtml = (html) => {
+    if (!html) return "";
+    return html.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, "\"");
+  };
+
+  // Fetch India market news on mount
+  React.useEffect(() => {
+    let cancelled = false;
+    const url = "https://api.marketaux.com/v1/news/all?api_token=" + MARKETAUX_KEY + "&countries=in&language=en&limit=15&filter_entities=true";
+    fetch(url)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled && data.data) setNews(data.data);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Fetch news for held tickers
+  React.useEffect(() => {
+    if (!holdings || holdings.length === 0) { setStockLoading(false); return; }
+    let cancelled = false;
+    const tickers = holdings.slice(0, 10).map((h) => h.ticker).join(",");
+    const url = "https://api.marketaux.com/v1/news/all?api_token=" + MARKETAUX_KEY + "&symbols=" + encodeURIComponent(tickers) + "&language=en&limit=12&filter_entities=true";
+    fetch(url)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled && data.data) setStockNews(data.data);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setStockLoading(false); });
+    return () => { cancelled = true; };
+  }, [holdings]);
+
+  const renderNewsCard = (article, idx) => {
+    const isExp = expanded[article.uuid];
+    const desc = stripHtml(article.description || "");
+    const shortDesc = desc.length > 140 ? desc.slice(0, 140) + "..." : desc;
+    const entities = (article.entities || []).slice(0, 4);
+
+    return React.createElement("div", {
+      key: article.uuid || idx,
+      className: "stx-card",
+      style: { padding: "14px 16px", marginBottom: 0, animation: "stxFadeIn .35s ease " + (idx * 0.04) + "s both", cursor: "pointer", transition: "border-color .15s, box-shadow .15s" },
+      onClick: () => { if (article.url) window.open(article.url, "_blank", "noopener"); },
+      onMouseEnter: (e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; },
+      onMouseLeave: (e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }
+    },
+      React.createElement("div", { style: { display: "flex", gap: 12 } },
+        article.image_url && React.createElement("div", {
+          style: { width: 72, height: 72, borderRadius: 8, backgroundSize: "cover", backgroundPosition: "center", backgroundImage: "url(" + article.image_url + ")", flexShrink: 0, background: article.image_url ? undefined : "var(--bg5)" }
+        }),
+        React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+          React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.35, marginBottom: 4, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" } }, article.title),
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", lineHeight: 1.4, marginBottom: 6, display: "-webkit-box", WebkitLineClamp: isExp ? 10 : 2, WebkitBoxOrient: "vertical", overflow: "hidden" } }, isExp ? desc : shortDesc),
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } },
+            React.createElement("span", { style: { fontSize: 10, color: "var(--text6)", fontWeight: 600 } }, article.source || "Unknown"),
+            React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "\u00b7"),
+            React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, timeAgo(article.published_at)),
+            entities.length > 0 && React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap", marginLeft: 4 } },
+              entities.map((ent, ei) => {
+                const sentColor = ent.sentiment_score > 0.1 ? "#10b981" : ent.sentiment_score < -0.1 ? "#ef4444" : "var(--text6)";
+                return React.createElement("span", {
+                  key: ei,
+                  style: { fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--bg5)", border: "1px solid var(--border2)", color: sentColor, letterSpacing: 0.3 }
+                }, ent.symbol || ent.name);
+              })
+            )
+          )
+        )
+      )
+    );
+  };
+
+  return React.createElement("div", { style: { marginTop: 24 } },
+    // Tab header
+    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 14 } },
+      React.createElement("h2", { style: { fontSize: 15, fontWeight: 700, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Market News"),
+      React.createElement("div", { style: { display: "flex", gap: 2, background: "var(--bg5)", borderRadius: 8, padding: 2, border: "1px solid var(--border)" } },
+        React.createElement("button", {
+          onClick: () => setActiveTab("market"),
+          style: { padding: "4px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", border: "none", background: activeTab === "market" ? "var(--accent)" : "transparent", color: activeTab === "market" ? "#fff" : "var(--text5)", transition: "all .15s", fontFamily: "var(--font-body)" }
+        }, "Indian Markets"),
+        holdings.length > 0 && React.createElement("button", {
+          onClick: () => setActiveTab("stock"),
+          style: { padding: "4px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", border: "none", background: activeTab === "stock" ? "var(--accent)" : "transparent", color: activeTab === "stock" ? "#fff" : "var(--text5)", transition: "all .15s", fontFamily: "var(--font-body)" }
+        }, "My Holdings")
+      ),
+      React.createElement("div", { style: { marginLeft: "auto", fontSize: 10, color: "var(--text6)" } }, "Powered by Marketaux")
+    ),
+
+    // Market news tab
+    activeTab === "market" && React.createElement("div", null,
+      loading && React.createElement("div", { style: { textAlign: "center", padding: 40, color: "var(--text5)" } },
+        React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite", fontSize: 20 } }, "\u21bb"),
+        React.createElement("div", { style: { marginTop: 8, fontSize: 12 } }, "Fetching market news...")
+      ),
+      !loading && news.length === 0 && React.createElement("div", { style: { textAlign: "center", padding: 32, color: "var(--text6)", fontSize: 12 } }, "No news available right now."),
+      !loading && news.length > 0 && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 } },
+        news.map((a, i) => renderNewsCard(a, i))
+      )
+    ),
+
+    // Stock-specific news tab
+    activeTab === "stock" && React.createElement("div", null,
+      stockLoading && React.createElement("div", { style: { textAlign: "center", padding: 40, color: "var(--text5)" } },
+        React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite", fontSize: 20 } }, "\u21bb"),
+        React.createElement("div", { style: { marginTop: 8, fontSize: 12 } }, "Fetching news for your holdings...")
+      ),
+      !stockLoading && stockNews.length === 0 && React.createElement("div", { style: { textAlign: "center", padding: 32, color: "var(--text6)", fontSize: 12 } }, "No news found for your holdings."),
+      !stockLoading && stockNews.length > 0 && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 } },
+        stockNews.map((a, i) => renderNewsCard(a, i))
+      )
+    )
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    PAGE: Dashboard
    ══════════════════════════════════════════════════════════════════════════ */
-function Dashboard({ holdings, watchlist, prices, navigate }) {
+function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
   const [loading, setLoading] = useState(false);
 
   const totalInvested = useMemo(() => {
@@ -573,44 +1001,20 @@ function Dashboard({ holdings, watchlist, prices, navigate }) {
   const totalPnLPct = totalInvested > 0 ? ((totalPnL / totalInvested) * 100) : 0;
   const todayStr = TODAY();
 
-  // Sector allocation
-  const sectorAlloc = useMemo(() => {
-    const map = {};
-    holdings.forEach((h) => {
-      const sector = h.sector || "Other";
-      const p = prices[h.ticker]?.price || h.currentPrice || h.buyPrice || h.avgPrice || 0;
-      const val = p * h.qty;
-      map[sector] = (map[sector] || 0) + val;
-    });
-    return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [holdings, prices]);
-
-  // Top holdings
-  const topHoldings = useMemo(() => {
-    return [...holdings]
-      .map((h) => {
-        const bp = h.buyPrice || h.avgPrice || 0;
-        const cp = prices[h.ticker]?.price || h.currentPrice || bp;
-        return {
-          ...h,
-          currentPrice: cp,
-          value: cp * h.qty,
-          pnl: (cp - bp) * h.qty,
-          pnlPct: bp > 0 ? ((cp - bp) / bp * 100) : 0,
-        };
-      })
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
-  }, [holdings, prices]);
-
   return React.createElement("div", null,
     // Header
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--accent)", letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 4 } }, "DASHBOARD"),
-        React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, "Portfolio Overview"),
+        React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, "Market Overview"),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 4 } }, todayStr + (isTradingWeekday() ? " \u00b7 Market Open" : " \u00b7 Market Closed"))
-      )
+      ),
+      React.createElement("button", {
+        className: "stx-btn stx-btn-ghost",
+        disabled: loading,
+        onClick: async function() { setLoading(true); try { await refreshPrices(); } catch(e) {} setLoading(false); },
+        style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "6px 14px", borderRadius: 8 }
+      }, React.createElement("span", { style: { display: "inline-block", animation: loading ? "screener-spin .8s linear infinite" : "none" } }, Icons.refresh(14)), loading ? "Refreshing..." : "Refresh")
     ),
 
     // Stats row
@@ -621,72 +1025,11 @@ function Dashboard({ holdings, watchlist, prices, navigate }) {
       React.createElement(StatCard, { label: "Holdings", value: holdings.length.toString(), sub: watchlist.length + " in watchlist", color: "var(--warn)" })
     ),
 
-    // Top Holdings
-    holdings.length > 0 && React.createElement("div", { className: "stx-card", style: { marginBottom: 24 } },
-      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 } },
-        React.createElement("h2", { style: { fontSize: 15, fontWeight: 700, fontFamily: "var(--font-heading)" } }, "Top Holdings"),
-        React.createElement("button", { className: "stx-btn stx-btn-ghost", onClick: () => navigate("portfolio") }, "View All")
-      ),
-      React.createElement("table", { className: "stx-table" },
-        React.createElement("thead", null,
-          React.createElement("tr", null,
-            React.createElement("th", null, "Stock"),
-            React.createElement("th", { style: { textAlign: "right" } }, "Qty"),
-            React.createElement("th", { style: { textAlign: "right" } }, "Avg Price"),
-            React.createElement("th", { style: { textAlign: "right" } }, "LTP"),
-            React.createElement("th", { style: { textAlign: "right" } }, "P&L"),
-            React.createElement("th", { style: { textAlign: "right" } }, "%")
-          )
-        ),
-        React.createElement("tbody", null,
-          topHoldings.map((h) =>
-            React.createElement("tr", { key: h.id, style: { cursor: "pointer" }, onClick: () => navigate("analysis", h.ticker) },
-              React.createElement("td", null,
-                React.createElement("div", { style: { fontWeight: 700, fontSize: 13 } }, h.ticker),
-                React.createElement("div", { style: { fontSize: 10, color: "var(--text5)" } }, h.company || h.ticker)
-              ),
-              React.createElement("td", { style: { textAlign: "right", fontFamily: "var(--font-mono)" } }, h.qty),
-              React.createElement("td", { style: { textAlign: "right", fontFamily: "var(--font-mono)" } }, INR(h.buyPrice || h.avgPrice, 2)),
-              React.createElement("td", { style: { textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700 } }, INR(h.currentPrice, 2)),
-              React.createElement("td", { style: { textAlign: "right", fontFamily: "var(--font-mono)", color: h.pnl >= 0 ? "var(--profit)" : "var(--loss)" } },
-                (h.pnl >= 0 ? "+" : "") + INR(h.pnl)
-              ),
-              React.createElement("td", { style: { textAlign: "right" } },
-                React.createElement("span", { className: "stx-badge " + (h.pnlPct >= 0 ? "stx-profit" : "stx-loss") },
-                  (h.pnlPct >= 0 ? "+" : "") + h.pnlPct.toFixed(2) + "%"
-                )
-              )
-            )
-          )
-        )
-      )
-    ),
+    // Market Indices
+    React.createElement(MarketTicker),
 
-    // Sector Allocation
-    sectorAlloc.length > 0 && React.createElement("div", { className: "stx-card", style: { marginBottom: 24 } },
-      React.createElement("h2", { style: { fontSize: 15, fontWeight: 700, fontFamily: "var(--font-heading)", marginBottom: 14 } }, "Sector Allocation"),
-      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
-        sectorAlloc.map(([sector, value]) => {
-          const pctOfTotal = totalCurrent > 0 ? (value / totalCurrent * 100) : 0;
-          return React.createElement("div", { key: sector, style: { display: "flex", alignItems: "center", gap: 10 } },
-            React.createElement("span", { style: { width: 120, fontSize: 12, fontWeight: 500, color: "var(--text4)", flexShrink: 0 } }, sector),
-            React.createElement("div", { style: { flex: 1, height: 6, borderRadius: 3, background: "var(--bg5)", overflow: "hidden" } },
-              React.createElement("div", { style: { width: pctOfTotal + "%", height: "100%", borderRadius: 3, background: "var(--accent)", transition: "width .3s" } })
-            ),
-            React.createElement("span", { style: { width: 50, fontSize: 11, fontWeight: 700, color: "var(--text4)", textAlign: "right", fontFamily: "var(--font-mono)" } }, pctOfTotal.toFixed(1) + "%"),
-            React.createElement("span", { style: { width: 80, fontSize: 11, color: "var(--text5)", textAlign: "right", fontFamily: "var(--font-mono)" } }, INR(value))
-          );
-        })
-      )
-    ),
-
-    // Empty state
-    holdings.length === 0 && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: "48px 24px" } },
-      React.createElement("div", { style: { fontSize: 48, marginBottom: 16, opacity: 0.3 } }, "\ud83d\udcc8"),
-      React.createElement("h3", { style: { fontSize: 16, fontWeight: 700, color: "var(--text2)", marginBottom: 8 } }, "No Holdings Yet"),
-      React.createElement("p", { style: { fontSize: 13, color: "var(--text5)", marginBottom: 20, maxWidth: 360, margin: "0 auto 20px" } }, "Start by adding your first stock holding to track your portfolio performance."),
-      React.createElement("button", { className: "stx-btn stx-btn-primary", onClick: () => navigate("portfolio") }, "+ Add Holding")
-    )
+    // Market News
+    React.createElement(MarketNewsPanel, { holdings: holdings })
   );
 }
 
@@ -728,14 +1071,491 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
   );
 }
 
+function EntryScoreAnalysis({ entry, onBack }) {
+  const [expandedTF, setExpandedTF] = useState({});
+  const r = entry.result || {};
+  const ind = entry.indicators || {};
+  const price = entry.currentPrice || r.lastClose || 0;
+
+  const factorBar = (label, val, max, color) => {
+    if (val == null || max == null) return null;
+    const pct = max > 0 ? (Math.abs(val) / max * 100) : 0;
+    const barColor = val < 0 ? "#ef4444" : color;
+    return React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+      React.createElement("span", { style: { width: 90, fontSize: 11, fontWeight: 600, color: "var(--text4)", textAlign: "right", flexShrink: 0 } }, label),
+      React.createElement("div", { style: { flex: 1, height: 6, borderRadius: 3, background: "var(--bg5)", overflow: "hidden" } },
+        React.createElement("div", { style: { width: pct + "%", height: "100%", borderRadius: 3, background: barColor, transition: "width .3s" } })
+      ),
+      React.createElement("span", { style: { width: 44, fontSize: 10, fontWeight: 700, color: val < 0 ? "#ef4444" : "var(--text4)", fontFamily: "var(--font-mono)", textAlign: "right" } }, (val >= 0 ? "+" : "") + val + "/" + max)
+    );
+  };
+
+  const indRow = (label, val, signal) => {
+    if (val == null) return null;
+    const sigColor = signal === "bullish" ? "#22c55e" : signal === "bearish" ? "#ef4444" : signal === "overbought" ? "#f59e0b" : signal === "oversold" ? "#3b82f6" : "var(--text5)";
+    return React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0" } },
+      React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, label),
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+        React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--text3)", fontFamily: "var(--font-mono)" } }, typeof val === "number" ? val.toFixed(2) : "\u2014"),
+        signal && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: sigColor, padding: "1px 5px", borderRadius: 3, background: sigColor + "15" } }, signal)
+      )
+    );
+  };
+
+  const renderIndicators = (indData) => {
+    if (!indData) return React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", padding: "6px 0" } }, "No data available");
+    const lc = indData.lastClose;
+    return React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px" } },
+      indRow("RSI (14)", indData.rsi_14, indData.rsi_14 > 70 ? "overbought" : indData.rsi_14 < 30 ? "oversold" : "neutral"),
+      indRow("ADX (14)", indData.adx_14, indData.adx_14 > 25 ? "trending" : "ranging"),
+      indRow("MACD", indData.macd ? indData.macd.macd : null, indData.macd && indData.macd.histogram > 0 ? "bullish" : "bearish"),
+      indRow("MACD Signal", indData.macd ? indData.macd.signal : null),
+      indRow("EMA 9", indData.ema_9, lc && indData.ema_9 ? lc > indData.ema_9 ? "bullish" : "bearish" : null),
+      indRow("EMA 21", indData.ema_21, lc && indData.ema_21 ? lc > indData.ema_21 ? "bullish" : "bearish" : null),
+      indRow("EMA 50", indData.ema_50, lc && indData.ema_50 ? lc > indData.ema_50 ? "bullish" : "bearish" : null),
+      indRow("SMA 20", indData.sma_20, lc && indData.sma_20 ? lc > indData.sma_20 ? "bullish" : "bearish" : null),
+      indRow("SMA 50", indData.sma_50, lc && indData.sma_50 ? lc > indData.sma_50 ? "bullish" : "bearish" : null),
+      indRow("Supertrend", indData.supertrend, lc && indData.supertrend ? lc > indData.supertrend ? "bullish" : "bearish" : null),
+      indRow("ATR (14)", indData.atr_14),
+      indRow("CCI (20)", indData.cci_20, indData.cci_20 > 100 ? "overbought" : indData.cci_20 < -100 ? "oversold" : "neutral"),
+      indRow("MFI (14)", indData.mfi_14, indData.mfi_14 > 80 ? "overbought" : indData.mfi_14 < 20 ? "oversold" : "neutral"),
+      indRow("Stoch RSI K", indData.stochRSI ? indData.stochRSI.k : null, indData.stochRSI && indData.stochRSI.k > 80 ? "overbought" : indData.stochRSI && indData.stochRSI.k < 20 ? "oversold" : "neutral"),
+      indRow("BB Upper", indData.bb ? indData.bb.upper : null),
+      indRow("BB Lower", indData.bb ? indData.bb.lower : null),
+      indRow("OBV", indData.obv),
+      indRow("VWAP", indData.vwap),
+      indRow("ROC (12)", indData.roc_12, indData.roc_12 > 0 ? "bullish" : "bearish"),
+      indRow("PSAR", indData.psar, lc && indData.psar ? lc > indData.psar ? "bullish" : "bearish" : null),
+      indRow("WMA 20", indData.wma_20),
+      indRow("HMA 16", indData.hma_16),
+      indRow("KAMA 10", indData.kama_10),
+      indRow("CMF (20)", indData.cmf_20, indData.cmf_20 > 0 ? "bullish" : "bearish"),
+      indRow("TSI", indData.tsi, indData.tsi > 0 ? "bullish" : "bearish"),
+      indRow("STC", indData.stc, indData.stc > 0 ? "bullish" : "bearish"),
+      indRow("KVO", indData.kvo, indData.kvo > 0 ? "bullish" : "bearish"),
+      indRow("PVT", indData.pvt),
+      indRow("Chandelier Long", indData.chandelier ? indData.chandelier.long : null, lc && indData.chandelier && indData.chandelier.long ? lc > indData.chandelier.long ? "bullish" : "bearish" : null),
+      indRow("Chandelier Short", indData.chandelier ? indData.chandelier.short : null, lc && indData.chandelier && indData.chandelier.short ? lc > indData.chandelier.short ? "bullish" : "bearish" : null),
+      indRow("Choppiness", indData.choppiness, indData.choppiness != null ? indData.choppiness < 38.2 ? "trending" : indData.choppiness > 61.8 ? "ranging" : "neutral" : null),
+      indRow("Williams %R", indData.williamsR, indData.williamsR != null ? indData.williamsR > -20 ? "overbought" : indData.williamsR < -80 ? "oversold" : "neutral" : null),
+      indRow("Awesome Osc", indData.awesomeOsc, indData.awesomeOsc != null ? indData.awesomeOsc > 0 ? "bullish" : "bearish" : null),
+      indRow("Force Index", indData.forceIndex, indData.forceIndex != null ? indData.forceIndex > 0 ? "bullish" : "bearish" : null),
+      indRow("Aroon Up", indData.aroon ? indData.aroon.up : null),
+      indRow("Aroon Down", indData.aroon ? indData.aroon.down : null),
+      indRow("Aroon Osc", indData.aroon ? indData.aroon.osc : null, indData.aroon && indData.aroon.osc != null ? indData.aroon.osc > 50 ? "bullish" : indData.aroon.osc < -50 ? "bearish" : "neutral" : null),
+      indRow("Vortex +", indData.vortex ? indData.vortex.plus : null),
+      indRow("Vortex -", indData.vortex ? indData.vortex.minus : null, indData.vortex && indData.vortex.plus != null && indData.vortex.minus != null ? indData.vortex.plus > indData.vortex.minus ? "bullish" : "bearish" : null),
+      indRow("HA Trend", indData.heikinAshi ? indData.heikinAshi.trend : null, indData.heikinAshi ? indData.heikinAshi.trend : null),
+      indRow("52W %From High", indData.week52HL ? indData.week52HL.pctFromHigh : null, indData.week52HL ? indData.week52HL.pctFromHigh > -5 ? "bullish" : indData.week52HL.pctFromHigh > -15 ? "neutral" : "bearish" : null),
+      indRow("52W High", indData.week52HL ? indData.week52HL.high52w : null),
+      indRow("52W Low", indData.week52HL ? indData.week52HL.low52w : null)
+    );
+  };
+
+  const tfCard = (label, weight, score, tfKey) => {
+    const isExp = !!expandedTF[tfKey];
+    if (!score) return React.createElement("div", { key: tfKey, style: { padding: 12, borderRadius: 10, background: "var(--bg4)", textAlign: "center" } },
+      React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 2 } }, label + " (" + weight + ")"),
+      React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: "var(--text6)", fontFamily: "var(--font-heading)" } }, "N/A"),
+      React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, "No data")
+    );
+    return React.createElement("div", { key: tfKey, style: { borderRadius: 10, background: "var(--bg4)", border: "1px solid " + score.decision.color + "22", overflow: "hidden" } },
+      React.createElement("div", { onClick: () => setExpandedTF(prev => ({ ...prev, [tfKey]: !prev[tfKey] })), style: { padding: 12, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        React.createElement("div", { style: { textAlign: "left" } },
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 2 } }, label + " (" + weight + ")"),
+          React.createElement("div", { style: { fontSize: 20, fontWeight: 900, color: score.decision.color, fontFamily: "var(--font-heading)", lineHeight: 1 } }, score.total)
+        ),
+        React.createElement("div", { style: { textAlign: "right" } },
+          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: score.decision.color } }, score.decision.label),
+          React.createElement("div", { style: { fontSize: 9, color: "var(--text5)" } }, isExp ? "\u25b4 Hide" : "\u25bc Details")
+        )
+      ),
+      isExp && React.createElement("div", { style: { padding: "0 12px 12px" } },
+        React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 } },
+          factorBar("Trend", score.trendScore, score.trendMax, "#3b82f6"),
+          factorBar("Momentum", score.momentumScore, score.momentumMax, "#a855f7"),
+          factorBar("Volume", score.volumeScore, score.volumeMax, "#06b6d4"),
+          factorBar("Structure", score.structureScore, score.structureMax, "#ec4899")
+        ),
+        React.createElement("div", { style: { borderTop: "1px solid var(--border)", paddingTop: 8 } },
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--text4)", marginBottom: 6 } }, "Technical Indicators"),
+          renderIndicators(ind[tfKey])
+        )
+      )
+    );
+  };
+
+  return React.createElement("div", null,
+    // Header
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 } },
+          onBack && React.createElement("button", {
+            onClick: onBack,
+            className: "stx-btn stx-btn-ghost",
+            style: { fontSize: 11, padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: 4 }
+          }, "\u2190 Back to Entry Score"),
+          React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "#f97316", letterSpacing: 1.4, textTransform: "uppercase" } }, "ENTRY SCORE ANALYSIS")
+        ),
+        React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, entry.ticker)
+      )
+    ),
+
+    // Price + Final Score header
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 2 } }, "Current Price"),
+        React.createElement("div", { style: { fontSize: 28, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--accent)" } }, price > 0 ? INR(price, 2) : "\u2014")
+      ),
+      React.createElement("div", { style: { textAlign: "right" } },
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600, marginBottom: 2 } }, "Final Score"),
+        React.createElement("div", { style: { fontSize: 36, fontWeight: 900, color: r.decision ? r.decision.color : "var(--text6)", fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore != null ? r.finalScore : "\u2014")
+      )
+    ),
+
+    // Decision badge + position
+    r.decision && React.createElement("div", { className: "stx-card", style: { marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" } },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+        React.createElement("div", { style: { padding: "6px 14px", borderRadius: 8, background: r.decision.color + "18", border: "1px solid " + r.decision.color + "33" } },
+          React.createElement("span", { style: { fontSize: 14, fontWeight: 800, color: r.decision.color, fontFamily: "var(--font-heading)" } }, r.decision.label)
+        ),
+        React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", fontStyle: "italic" } }, r.decision.position)
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+        React.createElement("div", { style: { fontSize: 9, color: "var(--text5)", textAlign: "right" } },
+          "Base: ", React.createElement("span", { style: { fontWeight: 700, color: "var(--text3)" } }, r.baseScore),
+          " \u00b7 Pen: ", React.createElement("span", { style: { fontWeight: 700, color: r.penalties < 0 ? "#ef4444" : "var(--text3)" } }, r.penalties),
+          " \u00b7 Bonus: ", React.createElement("span", { style: { fontWeight: 700, color: r.bonuses > 0 ? "#22c55e" : "var(--text3)" } }, r.bonuses)
+        )
+      )
+    ),
+
+    // 3-column timeframe cards
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 } },
+      tfCard("Weekly", "30%", r.weekly, "weekly"),
+      tfCard("Daily", "50%", r.daily, "daily"),
+      tfCard("Hourly", "20%", r.hourly, "hourly")
+    ),
+
+    // Penalties & Bonuses
+    r.hardFilters && r.hardFilters.length > 0 && React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
+      React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text3)", marginBottom: 8 } }, "Penalties & Bonuses"),
+      r.hardFilters.map((f, i) => {
+        var isBonus = f.indexOf("(+") >= 0;
+        var valMatch = f.match(/\([+\-\u2212]?\d+\)$/);
+        var valStr = valMatch ? valMatch[0] : "";
+        var label = valStr ? f.replace(valStr, "").replace(/\s*\u2014\s*/, " \u2014 ").trim() : f;
+        return React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "5px 0", borderBottom: "1px solid var(--border)" } },
+          React.createElement("span", { style: { color: "var(--text3)", fontSize: 12, flex: 1 } }, isBonus ? "\u2713 " + label : "\u26a0 " + label),
+          valStr && React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: isBonus ? "#22c55e" : "#ef4444", background: isBonus ? "rgba(34,197,94,.08)" : "rgba(239,68,68,.08)", padding: "2px 8px", borderRadius: 4, fontFamily: "var(--font-mono)" } }, valStr)
+        );
+      })
+    ),
+
+    // Added date
+    React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", textAlign: "center", padding: "8px 0" } },
+      "Added " + new Date(entry.addedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    )
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   HOLDING VALUE HISTORY CHART
+   ══════════════════════════════════════════════════════════════════════════ */
+const HoldingValueChart = ({ pts, qty, buyPrice, color, gradId }) => {
+  const [hoverIdx, setHoverIdx] = React.useState(null);
+  const svgRef = React.useRef(null);
+  if (!pts || pts.length < 2) return null;
+  color = color || "#10b981";
+  gradId = gradId || "hvh0";
+  const INRshort = v => {
+    if (v >= 10000000) return "\u20b9" + (v / 10000000).toFixed(2) + "Cr";
+    if (v >= 100000) return "\u20b9" + (v / 100000).toFixed(2) + "L";
+    if (v >= 1000) return "\u20b9" + (v / 1000).toFixed(1) + "K";
+    return "\u20b9" + Math.round(v);
+  };
+  const fmtLbl = dateStr => {
+    const mn = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const m = parseInt(dateStr.slice(5, 7));
+    const d = dateStr.slice(8);
+    return d + "-" + mn[m - 1];
+  };
+  const W = 1200, padL = 136, padR = 64, padT = 36, padB = 64;
+  const h = 480;
+  const chartW = W - padL - padR, chartH = h - padT - padB;
+  const costBasis = qty * buyPrice;
+  const vals = pts.map(d => d.value);
+  const allVals = [...vals, costBasis];
+  const rawMn = Math.min(...allVals), rawMx = Math.max(...allVals, 1);
+  const pad4 = (rawMx - rawMn) * 0.04;
+  const mn = rawMn - pad4, mx = rawMx + pad4;
+  const range = mx - mn || 1;
+  const xStep = chartW / (pts.length - 1);
+  const yFn = v => padT + chartH * (1 - (v - mn) / range);
+  const ptStr = pts.map((d, i) => `${padL + i * xStep},${yFn(d.value)}`).join(" ");
+  const polyFill = `${padL},${padT + chartH} ${ptStr} ${padL + (pts.length - 1) * xStep},${padT + chartH}`;
+  const yCostBasis = yFn(costBasis);
+  const yTicks = [rawMn, rawMn + (rawMx - rawMn) * 0.5, rawMx];
+  const greenGradId = gradId + "_g";
+  const redGradId = gradId + "_r";
+  const clipAboveId = gradId + "_ca";
+  const clipBelowId = gradId + "_cb";
+  const clipAboveRect = `0 0 ${W} ${yCostBasis}`;
+  const clipBelowRect = `0 ${yCostBasis} ${W} ${h - yCostBasis}`;
+  const handleMouseMove = e => {
+    const svg = svgRef.current; if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const svgX = (e.clientX - rect.left) * (W / rect.width) - padL;
+    const idx = Math.round(svgX / xStep);
+    setHoverIdx(Math.max(0, Math.min(pts.length - 1, idx)));
+  };
+  const hp = hoverIdx !== null ? pts[hoverIdx] : null;
+  const hx = hoverIdx !== null ? padL + hoverIdx * xStep : null;
+  const hy = hoverIdx !== null ? yFn(pts[hoverIdx].value) : null;
+  const tipW = 392, tipH = 160;
+  const tipX = hx !== null ? (hx + tipW + padR + 12 > W ? hx - tipW - 20 : hx + 20) : 0;
+  const tipY = hy !== null ? Math.max(padT, Math.min(padT + chartH - tipH, hy - tipH / 2)) : 0;
+  const labelGap = Math.max(82, Math.ceil(19 * 0.58 * 7 + 24));
+  const stride = Math.max(1, Math.ceil(labelGap / xStep));
+  const lastStrideIdx = Math.floor((pts.length - 1) / stride) * stride;
+  const showLastLabel = (pts.length - 1) % stride !== 0 && ((pts.length - 1) - lastStrideIdx) * xStep >= labelGap;
+
+  return React.createElement("svg", {
+    ref: svgRef, width: "100%", viewBox: `0 0 ${W} ${h}`,
+    style: { display: "block", cursor: "crosshair", overflow: "visible" },
+    onMouseMove: handleMouseMove, onMouseLeave: () => setHoverIdx(null)
+  },
+    React.createElement("defs", null,
+      React.createElement("linearGradient", { id: greenGradId, x1: "0", y1: "0", x2: "0", y2: "1" },
+        React.createElement("stop", { offset: "0%", stopColor: "#10b981", stopOpacity: .28 }),
+        React.createElement("stop", { offset: "100%", stopColor: "#10b981", stopOpacity: .02 })
+      ),
+      React.createElement("linearGradient", { id: redGradId, x1: "0", y1: "0", x2: "0", y2: "1" },
+        React.createElement("stop", { offset: "0%", stopColor: "#ef4444", stopOpacity: .28 }),
+        React.createElement("stop", { offset: "100%", stopColor: "#ef4444", stopOpacity: .02 })
+      ),
+      React.createElement("clipPath", { id: clipAboveId },
+        React.createElement("rect", { x: 0, y: 0, width: W, height: yCostBasis })
+      ),
+      React.createElement("clipPath", { id: clipBelowId },
+        React.createElement("rect", { x: 0, y: yCostBasis, width: W, height: h - yCostBasis })
+      )
+    ),
+    yTicks.map((v, i) => {
+      const gy = yFn(v);
+      return React.createElement("g", { key: "yt" + i },
+        React.createElement("line", { x1: padL, y1: gy, x2: W - padR, y2: gy, stroke: "var(--border2)", strokeWidth: 1.4, strokeDasharray: "6,8" }),
+        React.createElement("text", { x: padL - 10, y: gy + 7, textAnchor: "end", fill: "var(--text5)", fontSize: 19, fontWeight: 500 }, INRshort(v))
+      );
+    }),
+    React.createElement("line", { x1: padL, y1: yCostBasis, x2: W - padR, y2: yCostBasis, stroke: "#f59e0b", strokeWidth: 2.8, strokeDasharray: "12,8", opacity: .8 }),
+    React.createElement("text", { x: W - padR + 6, y: yCostBasis + 7, fill: "#f59e0b", fontSize: 15, fontWeight: 700, textAnchor: "start" }, "Cost"),
+    React.createElement("polygon", { points: polyFill, fill: "url(#" + greenGradId + ")", clipPath: "url(#" + clipAboveId + ")" }),
+    React.createElement("polygon", { points: polyFill, fill: "url(#" + redGradId + ")", clipPath: "url(#" + clipBelowId + ")" }),
+    React.createElement("polyline", { points: ptStr, fill: "none", stroke: pts[pts.length - 1].value >= costBasis ? "#10b981" : "#ef4444", strokeWidth: 4.4, strokeLinejoin: "round", strokeLinecap: "round" }),
+    React.createElement("line", { x1: padL, y1: padT + chartH, x2: W - padR, y2: padT + chartH, stroke: "var(--border)", strokeWidth: 2 }),
+    (() => {
+      const dotR = pts.length <= 20 ? 4.8 : pts.length <= 40 ? 3.2 : pts.length <= 70 ? 2.2 : 0;
+      if (dotR === 0) return null;
+      return pts.map((d, i) => i === hoverIdx ? null : React.createElement("circle", { key: "d" + i, cx: padL + i * xStep, cy: yFn(d.value), r: dotR, fill: d.value >= costBasis ? "#10b981" : "#ef4444", opacity: .6 }));
+    })(),
+    pts.map((d, i) => {
+      const isStrideHit = i % stride === 0;
+      const isLast = i === pts.length - 1;
+      if (!isStrideHit && !(isLast && showLastLabel)) return null;
+      return React.createElement("text", { key: "xl" + i, x: padL + i * xStep, y: h - 8, textAnchor: "middle", fill: "var(--text6)", fontSize: 19 }, fmtLbl(d.date));
+    }),
+    hoverIdx !== null && React.createElement("g", null,
+      React.createElement("line", { x1: hx, y1: padT, x2: hx, y2: padT + chartH, stroke: color, strokeWidth: 2.4, strokeDasharray: "8,6", opacity: .5 }),
+      React.createElement("circle", { cx: hx, cy: hy, r: 18, fill: color, opacity: .13 }),
+      React.createElement("circle", { cx: hx, cy: hy, r: 12, fill: "white", stroke: color, strokeWidth: 5 }),
+      React.createElement("circle", { cx: hx, cy: hy, r: 6, fill: color }),
+      React.createElement("rect", { x: tipX + 4, y: tipY + 6, width: tipW, height: tipH, rx: 16, fill: "rgba(0,0,0,.18)", style: { filter: "blur(6px)" } }),
+      React.createElement("rect", { x: tipX, y: tipY, width: tipW, height: tipH, rx: 16, fill: "var(--modal-bg)", stroke: color, strokeWidth: 3 }),
+      React.createElement("rect", { x: tipX, y: tipY, width: tipW, height: 8, rx: 16, fill: color }),
+      React.createElement("rect", { x: tipX, y: tipY + 4, width: tipW, height: 8, fill: color }),
+      React.createElement("text", { x: tipX + 24, y: tipY + 40, fill: "var(--text4)", fontSize: 19, fontWeight: 600, letterSpacing: .3 }, hp.date),
+      React.createElement("text", { x: tipX + 24, y: tipY + 84, fill: color, fontSize: 30, fontWeight: 800, fontFamily: "'Sora',sans-serif" }, INR(hp.value)),
+      (() => {
+        const diff = hp.value - costBasis;
+        const diffPct = costBasis > 0 ? ((diff / costBasis) * 100).toFixed(2) : "0.00";
+        const col = diff >= 0 ? "#10b981" : "#ef4444";
+        const sign = diff >= 0 ? "\u25b2 +" : "\u25bc ";
+        return React.createElement("text", { x: tipX + 24, y: tipY + 122, fill: col, fontSize: 18, fontWeight: 600 }, sign + INR(Math.abs(diff)) + " (" + Math.abs(diffPct) + "%)");
+      })()
+    )
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   HOLDING HISTORY PANEL
+   Fetches daily closing prices from buyDate → today, renders chart
+   ══════════════════════════════════════════════════════════════════════════ */
+const HoldingHistoryPanel = ({ h, prices }) => {
+  const [histLoading, setHistLoading] = React.useState(false);
+  const [histPts, setHistPts] = React.useState(null);
+  const [refreshKey, setRefreshKey] = React.useState(0);
+
+  const tkr = (h.ticker || "").trim().toUpperCase();
+  const isGain = (prices[h.ticker]?.price || h.currentPrice || 0) >= (h.buyPrice || h.avgPrice || 0);
+  const costBasisVal = h.qty * (h.buyPrice || h.avgPrice || 0);
+  const safeId = "hvh_" + (h.id || "x").replace(/[^a-zA-Z0-9]/g, "_");
+
+  React.useEffect(() => {
+    if (!tkr || !h.buyDate) { setHistPts(null); setHistLoading(false); return; }
+    let cancelled = false;
+    setHistLoading(true);
+    setHistPts(null);
+    fetchHistoricalPrices(tkr, h.buyDate)
+      .then(pts => {
+        if (cancelled) return;
+        setHistPts(pts && pts.length >= 2 ? pts : []);
+        setHistLoading(false);
+      })
+      .catch(() => { if (!cancelled) { setHistPts([]); setHistLoading(false); } });
+    return () => { cancelled = true; };
+  }, [tkr, h.buyDate, refreshKey]);
+
+  if (histLoading) return React.createElement("div", { style: {
+    marginTop: 16, padding: "14px 18px", borderRadius: 12,
+    background: "var(--bg4)", border: "1px solid var(--border2)",
+    display: "flex", alignItems: "center", gap: 10
+  }},
+    React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite", fontSize: 16 } }, "\u21bb"),
+    React.createElement("span", { style: { fontSize: 13, color: "var(--text5)", flex: 1 } }, "Fetching price history since " + h.buyDate + "...")
+  );
+
+  if (histPts && histPts.length >= 2) {
+    const chartPts = histPts.map(p => ({ date: p.date, value: h.qty * p.close }));
+    const latestVal = chartPts[chartPts.length - 1].value;
+    const oldestVal = chartPts[0].value;
+    const overallChg = latestVal - oldestVal;
+    const overallChgPct = oldestVal > 0 ? ((overallChg / oldestVal) * 100).toFixed(2) : "0.00";
+    const chgCol = overallChg >= 0 ? "#10b981" : "#ef4444";
+    return React.createElement("div", { style: { marginTop: 20, marginBottom: 6, background: "var(--bg4)", borderRadius: 14, padding: "20px 20px 14px", border: "1px solid var(--border2)" } },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 } },
+        React.createElement("span", { style: { fontSize: 14, fontWeight: 700, color: "var(--text4)", textTransform: "uppercase", letterSpacing: .5 } }, "Holding Value History"),
+        React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", background: "var(--accentbg2)", border: "1px solid var(--border2)", borderRadius: 6, padding: "2px 8px", whiteSpace: "nowrap" } }, chartPts[0].date + " \u2192 " + chartPts[chartPts.length - 1].date),
+        React.createElement("div", { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 } },
+          React.createElement("span", { style: { fontSize: 12, padding: "3px 10px", borderRadius: 8, fontWeight: 700, background: overallChg >= 0 ? "rgba(16,185,129,.12)" : "rgba(239,68,68,.12)", border: "1px solid " + (overallChg >= 0 ? "rgba(16,185,129,.25)" : "rgba(239,68,68,.25)"), color: chgCol } }, (overallChg >= 0 ? "\u25b2 +" : "\u25bc ") + Math.abs(overallChgPct) + "%"),
+          React.createElement("span", { style: { fontSize: 12, color: "var(--text6)" } }, chartPts.length + " days"),
+          React.createElement("button", {
+            onClick: () => { if (histLoading) return; setHistPts(null); setRefreshKey(k => k + 1); },
+            disabled: histLoading,
+            style: { display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 11px", borderRadius: 7, border: "1px solid rgba(16,185,129,.3)", background: "rgba(16,185,129,.08)", color: "var(--accent)", cursor: histLoading ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 600, opacity: histLoading ? .5 : 1 }
+          }, "\u21bb Refresh")
+        )
+      ),
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 16, marginBottom: 8, fontSize: 12, color: "var(--text6)" } },
+        React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 5 } },
+          React.createElement("span", { style: { display: "inline-block", width: 24, height: 3, background: isGain ? "#10b981" : "#ef4444", borderRadius: 2, verticalAlign: "middle" } }),
+          "Holding value"
+        ),
+        React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 5 } },
+          React.createElement("span", { style: { display: "inline-block", width: 24, height: 0, borderTop: "3px dashed #f59e0b", verticalAlign: "middle" } }),
+          "Cost basis (" + INR(costBasisVal) + ")"
+        )
+      ),
+      React.createElement(HoldingValueChart, { pts: chartPts, qty: h.qty, buyPrice: h.buyPrice || h.avgPrice || 0, color: isGain ? "#10b981" : "#ef4444", gradId: safeId })
+    );
+  }
+
+  if (histPts !== null && histPts.length === 0 && h.buyDate) {
+    return React.createElement("div", { style: {
+      marginTop: 12, padding: "10px 14px", borderRadius: 9, fontSize: 12,
+      background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.18)",
+      color: "#ef4444", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap"
+    }},
+      React.createElement("span", { style: { flex: 1 } }, "\u26a0 Could not fetch price history for " + h.ticker + ". Check connection or try again."),
+      React.createElement("button", {
+        onClick: () => { setHistPts(null); setRefreshKey(k => k + 1); },
+        style: { display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 11px", borderRadius: 7, border: "1px solid rgba(239,68,68,.3)", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer", fontSize: 11, fontWeight: 600 }
+      }, "\u21bb Retry")
+    );
+  }
+
+  return null;
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SNAPSHOT CHART PANEL (for Trade History — uses saved chartPts or fetches)
+   ══════════════════════════════════════════════════════════════════════════ */
+const SnapshotChartPanel = ({ sn }) => {
+  const [loading, setLoading] = React.useState(false);
+  const [histPts, setHistPts] = React.useState(sn.chartPts && sn.chartPts.length >= 2 ? sn.chartPts : null);
+  const tkr = (sn.ticker || "").trim().toUpperCase();
+  const isGain = sn.sellPrice >= sn.buyPrice;
+  const costBasisVal = sn.qty * sn.buyPrice;
+  const safeId = "svc_" + (sn.id || "x").replace(/[^a-zA-Z0-9]/g, "_");
+
+  React.useEffect(() => {
+    if (histPts && histPts.length >= 2) return;
+    if (!tkr || !sn.buyDate) return;
+    let cancelled = false;
+    setLoading(true);
+    fetchHistoricalPrices(tkr, sn.buyDate)
+      .then(pts => {
+        if (cancelled) return;
+        if (pts && pts.length >= 2) {
+          const cutoff = sn.savedAt || TODAY();
+          const filtered = pts.filter(p => p.date <= cutoff);
+          setHistPts(filtered.length >= 2 ? filtered.map(p => ({ date: p.date, close: p.close })) : []);
+        } else {
+          setHistPts([]);
+        }
+        setLoading(false);
+      })
+      .catch(() => { if (!cancelled) { setHistPts([]); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [tkr, sn.buyDate, sn.savedAt]);
+
+  if (loading) return React.createElement("div", { style: {
+    marginTop: 10, padding: "10px 14px", borderRadius: 9, fontSize: 12,
+    background: "var(--bg5)", border: "1px solid var(--border2)",
+    display: "flex", alignItems: "center", gap: 8
+  }},
+    React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, "\u21bb"),
+    React.createElement("span", { style: { color: "var(--text5)" } }, "Loading chart...")
+  );
+
+  if (!histPts || histPts.length < 2) return null;
+
+  const chartPts = histPts.map(p => ({ date: p.date, value: sn.qty * p.close }));
+  const latestVal = chartPts[chartPts.length - 1].value;
+  const oldestVal = chartPts[0].value;
+  const overallChg = latestVal - oldestVal;
+  const overallChgPct = oldestVal > 0 ? ((overallChg / oldestVal) * 100).toFixed(2) : "0.00";
+  const chgCol = overallChg >= 0 ? "#10b981" : "#ef4444";
+
+  return React.createElement("div", { style: { marginTop: 12, background: "var(--bg5)", borderRadius: 10, padding: "14px 14px 10px", border: "1px solid var(--border2)" } },
+    React.createElement("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 6 } },
+      React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--text5)", textTransform: "uppercase", letterSpacing: .4 } }, "Holding Value History"),
+      React.createElement("span", { style: { fontSize: 10, padding: "2px 7px", borderRadius: 6, fontWeight: 700, background: overallChg >= 0 ? "rgba(16,185,129,.1)" : "rgba(239,68,68,.1)", color: chgCol } }, (overallChg >= 0 ? "+" : "") + Math.abs(overallChgPct) + "%"),
+      React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, chartPts.length + " days")
+    ),
+    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 4, fontSize: 10, color: "var(--text6)" } },
+      React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 4 } },
+        React.createElement("span", { style: { display: "inline-block", width: 16, height: 2, background: isGain ? "#10b981" : "#ef4444", borderRadius: 1, verticalAlign: "middle" } }),
+        "Value"
+      ),
+      React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 4 } },
+        React.createElement("span", { style: { display: "inline-block", width: 16, height: 0, borderTop: "2px dashed #f59e0b", verticalAlign: "middle" } }),
+        "Cost"
+      )
+    ),
+    React.createElement(HoldingValueChart, { pts: chartPts, qty: sn.qty, buyPrice: sn.buyPrice, color: isGain ? "#10b981" : "#ef4444", gradId: safeId })
+  );
+};
+
 /* ══════════════════════════════════════════════════════════════════════════
    PAGE: Portfolio Management
    ══════════════════════════════════════════════════════════════════════════ */
-function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot }) {
+function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, refreshPrices, setSoldShareSnapshots }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editShare, setEditShare] = useState(null);
   const [mode, setMode] = useState("active"); /* "active" | "past" */
   const [analyzingTicker, setAnalyzingTicker] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [form, setForm] = useState({
     company: "", ticker: "", qty: "", buyPrice: "", currentPrice: "",
     buyDate: TODAY(), sellDate: "", sellPrice: "",
@@ -818,7 +1638,15 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot }
         React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, "Active Holdings"),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 2 } }, holdings.length + " position" + (holdings.length !== 1 ? "s" : "") + " \u00b7 " + TODAY())
       ),
-      React.createElement("button", { className: "stx-btn stx-btn-primary", onClick: () => { setShowAdd(true); resetForm(); } }, "+ Add Holding")
+      React.createElement("div", { style: { display: "flex", gap: 8 } },
+        React.createElement("button", {
+          className: "stx-btn stx-btn-ghost",
+          disabled: refreshing,
+          onClick: async function() { setRefreshing(true); try { await refreshPrices(); } catch(e) {} setRefreshing(false); showToast("Prices updated"); },
+          style: { display: "flex", alignItems: "center", gap: 5, fontSize: 12, padding: "6px 12px", borderRadius: 8 }
+        }, React.createElement("span", { style: { display: "inline-block", animation: refreshing ? "screener-spin .8s linear infinite" : "none" } }, Icons.refresh(14)), refreshing ? "..." : "Refresh"),
+        React.createElement("button", { className: "stx-btn stx-btn-primary", onClick: () => { setShowAdd(true); resetForm(); } }, "+ Add Holding")
+      )
     ),
 
     /* ── Summary stats row ── */
@@ -1136,8 +1964,9 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot }
                   title: "Edit this holding"
                 }, Icons.edit(13), " Edit"),
                 React.createElement("button", {
-                  onClick: () => {
+                  onClick: async () => {
                     const snapId = uid();
+                    const liveP = prices[h.ticker]?.price || h.currentPrice || h.buyPrice || h.avgPrice || 0;
                     const snap = {
                       id: snapId,
                       savedAt: TODAY(),
@@ -1146,8 +1975,8 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot }
                       qty: h.qty,
                       buyPrice: h.buyPrice || h.avgPrice || 0,
                       buyDate: h.buyDate || "",
-                      sellPrice: prices[h.ticker]?.price || h.currentPrice || h.buyPrice || h.avgPrice || 0,
-                      currentVal: h.qty * (prices[h.ticker]?.price || h.currentPrice || h.buyPrice || h.avgPrice || 0),
+                      sellPrice: liveP,
+                      currentVal: h.qty * liveP,
                       costBasis: h.qty * (h.buyPrice || h.avgPrice || 0),
                       pnl: 0,
                       pnlPct: 0,
@@ -1160,6 +1989,23 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot }
                     snap.pnlPct = snap.costBasis > 0 ? ((snap.pnl / snap.costBasis) * 100) : 0;
                     saveSnapshot(snap);
                     showToast(h.ticker + " snapshot saved to Trade History");
+                    if (h.buyDate) {
+                      fetchHistoricalPrices(h.ticker, h.buyDate).then(pts => {
+                        if (pts && pts.length >= 2) {
+                          const chartData = pts.filter(p => p.date <= TODAY()).map(p => ({ date: p.date, close: p.close }));
+                          if (chartData.length >= 2) {
+                            const updatedSnap = { ...snap, chartPts: chartData };
+                            const fyKey = getFYKey(snap.savedAt);
+                            setSoldShareSnapshots(prev => {
+                              const snaps = (prev[fyKey] || []).map(s => s.id === snapId ? updatedSnap : s);
+                              const updated = { ...prev, [fyKey]: snaps };
+                              persistSnapshots(updated);
+                              return updated;
+                            });
+                          }
+                        }
+                      }).catch(() => {});
+                    }
                   },
                   style: { display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 13px", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", border: "1px solid rgba(109,40,217,.35)", background: "rgba(109,40,217,.08)", color: "#6d28d9", transition: "all .15s" },
                   title: "Save a snapshot of this holding to Trade History"
@@ -1175,6 +2021,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot }
                   title: "Analyze this stock"
                 }, Icons.chart(13), " Analyze")
               ),
+              React.createElement(HoldingHistoryPanel, { h: h, prices: prices }),
               React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", fontStyle: "italic", marginTop: 4 } }, "Save Snapshot captures current values to Trade History before selling")
             );
           })
@@ -1242,7 +2089,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
   const totalSnapshots = fyKeys.reduce((s, fy) => s + (soldShareSnapshots[fy] || []).length, 0);
 
   if (!fyKeys.length) {
-    return React.createElement("div", null,
+  return React.createElement("div", null,
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 } },
         React.createElement("div", null,
           React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "#6d28d9", letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 4 } }, "TRADE HISTORY"),
@@ -1401,7 +2248,8 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
                         onClick: () => { if (confirm("Remove this snapshot? This cannot be undone.")) deleteSnapshot(fy, sn.id); },
                         style: { fontSize: 10, padding: "3px 10px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontFamily: "var(--font-body)", border: "1px solid var(--lossborder)", background: "var(--lossbg)", color: "var(--loss)" }
                       }, "\u00d7 Remove")
-                    )
+                    ),
+                    React.createElement(SnapshotChartPanel, { sn: sn })
                   );
                 })
               )
@@ -1492,7 +2340,7 @@ const EntryScorePanel = ({ shares }) => {
   const [adding, setAdding] = useState(false);
   const [addErr, setAddErr] = useState("");
   const [expandedIds, setExpandedIds] = useState({});
-  const [expandedTech, setExpandedTech] = useState({});
+  const [viewingAnalysis, setViewingAnalysis] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
   const [snapshotsLoaded, setSnapshotsLoaded] = useState(false);
 
@@ -1705,7 +2553,22 @@ const EntryScorePanel = ({ shares }) => {
         indRow("TSI", indData.tsi, indData.tsi > 0 ? "bullish" : "bearish"),
         indRow("STC", indData.stc, indData.stc > 0 ? "bullish" : "bearish"),
         indRow("KVO", indData.kvo, indData.kvo > 0 ? "bullish" : "bearish"),
-        indRow("PVT", indData.pvt)
+        indRow("PVT", indData.pvt),
+        indRow("Chandelier Long", indData.chandelier ? indData.chandelier.long : null, lc && indData.chandelier && indData.chandelier.long ? lc > indData.chandelier.long ? "bullish" : "bearish" : null),
+        indRow("Chandelier Short", indData.chandelier ? indData.chandelier.short : null, lc && indData.chandelier && indData.chandelier.short ? lc > indData.chandelier.short ? "bullish" : "bearish" : null),
+        indRow("Choppiness", indData.choppiness, indData.choppiness != null ? indData.choppiness < 38.2 ? "trending" : indData.choppiness > 61.8 ? "ranging" : "neutral" : null),
+        indRow("Williams %R", indData.williamsR, indData.williamsR != null ? indData.williamsR > -20 ? "overbought" : indData.williamsR < -80 ? "oversold" : "neutral" : null),
+        indRow("Awesome Osc", indData.awesomeOsc, indData.awesomeOsc != null ? indData.awesomeOsc > 0 ? "bullish" : "bearish" : null),
+        indRow("Force Index", indData.forceIndex, indData.forceIndex != null ? indData.forceIndex > 0 ? "bullish" : "bearish" : null),
+        indRow("Aroon Up", indData.aroon ? indData.aroon.up : null),
+        indRow("Aroon Down", indData.aroon ? indData.aroon.down : null),
+        indRow("Aroon Osc", indData.aroon ? indData.aroon.osc : null, indData.aroon && indData.aroon.osc != null ? indData.aroon.osc > 50 ? "bullish" : indData.aroon.osc < -50 ? "bearish" : "neutral" : null),
+        indRow("Vortex +", indData.vortex ? indData.vortex.plus : null),
+        indRow("Vortex -", indData.vortex ? indData.vortex.minus : null, indData.vortex && indData.vortex.plus != null && indData.vortex.minus != null ? indData.vortex.plus > indData.vortex.minus ? "bullish" : "bearish" : null),
+        indRow("HA Trend", indData.heikinAshi ? indData.heikinAshi.trend : null, indData.heikinAshi ? indData.heikinAshi.trend : null),
+        indRow("52W %From High", indData.week52HL ? indData.week52HL.pctFromHigh : null, indData.week52HL ? indData.week52HL.pctFromHigh > -5 ? "bullish" : indData.week52HL.pctFromHigh > -15 ? "neutral" : "bearish" : null),
+        indRow("52W High", indData.week52HL ? indData.week52HL.high52w : null),
+        indRow("52W Low", indData.week52HL ? indData.week52HL.low52w : null)
       );
     };
     return React.createElement("div", { key: snap.id, style: { padding: 12, borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", marginBottom: 8 } },
@@ -1836,6 +2699,11 @@ const EntryScorePanel = ({ shares }) => {
   };
 
   return React.createElement("div", null,
+    viewingAnalysis && React.createElement(EntryScoreAnalysis, {
+      entry: viewingAnalysis,
+      onBack: () => setViewingAnalysis(null)
+    }),
+    !viewingAnalysis && React.createElement(React.Fragment, null,
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Entry Score"),
@@ -1906,8 +2774,8 @@ const EntryScorePanel = ({ shares }) => {
             React.createElement("div", { onClick: () => setExpandedIds(prev => ({ ...prev, [entry.id]: !prev[entry.id] })), style: { fontSize: 10, color: "var(--accent)", cursor: "pointer", fontWeight: 600 } },
               isExpanded ? "\u25b2 Hide Details" : "\u25bc Show Details"
             ),
-            window.TechnicalIndicatorsInline && React.createElement("div", { onClick: () => setExpandedTech(prev => ({ ...prev, [entry.id]: !prev[entry.id] })), style: { fontSize: 10, color: !!expandedTech[entry.id] ? "var(--text5)" : "#f97316", cursor: "pointer", fontWeight: 600 } },
-              "\u26a1 " + (expandedTech[entry.id] ? "Hide Technicals" : "Technicals")
+            window.TechnicalIndicatorsInline && React.createElement("div", { onClick: () => setViewingAnalysis(viewingAnalysis && viewingAnalysis.id === entry.id ? null : entry), style: { fontSize: 10, color: "#f97316", cursor: "pointer", fontWeight: 600 } },
+              "\u26a1 Technicals"
             )
           ),
           isExpanded && React.createElement("div", { style: { marginTop: 8 } },
@@ -1930,20 +2798,20 @@ const EntryScorePanel = ({ shares }) => {
                 "Base: " + r.baseScore + " | Penalties: " + r.penalties + " | Bonuses: " + r.bonuses + " \u2192 Final: " + r.finalScore
               )
             )
-          ),
-          expandedTech[entry.id] && window.TechnicalIndicatorsInline && React.createElement("div", { style: { marginTop: 8, padding: 16, borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)" } },
-            React.createElement(window.TechnicalIndicatorsInline, { ticker: entry.ticker, currentPrice: entry.currentPrice, showExitScore: false })
           )
         );
       })
     ),
-    React.createElement("div", { style: { marginTop: 24, borderTop: "1px solid var(--border)", paddingTop: 20 } },
+
+    // Snapshots section
+    !viewingAnalysis && React.createElement("div", { style: { marginTop: 24, borderTop: "1px solid var(--border)", paddingTop: 20 } },
       React.createElement("div", { onClick: () => setShowSnapshots(!showSnapshots), style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", marginBottom: showSnapshots ? 12 : 0, padding: "8px 0" } },
         React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, (showSnapshots ? "\u25be " : "\u25b8 ") + "Saved Snapshots"),
         snapshots.length > 0 && React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", background: "var(--bg4)", padding: "3px 8px", borderRadius: 10 } }, snapshots.length + " snapshot" + (snapshots.length !== 1 ? "s" : ""))
       ),
       showSnapshots && React.createElement("div", { style: { marginTop: 4 } }, renderSnapshots())
     )
+    ) /* end Fragment */
   );
 };
 
@@ -2001,6 +2869,10 @@ function StockScreener() {
   var scanTime = _s9[0], setScanTime = _s9[1];
   var _s10 = useState({});
   var refreshingMap = _s10[0], setRefreshingMap = _s10[1];
+  var _s11 = useState({});
+  var addingToES = _s11[0], setAddingToES = _s11[1];
+  var _s12 = useState({});
+  var addedToES = _s12[0], setAddedToES = _s12[1];
   var _s11 = useState([]);
   var snapshots = _s11[0], setSnapshots = _s11[1];
 
@@ -2101,6 +2973,39 @@ function StockScreener() {
       setTimestamps(function(p) { var c = Object.assign({}, p); c[s.t] = Date.now(); return c; });
     } catch(e) {}
     setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = false; return c; });
+  };
+
+  var addToEntryScore = async function(s) {
+    var tk = s.t.replace(".NS", "");
+    if (!tk || addingToES[tk]) return;
+    setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = true; return c; });
+    try {
+      var existing = await dbGetSetting("mm_entry_scores");
+      var entries = (Array.isArray(existing) ? existing : []);
+      if (entries.some(function(e) { return e.ticker === tk; })) {
+        setAddedToES(function(p) { var c = Object.assign({}, p); c[tk] = "exists"; return c; });
+        setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
+        return;
+      }
+      var [resW, resD, resH] = await Promise.all([
+        DF.fetchOHLCVCached(tk, "weekly"),
+        DF.fetchOHLCVCached(tk, "daily"),
+        DF.fetchOHLCVCached(tk, "1h"),
+      ]);
+      if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
+        setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
+        return;
+      }
+      var indW = TI.computeAll(resW.data);
+      var indD = TI.computeAll(resD.data);
+      var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
+      var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, 0);
+      var entry = { id: Date.now(), ticker: tk, currentPrice: 0, addedAt: new Date().toISOString(), result: result, indicators: { weekly: indW, daily: indD, hourly: indH } };
+      entries.unshift(entry);
+      await dbSetSetting("mm_entry_scores", entries);
+      setAddedToES(function(p) { var c = Object.assign({}, p); c[tk] = true; return c; });
+    } catch (e) {}
+    setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
   };
 
   var startScan = async function() {
@@ -2238,12 +3143,12 @@ function StockScreener() {
         })
       ),
       React.createElement("div", { style: { overflowX: "auto", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg3)" } },
-        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1120 } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1220 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
-              ["ticker", "name", "price", "todayChg", "dayChg", "weekChg", "monthChg", "finalScore", "weekly", "daily", "hourly", "actions"].map(function(k) {
-                var labels = { ticker: "Ticker", name: "Company", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", actions: "Last Refreshed" };
-                return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: k === "actions" ? "default" : "pointer" }), onClick: k === "actions" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" ? "" : arrow(k)));
+              ["ticker", "name", "price", "todayChg", "dayChg", "weekChg", "monthChg", "finalScore", "weekly", "daily", "hourly", "addToES", "actions"].map(function(k) {
+                var labels = { ticker: "Ticker", name: "Company", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", addToES: "Add to ES", actions: "Last Refreshed" };
+                return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: k === "actions" || k === "addToES" ? "default" : "pointer" }), onClick: k === "actions" || k === "addToES" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" || k === "addToES" ? "" : arrow(k)));
               })
             )
           ),
@@ -2267,6 +3172,24 @@ function StockScreener() {
                 React.createElement("td", { style: tdStyle }, r.result.weekly ? React.createElement("span", { style: { fontWeight: 700, color: r.result.weekly.decision.color } }, r.result.weekly.total) : "\u2014"),
                 React.createElement("td", { style: tdStyle }, r.result.daily ? React.createElement("span", { style: { fontWeight: 700, color: r.result.daily.decision.color } }, r.result.daily.total) : "\u2014"),
                 React.createElement("td", { style: tdStyle }, r.result.hourly ? React.createElement("span", { style: { fontWeight: 700, color: r.result.hourly.decision.color } }, r.result.hourly.total) : "\u2014"),
+                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                  (function() {
+                    var tk = r.s.t.replace(".NS", "");
+                    var isAdding = addingToES[tk];
+                    var wasAdded = addedToES[tk];
+                    if (wasAdded === true) {
+                      return React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#22c55e", background: "rgba(34,197,94,.1)", padding: "3px 8px", borderRadius: 4 } }, "\u2713 Added");
+                    }
+                    if (wasAdded === "exists") {
+                      return React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", padding: "3px 8px" } }, "In List");
+                    }
+                    return React.createElement("button", {
+                      onClick: function() { addToEntryScore(r.s); },
+                      disabled: isAdding,
+                      style: { fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(22,163,74,.3)", background: isAdding ? "var(--bg5)" : "rgba(22,163,74,.08)", color: "#16a34a", cursor: isAdding ? "wait" : "pointer", fontFamily: "inherit", opacity: isAdding ? 0.6 : 1 }
+                    }, isAdding ? "\u27f3 ..." : "+ Add");
+                  })()
+                ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { whiteSpace: "nowrap" }) },
                   React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
                     React.createElement("button", {
@@ -2475,7 +3398,7 @@ function PulsePage({ holdings }) {
    PAGE: Settings
    ══════════════════════════════════════════════════════════════════════════ */
 function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareSnapshots, watchlist, setWatchlist }) {
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState("light");
 
   useEffect(() => {
     dbGetSetting("stox_theme").then(t => {
@@ -2514,6 +3437,16 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
     React.createElement(DataBackupSection, {
       holdings, setHoldings, soldShareSnapshots, setSoldShareSnapshots, watchlist, setWatchlist
     }),
+
+    // File System Access auto-save
+    window.FSAStoragePanel ? React.createElement(window.FSAStoragePanel, {
+      stateData: { holdings, watchlist, soldShareSnapshots }
+    }) : null,
+
+    // Google Drive cloud backup
+    window.CloudBackupPanel ? React.createElement(window.CloudBackupPanel, {
+      stateData: { holdings, watchlist, soldShareSnapshots }
+    }) : null,
 
     // About
     React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
@@ -2557,7 +3490,7 @@ function App() {
   const [watchlist, setWatchlist] = useState([]);
   const [prices, setPrices] = useState({});
   const [soldShareSnapshots, setSoldShareSnapshots] = useState({});
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState("light");
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [loading, setLoading] = useState(true);
 
@@ -2617,15 +3550,21 @@ function App() {
 
   const navigate = (p, param) => { setPage(p); setPageParam(param); window.scrollTo(0, 0); };
 
+  const refreshPrices = async () => {
+    if (allTickers.length === 0) return;
+    const result = await fetchMultiplePrices(allTickers);
+    setPrices((prev) => ({ ...prev, ...result }));
+  };
+
   // Hide splash
   useEffect(() => {
     const splash = document.getElementById("stox-splash");
     if (splash) {
       setTimeout(() => {
-        splash.style.transition = "opacity .4s ease";
+        splash.style.transition = "opacity .5s ease";
         splash.style.opacity = "0";
-        setTimeout(() => splash.remove(), 400);
-      }, 2500);
+        setTimeout(() => splash.remove(), 500);
+      }, 3200);
     }
   }, []);
 
@@ -2665,7 +3604,7 @@ function App() {
     });
   };
 
-  const pageProps = { holdings, setHoldings, watchlist, setWatchlist, prices, navigate, soldShareSnapshots, setSoldShareSnapshots, saveSnapshot, editSnapshot, deleteSnapshot };
+  const pageProps = { holdings, setHoldings, watchlist, setWatchlist, prices, navigate, soldShareSnapshots, setSoldShareSnapshots, saveSnapshot, editSnapshot, deleteSnapshot, refreshPrices };
 
   const renderPage = () => {
     switch (page) {
