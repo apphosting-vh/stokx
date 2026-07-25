@@ -3564,20 +3564,27 @@ function SingleStockAnalysis() {
   var _fmt = window.stoxFmt || function (v, d) { return v != null ? Number(v).toFixed(d != null ? d : 2) : "\u2014"; };
   var _fmtVal = window.stoxFormatValue || function () { return "\u2014"; };
 
-  var _a = useState(""), ticker = _a[0], setTicker = _a[1];
-  var _b = useState("daily"), timeframe = _b[0], setTimeframe = _b[1];
+  var _LS_KEY = "stox_single_stock";
+  var _saved = (function () { try { return JSON.parse(localStorage.getItem(_LS_KEY)) || {}; } catch (e) { return {}; } })();
+
+  var _a = useState(_saved.ticker || ""), ticker = _a[0], setTicker = _a[1];
+  var _b = useState(_saved.timeframe || "daily"), timeframe = _b[0], setTimeframe = _b[1];
   var _c = useState(null), candles = _c[0], setCandles = _c[1];
   var _d = useState(false), loading = _d[0], setLoading = _d[1];
   var _e = useState(null), error = _e[0], setError = _e[1];
   var _f = useState(null), indicators = _f[0], setIndicators = _f[1];
   var _g = useState(null), signals = _g[0], setSignals = _g[1];
-  var _h = useState(false), autoRefresh = _h[0], setAutoRefresh = _h[1];
+  var _h = useState(!!_saved.autoRefresh), autoRefresh = _h[0], setAutoRefresh = _h[1];
   var _i = useState(null), lastUpdated = _i[0], setLastUpdated = _i[1];
-  var _j = useState("all"), category = _j[0], setCategory = _j[1];
+  var _j = useState(_saved.category || "all"), category = _j[0], setCategory = _j[1];
   var _k = useState(0), refreshTick = _k[0], setRefreshTick = _k[1];
   var _l = useState(null), dataSource = _l[0], setDataSource = _l[1];
-  var _m = useState(""), inputVal = _m[0], setInputVal = _m[1];
+  var _m = useState(_saved.ticker || ""), inputVal = _m[0], setInputVal = _m[1];
   var timerRef = useRef(null);
+
+  useEffect(function () {
+    try { localStorage.setItem(_LS_KEY, JSON.stringify({ ticker: ticker, timeframe: timeframe, category: category, autoRefresh: autoRefresh })); } catch (e) {}
+  }, [ticker, timeframe, category, autoRefresh]);
 
   var TF_DEFS = [
     { key: "daily", label: "Daily" },
@@ -3951,9 +3958,15 @@ function PulsePage({ holdings }) {
       }, t.icon(14), t.label))
     ),
 
-    activeTab === "screener" && React.createElement(StockScreener, null),
-    activeTab === "entryscore" && React.createElement(EntryScorePanel, { shares: holdings || [] }),
-    activeTab === "singlestock" && React.createElement(SingleStockAnalysis, null)
+    React.createElement("div", { style: { display: activeTab === "screener" ? "block" : "none" } },
+      React.createElement(StockScreener, null)
+    ),
+    React.createElement("div", { style: { display: activeTab === "entryscore" ? "block" : "none" } },
+      React.createElement(EntryScorePanel, { shares: holdings || [] })
+    ),
+    React.createElement("div", { style: { display: activeTab === "singlestock" ? "block" : "none" } },
+      React.createElement(SingleStockAnalysis, null)
+    )
   );
 }
 
