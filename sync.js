@@ -916,7 +916,7 @@ window.FSAStoragePanel = function(props) {
     }},
       React.createElement("div", { style: { fontSize: 18 } }, supported ? "\u2705" : isMobileDevice ? "\ud83d\udcf1" : "\u26a0\ufe0f"),
       React.createElement("div", null,
-        React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: supported ? "#16a34a" : isMobileDevice ? "#b45309" : "#ef4444" } },
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: supported ? "#20c46a" : isMobileDevice ? "#b45309" : "#f0473f" } },
           supported ? "File System Access API \u2014 Supported" : isMobileDevice ? "Not available on mobile" : "Not supported in this browser"
         ),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } },
@@ -929,16 +929,16 @@ window.FSAStoragePanel = function(props) {
         React.createElement("div", null,
           React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", textTransform: "uppercase", letterSpacing: 0.7, fontWeight: 600, marginBottom: 6 } }, "Connection Status"),
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
-            React.createElement("span", { style: { width: 9, height: 9, borderRadius: "50%", display: "inline-block", background: connected ? "#16a34a" : permNeeded ? "#b45309" : "#ef4444" } }),
-            React.createElement("span", { style: { fontSize: 14, fontWeight: 700, color: connected ? "#16a34a" : permNeeded ? "#b45309" : "var(--text4)" } },
+            React.createElement("span", { style: { width: 9, height: 9, borderRadius: "50%", display: "inline-block", background: connected ? "#20c46a" : permNeeded ? "#b45309" : "#f0473f" } }),
+            React.createElement("span", { style: { fontSize: 14, fontWeight: 700, color: connected ? "#20c46a" : permNeeded ? "#b45309" : "var(--text4)" } },
               connected ? "Connected & Auto-saving" : permNeeded ? "Permission Needed" : "Disconnected")
           )
         ),
         React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
           connected && React.createElement("button", { className: "stx-btn", onClick: handleSaveNow, disabled: busy, style: { fontSize: 12 } }, "Save Now"),
-          connected && React.createElement("button", { className: "stx-btn stx-btn-ghost", onClick: handleDisconnect, disabled: busy, style: { fontSize: 12, color: "#ef4444" } }, "Disconnect"),
+          connected && React.createElement("button", { className: "stx-btn stx-btn-ghost", onClick: handleDisconnect, disabled: busy, style: { fontSize: 12, color: "#f0473f" } }, "Disconnect"),
           permNeeded && React.createElement("button", { className: "stx-btn", onClick: handleGrantPerm, disabled: busy, style: { fontSize: 12 } }, "Re-grant Permission"),
-          permNeeded && React.createElement("button", { className: "stx-btn stx-btn-ghost", onClick: handleDisconnect, disabled: busy, style: { fontSize: 12, color: "#ef4444" } }, "Disconnect")
+          permNeeded && React.createElement("button", { className: "stx-btn stx-btn-ghost", onClick: handleDisconnect, disabled: busy, style: { fontSize: 12, color: "#f0473f" } }, "Disconnect")
         )
       ),
       (connected || permNeeded) && React.createElement("div", { style: { marginTop: 12, padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)" } },
@@ -961,7 +961,7 @@ window.FSAStoragePanel = function(props) {
         padding: "10px 14px", borderRadius: 8, fontSize: 12, fontWeight: 500, marginTop: 4,
         background: msg.ok ? "rgba(22,163,74,.1)" : "rgba(239,68,68,.1)",
         border: "1px solid " + (msg.ok ? "rgba(22,163,74,.3)" : "rgba(239,68,68,.3)"),
-        color: msg.ok ? "#16a34a" : "#ef4444"
+        color: msg.ok ? "#20c46a" : "#f0473f"
       }
     }, msg.text)
   );
@@ -1044,7 +1044,7 @@ window.CloudBackupPanel = function(props) {
     ? (localEdit === lastSync ? "match" : (localEdit > lastSync ? "local-newer" : "drive-newer"))
     : "unknown";
   var syncLabel = syncCompare === "match" ? "Up to date" : syncCompare === "local-newer" ? "Local newer" : syncCompare === "drive-newer" ? "Drive newer" : "Waiting for sync";
-  var syncColor = syncCompare === "match" ? "#16a34a" : syncCompare === "unknown" ? "var(--text5)" : "#b45309";
+  var syncColor = syncCompare === "match" ? "#20c46a" : syncCompare === "unknown" ? "var(--text5)" : "#b45309";
 
   var fmtTs = function(iso) {
     if (!iso) return "Never";
@@ -1165,7 +1165,7 @@ window.CloudBackupPanel = function(props) {
 
   var StatusDot = function(p) {
     return React.createElement("span", {
-      style: { display: "inline-block", width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: p.on ? "#16a34a" : p.warn ? "#b45309" : "#475569" }
+      style: { display: "inline-block", width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: p.on ? "#20c46a" : p.warn ? "#b45309" : "#475569" }
     });
   };
   var subHdr = { fontSize: 11, color: "var(--text5)", textTransform: "uppercase", letterSpacing: 0.7, fontWeight: 600, marginBottom: 6 };
@@ -1195,7 +1195,7 @@ window.CloudBackupPanel = function(props) {
         ),
         React.createElement("button", { className: "stx-btn stx-btn-primary", onClick: saveCid, disabled: !cidInput.trim(), style: { minWidth: 110 } }, cidSaved ? "\u2713 Saved" : "Save Client ID")
       ),
-      hasCid && React.createElement("div", { style: { marginTop: 8, display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#16a34a" } },
+      hasCid && React.createElement("div", { style: { marginTop: 8, display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#20c46a" } },
         React.createElement(StatusDot, { on: true }), "Client ID configured"
       )
     ),
@@ -1220,7 +1220,7 @@ window.CloudBackupPanel = function(props) {
         React.createElement("button", { className: "stx-btn stx-btn-primary", onClick: saveSecret, disabled: !secretInput.trim(), style: { minWidth: 110 } }, secretSaved ? "\u2713 Saved" : "Save Secret")
       ),
       hasSecret
-        ? React.createElement("div", { style: { marginTop: 8, fontSize: 12, color: "#16a34a", display: "flex", alignItems: "center", gap: 6 } }, React.createElement(StatusDot, { on: true }), "Refresh token flow enabled")
+        ? React.createElement("div", { style: { marginTop: 8, fontSize: 12, color: "#20c46a", display: "flex", alignItems: "center", gap: 6 } }, React.createElement(StatusDot, { on: true }), "Refresh token flow enabled")
         : React.createElement("div", { style: { marginTop: 8, fontSize: 12, color: "#b45309", display: "flex", alignItems: "center", gap: 6 } }, React.createElement(StatusDot, { warn: true }), "Without a secret, OAuth popup every hour")
     ),
     /* Sync Status */
@@ -1231,21 +1231,21 @@ window.CloudBackupPanel = function(props) {
           React.createElement("div", { style: { fontSize: 9, color: "var(--text5)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 } }, "Connection"),
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
             React.createElement(StatusDot, { on: isConfigured }),
-            React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: isConfigured ? "#16a34a" : "var(--text5)" } }, isConfigured ? "Configured" : "Not set")
+            React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: isConfigured ? "#20c46a" : "var(--text5)" } }, isConfigured ? "Configured" : "Not set")
           )
         ),
         React.createElement("div", { style: { background: "var(--bg4)", borderRadius: 8, padding: "8px 10px" } },
           React.createElement("div", { style: { fontSize: 9, color: "var(--text5)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 } }, "Access Token"),
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
             React.createElement(StatusDot, { on: tokenOk }),
-            React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: tokenOk ? "#16a34a" : "#b45309" } }, tokenOk ? "Active" : "Expired")
+            React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: tokenOk ? "#20c46a" : "#b45309" } }, tokenOk ? "Active" : "Expired")
           )
         ),
         React.createElement("div", { style: { background: "var(--bg4)", borderRadius: 8, padding: "8px 10px" } },
           React.createElement("div", { style: { fontSize: 9, color: "var(--text5)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 } }, "Refresh Token"),
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
             React.createElement(StatusDot, { on: hasRefresh, warn: !hasRefresh && hasSecret }),
-            React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: hasRefresh ? "#16a34a" : "#b45309" } }, hasRefresh ? "Stored" : "Not stored")
+            React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: hasRefresh ? "#20c46a" : "#b45309" } }, hasRefresh ? "Stored" : "Not stored")
           )
         )
       ),
@@ -1275,7 +1275,7 @@ window.CloudBackupPanel = function(props) {
           className: "stx-btn", onClick: handleReauth, disabled: reauthing,
           style: { background: "rgba(109,40,217,.13)", border: "1px solid rgba(109,40,217,.35)", color: "#6d28d9" }
         }, reauthing ? "Authorising..." : hasRefresh ? "Re-Authorise Drive" : "Authorise & Store Refresh Token"),
-        hasRefresh && React.createElement("span", { style: { fontSize: 12, color: "#16a34a" } }, "Refresh token stored")
+        hasRefresh && React.createElement("span", { style: { fontSize: 12, color: "#20c46a" } }, "Refresh token stored")
       )
     ),
     /* Manual sync */
@@ -1284,7 +1284,7 @@ window.CloudBackupPanel = function(props) {
       React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
         React.createElement("button", {
           className: "stx-btn", onClick: handlePush, disabled: pushing || !hasCid,
-          style: { background: "rgba(22,163,74,.13)", border: "1px solid rgba(22,163,74,.35)", color: "#16a34a", opacity: !hasCid ? 0.5 : 1 }
+          style: { background: "rgba(22,163,74,.13)", border: "1px solid rgba(22,163,74,.35)", color: "#20c46a", opacity: !hasCid ? 0.5 : 1 }
         }, pushing ? "Pushing..." : "Push to Drive"),
         React.createElement("button", {
           className: "stx-btn", onClick: handlePull, disabled: pulling || !hasCid,
@@ -1292,8 +1292,8 @@ window.CloudBackupPanel = function(props) {
         }, pulling ? "Checking Drive..." : "Pull from Drive")
       ),
       (pushMsg || pullMsg) && React.createElement("div", { style: { marginTop: 10 } },
-        pushMsg && React.createElement("div", { style: { fontSize: 12, color: pushMsg.startsWith("\u2713") || pushMsg.startsWith("Pushed") || pushMsg.startsWith("Re-auth") ? "#16a34a" : pushMsg.startsWith("\u2717") || pushMsg.startsWith("Push failed") ? "#ef4444" : "var(--text4)", marginBottom: pullMsg ? 4 : 0 } }, pushMsg),
-        pullMsg && React.createElement("div", { style: { fontSize: 12, color: pullMsg.startsWith("\u2713") || pullMsg.startsWith("Restored") ? "#16a34a" : pullMsg.startsWith("\u2717") || pullMsg.startsWith("Pull failed") ? "#ef4444" : "var(--text4)" } }, pullMsg)
+        pushMsg && React.createElement("div", { style: { fontSize: 12, color: pushMsg.startsWith("\u2713") || pushMsg.startsWith("Pushed") || pushMsg.startsWith("Re-auth") ? "#20c46a" : pushMsg.startsWith("\u2717") || pushMsg.startsWith("Push failed") ? "#f0473f" : "var(--text4)", marginBottom: pullMsg ? 4 : 0 } }, pushMsg),
+        pullMsg && React.createElement("div", { style: { fontSize: 12, color: pullMsg.startsWith("\u2713") || pullMsg.startsWith("Restored") ? "#20c46a" : pullMsg.startsWith("\u2717") || pullMsg.startsWith("Pull failed") ? "#f0473f" : "var(--text4)" } }, pullMsg)
       )
     ),
     /* Daily Auto-Backup */
@@ -1309,7 +1309,7 @@ window.CloudBackupPanel = function(props) {
         React.createElement("div", { style: {
           display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 20, fontSize: 10, fontWeight: 700,
           background: abStatus === "ok" && abDate === _autoBackupTodayIST() ? "rgba(22,163,74,.12)" : "var(--bg4)",
-          color: abStatus === "ok" && abDate === _autoBackupTodayIST() ? "#16a34a" : "var(--text5)"
+          color: abStatus === "ok" && abDate === _autoBackupTodayIST() ? "#20c46a" : "var(--text5)"
         } }, abStatus === "ok" && abDate === _autoBackupTodayIST() ? "Done Today" : abStatus === "failed" ? "Not Yet" : "Not Run")
       ),
       React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 } },

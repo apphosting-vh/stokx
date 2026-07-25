@@ -35,7 +35,7 @@ const Icon = ({ n, size = 16, color, style = {} }) => {
 };
 
 /* ── Shared helpers ── */
-const pnlColor = v => v >= 0 ? "#16a34a" : "#ef4444";
+const pnlColor = v => v >= 0 ? "#20c46a" : "#f0473f";
 
 const fmtDays = d => {
   if (d < 7) return d + "d";
@@ -54,7 +54,7 @@ const EmptyState = ({ icon, text, sub }) =>
 const StatBox = ({ label, value, sub, color, bg, border }) =>
   React.createElement("div", { style: { background: bg || "var(--bg4)", border: border || "1px solid var(--border)", borderRadius: 12, padding: "14px 16px" } },
     React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, label),
-    React.createElement("div", { style: { fontSize: 20, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: color || "var(--text)" } }, value),
+    React.createElement("div", { style: { fontSize: 20, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: color || "var(--text)" } }, value),
     sub && React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, sub)
   );
 
@@ -146,7 +146,7 @@ const ReportsPage = ({ shares, soldShareSnapshots }) => {
     }
   };
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
-    React.createElement("div", { style: { fontSize: 22, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "var(--text)" } }, "Reports & Analytics"),
+    React.createElement("div", { style: { fontSize: 22, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "var(--text)" } }, "Reports & Analytics"),
     React.createElement("div", { className: "reports-tabs-scroll", style: { overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", paddingBottom: 2 } },
       React.createElement("div", { style: { display: "flex", gap: 6, minWidth: "max-content" } },
         tabs.map(t =>
@@ -320,27 +320,27 @@ const ProfitabilityMetrics = ({ shares, soldShareSnapshots = {} }) => {
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(175px,1fr))", gap: 12 } },
       React.createElement("div", { style: { background: totalPnl >= 0 ? "rgba(22,163,74,.07)" : "rgba(239,68,68,.07)", border: "1px solid " + (totalPnl >= 0 ? "rgba(22,163,74,.2)" : "rgba(239,68,68,.2)"), borderRadius: 12, padding: "14px 16px" } },
         React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Total P&L"),
-        React.createElement("div", { style: { fontSize: 20, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: totalPnl >= 0 ? "#16a34a" : "#ef4444" } }, (totalPnl >= 0 ? "+" : "") + INR(totalPnl)),
+        React.createElement("div", { style: { fontSize: 20, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: totalPnl >= 0 ? "#20c46a" : "#f0473f" } }, (totalPnl >= 0 ? "+" : "") + INR(totalPnl)),
         totalBrokerage > 0 && React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, "Net: " + (totalPnlNet >= 0 ? "+" : "") + INR(totalPnlNet))
       ),
       overallXirr !== null && React.createElement("div", { style: { background: "rgba(109,40,217,.07)", border: "1px solid rgba(109,40,217,.2)", borderRadius: 12, padding: "14px 16px" } },
         React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Overall XIRR"),
-        React.createElement("div", { style: { fontSize: 20, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: overallXirr >= 0 ? "#6d28d9" : "#ef4444" } }, (overallXirr >= 0 ? "+" : "") + overallXirr.toFixed(2) + "%"),
+        React.createElement("div", { style: { fontSize: 20, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: overallXirr >= 0 ? "#6d28d9" : "#f0473f" } }, (overallXirr >= 0 ? "+" : "") + overallXirr.toFixed(2) + "%"),
         React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, "Money-weighted p.a.")
       ),
       React.createElement("div", { style: { background: "var(--bg4)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px" } },
         React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Win Rate"),
-        React.createElement("div", { style: { fontSize: 20, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "var(--text)" } }, "%" + winRate),
+        React.createElement("div", { style: { fontSize: 20, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "var(--text)" } }, "%" + winRate),
         React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, winners + "W / " + losers + "L of " + trades.length + " trades")
       ),
       React.createElement("div", { style: { background: "var(--bg4)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px" } },
         React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Avg Return / Trade"),
-        React.createElement("div", { style: { fontSize: 20, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: +avgReturn >= 0 ? "#16a34a" : "#ef4444" } }, (+avgReturn >= 0 ? "+" : "") + avgReturn + "%"),
+        React.createElement("div", { style: { fontSize: 20, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: +avgReturn >= 0 ? "#20c46a" : "#f0473f" } }, (+avgReturn >= 0 ? "+" : "") + avgReturn + "%"),
         React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, "Mean return across all trades")
       ),
       totalBrokerage > 0 && React.createElement("div", { style: { background: "rgba(245,158,11,.07)", border: "1px solid rgba(245,158,11,.2)", borderRadius: 12, padding: "14px 16px" } },
         React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Total Brokerage"),
-        React.createElement("div", { style: { fontSize: 20, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#f59e0b" } }, "-" + INR(totalBrokerage)),
+        React.createElement("div", { style: { fontSize: 20, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "#e0a527" } }, "-" + INR(totalBrokerage)),
         overallXirrNet !== null && React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, "Adj. XIRR: " + (overallXirrNet >= 0 ? "+" : "") + overallXirrNet.toFixed(2) + "% p.a.")
       )
     ),
@@ -374,20 +374,20 @@ const ProfitabilityMetrics = ({ shares, soldShareSnapshots = {} }) => {
               ),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "center", color: "var(--text3)" } }, t.qty),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", color: "var(--text4)" } }, "\u20b9" + Number(t.buyPrice).toLocaleString("en-IN")),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", color: isGain ? "#16a34a" : "#ef4444", fontWeight: 600 } }, "\u20b9" + Number(t.sellPrice).toLocaleString("en-IN")),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "right", fontWeight: 700, color: isGain ? "#16a34a" : "#ef4444" } }, (isGain ? "+" : "") + INR(t.pnl)),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: isGain ? "#16a34a" : "#ef4444" } }, (t.returnPct >= 0 ? "+" : "") + t.returnPct.toFixed(2) + "%"),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: t.xirr !== null ? (t.xirr >= 0 ? "#16a34a" : "#ef4444") : "var(--text6)" } }, t.xirr !== null ? (t.xirr >= 0 ? "+" : "") + t.xirr.toFixed(2) + "%" : "\u2014"),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", color: t.brokerage > 0 ? "#f59e0b" : "var(--text6)" } }, t.brokerage > 0 ? "-" + INR(t.brokerage) : "\u2014"),
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", color: isGain ? "#20c46a" : "#f0473f", fontWeight: 600 } }, "\u20b9" + Number(t.sellPrice).toLocaleString("en-IN")),
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "right", fontWeight: 700, color: isGain ? "#20c46a" : "#f0473f" } }, (isGain ? "+" : "") + INR(t.pnl)),
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: isGain ? "#20c46a" : "#f0473f" } }, (t.returnPct >= 0 ? "+" : "") + t.returnPct.toFixed(2) + "%"),
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: t.xirr !== null ? (t.xirr >= 0 ? "#20c46a" : "#f0473f") : "var(--text6)" } }, t.xirr !== null ? (t.xirr >= 0 ? "+" : "") + t.xirr.toFixed(2) + "%" : "\u2014"),
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", color: t.brokerage > 0 ? "#e0a527" : "var(--text6)" } }, t.brokerage > 0 ? "-" + INR(t.brokerage) : "\u2014"),
               React.createElement("div", { style: { padding: "9px 8px", display: "flex", justifyContent: "center", alignItems: "center" } },
-                React.createElement("span", { style: { fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 6, background: t.type === "sold" ? "rgba(109,40,217,.1)" : "rgba(22,163,74,.1)", color: t.type === "sold" ? "#6d28d9" : "#16a34a", border: "1px solid " + (t.type === "sold" ? "rgba(109,40,217,.25)" : "rgba(22,163,74,.25)") } }, t.type === "sold" ? "SOLD" : "ACTIVE")
+                React.createElement("span", { style: { fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 6, background: t.type === "sold" ? "rgba(109,40,217,.1)" : "rgba(22,163,74,.1)", color: t.type === "sold" ? "#6d28d9" : "#20c46a", border: "1px solid " + (t.type === "sold" ? "rgba(109,40,217,.25)" : "rgba(22,163,74,.25)") } }, t.type === "sold" ? "SOLD" : "ACTIVE")
               )
             );
           })
         )
       ),
       totalBrokerage > 0 && React.createElement("div", { style: { padding: "10px 16px", borderTop: "1px solid var(--border)", background: "rgba(245,158,11,.04)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } },
-        React.createElement("span", { style: { fontSize: 11, color: "#f59e0b", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 } }, React.createElement(Icon, { n: "lightbulb", size: 12, color: "#f59e0b" }), "Brokerage-Adjusted Returns:"),
+        React.createElement("span", { style: { fontSize: 11, color: "#e0a527", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 } }, React.createElement(Icon, { n: "lightbulb", size: 12, color: "#e0a527" }), "Brokerage-Adjusted Returns:"),
         React.createElement("span", { style: { fontSize: 11, color: "var(--text4)" } }, "Gross P&L: " + (totalPnl >= 0 ? "+" : "") + INR(totalPnl)),
         React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, " \u2192 "),
         React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 600 } }, "Net P&L: " + (totalPnlNet >= 0 ? "+" : "") + INR(totalPnlNet)),
@@ -402,12 +402,12 @@ const ProfitabilityMetrics = ({ shares, soldShareSnapshots = {} }) => {
       React.createElement("div", { style: { padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 16 } },
         overallXirr !== null ? React.createElement("div", { style: { textAlign: "center", padding: 16, background: overallXirr >= 0 ? "rgba(22,163,74,.06)" : "rgba(239,68,68,.06)", border: "1px solid " + (overallXirr >= 0 ? "rgba(22,163,74,.18)" : "rgba(239,68,68,.18)"), borderRadius: 12 } },
           React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 } }, "Gross XIRR"),
-          React.createElement("div", { style: { fontSize: 32, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: overallXirr >= 0 ? "#16a34a" : "#ef4444", lineHeight: 1.1 } }, (overallXirr >= 0 ? "+" : "") + overallXirr.toFixed(2) + "%"),
+          React.createElement("div", { style: { fontSize: 32, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: overallXirr >= 0 ? "#20c46a" : "#f0473f", lineHeight: 1.1 } }, (overallXirr >= 0 ? "+" : "") + overallXirr.toFixed(2) + "%"),
           React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 4 } }, "p.a. money-weighted")
         ) : React.createElement("div", { style: { textAlign: "center", padding: 16, color: "var(--text6)", fontSize: 13 } }, "Insufficient data for XIRR"),
         overallXirrNet !== null && React.createElement("div", { style: { textAlign: "center", padding: 16, background: overallXirrNet >= 0 ? "rgba(245,158,11,.06)" : "rgba(239,68,68,.06)", border: "1px solid " + (overallXirrNet >= 0 ? "rgba(245,158,11,.18)" : "rgba(239,68,68,.18)"), borderRadius: 12 } },
           React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 } }, "Net XIRR (after brokerage)"),
-          React.createElement("div", { style: { fontSize: 32, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: overallXirrNet >= 0 ? "#f59e0b" : "#ef4444", lineHeight: 1.1 } }, (overallXirrNet >= 0 ? "+" : "") + overallXirrNet.toFixed(2) + "%"),
+          React.createElement("div", { style: { fontSize: 32, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: overallXirrNet >= 0 ? "#e0a527" : "#f0473f", lineHeight: 1.1 } }, (overallXirrNet >= 0 ? "+" : "") + overallXirrNet.toFixed(2) + "%"),
           React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 4 } }, "p.a. brokerage-adjusted")
         ),
         React.createElement("div", { style: { padding: 16, background: "var(--bg4)", border: "1px solid var(--border)", borderRadius: 12 } },
@@ -442,7 +442,7 @@ const ProfitabilityMetrics = ({ shares, soldShareSnapshots = {} }) => {
                 React.createElement("div", { style: { width: 70, fontSize: 11, fontWeight: 600, color: "var(--text4)", flexShrink: 0, textAlign: "right" } }, g.month),
                 React.createElement("div", { style: { flex: 1, height: 24, background: "var(--bg5)", borderRadius: 6, overflow: "hidden" } },
                   React.createElement("div", { style: { height: "100%", width: barW + "%", background: isGain ? "linear-gradient(90deg,rgba(22,163,74,.25),rgba(22,163,74,.5))" : "linear-gradient(90deg,rgba(239,68,68,.25),rgba(239,68,68,.5))", borderRadius: 6, display: "flex", alignItems: "center", paddingLeft: 8 } },
-                    React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: isGain ? "#16a34a" : "#ef4444", whiteSpace: "nowrap" } }, (isGain ? "+" : "") + INR(g.pnl))
+                    React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: isGain ? "#20c46a" : "#f0473f", whiteSpace: "nowrap" } }, (isGain ? "+" : "") + INR(g.pnl))
                   )
                 ),
                 React.createElement("div", { style: { width: 55, fontSize: 10, color: "var(--text6)", textAlign: "right" } }, g.count + " trade" + (g.count !== 1 ? "s" : ""))
@@ -461,21 +461,21 @@ const ProfitabilityMetrics = ({ shares, soldShareSnapshots = {} }) => {
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 } },
           React.createElement("div", { style: { background: "rgba(14,116,144,.07)", border: "1px solid rgba(14,116,144,.2)", borderRadius: 12, padding: "14px 16px" } },
             React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Time-Weighted Return (TWR)"),
-            React.createElement("div", { style: { fontSize: 22, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#0e7490" } }, ret(twrData.twrAnnualized) + " p.a."),
+            React.createElement("div", { style: { fontSize: 22, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "#0e7490" } }, ret(twrData.twrAnnualized) + " p.a."),
             React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, "Geometric chain of per-trade returns")
           ),
           React.createElement("div", { style: { background: "rgba(109,40,217,.07)", border: "1px solid rgba(109,40,217,.2)", borderRadius: 12, padding: "14px 16px" } },
             React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Money-Weighted Return (MWR)"),
-            React.createElement("div", { style: { fontSize: 22, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#6d28d9" } }, twrData.mwrAnnualized !== null ? ret(twrData.mwrAnnualized) + " p.a." : "\u2014"),
+            React.createElement("div", { style: { fontSize: 22, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "#6d28d9" } }, twrData.mwrAnnualized !== null ? ret(twrData.mwrAnnualized) + " p.a." : "\u2014"),
             React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, "XIRR \u2014 larger trades have more weight")
           )
         ),
         twrData.divergence !== null && React.createElement("div", {
           style: { display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10, background: Math.abs(twrData.divergence) < 1 ? "rgba(22,163,74,.06)" : twrData.divergence > 0 ? "rgba(14,116,144,.06)" : "rgba(239,68,68,.06)", border: "1px solid " + (Math.abs(twrData.divergence) < 1 ? "rgba(22,163,74,.15)" : twrData.divergence > 0 ? "rgba(14,116,144,.15)" : "rgba(239,68,68,.15)"), marginBottom: 12 }
         },
-          React.createElement(Icon, { n: Math.abs(twrData.divergence) < 1 ? "checkcircle" : twrData.divergence > 0 ? "invest" : "warning", size: 16, color: Math.abs(twrData.divergence) < 1 ? "#16a34a" : twrData.divergence > 0 ? "#0e7490" : "#ef4444" }),
+          React.createElement(Icon, { n: Math.abs(twrData.divergence) < 1 ? "checkcircle" : twrData.divergence > 0 ? "invest" : "warning", size: 16, color: Math.abs(twrData.divergence) < 1 ? "#20c46a" : twrData.divergence > 0 ? "#0e7490" : "#f0473f" }),
           React.createElement("div", null,
-            React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: Math.abs(twrData.divergence) < 1 ? "#16a34a" : twrData.divergence > 0 ? "#0e7490" : "#ef4444" } }, "Divergence: " + (twrData.divergence > 0 ? "+" : "") + twrData.divergence.toFixed(2) + "% p.a."),
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: Math.abs(twrData.divergence) < 1 ? "#20c46a" : twrData.divergence > 0 ? "#0e7490" : "#f0473f" } }, "Divergence: " + (twrData.divergence > 0 ? "+" : "") + twrData.divergence.toFixed(2) + "% p.a."),
             React.createElement("div", { style: { fontSize: 11, color: "var(--text4)", marginTop: 2 } }, twrData.interpretation)
           )
         ),
@@ -596,7 +596,7 @@ const TimeHoldingAnalysis = ({ shares, soldShareSnapshots = {} }) => {
                 React.createElement("div", { style: { width: 90, fontSize: 11, fontWeight: 600, color: "var(--text4)", flexShrink: 0, textAlign: "right" } }, b.label),
                 React.createElement("div", { style: { flex: 1, height: 28, background: "var(--bg5)", borderRadius: 6, overflow: "hidden" } },
                   b.count > 0 && React.createElement("div", { style: { height: "100%", width: barW + "%", background: b.pnl >= 0 ? "linear-gradient(90deg,rgba(22,163,74,.2),rgba(22,163,74,.45))" : "linear-gradient(90deg,rgba(239,68,68,.2),rgba(239,68,68,.45))", borderRadius: 6, display: "flex", alignItems: "center", paddingLeft: 8 } },
-                    React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: isGain ? "#16a34a" : "#ef4444", whiteSpace: "nowrap" } }, b.count + " trade" + (b.count !== 1 ? "s" : ""))
+                    React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: isGain ? "#20c46a" : "#f0473f", whiteSpace: "nowrap" } }, b.count + " trade" + (b.count !== 1 ? "s" : ""))
                   )
                 ),
                 React.createElement("div", { style: { width: 80, fontSize: 10, color: "var(--text6)", textAlign: "right" } }, b.count > 0 ? "Avg: " + (isGain ? "+" : "") + INR(Math.round(avgPnl)) : "\u2014")
@@ -627,7 +627,7 @@ const TimeHoldingAnalysis = ({ shares, soldShareSnapshots = {} }) => {
               ),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "right", color: "var(--text3)" } }, s.count),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "right", fontWeight: 600, color: "var(--text)" } }, fmtDays(s.avgDays)),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: avgRet >= 0 ? "#16a34a" : "#ef4444" } }, (avgRet >= 0 ? "+" : "") + avgRet + "%"),
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: avgRet >= 0 ? "#20c46a" : "#f0473f" } }, (avgRet >= 0 ? "+" : "") + avgRet + "%"),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 10, textAlign: "right", color: "var(--text6)" } }, fmtDays(s.minDays)),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 10, textAlign: "right", color: "var(--text6)" } }, fmtDays(s.maxDays))
             );
@@ -650,13 +650,13 @@ const TimeHoldingAnalysis = ({ shares, soldShareSnapshots = {} }) => {
           return React.createElement(React.Fragment, null,
             React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 } },
               React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, background: "rgba(22,163,74,.06)", border: "1px solid rgba(22,163,74,.18)" } },
-                React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "#16a34a", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 } }, "\ud83c\udfaf Best Month to Buy"),
-                React.createElement("div", { style: { fontSize: 18, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#16a34a" } }, bestMonth.name),
+                React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "#20c46a", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 } }, "\ud83c\udfaf Best Month to Buy"),
+                React.createElement("div", { style: { fontSize: 18, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "#20c46a" } }, bestMonth.name),
                 React.createElement("div", { style: { fontSize: 11, color: "var(--text4)", marginTop: 2 } }, "Avg return: " + (bestMonth.avgReturn >= 0 ? "+" : "") + bestMonth.avgReturn.toFixed(2) + "% \u00b7 " + bestMonth.count + " trades")
               ),
               React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.18)" } },
-                React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "#ef4444", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 } }, "\u26a0\ufe0f Worst Month to Buy"),
-                React.createElement("div", { style: { fontSize: 18, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#ef4444" } }, worstMonth.name),
+                React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "#f0473f", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 } }, "\u26a0\ufe0f Worst Month to Buy"),
+                React.createElement("div", { style: { fontSize: 18, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "#f0473f" } }, worstMonth.name),
                 React.createElement("div", { style: { fontSize: 11, color: "var(--text4)", marginTop: 2 } }, "Avg return: " + (worstMonth.avgReturn >= 0 ? "+" : "") + worstMonth.avgReturn.toFixed(2) + "% \u00b7 " + worstMonth.count + " trades")
               )
             ),
@@ -668,11 +668,11 @@ const TimeHoldingAnalysis = ({ shares, soldShareSnapshots = {} }) => {
                   React.createElement("div", { style: { width: 30, fontSize: 11, fontWeight: 600, color: "var(--text4)", flexShrink: 0, textAlign: "right" } }, m.name),
                   React.createElement("div", { style: { flex: 1, height: 22, background: "var(--bg5)", borderRadius: 5, overflow: "hidden", display: "flex", alignItems: "center" } },
                     m.count > 0 && React.createElement("div", { style: { height: "100%", width: barW + "%", background: isGain ? "linear-gradient(90deg,rgba(22,163,74,.2),rgba(22,163,74,.4))" : "linear-gradient(90deg,rgba(239,68,68,.2),rgba(239,68,68,.4))", borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6 } },
-                      React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: isGain ? "#16a34a" : "#ef4444", whiteSpace: "nowrap" } }, (isGain ? "+" : "") + m.avgReturn.toFixed(1) + "%")
+                      React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: isGain ? "#20c46a" : "#f0473f", whiteSpace: "nowrap" } }, (isGain ? "+" : "") + m.avgReturn.toFixed(1) + "%")
                     )
                   ),
                   React.createElement("div", { style: { width: 45, fontSize: 10, color: "var(--text6)", textAlign: "right" } }, m.count > 0 ? m.count + " trades" : "\u2014"),
-                  React.createElement("div", { style: { width: 38, fontSize: 9, textAlign: "right", fontWeight: 600, color: m.winRate >= 50 ? "#16a34a" : "#ef4444" } }, m.count > 0 ? Math.round(m.winRate) + "%" : "")
+                  React.createElement("div", { style: { width: 38, fontSize: 9, textAlign: "right", fontWeight: 600, color: m.winRate >= 50 ? "#20c46a" : "#f0473f" } }, m.count > 0 ? Math.round(m.winRate) + "%" : "")
                 );
               })
             )
@@ -689,14 +689,14 @@ const TimeHoldingAnalysis = ({ shares, soldShareSnapshots = {} }) => {
         quarterAnalysis.map(q => {
           const hasData = q.count > 0;
           const isGain = q.avgReturn >= 0;
-          const qCol = ["#3b82f6", "#f59e0b", "#10b981", "#8b5cf6"][q.q];
+          const qCol = ["#4a8fe0", "#e0a527", "#20c46a", "#8b5cf6"][q.q];
           return React.createElement("div", { key: q.q, style: { padding: "14px 16px", borderRadius: 12, background: hasData ? (isGain ? "rgba(22,163,74,.04)" : "rgba(239,68,68,.04)") : "var(--bg4)", border: "1px solid " + (hasData ? (isGain ? "rgba(22,163,74,.15)" : "rgba(239,68,68,.15)") : "var(--border)") } },
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 10 } },
               React.createElement("div", { style: { width: 8, height: 8, borderRadius: "50%", background: qCol } }),
               React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, "Q" + (q.q + 1))
             ),
             hasData ? React.createElement(React.Fragment, null,
-              React.createElement("div", { style: { fontSize: 22, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: isGain ? "#16a34a" : "#ef4444", marginBottom: 4 } }, (isGain ? "+" : "") + q.avgReturn.toFixed(2) + "%"),
+              React.createElement("div", { style: { fontSize: 22, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: isGain ? "#20c46a" : "#f0473f", marginBottom: 4 } }, (isGain ? "+" : "") + q.avgReturn.toFixed(2) + "%"),
               React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8 } }, "avg return \u00b7 " + q.count + " trades"),
               React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text6)" } },
                 React.createElement("span", null, "Win rate: " + Math.round(q.winRate) + "%"),
@@ -704,7 +704,7 @@ const TimeHoldingAnalysis = ({ shares, soldShareSnapshots = {} }) => {
               ),
               React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text6)", marginTop: 3 } },
                 React.createElement("span", null, "Total P&L:"),
-                React.createElement("span", { style: { fontWeight: 600, color: q.totalPnl >= 0 ? "#16a34a" : "#ef4444" } }, (q.totalPnl >= 0 ? "+" : "") + INR(q.totalPnl))
+                React.createElement("span", { style: { fontWeight: 600, color: q.totalPnl >= 0 ? "#20c46a" : "#f0473f" } }, (q.totalPnl >= 0 ? "+" : "") + INR(q.totalPnl))
               )
             ) : React.createElement("div", { style: { fontSize: 12, color: "var(--text6)", textAlign: "center", padding: "12px 0" } }, "No trades in this quarter")
           );
@@ -723,7 +723,7 @@ const TimeHoldingAnalysis = ({ shares, soldShareSnapshots = {} }) => {
             React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 8 } }, "\u2264 \u20b9" + Number(Math.round(positionSizing.median)).toLocaleString("en-IN") + " invested"),
             ["Trades", "Avg Size", "Avg Return", "Win Rate"].map((label, i) => {
               const vals = [positionSizing.small.count, "\u20b9" + Number(Math.round(positionSizing.small.avgSize)).toLocaleString("en-IN"), (positionSizing.small.avgReturn >= 0 ? "+" : "") + positionSizing.small.avgReturn.toFixed(2) + "%", Math.round(positionSizing.small.winRate) + "%"];
-              const cols = ["var(--text)", "var(--text)", positionSizing.small.avgReturn >= 0 ? "#16a34a" : "#ef4444", positionSizing.small.winRate >= 50 ? "#16a34a" : "#ef4444"];
+              const cols = ["var(--text)", "var(--text)", positionSizing.small.avgReturn >= 0 ? "#20c46a" : "#f0473f", positionSizing.small.winRate >= 50 ? "#20c46a" : "#f0473f"];
               return React.createElement("div", { key: label, style: { display: "flex", justifyContent: "space-between", marginBottom: 6 } },
                 React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, label),
                 React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: cols[i] } }, vals[i])
@@ -735,7 +735,7 @@ const TimeHoldingAnalysis = ({ shares, soldShareSnapshots = {} }) => {
             React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 8 } }, " > \u20b9" + Number(Math.round(positionSizing.median)).toLocaleString("en-IN") + " invested"),
             ["Trades", "Avg Size", "Avg Return", "Win Rate"].map((label, i) => {
               const vals = [positionSizing.large.count, "\u20b9" + Number(Math.round(positionSizing.large.avgSize)).toLocaleString("en-IN"), (positionSizing.large.avgReturn >= 0 ? "+" : "") + positionSizing.large.avgReturn.toFixed(2) + "%", Math.round(positionSizing.large.winRate) + "%"];
-              const cols = ["var(--text)", "var(--text)", positionSizing.large.avgReturn >= 0 ? "#16a34a" : "#ef4444", positionSizing.large.winRate >= 50 ? "#16a34a" : "#ef4444"];
+              const cols = ["var(--text)", "var(--text)", positionSizing.large.avgReturn >= 0 ? "#20c46a" : "#f0473f", positionSizing.large.winRate >= 50 ? "#20c46a" : "#f0473f"];
               return React.createElement("div", { key: label, style: { display: "flex", justifyContent: "space-between", marginBottom: 6 } },
                 React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, label),
                 React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: cols[i] } }, vals[i])
@@ -746,7 +746,7 @@ const TimeHoldingAnalysis = ({ shares, soldShareSnapshots = {} }) => {
         React.createElement("div", { style: { padding: "12px 16px", borderRadius: 10, background: Math.abs(positionSizing.correlation) > 0.15 ? (positionSizing.correlation > 0 ? "rgba(22,163,74,.06)" : "rgba(239,68,68,.06)") : "var(--bg4)", border: "1px solid " + (Math.abs(positionSizing.correlation) > 0.15 ? (positionSizing.correlation > 0 ? "rgba(22,163,74,.18)" : "rgba(239,68,68,.18)") : "var(--border)") } },
           React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
             React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--text3)" } }, "Size\u2013Return Correlation"),
-            React.createElement("span", { style: { fontSize: 14, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: Math.abs(positionSizing.correlation) > 0.15 ? (positionSizing.correlation > 0 ? "#16a34a" : "#ef4444") : "var(--text5)" } }, positionSizing.correlation.toFixed(3))
+            React.createElement("span", { style: { fontSize: 14, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: Math.abs(positionSizing.correlation) > 0.15 ? (positionSizing.correlation > 0 ? "#20c46a" : "#f0473f") : "var(--text5)" } }, positionSizing.correlation.toFixed(3))
           ),
           React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", lineHeight: 1.5 } },
             Math.abs(positionSizing.correlation) < 0.1 ? "No meaningful correlation \u2014 position size doesn't predict returns."
@@ -756,11 +756,11 @@ const TimeHoldingAnalysis = ({ shares, soldShareSnapshots = {} }) => {
         ),
         React.createElement("div", { style: { marginTop: 12, display: "flex", justifyContent: "space-between", padding: "8px 12px", background: "var(--bg5)", borderRadius: 8, fontSize: 11 } },
           React.createElement("span", { style: { color: "var(--text5)" } }, "Small positions total P&L:"),
-          React.createElement("span", { style: { fontWeight: 700, color: positionSizing.small.totalPnl >= 0 ? "#16a34a" : "#ef4444" } }, (positionSizing.small.totalPnl >= 0 ? "+" : "") + INR(positionSizing.small.totalPnl))
+          React.createElement("span", { style: { fontWeight: 700, color: positionSizing.small.totalPnl >= 0 ? "#20c46a" : "#f0473f" } }, (positionSizing.small.totalPnl >= 0 ? "+" : "") + INR(positionSizing.small.totalPnl))
         ),
         React.createElement("div", { style: { marginTop: 6, display: "flex", justifyContent: "space-between", padding: "8px 12px", background: "var(--bg5)", borderRadius: 8, fontSize: 11 } },
           React.createElement("span", { style: { color: "var(--text5)" } }, "Large positions total P&L:"),
-          React.createElement("span", { style: { fontWeight: 700, color: positionSizing.large.totalPnl >= 0 ? "#16a34a" : "#ef4444" } }, (positionSizing.large.totalPnl >= 0 ? "+" : "") + INR(positionSizing.large.totalPnl))
+          React.createElement("span", { style: { fontWeight: 700, color: positionSizing.large.totalPnl >= 0 ? "#20c46a" : "#f0473f" } }, (positionSizing.large.totalPnl >= 0 ? "+" : "") + INR(positionSizing.large.totalPnl))
         )
       )
     ),
@@ -869,16 +869,16 @@ const WinLossPatterns = ({ shares, soldShareSnapshots = {} }) => {
   else sortedStocks = [...stockStats].sort((a, b) => sortDir === "desc" ? b.totalPnl - a.totalPnl : a.totalPnl - b.totalPnl);
 
   const m = metrics;
-  const pfColor = m.profitFactor >= 1.5 ? "#16a34a" : m.profitFactor >= 1 ? "#f59e0b" : "#ef4444";
+  const pfColor = m.profitFactor >= 1.5 ? "#20c46a" : m.profitFactor >= 1 ? "#e0a527" : "#f0473f";
   const pfLabel = m.profitFactor >= 1.5 ? "Healthy" : m.profitFactor >= 1 ? "Marginal" : "Losing";
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 20 } },
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(170px,1fr))", gap: 12 } },
-      React.createElement(StatBox, { label: "Win Rate", value: m.winRate.toFixed(1) + "%", sub: m.winners + "W / " + m.losers + "L / " + m.breakeven + " even", color: m.winRate >= 50 ? "#16a34a" : "#ef4444", bg: m.winRate >= 50 ? "rgba(22,163,74,.07)" : "rgba(239,68,68,.07)", border: "1px solid " + (m.winRate >= 50 ? "rgba(22,163,74,.2)" : "rgba(239,68,68,.2)") }),
+      React.createElement(StatBox, { label: "Win Rate", value: m.winRate.toFixed(1) + "%", sub: m.winners + "W / " + m.losers + "L / " + m.breakeven + " even", color: m.winRate >= 50 ? "#20c46a" : "#f0473f", bg: m.winRate >= 50 ? "rgba(22,163,74,.07)" : "rgba(239,68,68,.07)", border: "1px solid " + (m.winRate >= 50 ? "rgba(22,163,74,.2)" : "rgba(239,68,68,.2)") }),
       React.createElement(StatBox, { label: "Profit Factor", value: m.profitFactor === Infinity ? "\u221e" : m.profitFactor.toFixed(2), sub: pfLabel + " \u00b7 gross \u00f7 gross loss", color: pfColor, bg: m.profitFactor >= 1.5 ? "rgba(22,163,74,.07)" : m.profitFactor >= 1 ? "rgba(245,158,11,.07)" : "rgba(239,68,68,.07)", border: "1px solid " + (m.profitFactor >= 1.5 ? "rgba(22,163,74,.2)" : m.profitFactor >= 1 ? "rgba(245,158,11,.2)" : "rgba(239,68,68,.2)") }),
-      React.createElement(StatBox, { label: "Avg Win / Avg Loss", value: m.winLossRatio === Infinity ? "\u221e" : m.winLossRatio.toFixed(2) + "\u00d7", sub: "Win avg: " + INR(m.avgWin) + " \u00b7 Loss avg: " + INR(m.avgLoss), color: m.winLossRatio >= 1.5 ? "#16a34a" : m.winLossRatio >= 1 ? "#f59e0b" : "#ef4444" }),
-      React.createElement(StatBox, { label: "Best Win Streak", value: m.maxWinStreak + " trades", sub: m.winStreakStart ? (m.winStreakStart.ticker || "") + " \u2192 " + (m.winStreakEnd?.ticker || "") : null, color: "#16a34a", bg: "rgba(22,163,74,.07)", border: "1px solid rgba(22,163,74,.2)" }),
-      React.createElement(StatBox, { label: "Worst Loss Streak", value: m.maxLossStreak + " trades", sub: m.lossStreakStart ? (m.lossStreakStart.ticker || "") + " \u2192 " + (m.lossStreakEnd?.ticker || "") : null, color: "#ef4444", bg: "rgba(239,68,68,.07)", border: "1px solid rgba(239,68,68,.2)" })
+      React.createElement(StatBox, { label: "Avg Win / Avg Loss", value: m.winLossRatio === Infinity ? "\u221e" : m.winLossRatio.toFixed(2) + "\u00d7", sub: "Win avg: " + INR(m.avgWin) + " \u00b7 Loss avg: " + INR(m.avgLoss), color: m.winLossRatio >= 1.5 ? "#20c46a" : m.winLossRatio >= 1 ? "#e0a527" : "#f0473f" }),
+      React.createElement(StatBox, { label: "Best Win Streak", value: m.maxWinStreak + " trades", sub: m.winStreakStart ? (m.winStreakStart.ticker || "") + " \u2192 " + (m.winStreakEnd?.ticker || "") : null, color: "#20c46a", bg: "rgba(22,163,74,.07)", border: "1px solid rgba(22,163,74,.2)" }),
+      React.createElement(StatBox, { label: "Worst Loss Streak", value: m.maxLossStreak + " trades", sub: m.lossStreakStart ? (m.lossStreakStart.ticker || "") + " \u2192 " + (m.lossStreakEnd?.ticker || "") : null, color: "#f0473f", bg: "rgba(239,68,68,.07)", border: "1px solid rgba(239,68,68,.2)" })
     ),
     React.createElement("div", { style: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" } },
       React.createElement("div", { style: { padding: "12px 16px", borderBottom: "1px solid var(--border)", background: "var(--bg5)", display: "flex", alignItems: "center", gap: 8 } },
@@ -887,37 +887,37 @@ const WinLossPatterns = ({ shares, soldShareSnapshots = {} }) => {
       ),
       React.createElement("div", { style: { padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 16 } },
         React.createElement("div", { style: { padding: 16, background: "rgba(22,163,74,.06)", border: "1px solid rgba(22,163,74,.18)", borderRadius: 12 } },
-          React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#16a34a", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 } }, React.createElement(Icon, { n: "checkcircle", size: 12, color: "#16a34a" }), " Winning Trades (" + m.winners + ")"),
-          [["Total Profit", "+" + INR(m.totalProfit), "#16a34a"], ["Avg Win (\u20b9)", "+" + INR(m.avgWin), "#16a34a"], ["Avg Win (%)", "+" + m.avgWinReturn.toFixed(2) + "%", "#16a34a"]].map(([l, v, c]) =>
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#20c46a", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 } }, React.createElement(Icon, { n: "checkcircle", size: 12, color: "#20c46a" }), " Winning Trades (" + m.winners + ")"),
+          [["Total Profit", "+" + INR(m.totalProfit), "#20c46a"], ["Avg Win (\u20b9)", "+" + INR(m.avgWin), "#20c46a"], ["Avg Win (%)", "+" + m.avgWinReturn.toFixed(2) + "%", "#20c46a"]].map(([l, v, c]) =>
             React.createElement("div", { key: l, style: { display: "flex", justifyContent: "space-between", marginBottom: 6 } },
               React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, l),
-              React.createElement("span", { style: { fontSize: l.includes("Total") ? 13 : 12, fontWeight: 700, color: c, fontFamily: l.includes("Total") ? "'Sora',sans-serif" : undefined } }, v)
+              React.createElement("span", { style: { fontSize: l.includes("Total") ? 13 : 12, fontWeight: 700, color: c, fontFamily: l.includes("Total") ? "'Manrope',sans-serif" : undefined } }, v)
             )
           ),
           m.largestWinner && React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(22,163,74,.15)" } },
             React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "Largest Win"),
-            React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#16a34a" } }, "+" + INR(m.largestWinner.pnl))
+            React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#20c46a" } }, "+" + INR(m.largestWinner.pnl))
           ),
           m.largestWinnerPct && React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 4 } },
             React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "Highest Return %"),
-            React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "#16a34a" } }, "+" + m.largestWinnerPct.returnPct.toFixed(2) + "% (" + m.largestWinnerPct.company + ")")
+            React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "#20c46a" } }, "+" + m.largestWinnerPct.returnPct.toFixed(2) + "% (" + m.largestWinnerPct.company + ")")
           )
         ),
         React.createElement("div", { style: { padding: 16, background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.18)", borderRadius: 12 } },
-          React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#ef4444", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 } }, React.createElement(Icon, { n: "delete", size: 12, color: "#ef4444" }), " Losing Trades (" + m.losers + ")"),
-          [["Total Loss", "-" + INR(m.totalLoss), "#ef4444"], ["Avg Loss (\u20b9)", "-" + INR(m.avgLoss), "#ef4444"], ["Avg Loss (%)", m.avgLossReturn.toFixed(2) + "%", "#ef4444"]].map(([l, v, c]) =>
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#f0473f", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 } }, React.createElement(Icon, { n: "delete", size: 12, color: "#f0473f" }), " Losing Trades (" + m.losers + ")"),
+          [["Total Loss", "-" + INR(m.totalLoss), "#f0473f"], ["Avg Loss (\u20b9)", "-" + INR(m.avgLoss), "#f0473f"], ["Avg Loss (%)", m.avgLossReturn.toFixed(2) + "%", "#f0473f"]].map(([l, v, c]) =>
             React.createElement("div", { key: l, style: { display: "flex", justifyContent: "space-between", marginBottom: 6 } },
               React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, l),
-              React.createElement("span", { style: { fontSize: l.includes("Total") ? 13 : 12, fontWeight: 700, color: c, fontFamily: l.includes("Total") ? "'Sora',sans-serif" : undefined } }, v)
+              React.createElement("span", { style: { fontSize: l.includes("Total") ? 13 : 12, fontWeight: 700, color: c, fontFamily: l.includes("Total") ? "'Manrope',sans-serif" : undefined } }, v)
             )
           ),
           m.largestLoser && React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(239,68,68,.15)" } },
             React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "Largest Loss"),
-            React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#ef4444" } }, "-" + INR(Math.abs(m.largestLoser.pnl)))
+            React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#f0473f" } }, "-" + INR(Math.abs(m.largestLoser.pnl)))
           ),
           m.largestLoserPct && React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 4 } },
             React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "Worst Return %"),
-            React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "#ef4444" } }, m.largestLoserPct.returnPct.toFixed(2) + "% (" + m.largestLoserPct.company + ")")
+            React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "#f0473f" } }, m.largestLoserPct.returnPct.toFixed(2) + "% (" + m.largestLoserPct.company + ")")
           )
         ),
         React.createElement("div", { style: { padding: 16, background: m.profitFactor >= 1.5 ? "rgba(22,163,74,.06)" : "rgba(245,158,11,.06)", border: "1px solid " + (m.profitFactor >= 1.5 ? "rgba(22,163,74,.18)" : "rgba(245,158,11,.18)"), borderRadius: 12, gridColumn: "1 / -1" } },
@@ -938,9 +938,9 @@ const WinLossPatterns = ({ shares, soldShareSnapshots = {} }) => {
       React.createElement("div", { style: { padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 16 } },
         React.createElement("div", { style: { padding: 16, background: "rgba(22,163,74,.06)", border: "1px solid rgba(22,163,74,.18)", borderRadius: 12 } },
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 } },
-            React.createElement(Icon, { n: "target", size: 20, color: "#16a34a" }),
+            React.createElement(Icon, { n: "target", size: 20, color: "#20c46a" }),
             React.createElement("div", null,
-              React.createElement("div", { style: { fontSize: 14, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#16a34a" } }, m.maxWinStreak + " consecutive wins"),
+              React.createElement("div", { style: { fontSize: 14, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "#20c46a" } }, m.maxWinStreak + " consecutive wins"),
               React.createElement("div", { style: { fontSize: 11, color: "var(--text5)" } }, "Best winning streak")
             )
           ),
@@ -952,9 +952,9 @@ const WinLossPatterns = ({ shares, soldShareSnapshots = {} }) => {
         ),
         React.createElement("div", { style: { padding: 16, background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.18)", borderRadius: 12 } },
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 } },
-            React.createElement(Icon, { n: "warning", size: 20, color: "#ef4444" }),
+            React.createElement(Icon, { n: "warning", size: 20, color: "#f0473f" }),
             React.createElement("div", null,
-              React.createElement("div", { style: { fontSize: 14, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#ef4444" } }, m.maxLossStreak + " consecutive losses"),
+              React.createElement("div", { style: { fontSize: 14, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "#f0473f" } }, m.maxLossStreak + " consecutive losses"),
               React.createElement("div", { style: { fontSize: 11, color: "var(--text5)" } }, "Worst losing streak")
             )
           ),
@@ -972,10 +972,10 @@ const WinLossPatterns = ({ shares, soldShareSnapshots = {} }) => {
         React.createElement("span", { style: { fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "var(--accentbg2)", color: "var(--text5)", border: "1px solid var(--border2)", fontWeight: 600 } }, stockStats.length + " stocks")
       ),
       React.createElement("div", { style: { padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 16 } },
-        [{ title: "Best by Absolute P&L", icon: "money", data: bestByPnl.slice(0, 5), col: "#16a34a", valFn: s => "+" + INR(s.totalPnl), subFn: s => s.trades + " trades \u00b7 " + s.winRate.toFixed(0) + "% win" },
-         { title: "Worst by Absolute P&L", icon: "expense", data: worstByPnl.slice(0, 5), col: "#ef4444", valFn: s => "-" + INR(Math.abs(s.totalPnl)), subFn: s => s.trades + " trades \u00b7 " + s.winRate.toFixed(0) + "% win" },
+        [{ title: "Best by Absolute P&L", icon: "money", data: bestByPnl.slice(0, 5), col: "#20c46a", valFn: s => "+" + INR(s.totalPnl), subFn: s => s.trades + " trades \u00b7 " + s.winRate.toFixed(0) + "% win" },
+         { title: "Worst by Absolute P&L", icon: "expense", data: worstByPnl.slice(0, 5), col: "#f0473f", valFn: s => "-" + INR(Math.abs(s.totalPnl)), subFn: s => s.trades + " trades \u00b7 " + s.winRate.toFixed(0) + "% win" },
          { title: "Best by Avg Return %", icon: "invest", data: bestByReturn.slice(0, 5), col: "#6d28d9", valFn: s => "+" + s.avgReturn.toFixed(2) + "%", subFn: s => s.trades + " trades \u00b7 hold " + s.avgHoldDays + "d avg" },
-         { title: "Worst by Avg Return %", icon: "trenddown", data: worstByReturn.slice(0, 5), col: "#f59e0b", valFn: s => s.avgReturn.toFixed(2) + "%", subFn: s => s.trades + " trades \u00b7 hold " + s.avgHoldDays + "d avg" },
+         { title: "Worst by Avg Return %", icon: "trenddown", data: worstByReturn.slice(0, 5), col: "#e0a527", valFn: s => s.avgReturn.toFixed(2) + "%", subFn: s => s.trades + " trades \u00b7 hold " + s.avgHoldDays + "d avg" },
          { title: "Best by Annualised Return", icon: "invest", data: bestByAnn.slice(0, 5), col: "#0e7490", valFn: s => "+" + s.annReturn.toFixed(2) + "% p.a.", subFn: s => s.trades + " trades \u00b7 " + s.avgHoldDays + "d hold" },
          { title: "Worst by Annualised Return", icon: "trenddown", data: worstByAnn.slice(0, 5), col: "#e11d48", valFn: s => s.annReturn.toFixed(2) + "% p.a.", subFn: s => s.trades + " trades \u00b7 " + s.avgHoldDays + "d hold" }
         ].map(card =>
@@ -986,7 +986,7 @@ const WinLossPatterns = ({ shares, soldShareSnapshots = {} }) => {
                 React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block" } }, s.company),
                 React.createElement("span", { style: { fontSize: 9, color: "var(--text6)" } }, card.subFn(s))
               ),
-              React.createElement("span", { style: { fontSize: 13, fontFamily: "'Sora',sans-serif", fontWeight: 700, color: card.col, marginLeft: 8, flexShrink: 0 } }, card.valFn(s))
+              React.createElement("span", { style: { fontSize: 13, fontFamily: "'Manrope',sans-serif", fontWeight: 700, color: card.col, marginLeft: 8, flexShrink: 0 } }, card.valFn(s))
             ))
           )
         )
@@ -1016,9 +1016,9 @@ const WinLossPatterns = ({ shares, soldShareSnapshots = {} }) => {
                 React.createElement("span", { style: { fontSize: 9, padding: "1px 5px", borderRadius: 4, background: "rgba(14,116,144,.1)", color: "#0e7490", fontWeight: 600, width: "fit-content" } }, s.ticker || "\u2014")
               ),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "center", color: "var(--text3)" } }, s.trades),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "center", fontWeight: 600, color: s.winRate >= 50 ? "#16a34a" : "#ef4444" } }, s.winRate.toFixed(0) + "%"),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "right", fontWeight: 700, color: isGain ? "#16a34a" : "#ef4444" } }, (isGain ? "+" : "") + INR(s.totalPnl)),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: s.avgReturn >= 0 ? "#16a34a" : "#ef4444" } }, (s.avgReturn >= 0 ? "+" : "") + s.avgReturn.toFixed(2) + "%"),
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "center", fontWeight: 600, color: s.winRate >= 50 ? "#20c46a" : "#f0473f" } }, s.winRate.toFixed(0) + "%"),
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "right", fontWeight: 700, color: isGain ? "#20c46a" : "#f0473f" } }, (isGain ? "+" : "") + INR(s.totalPnl)),
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: s.avgReturn >= 0 ? "#20c46a" : "#f0473f" } }, (s.avgReturn >= 0 ? "+" : "") + s.avgReturn.toFixed(2) + "%"),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: s.annReturn >= 0 ? "#0e7490" : "#e11d48" } }, (s.annReturn >= 0 ? "+" : "") + s.annReturn.toFixed(2) + "%"),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", color: "var(--text4)" } }, s.avgHoldDays + "d")
             );
@@ -1076,8 +1076,8 @@ const CapitalEfficiency = ({ shares, soldShareSnapshots }) => {
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(175px,1fr))", gap: 12 } },
       React.createElement(StatBox, { label: "Capital Deployed", value: "₹" + Number(sizingStats.total).toLocaleString("en-IN"), sub: sizingStats.count + " trades" }),
       React.createElement(StatBox, { label: "Avg Trade Size", value: "₹" + Number(Math.round(sizingStats.avg)).toLocaleString("en-IN") }),
-      oppCost && React.createElement(StatBox, { label: "Your Avg XIRR", value: (oppCost.avgXirr >= 0 ? "+" : "") + oppCost.avgXirr.toFixed(2) + "%", color: oppCost.avgXirr >= 0 ? "#16a34a" : "#ef4444" }),
-      oppCost && React.createElement(StatBox, { label: "Alpha vs Nifty", value: (oppCost.alpha >= 0 ? "+" : "") + oppCost.alpha.toFixed(2) + "%", sub: "vs 12% CAGR", color: oppCost.alpha >= 0 ? "#16a34a" : "#ef4444", bg: oppCost.alpha >= 0 ? "rgba(22,163,74,.07)" : "rgba(239,68,68,.07)", border: "1px solid " + (oppCost.alpha >= 0 ? "rgba(22,163,74,.2)" : "rgba(239,68,68,.2)") }),
+      oppCost && React.createElement(StatBox, { label: "Your Avg XIRR", value: (oppCost.avgXirr >= 0 ? "+" : "") + oppCost.avgXirr.toFixed(2) + "%", color: oppCost.avgXirr >= 0 ? "#20c46a" : "#f0473f" }),
+      oppCost && React.createElement(StatBox, { label: "Alpha vs Nifty", value: (oppCost.alpha >= 0 ? "+" : "") + oppCost.alpha.toFixed(2) + "%", sub: "vs 12% CAGR", color: oppCost.alpha >= 0 ? "#20c46a" : "#f0473f", bg: oppCost.alpha >= 0 ? "rgba(22,163,74,.07)" : "rgba(239,68,68,.07)", border: "1px solid " + (oppCost.alpha >= 0 ? "rgba(22,163,74,.2)" : "rgba(239,68,68,.2)") }),
       kellyData && React.createElement(StatBox, { label: "Kelly Criterion", value: kellyData.kelly.toFixed(1) + "%", sub: "Optimal position size", bg: "rgba(109,40,217,.07)", border: "1px solid rgba(109,40,217,.2)", color: "#6d28d9" })
     ),
     /* Position Sizing Distribution */
@@ -1088,7 +1088,7 @@ const CapitalEfficiency = ({ shares, soldShareSnapshots }) => {
           const val = [sizingStats.min, sizingStats.median, sizingStats.avg, sizingStats.max][i];
           return React.createElement("div", { key: label, style: { padding: "10px 12px", background: "var(--bg4)", borderRadius: 10, border: "1px solid var(--border)", textAlign: "center" } },
             React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, label),
-            React.createElement("div", { style: { fontSize: 14, fontFamily: "'Sora',sans-serif", fontWeight: 700, color: "var(--text)" } }, "₹" + Number(Math.round(val)).toLocaleString("en-IN"))
+            React.createElement("div", { style: { fontSize: 14, fontFamily: "'Manrope',sans-serif", fontWeight: 700, color: "var(--text)" } }, "₹" + Number(Math.round(val)).toLocaleString("en-IN"))
           );
         })
       )
@@ -1100,7 +1100,7 @@ const CapitalEfficiency = ({ shares, soldShareSnapshots }) => {
         React.createElement("div", { style: { padding: 16, background: "rgba(14,116,144,.06)", border: "1px solid rgba(14,116,144,.18)", borderRadius: 12 } },
           React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "#0e7490", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 } }, "vs Nifty 50 (12% CAGR)"),
           React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 6 } }, React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "Your XIRR"), React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, (oppCost.avgXirr >= 0 ? "+" : "") + oppCost.avgXirr.toFixed(2) + "%")),
-          React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } }, React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "Alpha"), React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: oppCost.alpha >= 0 ? "#16a34a" : "#ef4444" } }, (oppCost.alpha >= 0 ? "+" : "") + oppCost.alpha.toFixed(2) + "%"))
+          React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } }, React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "Alpha"), React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: oppCost.alpha >= 0 ? "#20c46a" : "#f0473f" } }, (oppCost.alpha >= 0 ? "+" : "") + oppCost.alpha.toFixed(2) + "%"))
         ),
         React.createElement("div", { style: { padding: 16, background: "var(--bg4)", border: "1px solid var(--border)", borderRadius: 12 } },
           React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 } }, "Summary"),
@@ -1115,15 +1115,15 @@ const CapitalEfficiency = ({ shares, soldShareSnapshots }) => {
       React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 } },
         React.createElement("div", { style: { padding: 14, background: "var(--bg4)", borderRadius: 12, border: "1px solid var(--border)", textAlign: "center" } },
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Win Rate"),
-          React.createElement("div", { style: { fontSize: 20, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: kellyData.winRate >= 50 ? "#16a34a" : "#ef4444" } }, kellyData.winRate.toFixed(1) + "%")
+          React.createElement("div", { style: { fontSize: 20, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: kellyData.winRate >= 50 ? "#20c46a" : "#f0473f" } }, kellyData.winRate.toFixed(1) + "%")
         ),
         React.createElement("div", { style: { padding: 14, background: "var(--bg4)", borderRadius: 12, border: "1px solid var(--border)", textAlign: "center" } },
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Win/Loss Ratio"),
-          React.createElement("div", { style: { fontSize: 20, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "var(--text)" } }, kellyData.winLossRatio.toFixed(2) + "×")
+          React.createElement("div", { style: { fontSize: 20, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "var(--text)" } }, kellyData.winLossRatio.toFixed(2) + "×")
         ),
         React.createElement("div", { style: { padding: 14, background: "rgba(109,40,217,.06)", borderRadius: 12, border: "1px solid rgba(109,40,217,.18)", textAlign: "center" } },
           React.createElement("div", { style: { fontSize: 9, color: "#6d28d9", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Half Kelly (Recommended)"),
-          React.createElement("div", { style: { fontSize: 20, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#6d28d9" } }, kellyData.halfKelly.toFixed(1) + "%")
+          React.createElement("div", { style: { fontSize: 20, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "#6d28d9" } }, kellyData.halfKelly.toFixed(1) + "%")
         )
       ),
       React.createElement("div", { style: { marginTop: 12, padding: "8px 12px", background: "var(--accentbg2)", borderRadius: 8, fontSize: 11, color: "var(--text4)", lineHeight: 1.6 } },
@@ -1196,8 +1196,8 @@ const BehaviouralPatterns = ({ shares, soldShareSnapshots }) => {
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 20 } },
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(170px,1fr))", gap: 12 } },
-      React.createElement(StatBox, { label: "Disposition Score", value: dispositionScore ? dispositionScore.score + "/100" : "—", sub: "Hold winners vs losers", color: dispositionScore && dispositionScore.score > 60 ? "#ef4444" : "#16a34a" }),
-      React.createElement(StatBox, { label: "Loss Aversion", value: lossAversion ? lossAversion.ratio.toFixed(2) + "×" : "—", sub: lossAversion ? lossAversion.severity : "Need both W & L", color: lossAversion && lossAversion.ratio > 1.5 ? "#ef4444" : "#16a34a" }),
+      React.createElement(StatBox, { label: "Disposition Score", value: dispositionScore ? dispositionScore.score + "/100" : "—", sub: "Hold winners vs losers", color: dispositionScore && dispositionScore.score > 60 ? "#f0473f" : "#20c46a" }),
+      React.createElement(StatBox, { label: "Loss Aversion", value: lossAversion ? lossAversion.ratio.toFixed(2) + "×" : "—", sub: lossAversion ? lossAversion.severity : "Need both W & L", color: lossAversion && lossAversion.ratio > 1.5 ? "#f0473f" : "#20c46a" }),
       React.createElement(StatBox, { label: "Buy-the-Dip Rate", value: dipVsMomentum ? dipVsMomentum.dip.count + "/" + trades.length : "—", sub: dipVsMomentum ? Math.round(dipVsMomentum.dip.count / trades.length * 100) + "% of trades" : null }),
       React.createElement(StatBox, { label: "Recency Bias", value: recencyBias ? recencyBias.bias : "—", sub: recencyBias ? "Size ratio: " + recencyBias.sizeRatio.toFixed(2) + "×" : "Need 5+ trades" })
     ),
@@ -1206,13 +1206,13 @@ const BehaviouralPatterns = ({ shares, soldShareSnapshots }) => {
       React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 } }, React.createElement(Icon, { n: "chart", size: 15 }), "Loss Aversion Indicator"),
       React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 } },
         React.createElement("div", { style: { padding: 14, background: "rgba(22,163,74,.06)", border: "1px solid rgba(22,163,74,.18)", borderRadius: 12 } },
-          React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "#16a34a", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 } }, "Avg Hold — Winners"),
-          React.createElement("div", { style: { fontSize: 22, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#16a34a" } }, fmtDays(lossAversion.avgHoldWin)),
+          React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "#20c46a", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 } }, "Avg Hold — Winners"),
+          React.createElement("div", { style: { fontSize: 22, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "#20c46a" } }, fmtDays(lossAversion.avgHoldWin)),
           React.createElement("div", { style: { fontSize: 11, color: "var(--text5)" } }, "You hold winners this long")
         ),
         React.createElement("div", { style: { padding: 14, background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.18)", borderRadius: 12 } },
-          React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "#ef4444", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 } }, "Avg Hold — Losers"),
-          React.createElement("div", { style: { fontSize: 22, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#ef4444" } }, fmtDays(lossAversion.avgHoldLose)),
+          React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "#f0473f", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 } }, "Avg Hold — Losers"),
+          React.createElement("div", { style: { fontSize: 22, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "#f0473f" } }, fmtDays(lossAversion.avgHoldLose)),
           React.createElement("div", { style: { fontSize: 11, color: "var(--text5)" } }, "You hold losers this long")
         )
       ),
@@ -1228,7 +1228,7 @@ const BehaviouralPatterns = ({ shares, soldShareSnapshots }) => {
     dispositionScore && React.createElement("div", { style: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px 20px" } },
       React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 } }, React.createElement(Icon, { n: "chart", size: 15 }), "Disposition Effect Score"),
       React.createElement("div", { style: { textAlign: "center", padding: 16, background: dispositionScore.score > 60 ? "rgba(239,68,68,.06)" : "rgba(22,163,74,.06)", border: "1px solid " + (dispositionScore.score > 60 ? "rgba(239,68,68,.18)" : "rgba(22,163,74,.18)"), borderRadius: 12, marginBottom: 12 } },
-        React.createElement("div", { style: { fontSize: 48, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: dispositionScore.score > 60 ? "#ef4444" : "#16a34a" } }, dispositionScore.score + "/100"),
+        React.createElement("div", { style: { fontSize: 48, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: dispositionScore.score > 60 ? "#f0473f" : "#20c46a" } }, dispositionScore.score + "/100"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)" } }, dispositionScore.score > 60 ? "High disposition effect — you sell winners too early" : "Low disposition effect — good exit discipline")
       )
     ),
@@ -1238,15 +1238,15 @@ const BehaviouralPatterns = ({ shares, soldShareSnapshots }) => {
       React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 } },
         React.createElement("div", { style: { padding: 14, background: "var(--bg4)", borderRadius: 12, border: "1px solid var(--border)", textAlign: "center" } },
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Avg Size (Recent Wins)"),
-          React.createElement("div", { style: { fontSize: 16, fontFamily: "'Sora',sans-serif", fontWeight: 700, color: "var(--text)" } }, "₹" + Number(Math.round(recencyBias.avgSizeBig)).toLocaleString("en-IN"))
+          React.createElement("div", { style: { fontSize: 16, fontFamily: "'Manrope',sans-serif", fontWeight: 700, color: "var(--text)" } }, "₹" + Number(Math.round(recencyBias.avgSizeBig)).toLocaleString("en-IN"))
         ),
         React.createElement("div", { style: { padding: 14, background: "var(--bg4)", borderRadius: 12, border: "1px solid var(--border)", textAlign: "center" } },
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Avg Size (Other Trades)"),
-          React.createElement("div", { style: { fontSize: 16, fontFamily: "'Sora',sans-serif", fontWeight: 700, color: "var(--text)" } }, "₹" + Number(Math.round(recencyBias.avgSizeRest)).toLocaleString("en-IN"))
+          React.createElement("div", { style: { fontSize: 16, fontFamily: "'Manrope',sans-serif", fontWeight: 700, color: "var(--text)" } }, "₹" + Number(Math.round(recencyBias.avgSizeRest)).toLocaleString("en-IN"))
         ),
         React.createElement("div", { style: { padding: 14, background: "var(--bg4)", borderRadius: 12, border: "1px solid var(--border)", textAlign: "center" } },
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Size Multiplier"),
-          React.createElement("div", { style: { fontSize: 16, fontFamily: "'Sora',sans-serif", fontWeight: 700, color: recencyBias.sizeRatio > 1.3 ? "#ef4444" : recencyBias.sizeRatio < 0.7 ? "#16a34a" : "var(--text)" } }, recencyBias.sizeRatio.toFixed(2) + "×")
+          React.createElement("div", { style: { fontSize: 16, fontFamily: "'Manrope',sans-serif", fontWeight: 700, color: recencyBias.sizeRatio > 1.3 ? "#f0473f" : recencyBias.sizeRatio < 0.7 ? "#20c46a" : "var(--text)" } }, recencyBias.sizeRatio.toFixed(2) + "×")
         )
       ),
       React.createElement("div", { style: { marginTop: 12, padding: "8px 12px", background: "var(--accentbg2)", borderRadius: 8, fontSize: 11, color: "var(--text4)", lineHeight: 1.6 } },
@@ -1302,7 +1302,7 @@ const TradeTimingCorrelation = ({ shares, soldShareSnapshots }) => {
               React.createElement("div", { style: { width: 35, fontSize: 11, fontWeight: 600, color: "var(--text4)", flexShrink: 0, textAlign: "right" } }, d.name),
               React.createElement("div", { style: { flex: 1, height: 24, background: "var(--bg5)", borderRadius: 5, overflow: "hidden", display: "flex", alignItems: "center" } },
                 React.createElement("div", { style: { height: "100%", width: barW + "%", background: isGain ? "linear-gradient(90deg,rgba(22,163,74,.2),rgba(22,163,74,.4))" : "linear-gradient(90deg,rgba(239,68,68,.2),rgba(239,68,68,.4))", borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6 } },
-                  React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: isGain ? "#16a34a" : "#ef4444" } }, (isGain ? "+" : "") + d.avgReturn.toFixed(1) + "%")
+                  React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: isGain ? "#20c46a" : "#f0473f" } }, (isGain ? "+" : "") + d.avgReturn.toFixed(1) + "%")
                 )
               ),
               React.createElement("div", { style: { width: 60, fontSize: 10, color: "var(--text6)", textAlign: "right" } }, d.count + " trades · " + Math.round(d.winRate) + "% W")
@@ -1322,7 +1322,7 @@ const TradeTimingCorrelation = ({ shares, soldShareSnapshots }) => {
             const isGain = d.avgReturn >= 0;
             return React.createElement("div", { key: d.month, style: { padding: "10px 8px", borderRadius: 10, background: isGain ? "rgba(22,163,74,.06)" : "rgba(239,68,68,.06)", border: "1px solid " + (isGain ? "rgba(22,163,74,.15)" : "rgba(239,68,68,.15)"), textAlign: "center" } },
               React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)" } }, d.name),
-              React.createElement("div", { style: { fontSize: 16, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: isGain ? "#16a34a" : "#ef4444" } }, (isGain ? "+" : "") + d.avgReturn.toFixed(1) + "%"),
+              React.createElement("div", { style: { fontSize: 16, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: isGain ? "#20c46a" : "#f0473f" } }, (isGain ? "+" : "") + d.avgReturn.toFixed(1) + "%"),
               React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, d.count + " trades")
             );
           })
@@ -1378,11 +1378,11 @@ const RiskMetrics = ({ shares, soldShareSnapshots }) => {
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 20 } },
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(170px,1fr))", gap: 12 } },
-      React.createElement(StatBox, { label: "Risk Score", value: riskData.riskScore + "/100", sub: riskData.riskScore < 40 ? "Low risk" : riskData.riskScore < 65 ? "Moderate" : "High risk", color: riskData.riskScore < 40 ? "#16a34a" : riskData.riskScore < 65 ? "#f59e0b" : "#ef4444" }),
+      React.createElement(StatBox, { label: "Risk Score", value: riskData.riskScore + "/100", sub: riskData.riskScore < 40 ? "Low risk" : riskData.riskScore < 65 ? "Moderate" : "High risk", color: riskData.riskScore < 40 ? "#20c46a" : riskData.riskScore < 65 ? "#e0a527" : "#f0473f" }),
       React.createElement(StatBox, { label: "Volatility (σ)", value: riskData.volatility.toFixed(1) + "%", sub: "Return std deviation" }),
-      React.createElement(StatBox, { label: "Sharpe-like Ratio", value: riskData.sharpe.toFixed(2), sub: "Mean ÷ σ", color: riskData.sharpe >= 1 ? "#16a34a" : riskData.sharpe >= 0 ? "#f59e0b" : "#ef4444" }),
-      React.createElement(StatBox, { label: "Max Drawdown", value: riskData.maxDD.toFixed(1) + "%", bg: "rgba(239,68,68,.07)", border: "1px solid rgba(239,68,68,.2)", color: "#ef4444" }),
-      React.createElement(StatBox, { label: "Concentration", value: riskData.concentration.toFixed(0) + "%", sub: "Top 3 stocks share", color: riskData.concentration > 70 ? "#ef4444" : "var(--text)" })
+      React.createElement(StatBox, { label: "Sharpe-like Ratio", value: riskData.sharpe.toFixed(2), sub: "Mean ÷ σ", color: riskData.sharpe >= 1 ? "#20c46a" : riskData.sharpe >= 0 ? "#e0a527" : "#f0473f" }),
+      React.createElement(StatBox, { label: "Max Drawdown", value: riskData.maxDD.toFixed(1) + "%", bg: "rgba(239,68,68,.07)", border: "1px solid rgba(239,68,68,.2)", color: "#f0473f" }),
+      React.createElement(StatBox, { label: "Concentration", value: riskData.concentration.toFixed(0) + "%", sub: "Top 3 stocks share", color: riskData.concentration > 70 ? "#f0473f" : "var(--text)" })
     ),
     /* Risk Breakdown */
     React.createElement("div", { style: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px 20px" } },
@@ -1392,11 +1392,11 @@ const RiskMetrics = ({ shares, soldShareSnapshots }) => {
           React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 } }, "Value at Risk"),
           React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 } },
             React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "95% VaR"),
-            React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#ef4444" } }, riskData.var95.toFixed(2) + "%")
+            React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#f0473f" } }, riskData.var95.toFixed(2) + "%")
           ),
           React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } },
             React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "99% VaR"),
-            React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#ef4444" } }, riskData.var99.toFixed(2) + "%")
+            React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#f0473f" } }, riskData.var99.toFixed(2) + "%")
           )
         ),
         React.createElement("div", { style: { padding: 14, background: "var(--bg4)", borderRadius: 12, border: "1px solid var(--border)" } },
@@ -1412,7 +1412,7 @@ const RiskMetrics = ({ shares, soldShareSnapshots }) => {
         ),
         React.createElement("div", { style: { padding: 14, background: riskData.riskScore < 40 ? "rgba(22,163,74,.06)" : riskData.riskScore < 65 ? "rgba(245,158,11,.06)" : "rgba(239,68,68,.06)", borderRadius: 12, border: "1px solid " + (riskData.riskScore < 40 ? "rgba(22,163,74,.18)" : riskData.riskScore < 65 ? "rgba(245,158,11,.18)" : "rgba(239,68,68,.18)") } },
           React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 } }, "Composite Risk"),
-          React.createElement("div", { style: { fontSize: 28, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: riskData.riskScore < 40 ? "#16a34a" : riskData.riskScore < 65 ? "#f59e0b" : "#ef4444" } }, riskData.riskScore + "/100"),
+          React.createElement("div", { style: { fontSize: 28, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: riskData.riskScore < 40 ? "#20c46a" : riskData.riskScore < 65 ? "#e0a527" : "#f0473f" } }, riskData.riskScore + "/100"),
           React.createElement("div", { style: { fontSize: 10, color: "var(--text5)" } }, "30% vol + 25% Sharpe + 25% DD + 20% conc")
         )
       )
@@ -1470,8 +1470,8 @@ const PatternMining = ({ shares, soldShareSnapshots }) => {
     sweetSpot && sweetSpot.best && React.createElement("div", { style: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px 20px" } },
       React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 12 } }, "Sweet-Spot Holding Duration"),
       React.createElement("div", { style: { padding: 14, background: "rgba(22,163,74,.06)", border: "1px solid rgba(22,163,74,.18)", borderRadius: 12, marginBottom: 14, textAlign: "center" } },
-        React.createElement("div", { style: { fontSize: 10, color: "#16a34a", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 } }, "Your Optimal Hold Period"),
-        React.createElement("div", { style: { fontSize: 24, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#16a34a" } }, sweetSpot.best.label),
+        React.createElement("div", { style: { fontSize: 10, color: "#20c46a", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 } }, "Your Optimal Hold Period"),
+        React.createElement("div", { style: { fontSize: 24, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "#20c46a" } }, sweetSpot.best.label),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)" } }, "Avg: " + (sweetSpot.best.avgReturn >= 0 ? "+" : "") + sweetSpot.best.avgReturn.toFixed(2) + "% · Win: " + Math.round(sweetSpot.best.winRate) + "%")
       ),
       React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
@@ -1481,10 +1481,10 @@ const PatternMining = ({ shares, soldShareSnapshots }) => {
           const isGain = b.avgReturn >= 0;
           const isBest = b === sweetSpot.best;
           return React.createElement("div", { key: b.label, style: { display: "flex", alignItems: "center", gap: 10, padding: isBest ? "4px 8px" : "0", background: isBest ? "rgba(22,163,74,.06)" : "transparent", borderRadius: 8 } },
-            React.createElement("div", { style: { width: 90, fontSize: 11, fontWeight: isBest ? 700 : 600, color: isBest ? "#16a34a" : "var(--text4)", flexShrink: 0, textAlign: "right" } }, b.label),
+            React.createElement("div", { style: { width: 90, fontSize: 11, fontWeight: isBest ? 700 : 600, color: isBest ? "#20c46a" : "var(--text4)", flexShrink: 0, textAlign: "right" } }, b.label),
             React.createElement("div", { style: { flex: 1, height: 24, background: "var(--bg5)", borderRadius: 5, overflow: "hidden" } },
               b.trades.length > 0 && React.createElement("div", { style: { height: "100%", width: barW + "%", background: isGain ? "linear-gradient(90deg,rgba(22,163,74,.2),rgba(22,163,74,.45))" : "linear-gradient(90deg,rgba(239,68,68,.2),rgba(239,68,68,.45))", borderRadius: 5, display: "flex", alignItems: "center", paddingLeft: 8 } },
-                React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: isGain ? "#16a34a" : "#ef4444" } }, b.trades.length + " trades")
+                React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: isGain ? "#20c46a" : "#f0473f" } }, b.trades.length + " trades")
               )
             ),
             React.createElement("div", { style: { width: 100, fontSize: 10, color: "var(--text6)", textAlign: "right" } }, b.trades.length > 0 ? "Avg: " + (isGain ? "+" : "") + b.avgReturn.toFixed(1) + "%" : "—")
@@ -1507,8 +1507,8 @@ const PatternMining = ({ shares, soldShareSnapshots }) => {
               ),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "right", color: "var(--text3)" } }, s.count),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: pnlColor(s.avgReturn) } }, (s.avgReturn >= 0 ? "+" : "") + s.avgReturn.toFixed(2) + "%"),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "right", fontWeight: 700, fontFamily: "'Sora',sans-serif", color: pnlColor(s.avgPnl) } }, (s.avgPnl >= 0 ? "+" : "") + INR(s.avgPnl)),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: s.winRate >= 50 ? "#16a34a" : "#ef4444" } }, Math.round(s.winRate) + "%")
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "right", fontWeight: 700, fontFamily: "'Manrope',sans-serif", color: pnlColor(s.avgPnl) } }, (s.avgPnl >= 0 ? "+" : "") + INR(s.avgPnl)),
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: s.winRate >= 50 ? "#20c46a" : "#f0473f" } }, Math.round(s.winRate) + "%")
             )
           )
         )
@@ -1550,9 +1550,9 @@ const DrawdownRecoveryTracker = ({ shares, soldShareSnapshots }) => {
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 20 } },
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(170px,1fr))", gap: 12 } },
       React.createElement(StatBox, { label: "Cumulative P&L", value: (curveData.totalPnl >= 0 ? "+" : "") + INR(curveData.totalPnl), color: pnlColor(curveData.totalPnl), bg: curveData.totalPnl >= 0 ? "rgba(22,163,74,.07)" : "rgba(239,68,68,.07)", border: "1px solid " + (curveData.totalPnl >= 0 ? "rgba(22,163,74,.2)" : "rgba(239,68,68,.2)") }),
-      React.createElement(StatBox, { label: "Peak P&L", value: INR(curveData.peak), color: "#16a34a" }),
-      React.createElement(StatBox, { label: "Max Drawdown", value: curveData.maxDDPct.toFixed(1) + "%", sub: INR(curveData.maxDD) + " peak-to-trough", bg: "rgba(239,68,68,.07)", border: "1px solid rgba(239,68,68,.2)", color: "#ef4444" }),
-      React.createElement(StatBox, { label: "Current Drawdown", value: curveData.currentDDPct.toFixed(1) + "%", sub: curveData.currentDD > 0 ? INR(curveData.currentDD) + " from peak" : "At peak!", color: curveData.currentDD > 0 ? "#ef4444" : "#16a34a" })
+      React.createElement(StatBox, { label: "Peak P&L", value: INR(curveData.peak), color: "#20c46a" }),
+      React.createElement(StatBox, { label: "Max Drawdown", value: curveData.maxDDPct.toFixed(1) + "%", sub: INR(curveData.maxDD) + " peak-to-trough", bg: "rgba(239,68,68,.07)", border: "1px solid rgba(239,68,68,.2)", color: "#f0473f" }),
+      React.createElement(StatBox, { label: "Current Drawdown", value: curveData.currentDDPct.toFixed(1) + "%", sub: curveData.currentDD > 0 ? INR(curveData.currentDD) + " from peak" : "At peak!", color: curveData.currentDD > 0 ? "#f0473f" : "#20c46a" })
     ),
     React.createElement("div", { style: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px 20px" } },
       React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 12 } }, "Equity Curve (Cumulative P&L)"),
@@ -1570,19 +1570,19 @@ const DrawdownRecoveryTracker = ({ shares, soldShareSnapshots }) => {
             return (i === 0 ? "M" : "L") + x + "," + y;
           }).join(" ");
           return React.createElement("svg", { viewBox: "0 0 100 100", preserveAspectRatio: "none", style: { width: "100%", height: "100%" } },
-            React.createElement("path", { d: pathD, fill: "none", stroke: curveData.totalPnl >= 0 ? "#16a34a" : "#ef4444", strokeWidth: "0.5", vectorEffect: "non-scaling-stroke", className: "stx-chart-line" })
+            React.createElement("path", { d: pathD, fill: "none", stroke: curveData.totalPnl >= 0 ? "#20c46a" : "#f0473f", strokeWidth: "0.5", vectorEffect: "non-scaling-stroke", className: "stx-chart-line" })
           );
         })()
       ),
       React.createElement("div", { style: { marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
         React.createElement("div", { style: { padding: 12, background: "var(--bg4)", borderRadius: 10, border: "1px solid var(--border)" } },
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Recovery Factor"),
-          React.createElement("div", { style: { fontSize: 20, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: curveData.recovery >= 100 ? "#16a34a" : "#f59e0b" } }, curveData.recovery.toFixed(1) + "%"),
+          React.createElement("div", { style: { fontSize: 20, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: curveData.recovery >= 100 ? "#20c46a" : "#e0a527" } }, curveData.recovery.toFixed(1) + "%"),
           React.createElement("div", { style: { fontSize: 10, color: "var(--text5)" } }, "Of peak P&L recovered")
         ),
         React.createElement("div", { style: { padding: 12, background: "var(--bg4)", borderRadius: 10, border: "1px solid var(--border)" } },
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Trade Count"),
-          React.createElement("div", { style: { fontSize: 20, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "var(--text)" } }, curveData.tradeCount),
+          React.createElement("div", { style: { fontSize: 20, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: "var(--text)" } }, curveData.tradeCount),
           React.createElement("div", { style: { fontSize: 10, color: "var(--text5)" } }, "Trades in equity curve")
         )
       )
@@ -1653,7 +1653,7 @@ const MultiTimeframePerformance = ({ shares, soldShareSnapshots }) => {
           React.createElement("div", { style: { width: 70, fontSize: 11, fontWeight: 600, color: "var(--text4)", flexShrink: 0, textAlign: "right" } }, d[labelField]),
           React.createElement("div", { style: { flex: 1, height: 26, background: "var(--bg5)", borderRadius: 5, overflow: "hidden", display: "flex", alignItems: "center" } },
             React.createElement("div", { style: { height: "100%", width: barW + "%", background: isGain ? "linear-gradient(90deg,rgba(22,163,74,.2),rgba(22,163,74,.45))" : "linear-gradient(90deg,rgba(239,68,68,.2),rgba(239,68,68,.45))", borderRadius: 5, display: "flex", alignItems: "center", paddingLeft: 8 } },
-              React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: isGain ? "#16a34a" : "#ef4444" } }, (isGain ? "+" : "") + INR(d.pnl))
+              React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: isGain ? "#20c46a" : "#f0473f" } }, (isGain ? "+" : "") + INR(d.pnl))
             )
           ),
           React.createElement("div", { style: { width: 70, fontSize: 10, color: "var(--text6)", textAlign: "right" } }, d.count + " trades · " + Math.round(d.winRate) + "% W")
@@ -1678,7 +1678,7 @@ const MultiTimeframePerformance = ({ shares, soldShareSnapshots }) => {
           const isGain = d.pnl >= 0;
           return React.createElement("div", { key: d.year, style: { padding: 16, borderRadius: 12, background: isGain ? "rgba(22,163,74,.06)" : "rgba(239,68,68,.06)", border: "1px solid " + (isGain ? "rgba(22,163,74,.18)" : "rgba(239,68,68,.18)"), textAlign: "center" } },
             React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 4 } }, d.year),
-            React.createElement("div", { style: { fontSize: 22, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: isGain ? "#16a34a" : "#ef4444" } }, (isGain ? "+" : "") + INR(d.pnl)),
+            React.createElement("div", { style: { fontSize: 22, fontFamily: "'Manrope',sans-serif", fontWeight: 800, color: isGain ? "#20c46a" : "#f0473f" } }, (isGain ? "+" : "") + INR(d.pnl)),
             React.createElement("div", { style: { fontSize: 10, color: "var(--text6)" } }, d.count + " trades · " + Math.round(d.winRate) + "% W")
           );
         })
@@ -1721,7 +1721,7 @@ const TradeFrequencyAnalytics = ({ shares, soldShareSnapshots }) => {
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 20 } },
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(170px,1fr))", gap: 12 } },
       React.createElement(StatBox, { label: "Avg Trades / Month", value: stats.avgPerMonth, sub: stats.totalMonths + " active months" }),
-      React.createElement(StatBox, { label: "Busiest Month", value: stats.maxMonth.count + " trades", sub: stats.maxMonth.month, color: "#16a34a" }),
+      React.createElement(StatBox, { label: "Busiest Month", value: stats.maxMonth.count + " trades", sub: stats.maxMonth.month, color: "#20c46a" }),
       React.createElement(StatBox, { label: "Quietest Month", value: stats.minMonth.count + " trade" + (stats.minMonth.count !== 1 ? "s" : ""), sub: stats.minMonth.month }),
       React.createElement(StatBox, { label: "Total Trades", value: stats.totalTrades, sub: "across all months" })
     ),
@@ -1737,7 +1737,7 @@ const TradeFrequencyAnalytics = ({ shares, soldShareSnapshots }) => {
               React.createElement("div", { style: { width: 70, fontSize: 11, fontWeight: 600, color: "var(--text4)", flexShrink: 0, textAlign: "right" } }, m.month),
               React.createElement("div", { style: { flex: 1, height: 24, background: "var(--bg5)", borderRadius: 5, overflow: "hidden", display: "flex", alignItems: "center" } },
                 React.createElement("div", { style: { height: "100%", width: barW + "%", background: isGain ? "linear-gradient(90deg,rgba(22,163,74,.2),rgba(22,163,74,.45))" : "linear-gradient(90deg,rgba(239,68,68,.2),rgba(239,68,68,.45))", borderRadius: 5, display: "flex", alignItems: "center", paddingLeft: 8 } },
-                  React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: isGain ? "#16a34a" : "#ef4444" } }, m.count + " trades")
+                  React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: isGain ? "#20c46a" : "#f0473f" } }, m.count + " trades")
                 )
               ),
               React.createElement("div", { style: { width: 80, fontSize: 10, color: "var(--text6)", textAlign: "right" } }, "P&L: " + (isGain ? "+" : "") + INR(m.pnl))
@@ -1777,7 +1777,7 @@ const SwingHoldOptimizer = ({ shares, soldShareSnapshots }) => {
       React.createElement(StatBox, { label: "Total Stocks", value: optimalByStock.length }),
       React.createElement(StatBox, { label: "Avg Hold (All)", value: fmtDays(Math.round(trades.reduce((s, t) => s + t.holdDays, 0) / trades.length)) }),
       React.createElement(StatBox, { label: "Total Trades", value: trades.length }),
-      React.createElement(StatBox, { label: "Best Performer", value: optimalByStock.length ? optimalByStock[0].company : "—", sub: optimalByStock.length ? (optimalByStock[0].avgReturn >= 0 ? "+" : "") + optimalByStock[0].avgReturn.toFixed(2) + "%" : null, color: "#16a34a" })
+      React.createElement(StatBox, { label: "Best Performer", value: optimalByStock.length ? optimalByStock[0].company : "—", sub: optimalByStock.length ? (optimalByStock[0].avgReturn >= 0 ? "+" : "") + optimalByStock[0].avgReturn.toFixed(2) + "%" : null, color: "#20c46a" })
     ),
     optimalByStock.length > 0 && React.createElement("div", { style: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px 20px" } },
       React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 12 } }, "Optimal Hold Duration Per Stock"),
@@ -1794,7 +1794,7 @@ const SwingHoldOptimizer = ({ shares, soldShareSnapshots }) => {
               ),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 12, textAlign: "right", color: "var(--text3)" } }, s.tradeCount),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: "var(--text)" } }, fmtDays(s.avgHold)),
-              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: "#16a34a" } }, fmtDays(s.bestHold)),
+              React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: "#20c46a" } }, fmtDays(s.bestHold)),
               React.createElement("div", { style: { padding: "9px 8px", fontSize: 11, textAlign: "right", fontWeight: 600, color: pnlColor(s.avgReturn) } }, (s.avgReturn >= 0 ? "+" : "") + s.avgReturn.toFixed(2) + "%")
             )
           )

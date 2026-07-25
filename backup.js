@@ -305,7 +305,7 @@ function DataBackupSection(props) {
 
   var screenerCount = screenerData.results ? screenerData.results.length : 0;
   var stats = [
-    { label: "Holdings", val: holdings.length, sub: storageInfo.holdingsKB + " KB", color: "#10b981" },
+    { label: "Holdings", val: holdings.length, sub: storageInfo.holdingsKB + " KB", color: "#20c46a" },
     { label: "Past Trades", val: pastTradeCount, sub: storageInfo.snapsKB + " KB", color: "#6d28d9" },
     { label: "Watchlist", val: watchlist.length, sub: storageInfo.watchKB + " KB", color: "#0ea5e9" },
     { label: "Entry Scores", val: entryScores.length, sub: storageInfo.esKB + " KB", color: "#f97316" },
@@ -339,7 +339,7 @@ function DataBackupSection(props) {
       React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
         React.createElement("button", {
           onClick: handleBackup,
-          style: Object.assign({}, btnBase, { background: "rgba(16,185,129,.13)", border: "1px solid rgba(16,185,129,.35)", color: "#10b981" })
+          style: Object.assign({}, btnBase, { background: "rgba(16,185,129,.13)", border: "1px solid rgba(16,185,129,.35)", color: "#20c46a" })
         }, "\u2B07 Download Backup"),
         React.createElement("button", {
           onClick: handleRestore,
@@ -361,7 +361,7 @@ function DataBackupSection(props) {
       style: { padding: "10px 16px", borderRadius: 10, marginBottom: 16, fontSize: 13, fontWeight: 600,
         background: msg.indexOf("failed") > -1 || msg.indexOf("Failed") > -1 ? "rgba(239,68,68,.1)" : "rgba(16,185,129,.1)",
         border: "1px solid " + (msg.indexOf("failed") > -1 || msg.indexOf("Failed") > -1 ? "rgba(239,68,68,.25)" : "rgba(16,185,129,.25)"),
-        color: msg.indexOf("failed") > -1 || msg.indexOf("Failed") > -1 ? "#ef4444" : "#10b981" }
+        color: msg.indexOf("failed") > -1 || msg.indexOf("Failed") > -1 ? "#f0473f" : "#20c46a" }
     }, msg) : null
   );
 }

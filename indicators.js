@@ -2250,11 +2250,11 @@ window.TechIndicators = (function () {
 
     var decision;
     if (total >= 85) decision = { label: "URGENT EXIT", action: "exitNow", color: "#dc2626" };
-    else if (total >= 70) decision = { label: "EXIT", action: "exitAll", color: "#ef4444" };
+    else if (total >= 70) decision = { label: "EXIT", action: "exitAll", color: "#f0473f" };
     else if (total >= 55) decision = { label: "PARTIAL EXIT", action: "exit50", color: "#f97316" };
     else if (total >= 40) decision = { label: "TIGHTEN STOP", action: "tighten", color: "#eab308" };
     else if (total >= 25) decision = { label: "MONITOR", action: "monitor", color: "#84cc16" };
-    else decision = { label: "HOLD", action: "hold", color: "#22c55e" };
+    else decision = { label: "HOLD", action: "hold", color: "#20c46a" };
 
     /* ── Critical Overrides ─────────────────────────────────────────── */
     var overrides = [];
@@ -2962,10 +2962,10 @@ window.TechIndicators = (function () {
 
     var decision;
     if (total >= 80) decision = { label: "Strong Buy", action: "strongBuy", color: "#15803d", position: "Full position (100%)" };
-    else if (total >= 65) decision = { label: "Buy", action: "buy", color: "#22c55e", position: "Standard position (70%)" };
+    else if (total >= 65) decision = { label: "Buy", action: "buy", color: "#20c46a", position: "Standard position (70%)" };
     else if (total >= 50) decision = { label: "Watchlist", action: "watchlist", color: "#eab308", position: "Half position (40%)" };
     else if (total >= 35) decision = { label: "Neutral", action: "neutral", color: "#f97316", position: "No action" };
-    else decision = { label: "Avoid", action: "avoid", color: "#ef4444", position: "Do not enter" };
+    else decision = { label: "Avoid", action: "avoid", color: "#f0473f", position: "Do not enter" };
 
     return {
       total: total, rawScore: rawScore,
@@ -3121,10 +3121,10 @@ window.TechIndicators = (function () {
 
     var decision;
     if (finalScore >= 80) decision = { label: "Strong Buy", action: "strongBuy", color: "#15803d", position: "Full position (100%)" };
-    else if (finalScore >= 65) decision = { label: "Buy", action: "buy", color: "#22c55e", position: "Standard position (70%)" };
+    else if (finalScore >= 65) decision = { label: "Buy", action: "buy", color: "#20c46a", position: "Standard position (70%)" };
     else if (finalScore >= 50) decision = { label: "Watchlist", action: "watchlist", color: "#eab308", position: "Half position (40%)" };
     else if (finalScore >= 35) decision = { label: "Neutral", action: "neutral", color: "#f97316", position: "No action" };
-    else decision = { label: "Avoid", action: "avoid", color: "#ef4444", position: "Do not enter" };
+    else decision = { label: "Avoid", action: "avoid", color: "#f0473f", position: "Do not enter" };
 
     return {
       weekly: weekly, daily: daily, hourly: hourly,
