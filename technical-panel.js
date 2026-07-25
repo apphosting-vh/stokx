@@ -379,8 +379,8 @@ window.TechnicalIndicatorsPanel = (function () {
   }
 
   /* ── Exit Score Card ────────────────────────────────────────────────── */
-  function ExitScoreCard(candles, ind, buyPrice, buyDate, currentPrice, entryScore) {
-    var es = TI.computeExitScore(candles, ind, {entryPrice: buyPrice, buyDate: buyDate, currentPrice: currentPrice, entryScore: entryScore});
+  function ExitScoreCard(candles, ind, buyPrice, buyDate, currentPrice, entryScore, indexTrendScore) {
+    var es = TI.computeExitScore(candles, ind, {entryPrice: buyPrice, buyDate: buyDate, currentPrice: currentPrice, entryScore: entryScore, indexTrendScore: indexTrendScore});
     if (!es) return null;
 
     var factors = [
@@ -1044,7 +1044,7 @@ window.TechnicalIndicatorsPanel = (function () {
       })(),
 
       /* Exit Score */
-      showExitScore && indicators && candles && ExitScoreCard(candles, indicators, buyPrice, buyDate, currentPrice, entryScore),
+      showExitScore && indicators && candles && ExitScoreCard(candles, indicators, buyPrice, buyDate, currentPrice, entryScore, props.indexTrendScore),
 
       /* Category filter pills */
       React.createElement("div", {
@@ -1154,6 +1154,11 @@ window.TechnicalIndicatorsPanel = (function () {
   }
 
   window.TechnicalIndicatorsInline = React.memo(TechnicalIndicatorsInline);
+  window.STOX_INDICATORS = INDICATORS;
+  window.STOX_CATEGORIES = CATEGORIES;
+  window.stoxFmt = fmt;
+  window.stoxFmtVol = fmtVol;
+  window.stoxFormatValue = formatValue;
 
   return React.memo(TechnicalIndicatorsPanelInner);
 })();

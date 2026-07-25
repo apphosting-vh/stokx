@@ -272,7 +272,7 @@ window.OHLCVFetcher = (function () {
       _cache[key] = { data: result.candles, source: result.source, ts: Date.now() };
       return _cache[key];
     }
-    return { data: null, source: null, ts: Date.now() };
+    return { data: null, source: null, ts: 0 };
   }
 
   function clearCache() {

@@ -209,7 +209,7 @@ window.TechIndicators = (function () {
       for (var j = i - period + 1; j <= i; j++) {
         sumSq += Math.pow(cl[j] - mid[i], 2);
       }
-      var std = Math.sqrt(sumSq / period);
+      var std = Math.sqrt(sumSq / (period - 1));
       upper.push(round(mid[i] + mult * std, 2));
       lower.push(round(mid[i] - mult * std, 2));
     }
@@ -710,8 +710,8 @@ window.TechIndicators = (function () {
       if (i < period) { out.push(null); continue; }
       var posMF = 0, negMF = 0;
       for (var j = i - period + 1; j <= i; j++) {
-        if (mf[j] > mf[j - 1]) posMF += mf[j];
-        else negMF += mf[j];
+        if (tp[j] > tp[j - 1]) posMF += mf[j];
+        else if (tp[j] < tp[j - 1]) negMF += mf[j];
       }
       var ratio = negMF === 0 ? 100 : posMF / negMF;
       out.push(round(100 - 100 / (1 + ratio), 2));
@@ -776,12 +776,13 @@ window.TechIndicators = (function () {
 
   /* ═══ 29. Volume Profile ════════════════════════════════════════════════ */
   function calcVolumeProfile(candles, numBins) {
-    numBins = numBins || 12;
+    numBins = numBins || 24;
     if (!candles || candles.length < 2) return null;
     var hi = -Infinity, lo = Infinity;
-    for (var i = 0; i < candles.length; i++) {
-      if (candles[i].h > hi) hi = candles[i].h;
-      if (candles[i].l < lo) lo = candles[i].l;
+    var cl = closes(candles);
+    for (var i = 0; i < cl.length; i++) {
+      if (cl[i] > hi) hi = cl[i];
+      if (cl[i] < lo) lo = cl[i];
     }
     if (hi === lo) return null;
     var binSize = (hi - lo) / numBins;
@@ -789,9 +790,8 @@ window.TechIndicators = (function () {
     for (var b = 0; b < numBins; b++) {
       bins.push({ priceFrom: round(lo + b * binSize, 2), priceTo: round(lo + (b + 1) * binSize, 2), volume: 0 });
     }
-    for (var i = 0; i < candles.length; i++) {
-      var mid = (candles[i].h + candles[i].l) / 2;
-      var binIdx = Math.min(numBins - 1, Math.max(0, Math.floor((mid - lo) / binSize)));
+    for (var i = 0; i < cl.length; i++) {
+      var binIdx = Math.min(numBins - 1, Math.max(0, Math.floor((cl[i] - lo) / binSize)));
       bins[binIdx].volume += candles[i].v;
     }
     var maxVol = 0;
@@ -799,10 +799,23 @@ window.TechIndicators = (function () {
     for (var b = 0; b < bins.length; b++) {
       bins[b].pctOfMax = maxVol > 0 ? round(bins[b].volume / maxVol * 100, 1) : 0;
     }
-    // POC = price level with highest volume
     var pocBin = bins[0];
     for (var b = 1; b < bins.length; b++) { if (bins[b].volume > pocBin.volume) pocBin = bins[b]; }
-    return { bins: bins, poc: round((pocBin.priceFrom + pocBin.priceTo) / 2, 2), pocVolume: pocBin.volume };
+    var poc = round((pocBin.priceFrom + pocBin.priceTo) / 2, 2);
+    var totalVol = 0;
+    for (var b = 0; b < bins.length; b++) totalVol += bins[b].volume;
+    var order = [];
+    for (var b = 0; b < bins.length; b++) order.push(b);
+    order.sort(function (a, b) { return bins[b].volume - bins[a].volume; });
+    var cum = 0, included = [];
+    for (var k = 0; k < order.length; k++) {
+      cum += bins[order[k]].volume;
+      included.push(order[k]);
+      if (cum >= 0.70 * totalVol) break;
+    }
+    var vah = round(bins[Math.max.apply(null, included)].priceTo, 2);
+    var val = round(bins[Math.min.apply(null, included)].priceFrom, 2);
+    return { bins: bins, poc: poc, pocVolume: pocBin.volume, vah: vah, val: val };
   }
 
   /* ═══ 30. TTM Squeeze ═══════════════════════════════════════════════════ */
@@ -868,7 +881,7 @@ window.TechIndicators = (function () {
     var boxRange = round(recentHigh - recentLow, 2);
     var pctFromTop = round((recentHigh - lastC) / (boxRange || 1) * 100, 1);
     var breakout = lastC > recentHigh ? "up" : lastC < recentLow ? "down" : "none";
-    return { boxHigh: boxHigh, boxLow: boxLow, boxRange: boxRange, position: position, breakout: breakout, pctFromTop: pctFromTop };
+    return { boxHigh: boxHigh, boxLow: boxLow, top: boxHigh, bottom: boxLow, boxRange: boxRange, position: position, breakout: breakout, pctFromTop: pctFromTop };
   }
 
   /* ═══ 33. Smart Money Concepts ══════════════════════════════════════════ */
@@ -1135,11 +1148,11 @@ window.TechIndicators = (function () {
     var hi = highs(candles), lo = lows(candles);
     var up = [], down = [], osc = [];
     for (var i = 0; i < candles.length; i++) {
-      if (i < period - 1) { up.push(null); down.push(null); osc.push(null); continue; }
+      if (i < period) { up.push(null); down.push(null); osc.push(null); continue; }
       var bestIdx = i, worstIdx = i;
-      for (var j = i - period + 1; j < i; j++) { if (hi[j] > hi[bestIdx]) bestIdx = j; if (lo[j] < lo[worstIdx]) worstIdx = j; }
-      var upVal = round((period - 1 - (i - bestIdx)) / (period - 1) * 100, 2);
-      var dnVal = round((period - 1 - (i - worstIdx)) / (period - 1) * 100, 2);
+      for (var j = i - period; j <= i; j++) { if (hi[j] > hi[bestIdx]) bestIdx = j; if (lo[j] < lo[worstIdx]) worstIdx = j; }
+      var upVal = round((period - (i - bestIdx)) / period * 100, 2);
+      var dnVal = round((period - (i - worstIdx)) / period * 100, 2);
       up.push(upVal); down.push(dnVal); osc.push(round(upVal - dnVal, 2));
     }
     return { up: up, down: down, osc: osc };
@@ -1690,16 +1703,26 @@ window.TechIndicators = (function () {
       if (indPrior.anchored_vwap !== undefined) prev_avwap = indPrior.anchored_vwap;
     }
 
-    /* ── Smart Money status ── */
-    var smStatus = "NONE";
-    if (ind.smartMoney) {
-      if (ind.smartMoney.bos === 'bearish_bos' || ind.smartMoney.choch === 'bearish_choch') smStatus = "SELLING";
-      else if (ind.smartMoney.bos === 'bullish_bos' || ind.smartMoney.choch === 'bullish_choch') smStatus = "BUYING";
-    }
-    var prevSmStatus = "NONE";
-    if (indPrior && indPrior.smartMoney) {
-      if (indPrior.smartMoney.bos === 'bearish_bos' || indPrior.smartMoney.choch === 'bearish_choch') prevSmStatus = "SELLING";
-      else if (indPrior.smartMoney.bos === 'bullish_bos' || indPrior.smartMoney.choch === 'bullish_choch') prevSmStatus = "BUYING";
+    /* ── Distribution Day Ratio (rolling 5-day) ── */
+    var distRatio = 0;
+    var prevDistRatio = 0;
+    if (candles.length >= 26) {
+      var avgVol20 = 0;
+      for (var di = candles.length - 25; di < candles.length - 5; di++) avgVol20 += candles[di].v;
+      avgVol20 /= 20;
+      var distDays = 0;
+      for (var di = candles.length - 5; di < candles.length; di++) {
+        if (candles[di].c < candles[di - 1].c && candles[di].v > avgVol20) distDays++;
+      }
+      distRatio = distDays / 5;
+      var avgVol20p = 0;
+      for (var di = candles.length - 26; di < candles.length - 6; di++) avgVol20p += candles[di].v;
+      avgVol20p /= 20;
+      var distDaysP = 0;
+      for (var di = candles.length - 6; di < candles.length - 1; di++) {
+        if (candles[di].c < candles[di - 1].c && candles[di].v > avgVol20p) distDaysP++;
+      }
+      prevDistRatio = distDaysP / 5;
     }
 
     /* ── Additional data for exit scoring ── */
@@ -1747,7 +1770,6 @@ window.TechIndicators = (function () {
     }
 
     var prev_choppiness = indPrior ? indPrior.choppiness : null;
-    var prev_smartMoney = prevSmStatus;
 
     /* ═══════════════════════════════════════════════════════════════════
        11. TREND BREAKDOWN (Max 25 pts)
@@ -1824,7 +1846,6 @@ window.TechIndicators = (function () {
       }
       if (plusDI !== null && minusDI !== null && prev_plusDI !== null && prev_minusDI !== null) {
         if (minusDI > plusDI && prev_minusDI <= prev_plusDI) adxStPsarVortexAroon += 1.5;
-        else if (minusDI > plusDI) adxStPsarVortexAroon += 0.5;
       }
     }
     if (ind.supertrend !== null) {
@@ -1898,7 +1919,7 @@ window.TechIndicators = (function () {
     }
     if (ind.momentum_10 !== null) {
       var prev_mom = indPrior ? indPrior.momentum_10 : null;
-      if (prev_mom !== null && ind.momentum_10 < 0 && prev_mom >= 0) cciRocMomFi += 0.5;
+      if (prev_mom !== null && ind.momentum_10 < 0 && prev_mom >= 0) cciRocMomFi += 1.0;
       else if (ind.momentum_10 < 0) cciRocMomFi += 0.5;
     }
     if (ind.forceIndex !== null) {
@@ -1977,7 +1998,7 @@ window.TechIndicators = (function () {
     }
     vwapAvwap = Math.min(vwapAvwap, 8.0);
 
-    /* 13.3 TTM Squeeze + Smart Money Exit (8 pts) ──────────────────── */
+    /* 14.3 TTM Squeeze + Distribution Confirmation (8 pts) ──────────────── */
     var squeezeSm = 0;
     var prevSqueezeMom = indPrior ? indPrior.squeezeMomentum : null;
     var prevSqueezeOn = indPrior ? indPrior.ttmSqueeze : null;
@@ -1987,9 +2008,9 @@ window.TechIndicators = (function () {
       if (ind.squeezeMomentum < prevSqueezeMom && ind.squeezeMomentum < 0) squeezeSm += 1.0;
     }
     if (ind.ttmSqueeze && ind.squeezeMomentum !== null && ind.squeezeMomentum < 0) squeezeSm += 1.0;
-    if (smStatus === "SELLING") squeezeSm += 2.5;
-    else if (smStatus === "DISTRIBUTING") squeezeSm += 1.5;
-    else if (smStatus === "NONE" && (prevSmStatus === "BUYING" || prevSmStatus === "ACCUMULATING")) squeezeSm += 1.0;
+    if (distRatio >= 0.6) squeezeSm += 2.5;
+    else if (distRatio >= 0.4) squeezeSm += 1.5;
+    if (distRatio > prevDistRatio) squeezeSm += 1.0;
     squeezeSm = Math.min(squeezeSm, 8.0);
 
     var volumeDistribution = Math.min(obvPvtKvoFi + vwapAvwap + squeezeSm, 25.0);
@@ -2014,9 +2035,8 @@ window.TechIndicators = (function () {
       if (lc < ind.keltner.middle && prevClose >= prevKcMid) bbKcDcChandelier += 1.0;
       else if (lc < ind.keltner.middle) bbKcDcChandelier += 0.5;
     }
-    if (ind.donchian && ind.donchian.lower !== null && ind.donchian.upper !== null) {
+    if (ind.donchian && ind.donchian.lower !== null) {
       if (lc <= ind.donchian.lower * 1.01) bbKcDcChandelier += 1.0;
-      else if (lc < (ind.donchian.upper + ind.donchian.lower) / 2) bbKcDcChandelier += 0.5;
     }
     if (chandelierLong !== null && lc < chandelierLong) bbKcDcChandelier += 1.0;
     if (prevChandelierLong !== null && chandelierLong !== null && chandelierLong < prevChandelierLong) bbKcDcChandelier += 0.5;
@@ -2182,19 +2202,17 @@ window.TechIndicators = (function () {
     /* ── Bonus Modifiers (increase exit urgency) ──────────────────── */
     var bonuses = 0;
 
-    // Sector Weak (≈ +5): sector score < 35
-    var sectorScore = (position && position.sectorScore) ? position.sectorScore : null;
-    if (sectorScore !== null && sectorScore < 35) {
+    // Index Trend Weak (+5): Nifty D+W turning bearish
+    var indexTrendScore = (position && position.indexTrendScore !== undefined) ? position.indexTrendScore : null;
+    if (indexTrendScore !== null && indexTrendScore < 35) {
       bonuses += 5;
-      hardFilters.push("Sector Weak \u2014 sector score " + round(sectorScore,1) + " (+5)");
+      hardFilters.push("Index Trend Weak \u2014 index trend score " + round(indexTrendScore,1) + " (+5)");
     }
 
-    // FII Net Selling (≈ +5): FII selling over 3d with high intensity
-    var fiiSelling = (position && position.fiiSelling) ? position.fiiSelling : false;
-    var fiiIntensity = (position && position.fiiIntensity) ? position.fiiIntensity : 0;
-    if (fiiSelling && fiiIntensity > 0.5) {
+    // Distribution Day High (+5): dist_day_ratio >= 0.6
+    if (distRatio >= 0.6) {
       bonuses += 5;
-      hardFilters.push("FII Net Selling \u2014 intensity " + round(fiiIntensity * 100,0) + "% (+5)");
+      hardFilters.push("Distribution Day High \u2014 dist ratio " + round(distRatio,2) + " (+5)");
     }
 
     // Deep Loss: >3% loss → +5, >1.5% loss → +3
@@ -2209,14 +2227,7 @@ window.TechIndicators = (function () {
       }
     }
 
-    // Earnings Approaching (≈ +4): within 5 days
-    var daysToEarnings = (position && position.daysToEarnings) ? position.daysToEarnings : null;
-    if (daysToEarnings !== null && daysToEarnings <= 5) {
-      bonuses += 4;
-      hardFilters.push("Earnings Approaching \u2014 " + daysToEarnings + " days (+4)");
-    }
-
-    // Dual TF Breakdown (≈ +5): hourly and daily both bearish
+    // Dual TF Breakdown (+5): hourly and daily both bearish
     var hourlyBearish = lc < ema9 && macdHist < 0;
     var dailyBearish = lc < (ind.ema_21 || 0) && (ind.adx_14 || 0) > 20;
     if (hourlyBearish && dailyBearish) {
@@ -2224,20 +2235,25 @@ window.TechIndicators = (function () {
       hardFilters.push("Dual TF Breakdown \u2014 price below fast MAs on hourly & daily (+5)");
     }
 
-    // Smart Money Exit (≈ +3): SELLING + MTF misalignment
-    if (smStatus === "SELLING" && ind.mtfAlignment !== null && mtfAlign < 40) {
+    // Accumulation/Distribution Distribution (+3): OBV below SMA, CMF negative, Force Index negative + MTF misalignment
+    var obvBelowSma = ind.obv !== null && obvSma20Last !== null && ind.obv < obvSma20Last;
+    var obvDeclining = obvSlope < 0;
+    var cmfDist = ind.cmf_20 !== null && ind.cmf_20 < -0.05;
+    var fiDist = ind.forceIndex !== null && ind.forceIndex < 0;
+    var accumDistLabel = (obvBelowSma && cmfDist && fiDist) ? 'DISTRIBUTION' : (obvBelowSma === false && !cmfDist && !fiDist ? 'ACCUMULATION' : 'NEUTRAL');
+    if (accumDistLabel === 'DISTRIBUTION' && ind.mtfAlignment !== null && mtfAlign < 40) {
       bonuses += 3;
-      hardFilters.push("Smart Money Exit \u2014 selling + MTF alignment " + round(mtfAlign,1) + " (+3)");
+      hardFilters.push("Distribution Detected \u2014 OBV/CMF/FI bearish + MTF alignment " + round(mtfAlign,1) + " (+3)");
     }
 
-    // High Beta + Sector Risk (≈ +3)
+    // High Beta + Index Risk (+3)
     var beta = ind.beta_nifty;
-    if (beta !== null && beta > 1.5 && sectorScore !== null && sectorScore < 40) {
+    if (beta !== null && beta > 1.5 && indexTrendScore !== null && indexTrendScore < 40) {
       bonuses += 3;
-      hardFilters.push("High Beta Sector Risk \u2014 beta " + round(beta,2) + ", sector " + round(sectorScore,1) + " (+3)");
+      hardFilters.push("High Beta Index Risk \u2014 beta " + round(beta,2) + ", index trend " + round(indexTrendScore,1) + " (+3)");
     }
 
-    // Multiple Stop Breaks (≈ +3): chandelier + pivot S1
+    // Multiple Stop Breaks (+3): chandelier + pivot S1
     if (chandelierLong !== null && lc < chandelierLong && pivotS1 !== null && lc < pivotS1) {
       bonuses += 3;
       hardFilters.push("Multiple Stop Breaks \u2014 below Chandelier (" + round(chandelierLong,2) + ") and Pivot S1 (" + round(pivotS1,2) + ") (+3)");
@@ -2378,6 +2394,22 @@ window.TechIndicators = (function () {
     /* ── Previous candle indicators ── */
     var indPrior = candles.length >= 13 ? computeAll(candles.slice(0, -1)) : null;
     var indPrior2 = candles.length >= 14 ? computeAll(candles.slice(0, -2)) : null;
+    var indPrior3 = candles.length >= 15 ? computeAll(candles.slice(0, -3)) : null;
+
+    function justCrossedAbove(cur, prev2, prev3, level) {
+      if (cur === null || cur === undefined) return false;
+      if (cur <= level) return false;
+      if (prev2 !== null && prev2 !== undefined && prev2 <= level) return true;
+      if (prev3 !== null && prev3 !== undefined && prev3 <= level) return true;
+      return false;
+    }
+    function justCrossedAboveLines(aCur, bCur, aP2, bP2, aP3, bP3) {
+      if (aCur === null || bCur === null) return false;
+      if (aCur <= bCur) return false;
+      if (aP2 !== null && bP2 !== null && aP2 <= bP2) return true;
+      if (aP3 !== null && bP3 !== null && aP3 <= bP3) return true;
+      return false;
+    }
 
     /* ── Arrays for slopes / crossover detection ── */
     var obvArr = calcOBV(candles);
@@ -2427,7 +2459,7 @@ window.TechIndicators = (function () {
     var trendMACD = 0;
     var trendADX = 0;
 
-    /* ── 4.1 Moving Average Stack (10 pts) ── */
+    /* ── 7.1 Moving Average Stack (10 pts) ── */
     (function () {
       var s = 0;
       if (lc > ind.ema_9)  s += 0.5;
@@ -2438,13 +2470,9 @@ window.TechIndicators = (function () {
       if (ind.ema_9 > ind.ema_21 && ind.ema_21 > ind.ema_50) s += 2.0;
       else if (ind.ema_9 > ind.ema_21 || ind.ema_21 > ind.ema_50) s += 1.0;
 
-      if (ind.sma_20 !== null && ind.sma_50 !== null) {
-        if (ind.sma_200 !== null) {
-          if (ind.sma_20 > ind.sma_50 && ind.sma_50 > ind.sma_200) s += 2.0;
-          else if (ind.sma_20 > ind.sma_50) s += 1.0;
-        } else {
-          if (ind.sma_20 > ind.sma_50) s += 1.5;
-        }
+      if (ind.sma_20 !== null && ind.sma_50 !== null && ind.sma_200 !== null) {
+        if (ind.sma_20 > ind.sma_50 && ind.sma_50 > ind.sma_200) s += 2.0;
+        else if (ind.sma_20 > ind.sma_50) s += 1.0;
       }
 
       var fastBull = 0;
@@ -2454,51 +2482,67 @@ window.TechIndicators = (function () {
       s += Math.min(fastBull * 0.67, 2.0);
 
       var prevHMA = indPrior && indPrior.hma_16 !== null ? indPrior.hma_16 : null;
-      if (ind.hma_16 !== null && prevHMA !== null && ind.hma_16 > prevHMA) s += 1.0;
+      if (ind.hma_16 !== null && prevHMA !== null && ind.hma_16 > prevHMA) s += 0.5;
+
+      var rsMans = ind.rs_vs_nifty ? ind.rs_vs_nifty.mansfield : null;
+      var prevRsMans = indPrior && indPrior.rs_vs_nifty ? indPrior.rs_vs_nifty.mansfield : null;
+      if (rsMans !== null) {
+        if (rsMans > 0) s += 0.5;
+        if (prevRsMans !== null && rsMans > prevRsMans) s += 0.5;
+      }
 
       trendMA = Math.min(s, 10.0);
     })();
 
-    /* ── 4.2 MACD + TSI + STC Confluence (10 pts) ── */
+    /* ── 7.2 MACD + TSI + STC + Awesome Oscillator (10 pts) ── */
     (function () {
       var s = 0;
       var mMacd = ind.macd ? ind.macd.macd || 0 : 0;
       var mSig = ind.macd ? ind.macd.signal || 0 : 0;
       var mHist = ind.macd ? ind.macd.histogram : 0;
       var prevHist = indPrior && indPrior.macd ? indPrior.macd.histogram : null;
-      var prevHist2 = indPrior2 && indPrior2.macd ? indPrior2.macd.histogram : null;
+      var prevMacd = indPrior && indPrior.macd ? (indPrior.macd.macd || 0) : null;
+      var prevSig = indPrior && indPrior.macd ? (indPrior.macd.signal || 0) : null;
+      var prevMacd2 = indPrior2 && indPrior2.macd ? (indPrior2.macd.macd || 0) : null;
+      var prevSig2 = indPrior2 && indPrior2.macd ? (indPrior2.macd.signal || 0) : null;
+      var prevMacd3 = indPrior3 && indPrior3.macd ? (indPrior3.macd.macd || 0) : null;
+      var prevSig3 = indPrior3 && indPrior3.macd ? (indPrior3.macd.signal || 0) : null;
 
-      if (mMacd > mSig) s += 1.5;
+      if (mMacd > mSig) s += 1.0;
       if (mMacd > 0) s += 0.5;
-      if (mHist > 0 && prevHist !== null && mHist > prevHist) s += 1.0;
-      if (mMacd > mSig && prevHist !== null && prevHist2 !== null && prevHist <= (indPrior.macd ? indPrior.macd.signal || 0 : 0)) s += 0.5;
+      if (mHist > 0 && prevHist !== null && mHist > prevHist) s += 0.5;
+      if (justCrossedAboveLines(mMacd, mSig, prevMacd, prevSig, prevMacd2, prevSig2) ||
+          justCrossedAboveLines(mMacd, mSig, prevMacd2, prevSig2, prevMacd3, prevSig3)) s += 0.5;
 
       var tsi = ind.tsi !== null ? ind.tsi : null;
       var prevTsi = indPrior && indPrior.tsi !== null ? indPrior.tsi : null;
+      var prevTsi2 = indPrior2 && indPrior2.tsi !== null ? indPrior2.tsi : null;
+      var prevTsi3 = indPrior3 && indPrior3.tsi !== null ? indPrior3.tsi : null;
       if (tsi !== null) {
         if (tsi > 0) s += 0.5;
-        if (tsi > 0 && prevTsi !== null && tsi > prevTsi) s += 1.0;
-        if (tsi > 0 && prevTsi !== null && prevTsi <= 0) s += 0.5;
+        if (tsi > prevTsi && tsi > 0) s += 0.5;
+        if (justCrossedAbove(tsi, prevTsi2, prevTsi3, 0)) s += 0.5;
       }
 
       var stc = ind.stc !== null ? ind.stc : null;
       var prevStc = indPrior && indPrior.stc !== null ? indPrior.stc : null;
       var prevStc2 = indPrior2 && indPrior2.stc !== null ? indPrior2.stc : null;
+      var prevStc3 = indPrior3 && indPrior3.stc !== null ? indPrior3.stc : null;
       if (stc !== null) {
         if (stc > 50) s += 0.5;
-        if (prevStc !== null && stc > prevStc) s += 1.0;
+        if (stc > prevStc) s += 0.5;
         if (stc > 75) s += 0.5;
-        if (prevStc !== null && prevStc2 !== null && stc > 25 && prevStc <= 25) s += 1.0;
+        if (justCrossedAbove(stc, prevStc2, prevStc3, 25)) s += 0.5;
       }
 
       var ao = ind.awesomeOsc;
       var prevAo = indPrior && indPrior.awesomeOsc !== null ? indPrior.awesomeOsc : null;
       var prevAo2 = indPrior2 && indPrior2.awesomeOsc !== null ? indPrior2.awesomeOsc : null;
+      var prevAo3 = indPrior3 && indPrior3.awesomeOsc !== null ? indPrior3.awesomeOsc : null;
       if (ao !== null) {
         if (ao > 0) s += 0.5;
-        if (prevAo !== null && ao > prevAo) s += 0.5;
+        if (ao > prevAo) s += 0.5;
         if (ao > 0 && prevAo !== null && prevAo <= 0) s += 0.5;
-        if (ao > 0 && prevAo !== null && ao > prevAo && prevAo2 !== null && prevAo <= prevAo2) s += 0.5;
       }
 
       var bullCount = 0;
@@ -2506,23 +2550,21 @@ window.TechIndicators = (function () {
       if (tsi !== null && tsi > 0) bullCount++;
       if (stc !== null && stc > 50) bullCount++;
       if (ao !== null && ao > 0) bullCount++;
-      if (bullCount >= 4) s += 1.5;
-      else if (bullCount >= 3) s += 1.0;
+      if (bullCount >= 3) s += 1.0;
 
       trendMACD = Math.min(s, 10.0);
     })();
 
-    /* ── 4.3 ADX + Supertrend + Parabolic SAR + Vortex + Aroon (10 pts) ── */
+    /* ── 7.3 ADX + Supertrend + Parabolic SAR + Vortex + Aroon (10 pts) ── */
     (function () {
       var s = 0;
       var adx = ind.adx_14;
       var prevAdx = indPrior && indPrior.adx_14 !== null ? indPrior.adx_14 : null;
 
       if (adx !== null) {
-        if (adx >= 40) s += 1.5;
-        else if (adx >= 25) s += 1.0;
-        else if (adx >= 20) s += 0.5;
-        if (diData.plusDI !== null && diData.minusDI !== null && diData.plusDI > diData.minusDI) s += 1.0;
+        if (adx >= 40) s += 1.0;
+        else if (adx >= 25) s += 0.5;
+        if (diData.plusDI !== null && diData.minusDI !== null && diData.plusDI > diData.minusDI) s += 0.5;
         if (adx !== null && prevAdx !== null && adx > prevAdx && diData.plusDI !== null && diData.minusDI !== null && diData.plusDI > diData.minusDI) s += 0.5;
       }
 
@@ -2530,27 +2572,25 @@ window.TechIndicators = (function () {
       var prevST = indPrior && indPrior.supertrend !== null ? indPrior.supertrend : null;
       var prevClose2 = candles.length >= 2 ? candles[candles.length - 2].c : null;
       if (st !== null) {
-        if (lc > st) s += 2.0;
-        if (prevST !== null && prevClose2 !== null && prevClose2 <= prevST && lc > st) s += 1.5;
+        if (lc > st) s += 1.0;
+        if (prevST !== null && prevClose2 !== null && prevClose2 <= prevST && lc > st) s += 0.5;
       }
 
       var psar = ind.psar;
       var prevPsar = indPrior && indPrior.psar !== null ? indPrior.psar : null;
       var prevClose3 = candles.length >= 3 ? candles[candles.length - 3].c : null;
       if (psar !== null) {
-        if (lc > psar) s += 1.5;
-        if (prevPsar !== null && prevClose3 !== null && prevClose3 <= prevPsar && lc > psar) s += 1.0;
+        if (lc > psar) s += 0.5;
+        if (prevPsar !== null && prevClose3 !== null && prevClose3 <= prevPsar && lc > psar) s += 0.5;
       }
-
-      if (st !== null && lc > st && psar !== null && lc > psar && diData.plusDI !== null && diData.minusDI !== null && diData.plusDI > diData.minusDI) s += 1.0;
 
       if (ind.vortex) {
         var vx = ind.vortex;
         var prevVx = indPrior && indPrior.vortex ? indPrior.vortex : null;
         if (vx.plus !== null && vx.minus !== null) {
-          if (vx.plus > vx.minus) s += 0.5;
-          if (vx.plus > vx.minus && lc > st) s += 0.5;
-          if (prevVx && prevVx.plus !== null && prevVx.minus !== null && vx.plus > vx.minus && prevVx.plus <= prevVx.minus) s += 0.5;
+          if (vx.plus > vx.minus) s += 1.0;
+          if (prevVx && prevVx.plus !== null && prevVx.minus !== null &&
+              vx.plus > vx.minus && vx.plus > prevVx.plus && vx.minus < prevVx.minus) s += 0.5;
         }
       }
 
@@ -2558,11 +2598,16 @@ window.TechIndicators = (function () {
         var ar = ind.aroon;
         var prevAr = indPrior && indPrior.aroon ? indPrior.aroon : null;
         if (ar.osc !== null) {
-          if (ar.osc > 50) s += 0.5;
-          if (ar.up !== null && ar.down !== null && ar.up > ar.down) s += 0.5;
-          if (prevAr && prevAr.osc !== null && ar.osc > prevAr.osc) s += 0.5;
+          if (ar.osc > 50) s += 1.0;
+          else if (ar.osc > 0) s += 0.5;
+          if (prevAr && prevAr.osc !== null && ar.osc > prevAr.osc && ar.osc > 0) s += 0.5;
         }
       }
+
+      if (st !== null && lc > st && psar !== null && lc > psar &&
+          diData.plusDI !== null && diData.minusDI !== null && diData.plusDI > diData.minusDI &&
+          ind.vortex && ind.vortex.plus !== null && ind.vortex.minus !== null && ind.vortex.plus > ind.vortex.minus &&
+          ind.aroon && ind.aroon.osc !== null && ind.aroon.osc > 0) s += 1.0;
 
       trendADX = Math.min(s, 10.0);
     })();
@@ -2576,91 +2621,88 @@ window.TechIndicators = (function () {
     var momCCIROC = 0;
     var momMFI = 0;
 
-    /* ── 5.1 RSI + Stochastic RSI + Williams %R (10 pts) ── */
+    /* ── 8.1 RSI + Stochastic RSI + Williams %R (10 pts) ── */
     (function () {
       var s = 0;
       var rsi = ind.rsi_14;
       var prevRsi = indPrior && indPrior.rsi_14 !== null ? indPrior.rsi_14 : null;
 
       if (rsi !== null) {
-        if (rsi >= 60 && rsi <= 75) s += 2.5;
-        else if (rsi >= 55 && rsi < 60) s += 1.5;
-        else if (rsi > 75 && rsi <= 80) s += 1.5;
-        else if (rsi >= 50 && rsi < 55) s += 1.0;
-        else s += 0.5;
-
-        if (rsi > 50 && prevRsi !== null && rsi > prevRsi) s += 1.5;
-        if (prevRsi !== null && rsi > 50 && prevRsi <= 50) s += 1.0;
+        if (rsi >= 60 && rsi <= 75) s += 2.0;
+        else if (rsi >= 55 && rsi < 60) s += 1.0;
+        else if (rsi > 75 && rsi <= 80) s += 1.0;
+        else if (rsi >= 50 && rsi < 55) s += 0.5;
+        if (rsi > prevRsi && rsi > 50) s += 1.0;
+        if (crossedAbove(rsi, prevRsi, 50)) s += 0.5;
       }
 
       if (ind.stochRSI) {
         var sk = ind.stochRSI.k, sd = ind.stochRSI.d;
         var prevSK = indPrior && indPrior.stochRSI ? indPrior.stochRSI.k : null;
         if (sk !== null && sd !== null) {
-          if (sk > sd) s += 1.5;
-          if (sk >= 50 && sk <= 80) s += 1.0;
+          if (sk > sd) s += 1.0;
+          if (sk >= 50 && sk <= 80) s += 0.5;
           if (prevSK !== null && sk > prevSK) s += 0.5;
         }
       }
 
-      if (rsi !== null && rsi > 55 && ind.stochRSI && ind.stochRSI.k !== null && ind.stochRSI.d !== null && ind.stochRSI.k > ind.stochRSI.d) s += 0.5;
-
       var wr = ind.williamsR;
       var prevWr = indPrior && indPrior.williamsR !== null ? indPrior.williamsR : null;
       if (wr !== null) {
-        if (wr > -50 && wr <= -20) s += 1.5;
-        else if (wr > -80 && wr <= -50) s += 1.0;
-        else if (wr <= -80) s += 0.5;
-        if (prevWr !== null && wr > prevWr) s += 1.0;
-        if (wr > -80 && prevWr !== null && prevWr <= -80) s += 0.5;
+        if (wr >= -50 && wr <= -20) s += 1.0;
+        else if (wr >= -80 && wr < -50) s += 0.5;
+        if (wr > prevWr && wr > -50) s += 0.5;
+        if (wr > -20) s += 0.5;
       }
+
+      if (rsi !== null && rsi > 55 && ind.stochRSI && ind.stochRSI.k !== null && ind.stochRSI.d !== null && ind.stochRSI.k > ind.stochRSI.d && wr !== null && wr > -50) s += 0.5;
 
       momRSI = Math.min(s, 10.0);
     })();
 
-    /* ── 5.2 CCI + ROC + Momentum + Force Index (10 pts) ── */
+    /* ── 8.2 CCI + ROC + Momentum + Force Index (10 pts) ── */
     (function () {
       var s = 0;
       var cci = ind.cci_20;
       var prevCci = indPrior && indPrior.cci_20 !== null ? indPrior.cci_20 : null;
       if (cci !== null) {
-        if (cci >= 100 && cci <= 200) s += 2.0;
-        else if (cci >= 50 && cci < 100) s += 1.5;
-        else if (cci >= 0 && cci < 50) s += 1.0;
-        else if (cci > 200) s += 1.0;
-        if (cci > 0 && prevCci !== null && cci > prevCci) s += 0.5;
+        if (cci >= 100 && cci <= 200) s += 1.5;
+        else if (cci >= 50 && cci < 100) s += 1.0;
+        else if (cci >= 0 && cci < 50) s += 0.5;
+        if (cci > prevCci && cci > 0) s += 0.5;
       }
 
       var roc = ind.roc_12;
       var prevRoc = indPrior && indPrior.roc_12 !== null ? indPrior.roc_12 : null;
       if (roc !== null) {
-        if (roc > 0 && prevRoc !== null && roc > prevRoc) s += 2.0;
-        else if (roc > 0) s += 1.0;
+        if (roc > 0 && prevRoc !== null && roc > prevRoc) s += 1.5;
+        else if (roc > 0) s += 0.5;
         if (roc > 2) s += 0.5;
       }
 
       var mom = ind.momentum_10;
       var prevMom = indPrior && indPrior.momentum_10 !== null ? indPrior.momentum_10 : null;
       if (mom !== null) {
-        if (mom > 0 && prevMom !== null && mom > prevMom) s += 2.0;
-        else if (mom > 0) s += 1.0;
-        if (prevMom !== null && mom > prevMom) s += 0.5;
+        if (mom > 0 && prevMom !== null && mom > prevMom) s += 1.5;
+        else if (mom > 0) s += 0.5;
       }
 
       var fi = ind.forceIndex;
       var prevFi = indPrior && indPrior.forceIndex !== null ? indPrior.forceIndex : null;
+      var prevFi2 = indPrior2 && indPrior2.forceIndex !== null ? indPrior2.forceIndex : null;
+      var prevFi3 = indPrior3 && indPrior3.forceIndex !== null ? indPrior3.forceIndex : null;
       if (fi !== null) {
-        if (fi > 0) s += 1.0;
-        if (prevFi !== null && fi > prevFi) s += 0.5;
-        if (fi > 0 && prevFi !== null && prevFi <= 0) s += 0.5;
+        if (fi > 0 && prevFi !== null && fi > prevFi) s += 1.5;
+        else if (fi > 0) s += 0.5;
+        if (justCrossedAbove(fi, prevFi2, prevFi3, 0)) s += 0.5;
       }
 
-      if (cci !== null && cci > 0 && roc !== null && roc > 0 && mom !== null && mom > 0) s += 0.5;
+      if (cci !== null && cci > 0 && roc !== null && roc > 0 && mom !== null && mom > 0 && fi !== null && fi > 0) s += 1.0;
 
       momCCIROC = Math.min(s, 10.0);
     })();
 
-    /* ── 5.3 MFI + CMF — Money Flow (10 pts) ── */
+    /* ── 8.3 MFI + CMF — Money Flow (10 pts) ── */
     (function () {
       var s = 0;
       var mfi = ind.mfi_14;
@@ -2670,8 +2712,8 @@ window.TechIndicators = (function () {
         else if (mfi >= 50 && mfi < 60) s += 1.5;
         else if (mfi >= 40 && mfi < 50) s += 1.0;
         else if (mfi > 80) s += 1.0;
-        if (mfi > 50 && prevMfi !== null && mfi > prevMfi) s += 1.5;
-        if (mfi > 50 && prevMfi !== null && prevMfi <= 50) s += 1.0;
+        if (mfi > prevMfi && mfi > 50) s += 1.5;
+        if (crossedAbove(mfi, prevMfi, 50)) s += 1.0;
       }
 
       var cmf = ind.cmf_20;
@@ -2680,7 +2722,7 @@ window.TechIndicators = (function () {
         if (cmf > 0.10) s += 2.0;
         else if (cmf > 0.05) s += 1.5;
         else if (cmf > 0) s += 1.0;
-        if (cmf > 0 && prevCmf !== null && cmf > prevCmf) s += 1.0;
+        if (cmf > prevCmf && cmf > 0) s += 1.0;
       }
 
       if (mfi !== null && mfi > 50 && cmf !== null && cmf > 0) s += 0.5;
@@ -2697,7 +2739,7 @@ window.TechIndicators = (function () {
     var volVWAP = 0;
     var volProfile = 0;
 
-    /* ── 6.1 OBV + PVT + KVO (8 pts) ── */
+    /* ── 9.1 OBV + PVT + KVO (8 pts) ── */
     (function () {
       var s = 0;
       var obvLast = obvArr ? obvArr[obvArr.length - 1] : null;
@@ -2726,7 +2768,9 @@ window.TechIndicators = (function () {
 
       var kvo = ind.kvo;
       var prevKvo = indPrior && indPrior.kvo !== null ? indPrior.kvo : null;
+      var kvoSignal = indPrior && indPrior.kvo !== null ? indPrior.kvo : null;
       var prevKvo2 = indPrior2 && indPrior2.kvo !== null ? indPrior2.kvo : null;
+      var prevKvo3 = indPrior3 && indPrior3.kvo !== null ? indPrior3.kvo : null;
       if (kvo !== null) {
         if (prevKvo !== null && kvo > prevKvo) s += 1.5;
         else if (kvo > 0) s += 0.5;
@@ -2737,7 +2781,7 @@ window.TechIndicators = (function () {
       volOBV = Math.min(s, 8.0);
     })();
 
-    /* ── 6.2 VWAP + Anchored VWAP (6 pts) ── */
+    /* ── 9.2 VWAP + Anchored VWAP (6 pts) ── */
     (function () {
       var s = 0;
       if (ind.vwap !== null) {
@@ -2759,27 +2803,32 @@ window.TechIndicators = (function () {
       volVWAP = Math.min(s, 6.0);
     })();
 
-    /* ── 6.3 Volume Profile + TTM Squeeze + Smart Money (6 pts) ── */
+    /* ── 9.3 Volume Profile + TTM Squeeze + Accumulation/Distribution (6 pts) ── */
     (function () {
       var s = 0;
+      var prevPoc = indPrior && indPrior.volumeProfile ? indPrior.volumeProfile.poc : null;
       if (ind.volumeProfile) {
         var vp = ind.volumeProfile;
         if (vp.poc !== null && lc > vp.poc) s += 1.0;
         if (vp.vah !== null && lc > vp.vah) s += 0.5;
+        if (vp.poc !== null && prevPoc !== null && vp.poc > prevPoc) s += 0.5;
       }
       if (ind.ttmSqueeze !== null) {
-        if (ind.ttmSqueeze === true) s += 0.5;
+        if (ind.ttmSqueeze === true && indPrior && indPrior.ttmSqueeze === false) s += 1.0;
+        else if (ind.ttmSqueeze === true) s += 0.5;
       }
       if (ind.squeezeMomentum !== null) {
         var prevSqMom = indPrior && indPrior.squeezeMomentum !== null ? indPrior.squeezeMomentum : null;
         if (ind.squeezeMomentum > 0 && prevSqMom !== null && ind.squeezeMomentum > prevSqMom) s += 1.5;
         else if (ind.squeezeMomentum > 0) s += 0.5;
       }
-      if (ind.smartMoney) {
-        var sm = ind.smartMoney;
-        if (sm.bos === 'bullish_bos' && sm.choch === 'bullish_choch') s += 1.5;
-        else if (sm.bos === 'bullish_bos' || sm.choch === 'bullish_choch') s += 1.0;
-      }
+      var obvLast2 = obvArr ? obvArr[obvArr.length - 1] : null;
+      var obvSma2 = obvSma20 ? obvSma20[obvSma20.length - 1] : null;
+      var obvSlope2 = obvArr && obvArr.length >= 3 ? (obvArr[obvArr.length - 1] || 0) - (obvArr[obvArr.length - 3] || 0) : 0;
+      var cmfBull = ind.cmf_20 !== null && ind.cmf_20 > 0.05;
+      var fiBull = ind.forceIndex !== null && ind.forceIndex > 0;
+      var obvBull = obvLast2 !== null && obvSma2 !== null && obvLast2 > obvSma2 && obvSlope2 > 0;
+      if (obvBull && cmfBull && fiBull) s += 1.5;
 
       volProfile = Math.min(s, 6.0);
     })();
@@ -2793,16 +2842,16 @@ window.TechIndicators = (function () {
     var structIch = 0;
     var structDarvas = 0;
 
-    /* ── 7.1 Bollinger + Keltner + Donchian + Chandelier Exit (8 pts) ── */
+    /* ── 10.1 Bollinger + Keltner + Donchian + Chandelier (8 pts) ── */
     (function () {
       var s = 0;
+      var prevBbW = null, curBbW = null;
       if (ind.bb && ind.bb.upper !== null && ind.bb.lower !== null && ind.bb.middle !== null) {
         var bbRange = ind.bb.upper - ind.bb.lower;
         var bbPos = bbRange > 0 ? (lc - ind.bb.lower) / bbRange : 0.5;
         if (bbPos >= 0.5 && bbPos <= 0.8) s += 1.0;
         else if (bbPos >= 0.3 && bbPos < 0.5) s += 0.5;
 
-        var prevBbW = null, curBbW = null;
         if (bbArr) {
           for (var bi = bbArr.length - 2; bi < bbArr.length; bi++) {
             if (bbArr[bi] && bbArr[bi].upper !== null && bbArr[bi].middle !== null && bbArr[bi].lower !== null && bbArr[bi].middle > 0) {
@@ -2815,49 +2864,42 @@ window.TechIndicators = (function () {
       }
 
       if (ind.keltner) {
-        if (lc > (ind.keltner.middle || 0)) s += 1.0;
+        if (lc > (ind.keltner.middle || 0)) s += 0.5;
         if (ind.keltner.upper !== null && lc > ind.keltner.upper) s += 0.5;
       }
 
       if (ind.donchian) {
         if (ind.donchian.upper !== null && ind.donchian.lower !== null) {
           var dcMid = (ind.donchian.upper + ind.donchian.lower) / 2;
-          if (ind.donchian.upper !== null && lc >= ind.donchian.upper * 0.99) s += 1.5;
+          if (ind.donchian.upper !== null && lc >= ind.donchian.upper * 0.99) s += 1.0;
           else if (lc > dcMid) s += 0.5;
         }
       }
 
-      if (ind.bb && ind.keltner && ind.bb.upper !== null && ind.keltner.upper !== null && ind.bb.lower !== null && ind.keltner.lower !== null) {
-        if (ind.bb.upper < ind.keltner.upper && ind.bb.lower > ind.keltner.lower) s += 1.0;
-      }
-
-      if (ind.atr_14 !== null && lc > 0) {
-        var atrPct = (ind.atr_14 / lc) * 100;
-        if (atrPct >= 2.0 && atrPct <= 4.0) s += 1.0;
-        else if (atrPct >= 1.5 && atrPct < 2.0) s += 0.5;
-      }
-
-      if (ind.donchian && ind.donchian.upper !== null && lc > ind.donchian.upper && prevBbW !== null && curBbW !== null && curBbW > prevBbW) s += 1.5;
-
+      var prevChandLong = indPrior && indPrior.chandelier ? indPrior.chandelier.long : null;
       if (ind.chandelier) {
         var ce = ind.chandelier;
         if (ce.long !== null) {
           if (lc > ce.long) s += 1.0;
-          if (lc > ce.long && ind.supertrend !== null && lc > ind.supertrend) s += 0.5;
-        }
-        if (ce.short !== null && ce.long !== null) {
-          var ceRange = ce.short - ce.long;
-          if (ceRange > 0) {
-            var cePos = (lc - ce.long) / ceRange;
-            if (cePos >= 0.5 && cePos <= 0.8) s += 0.5;
-          }
+          if (prevChandLong !== null && ce.long > prevChandLong) s += 0.5;
         }
       }
+
+      if (ind.bb && ind.keltner && ind.bb.upper !== null && ind.keltner.upper !== null && ind.bb.lower !== null && ind.keltner.lower !== null) {
+        if (ind.bb.upper < ind.keltner.upper && ind.bb.lower > ind.keltner.lower) s += 0.5;
+      }
+
+      if (ind.atr_14 !== null && lc > 0) {
+        var atrPct = (ind.atr_14 / lc) * 100;
+        if (atrPct >= 2.0 && atrPct <= 4.0) s += 0.5;
+      }
+
+      if (ind.donchian && ind.donchian.upper !== null && lc > ind.donchian.upper && prevBbW !== null && curBbW !== null && curBbW > prevBbW) s += 1.0;
 
       structBB = Math.min(s, 8.0);
     })();
 
-    /* ── 7.2 Ichimoku Cloud (6 pts) ── */
+    /* ── 10.2 Ichimoku Cloud (6 pts) ── */
     (function () {
       var s = 0;
       if (ind.ichimoku) {
@@ -2872,8 +2914,12 @@ window.TechIndicators = (function () {
         if (ich.tenkan !== null && ich.kijun !== null && ich.tenkan > ich.kijun) s += 1.0;
         var prevTenkan = indPrior && indPrior.ichimoku ? indPrior.ichimoku.tenkan : null;
         var prevKijun = indPrior && indPrior.ichimoku ? indPrior.ichimoku.kijun : null;
-        if (prevTenkan !== null && prevKijun !== null && ich.tenkan !== null && ich.kijun !== null) {
-          if (ich.tenkan > ich.kijun && prevTenkan <= prevKijun) s += 0.5;
+        var prevTenkan2 = indPrior2 && indPrior2.ichimoku ? indPrior2.ichimoku.tenkan : null;
+        var prevKijun2 = indPrior2 && indPrior2.ichimoku ? indPrior2.ichimoku.kijun : null;
+        var prevTenkan3 = indPrior3 && indPrior3.ichimoku ? indPrior3.ichimoku.tenkan : null;
+        var prevKijun3 = indPrior3 && indPrior3.ichimoku ? indPrior3.ichimoku.kijun : null;
+        if (ich.tenkan !== null && ich.kijun !== null) {
+          if (justCrossedAboveLines(ich.tenkan, ich.kijun, prevTenkan2, prevKijun2, prevTenkan3, prevKijun3)) s += 0.5;
         }
 
         if (ich.senkouA !== null && ich.senkouB !== null && ich.senkouA > ich.senkouB) s += 1.0;
@@ -2888,13 +2934,13 @@ window.TechIndicators = (function () {
       structIch = Math.min(s, 6.0);
     })();
 
-    /* ── 7.3 Darvas + HMA + KAMA + Fibonacci + Pivot + Fractals + ZigZag + Choppiness + Beta (6 pts) ── */
+    /* ── 10.3 Darvas + HMA + KAMA + Fibonacci + Pivot + Fractals + ZigZag + Choppiness + Beta (6 pts) ── */
     (function () {
       var s = 0;
       if (ind.darvasBox) {
         var db = ind.darvasBox;
-        if (db.top !== null && lc >= db.top) s += 0.5;
-        else if (db.top !== null && db.bottom !== null && lc > (db.top + db.bottom) / 2) s += 0.25;
+        if (db.top !== null && lc >= db.top) s += 1.5;
+        else if (db.top !== null && db.bottom !== null && lc > (db.top + db.bottom) / 2) s += 0.5;
       }
 
       if (ind.hma_16 !== null) {
@@ -2910,42 +2956,35 @@ window.TechIndicators = (function () {
 
       if (ind.fibonacci) {
         var fib = ind.fibonacci;
-        if (fib.level_382 !== null && fib.level_618 !== null) {
-          if (lc > fib.level_618) s += 0.5;
-          else if (lc > fib.level_382) s += 0.25;
+        var fibR = fib.retrace || {};
+        var fibLevels = { '0.382': fibR['0.382'], '0.500': fibR['0.500'], '0.618': fibR['0.618'] };
+        for (var fname in fibLevels) {
+          if (fibLevels[fname] !== null && fibLevels[fname] !== undefined && Math.abs(lc - fibLevels[fname]) / lc < 0.005 && lc > prevClose) { s += 0.5; break; }
         }
       }
 
       if (ind.pivotPoints) {
         var pp = ind.pivotPoints;
-        if (pp.r1 !== null && lc > pp.r1) s += 0.5;
-        else if (pp.pivot !== null && lc > pp.pivot) s += 0.25;
+        var ppP = pp.classic ? pp.classic.P : null;
+        var ppR1 = pp.classic ? pp.classic.R1 : null;
+        if (ppP !== null && lc > ppP) s += 0.25;
+        if (ppR1 !== null && lc > ppR1) s += 0.25;
       }
 
-      if (ind.fractals) {
-        var fr = ind.fractals;
-        if (fr.upper !== null && lc > fr.upper) s += 0.5;
-        else if (fr.lower !== null && lc < fr.lower) s -= 0.25;
+      if (ind.choppiness !== null) {
+        if (ind.choppiness < 38.2) s += 0.5;
+        else if (ind.choppiness < 50) s += 0.25;
       }
 
       if (ind.zigZag && ind.zigZag.length >= 2) {
         var zz = ind.zigZag;
         var lastZig = zz[zz.length - 1];
-        var prevZig = zz[zz.length - 2];
-        if (lastZig && prevZig) {
-          if (lastZig.type === 'low' && lc > lastZig.price) s += 0.25;
-          if (lastZig.type === 'high' && prevZig.type === 'low' && lastZig.price > prevZig.price) s += 0.25;
-        }
+        if (lastZig && lastZig.type === 'high') s += 0.5;
       }
 
-      if (ind.choppiness !== null) {
-        if (ind.choppiness < 38.2) s += 0.75;
-        else if (ind.choppiness < 50) s += 0.25;
-        else if (ind.choppiness > 61.8) s -= 0.25;
-      }
-
-      if (ind.heikinAshi) {
-        if (ind.heikinAshi.trend === 'bullish') s += 0.5;
+      if (ind.mtfAlignment !== null) {
+        if (ind.mtfAlignment >= 80) s += 1.0;
+        else if (ind.mtfAlignment >= 60) s += 0.5;
       }
 
       structDarvas = Math.min(Math.max(s, 0), 6.0);
@@ -3016,7 +3055,7 @@ window.TechIndicators = (function () {
     var hEma21 = (indH && indH.ema_21 !== null) ? indH.ema_21 : 0;
     var hEma50 = (indH && indH.ema_50 !== null) ? indH.ema_50 : 0;
 
-    /* ── Penalty Modifiers ── */
+    /* ── Penalty Modifiers (all OHLCV-derived) ── */
     var penalties = 0;
     var hardFilters = [];
 
@@ -3046,13 +3085,14 @@ window.TechIndicators = (function () {
       hardFilters.push("Conflicting Timeframes \u2014 daily EMA " + round(dEma9,0) + "/" + round(dEma21,0) + "/" + round(dEma50,0) + " vs weekly " + round(wEma9,0) + "/" + round(wEma21,0) + "/" + round(wEma50,0) + " (\u221210)");
     }
 
-    /* Near Resistance: price within 1% of major resistance → −5 */
+    /* Near Resistance: price within 1% of major resistance (pivots/Donchian/Fib) → −5 */
     if (indD && lc && lc > 0) {
       var resistances = [];
       var resistLabels = [];
       if (indD.bb && indD.bb.upper !== null) { resistances.push(indD.bb.upper); resistLabels.push("BB"); }
       if (indD.keltner && indD.keltner.upper !== null) { resistances.push(indD.keltner.upper); resistLabels.push("KC"); }
       if (indD.donchian && indD.donchian.upper !== null) { resistances.push(indD.donchian.upper); resistLabels.push("DC"); }
+      if (indD.pivotPoints && indD.pivotPoints.classic && indD.pivotPoints.classic.R1 !== null) { resistances.push(indD.pivotPoints.classic.R1); resistLabels.push("Pivot R1"); }
       for (var ri = 0; ri < resistances.length; ri++) {
         if (resistances[ri] > 0 && Math.abs(resistances[ri] - lc) / lc < 0.01) {
           var resDist = round(Math.abs(resistances[ri] - lc) / lc * 100, 2);
@@ -3081,7 +3121,16 @@ window.TechIndicators = (function () {
       }
     }
 
-    /* ── Bonus Modifiers ── */
+    /* High Beta + Volatility Spike → −3 */
+    if (indD && indD.beta_nifty !== null && indD.beta_nifty > 1.5 && indD.atr_14 !== null && lc > 0) {
+      var atrPctD = (indD.atr_14 / lc) * 100;
+      if (atrPctD > 4.0) {
+        penalties -= 3;
+        hardFilters.push("High Beta + Volatility \u2014 beta " + round(indD.beta_nifty,2) + ", ATR " + round(atrPctD,1) + "% (\u22123)");
+      }
+    }
+
+    /* ── Bonus Modifiers (all OHLCV-derived) ── */
     var bonuses = 0;
 
     /* Fresh Breakout: price > 20d high + volume > 1.5x avg → +5 */
@@ -3108,12 +3157,55 @@ window.TechIndicators = (function () {
       hardFilters.push("Multi-TF Alignment \u2014 W " + round(wEma9,0)+"/"+round(wEma21,0)+"/"+round(wEma50,0) + " D " + round(dEma9,0)+"/"+round(dEma21,0)+"/"+round(dEma50,0) + " H " + round(hEma9,0)+"/"+round(hEma21,0)+"/"+round(hEma50,0) + " (+5)");
     }
 
-    /* Smart Money + MTF Confirmation → +3 */
-    var smBull = (indD && indD.smartMoney) ? (indD.smartMoney.bos === 'bullish_bos' || indD.smartMoney.choch === 'bullish_choch') : false;
-    var smMTFReady = (daily && daily.trendScore >= 20) ? true : false;
-    if (smBull && smMTFReady) {
+    /* Index Trend Score > 60 → +3 (computed from Nifty50 OHLCV; neutral without index data) */
+    var indexTrendScore = 0;
+    if (indD && indD.rs_vs_nifty) {
+      indexTrendScore = 60;
+      if (dailyBull) indexTrendScore += 15;
+      if (indD.macd && indD.macd.macd > indD.macd.signal) indexTrendScore += 15;
+      if (indD.adx_14 !== null && indD.adx_14 > 25) indexTrendScore += 10;
+      indexTrendScore = Math.min(100, indexTrendScore);
+    }
+    if (indexTrendScore > 60) {
       bonuses += 3;
-      hardFilters.push("Smart Money + MTF \u2014 trend score " + daily.trendScore + " (+3)");
+      hardFilters.push("Index Trend \u2014 score " + indexTrendScore + " (+3)");
+    }
+
+    /* Accumulation + MTF Alignment > 80 → +3 (replaces Smart Money) */
+    var obvArrD = candlesDaily ? calcOBV(candlesDaily) : null;
+    var obvSmaD = null;
+    if (obvArrD && obvArrD.length >= 20) {
+      var s = 0; for (var i = obvArrD.length - 20; i < obvArrD.length; i++) s += obvArrD[i] || 0;
+      obvSmaD = s / 20;
+    }
+    var obvLastD = obvArrD && obvArrD.length > 0 ? obvArrD[obvArrD.length - 1] : null;
+    var obvSlopeD = obvArrD && obvArrD.length >= 3 ? (obvArrD[obvArrD.length - 1] || 0) - (obvArrD[obvArrD.length - 3] || 0) : 0;
+    var cmfBullD = indD && indD.cmf_20 !== null && indD.cmf_20 > 0.05;
+    var fiBullD = indD && indD.forceIndex !== null && indD.forceIndex > 0;
+    var obvBullD = obvLastD !== null && obvSmaD !== null && obvLastD > obvSmaD && obvSlopeD > 0;
+    var accumDLabel = (obvBullD && cmfBullD && fiBullD) ? 'ACCUMULATION' : 'NEUTRAL';
+    var mtfAlignD = indD && indD.mtfAlignment !== null ? indD.mtfAlignment : 0;
+    if (accumDLabel === 'ACCUMULATION' && mtfAlignD > 80) {
+      bonuses += 3;
+      hardFilters.push("Accumulation + MTF \u2014 AD composite bullish, MTF " + round(mtfAlignD,0) + " (+3)");
+    }
+
+    /* RS Mansfield > 5 + Aroon Osc > 50 → +3 */
+    var rsMansD = indD && indD.rs_vs_nifty ? indD.rs_vs_nifty.mansfield : null;
+    var aroonOscD = indD && indD.aroon ? indD.aroon.osc : null;
+    if (rsMansD !== null && rsMansD > 5 && aroonOscD !== null && aroonOscD > 50) {
+      bonuses += 3;
+      hardFilters.push("Relative Strength + Aroon \u2014 RS Mansfield " + round(rsMansD,1) + ", Aroon Osc " + round(aroonOscD,0) + " (+3)");
+    }
+
+    /* Close > Pivot R1 + close > Fib 0.618 → +2 */
+    if (indD && indD.pivotPoints && indD.fibonacci) {
+      var ppR1 = indD.pivotPoints.classic ? indD.pivotPoints.classic.R1 : null;
+      var fib618 = indD.fibonacci.retrace ? indD.fibonacci.retrace['0.618'] : null;
+      if (ppR1 !== null && fib618 !== null && lc > ppR1 && lc > fib618) {
+        bonuses += 2;
+        hardFilters.push("Above Key Levels \u2014 > Pivot R1 " + round(ppR1,2) + " + > Fib 0.618 " + round(fib618,2) + " (+2)");
+      }
     }
 
     var finalScore = Math.round((baseScore + penalties + bonuses) * 10) / 10;
@@ -3131,7 +3223,7 @@ window.TechIndicators = (function () {
       baseScore: baseScore, penalties: penalties, bonuses: bonuses,
       finalScore: finalScore, decision: decision,
       hardFilters: hardFilters, overrides: hardFilters,
-      lastClose: lc
+      lastClose: lc, indexTrendScore: indexTrendScore
     };
   }
 
