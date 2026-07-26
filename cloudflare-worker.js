@@ -68,8 +68,13 @@ export default {
     }
 
     /* Retry transient Yahoo errors server-side so the client never sees
-       them — resolves network hiccups and 5xx spikes without falling
-       back to slower public proxies. */
+       them — but ONLY real transient failures (network errors, 5xx).
+       A 429 means Yahoo has soft-blocked this Worker's egress IP; retrying
+       250-500ms later just re-hits the same block and burns another
+       request against it, making the block last longer. On 429 we return
+       immediately and let the client's own backoff/cooldown decide when
+       to try again, instead of quietly multiplying requests into a block
+       that hasn't cleared yet. */
     const MAX_WORKER_RETRIES = 2;
     const RETRY_DELAY_MS = 250;
     const FETCH_OPTS = {
@@ -83,7 +88,7 @@ export default {
     for (let attempt = 0; attempt <= MAX_WORKER_RETRIES; attempt++) {
       try {
         const upstream = await fetch(targetUrl.toString(), FETCH_OPTS);
-        if ((upstream.status === 429 || upstream.status >= 500) && attempt < MAX_WORKER_RETRIES) {
+        if (upstream.status >= 500 && attempt < MAX_WORKER_RETRIES) {
           await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
           continue;
         }

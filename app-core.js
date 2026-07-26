@@ -2922,6 +2922,11 @@ var NIFTY_200 = [
 ];
 var _nseen = new Set();
 var NIFTY_200_UNIQUE = NIFTY_200.filter(function(s) { if (_nseen.has(s.t)) return false; _nseen.add(s.t); return true; });
+var BATCH_SIZE = Math.ceil(NIFTY_200_UNIQUE.length / 4);
+var NIFTY_200_PARTS = [];
+for (var _bi = 0; _bi < 4; _bi++) {
+  NIFTY_200_PARTS.push(NIFTY_200_UNIQUE.slice(_bi * BATCH_SIZE, Math.min((_bi + 1) * BATCH_SIZE, NIFTY_200_UNIQUE.length)));
+}
 
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    STOCK SCREENER (Nifty 200 multi-TF entry score)
@@ -2961,6 +2966,10 @@ function StockScreener() {
   var workerUrlInput = _wu[0], setWorkerUrlInput = _wu[1];
   var _wus = useState(false);
   var workerUrlSaved = _wus[0], setWorkerUrlSaved = _wus[1];
+  var _bgActive = React.useRef(false);
+  var _bgTimer = React.useRef(null);
+  var _s_bg = useState({ active: false, done: 0, total: 0, current: "" });
+  var bgStatus = _s_bg[0], setBgStatus = _s_bg[1];
 
   /* Load cached data from IndexedDB on mount */
   React.useEffect(function() {
@@ -3005,7 +3014,9 @@ function StockScreener() {
       s.textContent = "@keyframes screener-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}";
       document.head.appendChild(s);
     }
-    return function() { var el = document.getElementById(id); if (el) el.remove(); };
+    return function() { var el = document.getElementById(id); if (el) el.remove(); }; }, []);
+  React.useEffect(function() {
+    return function() { stopBackgroundRetry(); };
   }, []);
 
   var saveSnapshot = function() {
@@ -3072,6 +3083,132 @@ function StockScreener() {
     setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = false; return c; });
   };
 
+  var manualFetchStock = async function(s) {
+    if (!TI || !DF) return;
+    var tk = s.t.replace(".NS", "");
+    var retryDelays = [0, 15000, 30000];
+    for (var attempt = 0; attempt < retryDelays.length; attempt++) {
+      if (attempt > 0) {
+        setScanErr("Retrying " + tk + " in " + (retryDelays[attempt]/1000) + "s (attempt " + (attempt+1) + "/" + retryDelays.length + ")...");
+        await new Promise(function(r) { setTimeout(r, retryDelays[attempt]); });
+      }
+      setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = true; return c; });
+      try {
+        DF.clearCache();
+        DF.clearProxyCooldowns();
+        var fetched = await DF.fetchOHLCVParallel(tk, ["weekly", "daily", "1h"], 18000);
+        var resW = fetched.weekly || { data: null };
+        var resD = fetched.daily || { data: null };
+        var resH = fetched["1h"] || { data: null };
+        if (!resW.data || resW.data.length < 5 || !resD.data || resD.data.length < 5) {
+          setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = false; return c; });
+          continue;
+        }
+        var indW = TI.computeAll(resW.data);
+        var indD = TI.computeAll(resD.data);
+        var indH = resH.data && resH.data.length >= 5 ? TI.computeAll(resH.data) : null;
+        var lc = indD ? indD.lastClose : 0;
+        var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
+        var dc = resD.data;
+        var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
+        var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
+        var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
+        var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
+        var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
+        var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
+        var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
+        var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
+        setResults(function(p) {
+          var idx = p.findIndex(function(r) { return r.s.t === s.t; });
+          if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, failed: false }; return copy; }
+          return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, failed: false }]);
+        });
+        setTimestamps(function(p) { var c = Object.assign({}, p); c[s.t] = Date.now(); return c; });
+        setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = false; return c; });
+        return;
+      } catch(e) {
+        setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = false; return c; });
+      }
+    }
+    setScanErr(tk + " still unavailable after " + retryDelays.length + " attempts. Yahoo may be rate-limited. Wait 30s and try again.");
+  };
+
+  var stopBackgroundRetry = function() {
+    _bgActive.current = false;
+    if (_bgTimer.current) { clearTimeout(_bgTimer.current); _bgTimer.current = null; }
+    setBgStatus({ active: false, done: 0, total: 0, current: "" });
+  };
+
+  var startBackgroundRetry = function(failedTickers) {
+    if (_bgActive.current || !failedTickers || failedTickers.length === 0) return;
+    _bgActive.current = true;
+    setBgStatus({ active: true, done: 0, total: failedTickers.length, current: "starting..." });
+    var queue = failedTickers.slice();
+    var consecutiveFails = 0;
+    var bgLoop = function() {
+      if (!_bgActive.current || queue.length === 0) {
+        _bgActive.current = false;
+        setBgStatus({ active: false, done: 0, total: 0, current: "" });
+        if (queue.length === 0) setScanErr("Background fetch complete - all stocks loaded.");
+        return;
+      }
+      setResults(function(prev) {
+        var doneCount = prev.filter(function(r) { return !r.failed; }).length;
+        setBgStatus({ active: true, done: doneCount, total: prev.length, current: queue[0].t.replace(".NS", "") });
+        return prev;
+      });
+      var s = queue.shift();
+      var tk = s.t.replace(".NS", "");
+      (async function() {
+        try {
+          DF.clearProxyCooldowns();
+          var fetched = await DF.fetchOHLCVParallel(tk, ["weekly", "daily", "1h"], 20000);
+          var resW = fetched.weekly || { data: null };
+          var resD = fetched.daily || { data: null };
+          var resH = fetched["1h"] || { data: null };
+          if (resW.data && resW.data.length >= 5 && resD.data && resD.data.length >= 5) {
+            var indW = TI.computeAll(resW.data);
+            var indD = TI.computeAll(resD.data);
+            var indH = resH.data && resH.data.length >= 5 ? TI.computeAll(resH.data) : null;
+            var lc = indD ? indD.lastClose : 0;
+            var scoreResult = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
+            var dc = resD.data;
+            var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
+            var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
+            var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
+            var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
+            var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
+            var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
+            var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
+            var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
+            setResults(function(prev) {
+              var copy = prev.slice();
+              var fi = copy.findIndex(function(r) { return r.s.t === s.t; });
+              if (fi >= 0) copy[fi] = { s: s, result: scoreResult, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, failed: false };
+              return copy.sort(function(a, b) {
+                if (a.failed && !b.failed) return 1;
+                if (!a.failed && b.failed) return -1;
+                return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
+              });
+            });
+            setTimestamps(function(p) { var c = Object.assign({}, p); c[s.t] = Date.now(); return c; });
+            consecutiveFails = 0;
+            _bgTimer.current = setTimeout(bgLoop, 20000);
+          } else {
+            queue.push(s); consecutiveFails++;
+            var d = Math.min(30000 + consecutiveFails * 10000, 120000);
+            _bgTimer.current = setTimeout(bgLoop, d);
+          }
+        } catch(e) {
+          queue.push(s); consecutiveFails++;
+          var d2 = Math.min(30000 + consecutiveFails * 10000, 120000);
+          _bgTimer.current = setTimeout(bgLoop, d2);
+        }
+      })();
+    };
+    _bgTimer.current = setTimeout(bgLoop, 15000);
+  };
+
   var addToEntryScore = async function(s) {
     var tk = s.t.replace(".NS", "");
     if (!tk || addingToES[tk]) return;
@@ -3105,20 +3242,25 @@ function StockScreener() {
     setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
   };
 
-  var startScan = async function() {
+  var startScan = async function(partIdx) {
     if (scanning || !TI || !DF) return;
-    setScanning(true); setResults([]); setScanErr("");
+    stopBackgroundRetry();
+    partIdx = typeof partIdx === "number" ? partIdx : -1;
+    var isPart = partIdx >= 0;
+    var stocks = isPart ? NIFTY_200_PARTS[partIdx] : NIFTY_200_UNIQUE;
+    var prevResults = isPart ? results : [];
+    setScanning(true); if (!isPart) setResults([]); setScanErr("");
     DF.clearCache(); DF.clearProxyCooldowns();
-    var stocks = NIFTY_200_UNIQUE;
     var total = stocks.length;
-    var STOCK_TIMEOUT = 12000;
-    setProgress({ done: 0, total: total, current: "Starting..." });
+    var STOCK_TIMEOUT = 25000;
+    var partLabel = isPart ? ("Part " + (partIdx + 1)) : "All";
+    setProgress({ done: 0, total: total, current: partLabel + " - Starting..." });
     var out = [];
 
     var processStock = async function(s) {
       try {
         var tk = s.t.replace(".NS", "");
-        var fetchPromise = DF.fetchOHLCVParallel(tk, ["weekly", "daily", "1h"], 5000);
+        var fetchPromise = DF.fetchOHLCVParallel(tk, ["weekly", "daily", "1h"], 15000);
         var timeoutPromise = new Promise(function(_, rej) { setTimeout(function() { rej(new Error("timeout")); }, STOCK_TIMEOUT); });
         var fetched = await Promise.race([fetchPromise, timeoutPromise]);
         var resW = fetched.weekly || { data: null };
@@ -3148,12 +3290,10 @@ function StockScreener() {
     };
 
     // Bounded-concurrency pool: request-level throttling (global slot cap +
-    // per-proxy token buckets) now lives in data-fetcher.js, so the scanner
-    // no longer needs a flat inter-stock delay to protect proxies. Running a
-    // small pool of stocks concurrently (instead of strictly one at a time)
-    // gets through all 200 stocks faster while the fetcher's own rate
-    // limiter still prevents any burst from exhausting free proxy quotas.
-    var POOL_SIZE = 6;
+    // per-proxy token buckets) now lives in data-fetcher.js.  3 workers
+    // balances throughput with gentle load (3 stocks × 3 TFs = 9 concurrent
+    // TFs, each paced 800ms apart = max 18 simultaneous requests to Yahoo).
+    var POOL_SIZE = 3;
     var nextIdx = 0;
     var doneCount = 0;
     var resultsByIdx = new Array(total);
@@ -3164,6 +3304,15 @@ function StockScreener() {
         if (!a.failed && b.failed) return -1;
         return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
       });
+      if (isPart) {
+        var batchTickerSet = new Set(stocks.map(function(s) { return s.t; }));
+        snapshot = prevResults.filter(function(r) { return !batchTickerSet.has(r.s.t); }).concat(snapshot);
+        snapshot.sort(function(a, b) {
+          if (a.failed && !b.failed) return 1;
+          if (!a.failed && b.failed) return -1;
+          return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
+        });
+      }
       setResults(snapshot);
     };
 
@@ -3191,48 +3340,64 @@ function StockScreener() {
       if (!a.failed && b.failed) return -1;
       return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
     });
-    setResults(out);
 
-    // Auto-retry once: if a meaningful chunk failed (typically a sign the
-    // proxy pool was still cooling down), wait for cooldowns to clear and
-    // run a single automatic recovery pass before handing control back to
-    // the user via the manual "Retry Failed" button.
-    if (failedCount > total * 0.1) {
-      setProgress({ done: 0, total: failedCount, current: "Auto-recovering rate-limited stocks..." });
-      await new Promise(function(r) { setTimeout(r, 8000); });
+    var doRecoveryPass = async function(label, waitMs, stocksToRecover) {
+      setProgress({ done: 0, total: stocksToRecover.length, current: label });
+      await new Promise(function(r) { setTimeout(r, waitMs); });
       DF.clearProxyCooldowns();
-      var stillFailedStocks = out.filter(function(r) { return r.failed; });
-      var recoveryMap = {};
-      var recNextIdx = 0;
-      var recWorker = async function() {
-        while (recNextIdx < stillFailedStocks.length) {
-          var ri = recNextIdx++;
-          var rr = await processStock(stillFailedStocks[ri].s);
-          recoveryMap[stillFailedStocks[ri].s.t] = rr;
-          setProgress({ done: Object.keys(recoveryMap).length, total: stillFailedStocks.length, current: rr.s.t.replace(".NS", "") });
+      var recMap = {};
+      var recIdx = 0;
+      var recW = async function() {
+        while (recIdx < stocksToRecover.length) {
+          var ri = recIdx++;
+          var rr = await processStock(stocksToRecover[ri].s);
+          recMap[stocksToRecover[ri].s.t] = rr;
+          setProgress({ done: Object.keys(recMap).length, total: stocksToRecover.length, current: rr.s.t.replace(".NS", "") });
         }
       };
-      var recWorkers = [];
-      for (var rw = 0; rw < Math.min(POOL_SIZE, stillFailedStocks.length); rw++) recWorkers.push(recWorker());
-      await Promise.all(recWorkers);
-      out = out.map(function(r) { return recoveryMap[r.s.t] || r; });
+      var allW = [];
+      for (var rw = 0; rw < Math.min(POOL_SIZE, stocksToRecover.length); rw++) allW.push(recW());
+      await Promise.all(allW);
+      return recMap;
+    };
+
+    if (failedCount > total * 0.1) {
+      var recMap = await doRecoveryPass("Recovery pass 1/2 (15s cooldown)...", 15000, out.filter(function(r) { return r.failed; }));
+      out = out.map(function(r) { return recMap[r.s.t] || r; });
+      out.sort(function(a, b) {
+        if (a.failed && !b.failed) return 1; if (!a.failed && b.failed) return -1; return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
+      });
+      failedCount = out.filter(function(r) { return r.failed; }).length;
+      if (failedCount > total * 0.05) {
+        recMap = await doRecoveryPass("Recovery pass 2/2 (30s cooldown)...", 30000, out.filter(function(r) { return r.failed; }));
+        out = out.map(function(r) { return recMap[r.s.t] || r; });
+        out.sort(function(a, b) {
+          if (a.failed && !b.failed) return 1; if (!a.failed && b.failed) return -1; return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
+        });
+        failedCount = out.filter(function(r) { return r.failed; }).length;
+      }
+    }
+
+    if (isPart) {
+      var batchTickerSet = new Set(stocks.map(function(s) { return s.t; }));
+      out = prevResults.filter(function(r) { return !batchTickerSet.has(r.s.t); }).concat(out);
       out.sort(function(a, b) {
         if (a.failed && !b.failed) return 1;
         if (!a.failed && b.failed) return -1;
         return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
       });
-      setResults(out);
-      failedCount = out.filter(function(r) { return r.failed; }).length;
     }
+    setResults(out);
 
-    if (failedCount > 0) setScanErr(failedCount + " of " + total + " stocks could not be scanned (data unavailable). They appear as N/A at the bottom.");
+    if (failedCount > 0) setScanErr(failedCount + " of " + total + " stocks in " + partLabel + " could not be scanned.");
     var now = Date.now();
     var ts = {};
     out.forEach(function(r) { ts[r.s.t] = now; });
-    setTimestamps(ts);
+    setTimestamps(function(prev) { return Object.assign({}, prev, ts); });
     setScanTime(now);
     setScanning(false);
     setProgress({ done: total, total: 0, current: "" });
+    if (!isPart && failedCount > 0) startBackgroundRetry(out.filter(function(r) { return r.failed; }).map(function(r) { return r.s; }));
   };
 
   var failedCount = results.filter(function(r) { return r.failed; }).length;
@@ -3241,81 +3406,86 @@ function StockScreener() {
     if (retryingFailed || !TI || !DF) return;
     var failed = results.filter(function(r) { return r.failed; });
     if (failed.length === 0) return;
-    var prevFailedCount = failed.length;
     setRetryingFailed(true); setScanErr("");
-    setProgress({ done: 0, total: failed.length, current: "Waiting for proxy cooldown..." });
-    await new Promise(function(r) { setTimeout(r, 5000); });
-    DF.clearCache(); DF.clearProxyCooldowns();
-    var STOCK_TIMEOUT = 12000;
 
-    var processStock = async function(r) {
-      try {
-        var tk = r.s.t.replace(".NS", "");
-        var fetchPromise = DF.fetchOHLCVParallel(tk, ["weekly", "daily", "1h"], 5000);
-        var timeoutPromise = new Promise(function(_, rej) { setTimeout(function() { rej(new Error("timeout")); }, STOCK_TIMEOUT); });
-        var fetched = await Promise.race([fetchPromise, timeoutPromise]);
-        var resW = fetched.weekly || { data: null };
-        var resD = fetched.daily || { data: null };
-        var resH = fetched["1h"] || { data: null };
-        if (!resW.data || resW.data.length < 5 || !resD.data || resD.data.length < 5) {
-          return { s: r.s, result: null, lc: 0, dayChg: null, weekChg: null, monthChg: null, todayChg: null, failed: true };
+    var runPass = async function(label, waitMs, stockObjs) {
+      setProgress({ done: 0, total: stockObjs.length, current: label });
+      await new Promise(function(r) { setTimeout(r, waitMs); });
+      DF.clearCache(); DF.clearProxyCooldowns();
+      var STOCK_TIMEOUT = 25000;
+      var stillFailed = [];
+      var processOne = async function(s) {
+        try {
+          var tk = s.t.replace(".NS", "");
+          var fp = DF.fetchOHLCVParallel(tk, ["weekly", "daily", "1h"], 15000);
+          var tp = new Promise(function(_, rej) { setTimeout(function() { rej(new Error("timeout")); }, STOCK_TIMEOUT); });
+          var fetched = await Promise.race([fp, tp]);
+          var resW = fetched.weekly || { data: null };
+          var resD = fetched.daily || { data: null };
+          var resH = fetched["1h"] || { data: null };
+          if (!resW.data || resW.data.length < 5 || !resD.data || resD.data.length < 5) {
+            stillFailed.push(s); return { s: s, result: null, lc: 0, dayChg: null, weekChg: null, monthChg: null, todayChg: null, failed: true };
+          }
+          var indW = TI.computeAll(resW.data);
+          var indD = TI.computeAll(resD.data);
+          var indH = resH.data && resH.data.length >= 5 ? TI.computeAll(resH.data) : null;
+          var lc = indD ? indD.lastClose : 0;
+          var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
+          var dc = resD.data;
+          var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
+          var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
+          var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
+          var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
+          var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
+          var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
+          var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
+          var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
+          return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, failed: false };
+        } catch(e) {
+          stillFailed.push(s); return { s: s, result: null, lc: 0, dayChg: null, weekChg: null, monthChg: null, todayChg: null, failed: true };
         }
-        var indW = TI.computeAll(resW.data);
-        var indD = TI.computeAll(resD.data);
-        var indH = resH.data && resH.data.length >= 5 ? TI.computeAll(resH.data) : null;
-        var lc = indD ? indD.lastClose : 0;
-        var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
-        var dc = resD.data;
-        var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
-        var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
-        var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
-        var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
-        var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
-        var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
-        var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
-        var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
-        return { s: r.s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, failed: false };
-      } catch(e) {
-        return { s: r.s, result: null, lc: 0, dayChg: null, weekChg: null, monthChg: null, todayChg: null, failed: true };
-      }
+      };
+      var POOL_SIZE = 3;
+      var idx = 0;
+      var doneCount = 0;
+      var worker = async function() {
+        while (idx < stockObjs.length) {
+          var mi = idx++;
+          var s = stockObjs[mi];
+          setProgress({ done: doneCount, total: stockObjs.length, current: s.t.replace(".NS", "") });
+          var nr = await processOne(s);
+          doneCount++;
+          setResults(function(prev) {
+            var copy = prev.slice();
+            var fi = copy.findIndex(function(x) { return x.s.t === nr.s.t; });
+            if (fi >= 0) copy[fi] = nr;
+            return copy.sort(function(a, b) {
+              if (a.failed && !b.failed) return 1;
+              if (!a.failed && b.failed) return -1;
+              return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
+            });
+          });
+          setProgress({ done: doneCount, total: stockObjs.length, current: s.t.replace(".NS", "") });
+        }
+      };
+      var workers = [];
+      for (var w = 0; w < Math.min(POOL_SIZE, stockObjs.length); w++) workers.push(worker());
+      await Promise.all(workers);
+      return stillFailed;
     };
 
-    var POOL_SIZE = 6;
-    var retryNextIdx = 0;
-    var retryDoneCount = 0;
-    var retryWorker = async function() {
-      while (retryNextIdx < failed.length) {
-        var myIdx = retryNextIdx++;
-        var r = failed[myIdx];
-        setProgress({ done: retryDoneCount, total: failed.length, current: r.s.t.replace(".NS", "") });
-        var nr = await processStock(r);
-        retryDoneCount++;
-        setResults(function(prev) {
-          var copy = prev.slice();
-          var fi = copy.findIndex(function(x) { return x.s.t === nr.s.t; });
-          if (fi >= 0) copy[fi] = nr;
-          return copy.sort(function(a, b) {
-            if (a.failed && !b.failed) return 1;
-            if (!a.failed && b.failed) return -1;
-            return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
-          });
-        });
-        setProgress({ done: retryDoneCount, total: failed.length, current: r.s.t.replace(".NS", "") });
-      }
-    };
-    var retryWorkers = [];
-    for (var rw2 = 0; rw2 < Math.min(POOL_SIZE, failed.length); rw2++) retryWorkers.push(retryWorker());
-    await Promise.all(retryWorkers);
+    var prevFailedCount = failed.length;
+    var stillFailed = failed.map(function(r) { return r.s; });
+    for (var pass = 0; pass < 3 && stillFailed.length > 0; pass++) {
+      var waitMs = pass === 0 ? 15000 : pass === 1 ? 25000 : 35000;
+      stillFailed = await runPass("Retry pass " + (pass + 1) + "/3 (" + (waitMs / 1000) + "s cooldown)...", waitMs, stillFailed);
+    }
 
     setRetryingFailed(false);
     setProgress({ done: 0, total: 0, current: "" });
-    setResults(function(prev) {
-      var stillFailed = prev.filter(function(r) { return r.failed; }).length;
-      var recovered = prevFailedCount - stillFailed;
-      if (stillFailed === 0) { setScanErr(""); }
-      else { setScanErr(recovered + " recovered. " + stillFailed + " of " + prev.length + " stocks still unavailable."); }
-      return prev;
-    });
+    var recovered = prevFailedCount - stillFailed.length;
+    if (stillFailed.length === 0) { setScanErr(""); }
+    else { setScanErr(recovered + " recovered. " + stillFailed.length + " of " + results.length + " stocks still unavailable."); }
   };
 
   var toggleSort = function(key) {
@@ -3370,7 +3540,7 @@ function StockScreener() {
           scanTime && !scanning ? React.createElement("span", { style: { marginLeft: 6, color: "var(--text6)", fontSize: 9 } }, "Last scanned: " + new Date(scanTime).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })) : ""
         )
       ),
-      React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+      React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
         results.length > 0 && !scanning ? React.createElement("button", {
           onClick: saveSnapshot,
           className: "stx-btn",
@@ -3381,11 +3551,21 @@ function StockScreener() {
           className: "stx-btn",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text5)", cursor: "pointer" }
         }, "Purge Data") : null,
+        [0,1,2,3].map(function(i) {
+          return React.createElement("button", {
+            key: "part" + i,
+            onClick: function() { startScan(i); },
+            disabled: scanning,
+            className: "stx-btn",
+            style: { padding: "6px 10px", fontSize: 10, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--text3)", cursor: scanning ? "wait" : "pointer" }
+          }, "Part " + (i+1) + " (" + NIFTY_200_PARTS[i].length + ")");
+        }),
         React.createElement("button", {
-          onClick: startScan, disabled: scanning,
+          onClick: function() { startScan(-1); },
+          disabled: scanning,
           className: "stx-btn stx-btn-primary",
-          style: { padding: "8px 18px", fontSize: 12, fontWeight: 700, cursor: scanning ? "wait" : "pointer" }
-        }, scanning ? "Scanning... (" + progress.done + "/" + progress.total + ")" : "Scan Nifty 200")
+          style: { padding: "8px 14px", fontSize: 11, fontWeight: 700, cursor: scanning ? "wait" : "pointer" }
+        }, scanning ? "Scanning... (" + progress.done + "/" + progress.total + ")" : "Scan All")
       )
     ),
     React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 14, padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)", flexWrap: "wrap" } },
@@ -3413,14 +3593,25 @@ function StockScreener() {
         React.createElement("div", { style: { height: "100%", borderRadius: 3, background: "var(--accent)", transition: "width .3s", width: (progress.total > 0 ? (progress.done / progress.total * 100) : 0) + "%" } })
       )
     ),
-    scanErr && React.createElement("div", { style: { marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.15)", fontSize: 11, color: "#f0473f", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 } },
-      React.createElement("span", null, scanErr),
-      failedCount > 0 && !retryingFailed ? React.createElement("button", {
+    scanErr ? React.createElement("div", { style: { marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.15)", fontSize: 11, color: "#f0473f", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 } },
+      React.createElement("span", null, scanErr)
+    ) : null,
+    failedCount > 0 && !retryingFailed ? React.createElement("div", { style: { marginBottom: 10, display: "flex", justifyContent: "center" } },
+      React.createElement("button", {
         onClick: retryFailed,
-        style: { padding: "4px 12px", borderRadius: 6, fontSize: 10, fontWeight: 700, border: "1px solid #f0473f", background: "rgba(239,68,68,.1)", color: "#f0473f", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }
-      }, "Retry Failed (" + failedCount + ")") : null,
-      retryingFailed ? React.createElement("span", { style: { fontSize: 10, color: "#f0473f", flexShrink: 0 } }, "Retrying...") : null
-    ),
+        style: { padding: "6px 16px", borderRadius: 6, fontSize: 11, fontWeight: 700, border: "1px solid #f0473f", background: "rgba(239,68,68,.1)", color: "#f0473f", cursor: "pointer", whiteSpace: "nowrap" }
+      }, "Retry Failed (" + failedCount + ")")
+    ) : null,
+    retryingFailed ? React.createElement("div", { style: { marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.15)", fontSize: 11, color: "#f0473f" } },
+      "Retrying failed stocks (3 passes)..."
+    ) : null,
+    bgStatus.active ? React.createElement("div", { style: { marginBottom: 10, padding: "6px 12px", borderRadius: 8, background: "rgba(32,196,106,.06)", border: "1px solid rgba(32,196,106,.12)", fontSize: 10, color: "var(--text5)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 } },
+      React.createElement("span", null, "\u27f3 Background: " + bgStatus.done + "/" + bgStatus.total + " stocks \u00b7 fetching " + bgStatus.current),
+      React.createElement("button", {
+        onClick: stopBackgroundRetry,
+        style: { padding: "2px 8px", fontSize: 9, fontWeight: 600, borderRadius: 4, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text5)", cursor: "pointer", fontFamily: "inherit" }
+      }, "Stop")
+    ) : null,
     results.length > 0 && React.createElement("div", null,
       React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
         [{ k: "all", l: "All (" + results.length + ")" }, { k: "buy", l: "Buy (" + countBuy + ")" }, { k: "watch", l: "Watch (" + countWatch + ")" }, { k: "avoid", l: "Avoid (" + countAvoid + ")" }].map(function(f) {
@@ -3478,6 +3669,11 @@ function StockScreener() {
                   })()
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { whiteSpace: "nowrap" }) },
+                  r.failed ?
+                  React.createElement("button", {
+                    onClick: function() { manualFetchStock(r.s); }, disabled: !!refreshingMap[r.s.t],
+                    style: { padding: "5px 14px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: "1px solid rgba(240,71,63,.3)", background: refreshingMap[r.s.t] ? "var(--bg5)" : "rgba(240,71,63,.08)", color: "#f0473f", cursor: refreshingMap[r.s.t] ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }
+                  }, refreshingMap[r.s.t] ? "Fetching..." : "Fetch") :
                   React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
                     React.createElement("button", {
                       onClick: function() { refreshStock(r.s); }, disabled: !!refreshingMap[r.s.t],
@@ -3496,7 +3692,7 @@ function StockScreener() {
       )
     ),
     !scanning && results.length === 0 && React.createElement("div", { style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
-      "Click \"Scan Nifty 200\" to analyze all stocks"
+      "Click a Part button (1-4) or Scan All to analyze stocks"
     ),
     React.createElement(ScreenerSnapshots, { snapshots: snapshots, deleteSnapshot: deleteSnapshot, deleteSnapshotsBatch: deleteSnapshotsBatch })
   );

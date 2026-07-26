@@ -1,6 +1,7 @@
 /* ══════════════════════════════════════════════════════════════════════════
    OHLCV Data Fetcher — Yahoo Finance (all timeframes via CORS proxies)
-   Sequential worker cascade for self-hosted proxy, wave racing for public.
+   Every configured channel (Worker + public proxies) is raced together per
+   symbol/host combo — see fetchFromYahooRaced below.
    ══════════════════════════════════════════════════════════════════════════ */
 window.OHLCVFetcher = (function () {
 
@@ -10,8 +11,10 @@ window.OHLCVFetcher = (function () {
     function (u) { return "https://corsproxy.io/?" + encodeURIComponent(u); },
     function (u) { return "https://cors.eu.org/" + u; },
     function (u) { return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); },
+    function (u) { return "https://api.allorigins.win/raw?url=" + encodeURIComponent(u); },
+    function (u) { return "https://thingproxy.freeboard.io/fetch/" + encodeURIComponent(u); },
   ];
-  var Y_PROXY_KEYS = ["cors.lol", "corsproxy.io", "cors.eu.org", "codetabs"];
+  var Y_PROXY_KEYS = ["cors.lol", "corsproxy.io", "cors.eu.org", "codetabs", "allorigins", "thingproxy"];
   var Y_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
 
   /* ── Y_HOSTS ──────────────────────────────────────────────────────── */
@@ -27,10 +30,13 @@ window.OHLCVFetcher = (function () {
     var key = _proxyKey(idx);
     _proxyHealth[key] = _proxyHealth[key] || {};
     var fails = (_proxyHealth[key].fails || 0) + 1;
-    /* idx === -1 means worker-self: shorter cooldown so one 429 doesn't
-       block the entire batch for minutes.  Public proxies keep longer backs. */
-    var base = idx === -1 ? 3000 : (isHardLimit ? 10000 : 5000);
-    var cooldown = Math.min(base * Math.pow(1.5, Math.min(fails, 4)), idx === -1 ? 10000 : 60000);
+    /* idx === -1 means worker-self. A 429/403 here means Yahoo has
+       soft-blocked the Worker's own egress IP. Non-hard limits (timeouts,
+       network errors) use a shorter base so transient blips don't cause
+       cascading proxy blackouts during the scan. */
+    var base = idx === -1 ? (isHardLimit ? 3000 : 1500) : (isHardLimit ? 6000 : 2000);
+    var capMs = idx === -1 ? 15000 : 30000;
+    var cooldown = Math.min(base * Math.pow(1.5, Math.min(fails, 5)), capMs);
     _proxyHealth[key].cooldownUntil = Date.now() + cooldown;
     _proxyHealth[key].fails = fails;
   }
@@ -66,13 +72,14 @@ window.OHLCVFetcher = (function () {
     return healthy.slice(start).concat(healthy.slice(0, start));
   }
 
-  /* ── Global concurrency cap (bounds TOTAL in-flight proxy requests app-wide) ──
-     Tilted upward from 8 → 12 because each stock now takes fewer network
-     legs (sequential worker cascade resolves in 1-2 requests instead of
-     firing a multi-proxy wave), so the same global cap lets more stocks
-     scan concurrently without overwhelming the proxy pool. ── */
-  /* 6 stocks scan at a time × 3 TFs each = 18 concurrent fetches.
-     Must be ≥ POOL_SIZE × timeframes so nothing queues behind the gate. */
+  /* ── Global concurrency cap ────────────────────────────────────────────
+     With _acquireGlobalPacingGate (below) now serializing the actual FIRE
+     RATE of every request app-wide, this cap no longer does the heavy
+     lifting — it just bounds how many already-fired requests can be
+     awaiting a response at once (each takes up to ~4s to resolve or time
+     out, fired ~600ms apart, so a handful are normally in flight
+     simultaneously). Kept modest since it's a secondary safety net now,
+     not the primary throttle. */
   var MAX_GLOBAL_CONCURRENT = 18;
   var _globalActive = 0;
   var _globalQueue = [];
@@ -91,10 +98,49 @@ window.OHLCVFetcher = (function () {
     }
   }
 
+  /* ── Global pacing gate ───────────────────────────────────────────────────
+     MAX_GLOBAL_CONCURRENT / the per-proxy token buckets both cap how many
+     requests can be OUTSTANDING at once, but neither one stops several
+     different channels (Worker + public proxies) from all firing in the
+     same instant — which is exactly what happened when we raced them
+     together per wave. Yahoo's real constraint (per available evidence) is
+     a low SUSTAINED RATE against its API, not per-IP concurrency — so this
+     gate serializes the actual fire time of every request app-wide, one at
+     a time, spaced GLOBAL_MIN_GAP_MS apart, no matter which channel or how
+     many stocks are "concurrently" being processed above this layer. A
+     promise chain is used (rather than a plain timestamp check) so that
+     concurrent callers each get a distinct, non-overlapping slot instead of
+     racing each other to read/write the same "last fire time". ── */
+  var GLOBAL_MIN_GAP_MS = 800; // ~1.25 req/s sustained — well under Yahoo's observed ~2/s tolerance
+  var _lastFireTime = 0;
+  var _pacingChain = Promise.resolve();
+  function _acquireGlobalPacingGate() {
+    var myTurn = _pacingChain.then(function () {
+      var now = Date.now();
+      var slot = Math.max(now, _lastFireTime + GLOBAL_MIN_GAP_MS);
+      _lastFireTime = slot;
+      var wait = slot - now;
+      if (wait > 0) return new Promise(function (r) { setTimeout(r, wait); });
+    });
+    _pacingChain = myTurn.catch(function () {});
+    return myTurn;
+  }
+  function resetGlobalPacing() {
+    _lastFireTime = 0;
+    _pacingChain = Promise.resolve();
+  }
+
   /* ── Per-proxy token bucket ────────────────────────────────────────────── */
   var PROXY_WINDOW_MS = 10000;
-  var PROXY_MAX_PER_WINDOW = 25; // ~2.5 req/s sustained per public proxy — was 6, far too low
-  var WORKER_MAX_PER_WINDOW = 120; // self-hosted: 100k req/day ÷ 10s window ≈ 115; keep headroom
+  var PROXY_MAX_PER_WINDOW = 30; // ~3 req/s sustained per public proxy
+  /* self-hosted Worker: the 100k req/day quota is NOT the real ceiling —
+     the Worker still calls Yahoo directly, and Yahoo soft rate-limits by
+     the calling IP well before that quota is ever touched. 120/10s (12
+     req/s) let bursts of scanning stocks slam Yahoo hard enough to get
+     throttled after only a few dozen requests, which looked like "only
+     15-16 stocks load" no matter how the scan was batched. Capped much
+     lower so the Worker's real Yahoo-facing rate stays sustainable. */
+  var WORKER_MAX_PER_WINDOW = 60;
   var _proxyBucket = {};
   function _maxForKey(key) { return key === "worker" ? WORKER_MAX_PER_WINDOW : PROXY_MAX_PER_WINDOW; }
   function _proxyHasRoom(idx) {
@@ -170,20 +216,22 @@ window.OHLCVFetcher = (function () {
   /* One attempt: acquire a global slot + proxy token, fetch, parse, release. */
   function _tryOneAttempt(att, interval, range) {
     return _acquireGlobalSlot().then(function () {
+      return _acquireGlobalPacingGate();
+    }).then(function () {
       _proxyRecordFire(att.pIdx);
       var yUrl = "https://" + att.host + "/v8/finance/chart/"
         + encodeURIComponent(att.symbol)
         + "?interval=" + interval + "&range=" + range;
       var proxyUrl = att.pIdx === -1 ? att.proxyFn(yUrl) : Y_PROXY_FNS[att.pIdx](yUrl);
 
-      return fetchWithTimeout(proxyUrl, {}, 2200)
+      return fetchWithTimeout(proxyUrl, {}, 4000)
         .then(function (r) {
           if (!r.ok) {
             var hard = r.status === 429 || r.status === 403;
             _markProxyCool(att.pIdx, hard);
             return null;
           }
-          return readBody(r, 1800);
+          return readBody(r, 3000);
         })
         .then(function (txt) {
           if (!txt) return null;
@@ -227,114 +275,88 @@ window.OHLCVFetcher = (function () {
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
-     FETCH STRATEGY — sequential worker cascade + wave public fallback
+     FETCH STRATEGY — one request at a time, paced, Worker-first
 
-     When a self-hosted Worker proxy is configured it becomes the sole
-     primary path.  Attempts are tried ONE AT A TIME through the Worker
-     (no parallel racing) because our own Worker doesn't need race-to-
-     beat rate limits — firing duplicate simultaneous requests just
-     wastes its dedicated quota.  Budget / cooldown checks are enforced
-     before each attempt so a struggling Worker isn't hammered by all
-     concurrent stocks at once.
+     Two things changed here based on what actually happened when this
+     was tested:
 
-     If every Worker attempt fails or no Worker is configured, we fall
-     back to public CORS proxies using a small wave-based race (unchanged
-     logic, just narrower scope since the common case now resolves in
-     the Worker cascade).
+     1. Racing the Worker against all 4 public CORS proxies at once made
+        the success rate WORSE (65/200 → 42/200), not better. The public
+        proxies (cors.lol, corsproxy.io free tier, cors.eu.org, codetabs)
+        have no way to forward a custom User-Agent to Yahoo — only our
+        own Worker sets one — and Yahoo's endpoint rejects requests that
+        arrive without a real browser User-Agent. So those 4 channels
+        were near-guaranteed failures the whole time; racing them just
+        burned time and concurrency slots on near-certain misses while
+        diluting the one channel that actually works. They're now used
+        only as a genuine last resort, one at a time, never raced
+        alongside the Worker.
+
+     2. The regression is itself evidence that Yahoo's block here tracks
+        aggregate REQUEST RATE, not which IP a request comes from —
+        otherwise adding more distinct egress paths should have helped,
+        not hurt. So instead of more parallelism, every real request
+        (Worker or fallback) now passes through _acquireGlobalPacingGate,
+        which serializes actual fire time app-wide to one request every
+        GLOBAL_MIN_GAP_MS, regardless of how many stocks/timeframes are
+        nominally "concurrent" above this layer.
      ═══════════════════════════════════════════════════════════════════════ */
   async function fetchFromYahooRaced(ticker, interval, range, overallMs) {
     interval = interval || "5m";
     range = range || "1mo";
-    overallMs = overallMs || 3000;
+    overallMs = overallMs || 5000;
 
     var symbols = [ticker.toUpperCase() + ".NS", ticker.toUpperCase() + ".BO", ticker.toUpperCase()];
     var deadline = Date.now() + overallMs;
 
-    /* ── Worker sequential cascade ────────────────────────────────────────
-       Each attempt goes: acquire slot → budget check → fetch → release.
-       On success return immediately. On failure, sleep a tiny inter-attempt
-       gap (only when the Worker isn't in hard cooldown) to avoid burst-
-       hammering a struggling upstream while other stocks are also scanning.
-       ──────────────────────────────────────────────────────────────────── */
     var workerUrl = await getWorkerProxyUrl();
-    if (workerUrl) {
-      var workerFn = _workerProxyFn(workerUrl);
-      var workerAttempts = [];
+    var workerFn = workerUrl ? _workerProxyFn(workerUrl) : null;
+    var proxyOrder = _getProxyOrder();
+
+    /* One flat, priority-ordered attempt list, tried strictly one at a
+       time: every Worker symbol/host combo first (.NS covers almost
+       every Nifty 200 name, so this usually resolves on attempt #1),
+       then public proxies as a last resort if the Worker is unconfigured
+       or every combo through it failed. */
+    var attempts = [];
+    if (workerFn) {
       for (var s = 0; s < symbols.length; s++) {
         for (var h = 0; h < Y_HOSTS.length; h++) {
-          workerAttempts.push({ symbol: symbols[s], host: Y_HOSTS[h], pIdx: -1, proxyFn: workerFn });
-        }
-      }
-
-      for (var wi = 0; wi < workerAttempts.length && Date.now() < deadline; wi++) {
-        var wAtt = workerAttempts[wi];
-        if (_isProxyCool(-1) || !_proxyHasRoom(-1)) {
-          /* Worker is cooling down or over budget — pause briefly before
-             trying the next symbol/host combo rather than skipping straight
-             through all of them. */
-          if (_isProxyCool(-1)) break;
-          await new Promise(function (r) { setTimeout(r, 120); });
-          if (!_proxyHasRoom(-1)) continue;
-        }
-        var wResult = await _tryOneAttempt(wAtt, interval, range);
-        if (wResult) return wResult;
-        /* Tiny gap between consecutive failures so we don't fire N
-           rapid requests through a Worker whose upstream (Yahoo) is
-           clearly unhappy.  Only 60 ms — negligible when Yahoo is up. */
-        if (wi < workerAttempts.length - 1) {
-          await new Promise(function (r) { setTimeout(r, 60); });
+          attempts.push({ symbol: symbols[s], host: Y_HOSTS[h], pIdx: -1, proxyFn: workerFn });
         }
       }
     }
-
-    /* ── Public proxy wave fallback ───────────────────────────────────────
-       Worker wasn't configured or every attempt through it failed.
-       Fire small parallel waves across the public CORS proxy pool —
-       this is the old racing logic kept for the fallback path only.
-       ──────────────────────────────────────────────────────────────────── */
-    var proxyOrder = _getProxyOrder();
-    var attempts = [];
     for (var s2 = 0; s2 < symbols.length; s2++) {
       for (var h2 = 0; h2 < Y_HOSTS.length; h2++) {
         for (var pi = 0; pi < proxyOrder.length; pi++) {
-          attempts.push({ symbol: symbols[s2], host: Y_HOSTS[h2], pIdx: proxyOrder[pi] });
+          attempts.push({ symbol: symbols[s2], host: Y_HOSTS[h2], pIdx: proxyOrder[pi], proxyFn: Y_PROXY_FNS[proxyOrder[pi]] });
         }
       }
     }
     if (attempts.length === 0) return null;
 
-    var WAVE_SIZE = 2;
-    var WAVE_GAP_MS = 350;
-    var idx = 0;
-
-    while (idx < attempts.length && Date.now() < deadline) {
-      var wave = [];
-      var firedInWave = 0;
-      while (idx < attempts.length && firedInWave < WAVE_SIZE) {
-        var att = attempts[idx];
-        idx++;
-        if (_isProxyCool(att.pIdx) || !_proxyHasRoom(att.pIdx)) continue;
-        wave.push(_tryOneAttempt(att, interval, range));
-        firedInWave++;
+    var ai = 0;
+    var consecutiveFails = 0;
+    while (ai < attempts.length && Date.now() < deadline) {
+      var att = attempts[ai];
+      if (_isProxyCool(att.pIdx)) { ai++; continue; }
+      if (!_proxyHasRoom(att.pIdx)) {
+        await new Promise(function (r) { setTimeout(r, 150); });
+        continue;
       }
-      if (wave.length > 0) {
-        var remaining = Math.max(200, deadline - Date.now());
-        var waveBudget = Math.min(2200, remaining);
-        var waveTimeout = new Promise(function (res) { setTimeout(function () { res(null); }, waveBudget); });
-        var firstGood = new Promise(function (res) {
-          var remainingInWave = wave.length;
-          wave.forEach(function (p) {
-            p.then(function (val) {
-              remainingInWave--;
-              if (val) res(val);
-              else if (remainingInWave === 0) res(null);
-            });
-          });
-        });
-        var winner = await Promise.race([firstGood, waveTimeout]);
-        if (winner) return winner;
+      var result = await _tryOneAttempt(att, interval, range);
+      if (result) return result;
+      ai++;
+      consecutiveFails++;
+      if (ai < attempts.length && Date.now() < deadline) {
+        /* Back off a bit more with each consecutive miss instead of a
+           flat gap — gives a fresh block a moment to clear instead of
+           immediately retrying into it. The global pacing gate inside
+           _tryOneAttempt already enforces the real minimum spacing; this
+           adds extra room specifically after failures. */
+        var gap = Math.min(150 * consecutiveFails, 1200) + Math.random() * 150;
+        await new Promise(function (r) { setTimeout(r, gap); });
       }
-      await new Promise(function (res) { setTimeout(res, WAVE_GAP_MS); });
     }
     return null;
   }
@@ -403,7 +425,7 @@ window.OHLCVFetcher = (function () {
      Overall stock timeout enforced by caller.
      ═══════════════════════════════════════════════════════════════════════ */
   async function fetchOHLCVParallel(ticker, timeframes, perTfMs) {
-    perTfMs = perTfMs || 5000;
+    perTfMs = perTfMs || 12000;
     ticker = (ticker || "").trim().toUpperCase();
     if (!ticker) return {};
     var tfConfigs = {
@@ -430,6 +452,7 @@ window.OHLCVFetcher = (function () {
 
   function clearProxyCooldowns() {
     _clearProxyCooldowns();
+    resetGlobalPacing();
   }
 
   return {
