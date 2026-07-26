@@ -610,8 +610,6 @@ window.TechnicalIndicatorsPanel = (function () {
     var _l = useState(null), dataSource = _l[0], setDataSource = _l[1];
     var timerRef = useRef(null);
 
-    var avKey = DF.getAVKey();
-
     var fetchData = useCallback(async function () {
       if (!ticker) return;
       setLoading(true);
@@ -621,7 +619,7 @@ window.TechnicalIndicatorsPanel = (function () {
         var data = result.data;
         var source = result.source;
         if (!data || data.length < 10) {
-          setError("Insufficient data for " + ticker + ". Try a different timeframe or add an Alpha Vantage API key in settings for daily data.");
+          setError("Insufficient data for " + ticker + ". Try a different timeframe or check your internet connection.");
           setLoading(false);
           return;
         }
@@ -671,12 +669,10 @@ window.TechnicalIndicatorsPanel = (function () {
         React.createElement("span", {
           style: {
             width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-            background: avKey ? "#20c46a" : "var(--text6)",
+            background: "#20c46a",
           }
         }),
-        avKey
-          ? React.createElement("span", null, "Alpha Vantage: ", React.createElement("span", { style: { color: "#20c46a", fontWeight: 600 } }, "Connected"))
-          : React.createElement("span", null, "Using Yahoo Finance fallback — set API key in ", React.createElement("span", { style: { fontWeight: 600 } }, "Settings → API Keys"))
+        React.createElement("span", null, "Yahoo Finance")
       ),
 
       /* ── Controls row ── */
@@ -833,8 +829,7 @@ window.TechnicalIndicatorsPanel = (function () {
         }
       },
         React.createElement("strong", { style: { color: "var(--text4)" } }, "Data Sources:"),
-        " Daily OHLCV from Alpha Vantage (requires free API key) or Yahoo Finance (fallback).",
-        " Intraday OHLCV from Yahoo Finance.",
+        " OHLCV data from Yahoo Finance (daily, weekly, intraday).",
         " Technical indicators calculated locally in-browser.",
         " Data may be delayed 15+ minutes — not suitable for live trading."
       )

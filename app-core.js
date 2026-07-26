@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "1.0.0";
+window.__STOX_APP_VERSION = "1.0.1";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -2953,10 +2953,14 @@ function StockScreener() {
   var addingToES = _s11[0], setAddingToES = _s11[1];
   var _s12 = useState({});
   var addedToES = _s12[0], setAddedToES = _s12[1];
-  var _s13 = useState(false);
-  var retryingFailed = _s13[0], setRetryingFailed = _s13[1];
+  var _s13b = useState(false);
+  var retryingFailed = _s13b[0], setRetryingFailed = _s13b[1];
   var _s11 = useState([]);
   var snapshots = _s11[0], setSnapshots = _s11[1];
+  var _wu = useState("");
+  var workerUrlInput = _wu[0], setWorkerUrlInput = _wu[1];
+  var _wus = useState(false);
+  var workerUrlSaved = _wus[0], setWorkerUrlSaved = _wus[1];
 
   /* Load cached data from IndexedDB on mount */
   React.useEffect(function() {
@@ -2973,8 +2977,18 @@ function StockScreener() {
         var snaps = await dbGetSetting("stox_screener_snapshots");
         if (Array.isArray(snaps)) setSnapshots(snaps);
       } catch(e) {}
+      try {
+        var wu = DF && DF.getWorkerProxyUrl ? await DF.getWorkerProxyUrl() : "";
+        if (wu) { setWorkerUrlInput(wu); setWorkerUrlSaved(true); }
+      } catch(e) {}
     })();
   }, []);
+
+  var saveWorkerUrl = async function() {
+    if (!DF || !DF.setWorkerProxyUrl) return;
+    await DF.setWorkerProxyUrl(workerUrlInput);
+    setWorkerUrlSaved(!!workerUrlInput.trim());
+  };
 
   /* Persist to IndexedDB whenever data changes */
   React.useEffect(function() {
@@ -3027,15 +3041,16 @@ function StockScreener() {
     setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = true; return c; });
     try {
       var tk = s.t.replace(".NS", "");
+      DF.clearCache();
       var resW = await DF.fetchOHLCVCached(tk, "weekly");
       var resD = await DF.fetchOHLCVCached(tk, "daily");
       var resH = await DF.fetchOHLCVCached(tk, "1h");
-      if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
+      if (!resW.data || resW.data.length < 5 || !resD.data || resD.data.length < 5) {
         setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = false; return c; }); return;
       }
       var indW = TI.computeAll(resW.data);
       var indD = TI.computeAll(resD.data);
-      var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
+      var indH = resH.data && resH.data.length >= 5 ? TI.computeAll(resH.data) : null;
       var lc = indD ? indD.lastClose : 0;
       var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
       var dc = resD.data;
@@ -3074,13 +3089,13 @@ function StockScreener() {
         DF.fetchOHLCVCached(tk, "daily"),
         DF.fetchOHLCVCached(tk, "1h"),
       ]);
-      if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
+      if (!resW.data || resW.data.length < 5 || !resD.data || resD.data.length < 5) {
         setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
         return;
       }
       var indW = TI.computeAll(resW.data);
       var indD = TI.computeAll(resD.data);
-      var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
+      var indH = resH.data && resH.data.length >= 5 ? TI.computeAll(resH.data) : null;
       var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, 0);
       var entry = { id: Date.now(), ticker: tk, currentPrice: 0, addedAt: new Date().toISOString(), result: result, indicators: { weekly: indW, daily: indD, hourly: indH } };
       entries.unshift(entry);
@@ -3093,61 +3108,83 @@ function StockScreener() {
   var startScan = async function() {
     if (scanning || !TI || !DF) return;
     setScanning(true); setResults([]); setScanErr("");
-    DF.clearCache();
+    DF.clearCache(); DF.clearProxyCooldowns();
     var stocks = NIFTY_200_UNIQUE;
     var total = stocks.length;
+    var STOCK_TIMEOUT = 12000;
     setProgress({ done: 0, total: total, current: "Starting..." });
     var out = [];
-    var BATCH = 5;
 
-    var fetchWithRetry = async function(tk, tf, retries) {
-      retries = retries || 1;
-      for (var attempt = 0; attempt <= retries; attempt++) {
-        var res = await DF.fetchOHLCVCached(tk, tf);
-        if (res && res.data && res.data.length > 0) return res;
-        if (attempt < retries) await new Promise(function(r) { setTimeout(r, 200); });
-      }
-      return { data: null, source: null, ts: 0 };
-    };
-
-    for (var i = 0; i < stocks.length; i += BATCH) {
-      var batch = stocks.slice(i, i + BATCH);
-      var promises = batch.map(async function(s) {
-        try {
-          var tk = s.t.replace(".NS", "");
-          var allFetched = await Promise.all([
-            fetchWithRetry(tk, "weekly", 1),
-            fetchWithRetry(tk, "daily", 1),
-            fetchWithRetry(tk, "1h", 0)
-          ]);
-          var resW = allFetched[0], resD = allFetched[1], resH = allFetched[2];
-          if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
-            return { s: s, result: null, lc: 0, dayChg: null, weekChg: null, monthChg: null, todayChg: null, failed: true };
-          }
-          var indW = TI.computeAll(resW.data);
-          var indD = TI.computeAll(resD.data);
-          var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-          var lc = indD ? indD.lastClose : 0;
-          var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
-          var dc = resD.data;
-          var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
-          var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
-          var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
-          var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
-          var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
-          var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
-          var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
-          var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
-          return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, failed: false };
-        } catch(e) {
+    var processStock = async function(s) {
+      try {
+        var tk = s.t.replace(".NS", "");
+        var fetchPromise = DF.fetchOHLCVParallel(tk, ["weekly", "daily", "1h"], 5000);
+        var timeoutPromise = new Promise(function(_, rej) { setTimeout(function() { rej(new Error("timeout")); }, STOCK_TIMEOUT); });
+        var fetched = await Promise.race([fetchPromise, timeoutPromise]);
+        var resW = fetched.weekly || { data: null };
+        var resD = fetched.daily || { data: null };
+        var resH = fetched["1h"] || { data: null };
+        if (!resW.data || resW.data.length < 5 || !resD.data || resD.data.length < 5) {
           return { s: s, result: null, lc: 0, dayChg: null, weekChg: null, monthChg: null, todayChg: null, failed: true };
         }
+        var indW = TI.computeAll(resW.data);
+        var indD = TI.computeAll(resD.data);
+        var indH = resH.data && resH.data.length >= 5 ? TI.computeAll(resH.data) : null;
+        var lc = indD ? indD.lastClose : 0;
+        var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
+        var dc = resD.data;
+        var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
+        var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
+        var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
+        var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
+        var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
+        var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
+        var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
+        var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
+        return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, failed: false };
+      } catch(e) {
+        return { s: s, result: null, lc: 0, dayChg: null, weekChg: null, monthChg: null, todayChg: null, failed: true };
+      }
+    };
+
+    // Bounded-concurrency pool: request-level throttling (global slot cap +
+    // per-proxy token buckets) now lives in data-fetcher.js, so the scanner
+    // no longer needs a flat inter-stock delay to protect proxies. Running a
+    // small pool of stocks concurrently (instead of strictly one at a time)
+    // gets through all 200 stocks faster while the fetcher's own rate
+    // limiter still prevents any burst from exhausting free proxy quotas.
+    var POOL_SIZE = 6;
+    var nextIdx = 0;
+    var doneCount = 0;
+    var resultsByIdx = new Array(total);
+
+    var refreshResults = function() {
+      var snapshot = resultsByIdx.filter(Boolean).slice().sort(function(a, b) {
+        if (a.failed && !b.failed) return 1;
+        if (!a.failed && b.failed) return -1;
+        return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
       });
-      var batchResults = await Promise.all(promises);
-      batchResults.forEach(function(r) { out.push(r); });
-      setProgress({ done: Math.min(i + BATCH, total), total: total, current: batch.map(function(s) { return s.t.replace(".NS", ""); }).join(", ") });
-      if (i + BATCH < stocks.length) await new Promise(function(r) { setTimeout(r, 150); });
-    }
+      setResults(snapshot);
+    };
+
+    var worker = async function() {
+      while (nextIdx < total) {
+        var myIdx = nextIdx++;
+        var s = stocks[myIdx];
+        setProgress({ done: doneCount, total: total, current: s.t.replace(".NS", "") });
+        var r = await processStock(s);
+        resultsByIdx[myIdx] = r;
+        doneCount++;
+        refreshResults();
+        setProgress({ done: doneCount, total: total, current: s.t.replace(".NS", "") });
+      }
+    };
+
+    var workers = [];
+    for (var w = 0; w < Math.min(POOL_SIZE, total); w++) workers.push(worker());
+    await Promise.all(workers);
+
+    var out = resultsByIdx.filter(Boolean);
     var failedCount = out.filter(function(r) { return r.failed; }).length;
     out.sort(function(a, b) {
       if (a.failed && !b.failed) return 1;
@@ -3155,6 +3192,39 @@ function StockScreener() {
       return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
     });
     setResults(out);
+
+    // Auto-retry once: if a meaningful chunk failed (typically a sign the
+    // proxy pool was still cooling down), wait for cooldowns to clear and
+    // run a single automatic recovery pass before handing control back to
+    // the user via the manual "Retry Failed" button.
+    if (failedCount > total * 0.1) {
+      setProgress({ done: 0, total: failedCount, current: "Auto-recovering rate-limited stocks..." });
+      await new Promise(function(r) { setTimeout(r, 8000); });
+      DF.clearProxyCooldowns();
+      var stillFailedStocks = out.filter(function(r) { return r.failed; });
+      var recoveryMap = {};
+      var recNextIdx = 0;
+      var recWorker = async function() {
+        while (recNextIdx < stillFailedStocks.length) {
+          var ri = recNextIdx++;
+          var rr = await processStock(stillFailedStocks[ri].s);
+          recoveryMap[stillFailedStocks[ri].s.t] = rr;
+          setProgress({ done: Object.keys(recoveryMap).length, total: stillFailedStocks.length, current: rr.s.t.replace(".NS", "") });
+        }
+      };
+      var recWorkers = [];
+      for (var rw = 0; rw < Math.min(POOL_SIZE, stillFailedStocks.length); rw++) recWorkers.push(recWorker());
+      await Promise.all(recWorkers);
+      out = out.map(function(r) { return recoveryMap[r.s.t] || r; });
+      out.sort(function(a, b) {
+        if (a.failed && !b.failed) return 1;
+        if (!a.failed && b.failed) return -1;
+        return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
+      });
+      setResults(out);
+      failedCount = out.filter(function(r) { return r.failed; }).length;
+    }
+
     if (failedCount > 0) setScanErr(failedCount + " of " + total + " stocks could not be scanned (data unavailable). They appear as N/A at the bottom.");
     var now = Date.now();
     var ts = {};
@@ -3171,73 +3241,79 @@ function StockScreener() {
     if (retryingFailed || !TI || !DF) return;
     var failed = results.filter(function(r) { return r.failed; });
     if (failed.length === 0) return;
+    var prevFailedCount = failed.length;
     setRetryingFailed(true); setScanErr("");
-    setProgress({ done: 0, total: failed.length, current: "Retrying..." });
+    setProgress({ done: 0, total: failed.length, current: "Waiting for proxy cooldown..." });
+    await new Promise(function(r) { setTimeout(r, 5000); });
+    DF.clearCache(); DF.clearProxyCooldowns();
+    var STOCK_TIMEOUT = 12000;
 
-    var fetchWithRetry = async function(tk, tf, retries) {
-      retries = retries || 1;
-      for (var attempt = 0; attempt <= retries; attempt++) {
-        var res = await DF.fetchOHLCVCached(tk, tf);
-        if (res && res.data && res.data.length > 0) return res;
-        if (attempt < retries) await new Promise(function(r) { setTimeout(r, 300); });
+    var processStock = async function(r) {
+      try {
+        var tk = r.s.t.replace(".NS", "");
+        var fetchPromise = DF.fetchOHLCVParallel(tk, ["weekly", "daily", "1h"], 5000);
+        var timeoutPromise = new Promise(function(_, rej) { setTimeout(function() { rej(new Error("timeout")); }, STOCK_TIMEOUT); });
+        var fetched = await Promise.race([fetchPromise, timeoutPromise]);
+        var resW = fetched.weekly || { data: null };
+        var resD = fetched.daily || { data: null };
+        var resH = fetched["1h"] || { data: null };
+        if (!resW.data || resW.data.length < 5 || !resD.data || resD.data.length < 5) {
+          return { s: r.s, result: null, lc: 0, dayChg: null, weekChg: null, monthChg: null, todayChg: null, failed: true };
+        }
+        var indW = TI.computeAll(resW.data);
+        var indD = TI.computeAll(resD.data);
+        var indH = resH.data && resH.data.length >= 5 ? TI.computeAll(resH.data) : null;
+        var lc = indD ? indD.lastClose : 0;
+        var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
+        var dc = resD.data;
+        var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
+        var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
+        var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
+        var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
+        var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
+        var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
+        var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
+        var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
+        return { s: r.s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, failed: false };
+      } catch(e) {
+        return { s: r.s, result: null, lc: 0, dayChg: null, weekChg: null, monthChg: null, todayChg: null, failed: true };
       }
-      return { data: null, source: null, ts: 0 };
     };
 
-    for (var i = 0; i < failed.length; i += 5) {
-      var batch = failed.slice(i, i + 5);
-      var promises = batch.map(async function(r) {
-        try {
-          var tk = r.s.t.replace(".NS", "");
-          var allFetched = await Promise.all([
-            fetchWithRetry(tk, "weekly", 2),
-            fetchWithRetry(tk, "daily", 2),
-            fetchWithRetry(tk, "1h", 1)
-          ]);
-          var resW = allFetched[0], resD = allFetched[1], resH = allFetched[2];
-          if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) return { s: r.s, failed: true };
-          var indW = TI.computeAll(resW.data);
-          var indD = TI.computeAll(resD.data);
-          var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-          var lc = indD ? indD.lastClose : 0;
-          var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
-          var dc = resD.data;
-          var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
-          var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
-          var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
-          var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
-          var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
-          var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
-          var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
-          var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
-          return { s: r.s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, failed: false };
-        } catch(e) {
-          return { s: r.s, failed: true };
-        }
-      });
-      var batchResults = await Promise.all(promises);
-      setResults(function(prev) {
-        var copy = prev.slice();
-        batchResults.forEach(function(nr) {
-          var idx = copy.findIndex(function(r) { return r.s.t === nr.s.t; });
-          if (idx >= 0) copy[idx] = nr;
+    var POOL_SIZE = 6;
+    var retryNextIdx = 0;
+    var retryDoneCount = 0;
+    var retryWorker = async function() {
+      while (retryNextIdx < failed.length) {
+        var myIdx = retryNextIdx++;
+        var r = failed[myIdx];
+        setProgress({ done: retryDoneCount, total: failed.length, current: r.s.t.replace(".NS", "") });
+        var nr = await processStock(r);
+        retryDoneCount++;
+        setResults(function(prev) {
+          var copy = prev.slice();
+          var fi = copy.findIndex(function(x) { return x.s.t === nr.s.t; });
+          if (fi >= 0) copy[fi] = nr;
+          return copy.sort(function(a, b) {
+            if (a.failed && !b.failed) return 1;
+            if (!a.failed && b.failed) return -1;
+            return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
+          });
         });
-        return copy;
-      });
-      setProgress({ done: Math.min(i + 5, failed.length), total: failed.length, current: batch.map(function(r) { return r.s.t.replace(".NS", ""); }).join(", ") });
-      if (i + 5 < failed.length) await new Promise(function(r) { setTimeout(r, 150); });
-    }
+        setProgress({ done: retryDoneCount, total: failed.length, current: r.s.t.replace(".NS", "") });
+      }
+    };
+    var retryWorkers = [];
+    for (var rw2 = 0; rw2 < Math.min(POOL_SIZE, failed.length); rw2++) retryWorkers.push(retryWorker());
+    await Promise.all(retryWorkers);
+
     setRetryingFailed(false);
     setProgress({ done: 0, total: 0, current: "" });
     setResults(function(prev) {
       var stillFailed = prev.filter(function(r) { return r.failed; }).length;
-      var recovered = failedCount - stillFailed;
+      var recovered = prevFailedCount - stillFailed;
       if (stillFailed === 0) { setScanErr(""); }
-      else { setScanErr(recovered + " recovered. " + stillFailed + " of " + results.length + " stocks still unavailable."); }
-      if (stillFailed === 0) {
-        var sorted = prev.slice().sort(function(a, b) { return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0); });
-        return sorted;
-      }
+      else { setScanErr(recovered + " recovered. " + stillFailed + " of " + prev.length + " stocks still unavailable."); }
       return prev;
     });
   };
@@ -3312,7 +3388,22 @@ function StockScreener() {
         }, scanning ? "Scanning... (" + progress.done + "/" + progress.total + ")" : "Scan Nifty 200")
       )
     ),
-    scanning && React.createElement("div", { style: { marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)" } },
+    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 14, padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)", flexWrap: "wrap" } },
+      React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: workerUrlSaved ? "#20c46a" : "var(--text5)", whiteSpace: "nowrap" } },
+        workerUrlSaved ? "\u25cf Proxy Worker connected" : "\u25cb No proxy Worker set"),
+      React.createElement("input", {
+        type: "text", placeholder: "https://your-worker.workers.dev (optional — bypasses public proxy rate limits)",
+        value: workerUrlInput,
+        onChange: function(e) { setWorkerUrlInput(e.target.value); },
+        style: { flex: 1, minWidth: 220, fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)" }
+      }),
+      React.createElement("button", {
+        onClick: saveWorkerUrl,
+        className: "stx-btn",
+        style: { padding: "6px 12px", fontSize: 10, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--text3)", cursor: "pointer", whiteSpace: "nowrap" }
+      }, "Save")
+    ),
+    (scanning || retryingFailed) && React.createElement("div", { style: { marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)" } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 6 } },
         React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "var(--text3)" } },
           "Progress: " + progress.done + "/" + (progress.total || NIFTY_200_UNIQUE.length) + " stocks"),
@@ -4030,7 +4121,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "1.0.0"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "1.0.1"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
