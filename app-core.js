@@ -3343,7 +3343,12 @@ function StockScreener() {
 
     var doRecoveryPass = async function(label, waitMs, stocksToRecover) {
       setProgress({ done: 0, total: stocksToRecover.length, current: label });
-      await new Promise(function(r) { setTimeout(r, waitMs); });
+      var remain = Math.ceil(waitMs / 1000);
+      while (remain > 0) {
+        setProgress({ done: 0, total: stocksToRecover.length, current: label + " (" + remain + "s)" });
+        await new Promise(function(r) { setTimeout(r, 1000); });
+        remain--;
+      }
       DF.clearProxyCooldowns();
       var recMap = {};
       var recIdx = 0;
@@ -3362,14 +3367,14 @@ function StockScreener() {
     };
 
     if (failedCount > total * 0.1) {
-      var recMap = await doRecoveryPass("Recovery pass 1/2 (15s cooldown)...", 15000, out.filter(function(r) { return r.failed; }));
+      var recMap = await doRecoveryPass("Recovery pass 1/2 (60s cooldown)...", 60000, out.filter(function(r) { return r.failed; }));
       out = out.map(function(r) { return recMap[r.s.t] || r; });
       out.sort(function(a, b) {
         if (a.failed && !b.failed) return 1; if (!a.failed && b.failed) return -1; return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
       });
       failedCount = out.filter(function(r) { return r.failed; }).length;
       if (failedCount > total * 0.05) {
-        recMap = await doRecoveryPass("Recovery pass 2/2 (30s cooldown)...", 30000, out.filter(function(r) { return r.failed; }));
+        recMap = await doRecoveryPass("Recovery pass 2/2 (120s cooldown)...", 120000, out.filter(function(r) { return r.failed; }));
         out = out.map(function(r) { return recMap[r.s.t] || r; });
         out.sort(function(a, b) {
           if (a.failed && !b.failed) return 1; if (!a.failed && b.failed) return -1; return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
@@ -3410,7 +3415,12 @@ function StockScreener() {
 
     var runPass = async function(label, waitMs, stockObjs) {
       setProgress({ done: 0, total: stockObjs.length, current: label });
-      await new Promise(function(r) { setTimeout(r, waitMs); });
+      var remain = Math.ceil(waitMs / 1000);
+      while (remain > 0) {
+        setProgress({ done: 0, total: stockObjs.length, current: label + " (" + remain + "s)" });
+        await new Promise(function(r) { setTimeout(r, 1000); });
+        remain--;
+      }
       DF.clearCache(); DF.clearProxyCooldowns();
       var STOCK_TIMEOUT = 25000;
       var stillFailed = [];
@@ -3477,7 +3487,7 @@ function StockScreener() {
     var prevFailedCount = failed.length;
     var stillFailed = failed.map(function(r) { return r.s; });
     for (var pass = 0; pass < 3 && stillFailed.length > 0; pass++) {
-      var waitMs = pass === 0 ? 15000 : pass === 1 ? 25000 : 35000;
+      var waitMs = pass === 0 ? 60000 : pass === 1 ? 120000 : 180000;
       stillFailed = await runPass("Retry pass " + (pass + 1) + "/3 (" + (waitMs / 1000) + "s cooldown)...", waitMs, stillFailed);
     }
 
