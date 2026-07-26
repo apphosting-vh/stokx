@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "1.0.0";
+window.__STOX_APP_VERSION = "2.2.0";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -618,6 +618,11 @@ const Icons = {
   filter: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("polygon", { points: "22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" })
   ),
+  info: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("circle", { cx: 12, cy: 12, r: 10 }),
+    React.createElement("line", { x1: 12, y1: 16, x2: 12, y2: 12 }),
+    React.createElement("line", { x1: 12, y1: 8, x2: 12.01, y2: 8 })
+  ),
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1072,121 +1077,214 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
 }
 
 function EntryScoreAnalysis({ entry, onBack }) {
-  const [expandedTF, setExpandedTF] = useState({});
+  const [activeTF, setActiveTF] = useState("daily");
+  const [catFilter, setCatFilter] = useState("all");
   const r = entry.result || {};
   const ind = entry.indicators || {};
   const price = entry.currentPrice || r.lastClose || 0;
 
+  const INDS = window.STOX_INDICATORS || [];
+  const CATS = window.STOX_CATEGORIES || [];
+  const _fmt = function (v, d) { return v != null ? Number(v).toFixed(d != null ? d : 2) : "\u2014"; };
+  const _TI = window.TechIndicators;
+
+  const _fmtVal = (def, val) => {
+    if (val == null) return "\u2014";
+    if (typeof val === "number") {
+      if (def.type === "volume") {
+        if (Math.abs(val) >= 1e9) return (val / 1e9).toFixed(2) + "B";
+        if (Math.abs(val) >= 1e7) return (val / 1e7).toFixed(2) + "Cr";
+        if (Math.abs(val) >= 1e5) return (val / 1e5).toFixed(2) + "L";
+        if (Math.abs(val) >= 1000) return (val / 1000).toFixed(1) + "K";
+      }
+      return _fmt(val, 2);
+    }
+    if (typeof val === "object") {
+      switch (def.type) {
+        case "macd": return _fmt(val.macd, 4);
+        case "bands": return _fmt(val.upper, 2);
+        case "stoch": return _fmt(val.k, 2);
+        case "ichimoku": return _fmt(val.tenkan, 2);
+        case "chandelier": return _fmt(val.long, 2);
+        case "heikinAshi": return (val.trend || "\u2014").toUpperCase();
+        case "aroon": return "Up: " + _fmt(val.up) + " / Dn: " + _fmt(val.down);
+        case "vortex": return "+: " + _fmt(val.plus) + " / -: " + _fmt(val.minus);
+        case "volumeProfile": return val.poc ? "POC: " + _fmt(val.poc) : "\u2014";
+        case "rs": return val.rs ? "RS: " + _fmt(val.rs, 4) : "\u2014";
+        case "squeeze": return val.active ? "Squeeze ON" : "Squeeze OFF";
+        case "darvas": return val.boxTop ? _fmt(val.boxTop) + " / " + _fmt(val.boxBottom) : "\u2014";
+        case "smartMoney": return val.bos ? val.bos.replace("_", " ").toUpperCase() : "\u2014";
+        case "fibonacci": return val.swingHigh ? _fmt(val.swingHigh) + " \u2014 " + _fmt(val.swingLow) : "\u2014";
+        case "pivotPoints": return val.classic ? "P: " + _fmt(val.classic.P) : "\u2014";
+        case "fractals": return (val.up ? val.up.length : 0) + "\u2191 / " + (val.down ? val.down.length : 0) + "\u2193";
+        case "zigZag": return val ? val.length + " pivots" : "\u2014";
+        default: return "\u2014";
+      }
+    }
+    return String(val);
+  };
+
+  const TF_DEFS = [
+    { key: "weekly", label: "Weekly", weight: "30%" },
+    { key: "daily", label: "Daily", weight: "50%" },
+    { key: "hourly", label: "Hourly", weight: "20%" },
+  ];
+
+  const activeScore = r[activeTF] || null;
+  const activeInd = ind[activeTF] || null;
+
   const factorBar = (label, val, max, color) => {
     if (val == null || max == null) return null;
     const pct = max > 0 ? (Math.abs(val) / max * 100) : 0;
-    const barColor = val < 0 ? "#ef4444" : color;
+    const barColor = val < 0 ? "#f0473f" : color;
     return React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
       React.createElement("span", { style: { width: 90, fontSize: 11, fontWeight: 600, color: "var(--text4)", textAlign: "right", flexShrink: 0 } }, label),
       React.createElement("div", { style: { flex: 1, height: 6, borderRadius: 3, background: "var(--bg5)", overflow: "hidden" } },
         React.createElement("div", { style: { width: pct + "%", height: "100%", borderRadius: 3, background: barColor, transition: "width .3s" } })
       ),
-      React.createElement("span", { style: { width: 44, fontSize: 10, fontWeight: 700, color: val < 0 ? "#ef4444" : "var(--text4)", fontFamily: "var(--font-mono)", textAlign: "right" } }, (val >= 0 ? "+" : "") + val + "/" + max)
-    );
-  };
-
-  const indRow = (label, val, signal) => {
-    if (val == null) return null;
-    const sigColor = signal === "bullish" ? "#22c55e" : signal === "bearish" ? "#ef4444" : signal === "overbought" ? "#f59e0b" : signal === "oversold" ? "#3b82f6" : "var(--text5)";
-    return React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0" } },
-      React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, label),
-      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
-        React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--text3)", fontFamily: "var(--font-mono)" } }, typeof val === "number" ? val.toFixed(2) : "\u2014"),
-        signal && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: sigColor, padding: "1px 5px", borderRadius: 3, background: sigColor + "15" } }, signal)
-      )
+      React.createElement("span", { style: { width: 44, fontSize: 10, fontWeight: 700, color: val < 0 ? "#f0473f" : "var(--text4)", fontFamily: "var(--font-mono)", textAlign: "right" } }, (val >= 0 ? "+" : "") + val + "/" + max)
     );
   };
 
   const renderIndicators = (indData) => {
-    if (!indData) return React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", padding: "6px 0" } }, "No data available");
-    const lc = indData.lastClose;
-    return React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px" } },
-      indRow("RSI (14)", indData.rsi_14, indData.rsi_14 > 70 ? "overbought" : indData.rsi_14 < 30 ? "oversold" : "neutral"),
-      indRow("ADX (14)", indData.adx_14, indData.adx_14 > 25 ? "trending" : "ranging"),
-      indRow("MACD", indData.macd ? indData.macd.macd : null, indData.macd && indData.macd.histogram > 0 ? "bullish" : "bearish"),
-      indRow("MACD Signal", indData.macd ? indData.macd.signal : null),
-      indRow("EMA 9", indData.ema_9, lc && indData.ema_9 ? lc > indData.ema_9 ? "bullish" : "bearish" : null),
-      indRow("EMA 21", indData.ema_21, lc && indData.ema_21 ? lc > indData.ema_21 ? "bullish" : "bearish" : null),
-      indRow("EMA 50", indData.ema_50, lc && indData.ema_50 ? lc > indData.ema_50 ? "bullish" : "bearish" : null),
-      indRow("SMA 20", indData.sma_20, lc && indData.sma_20 ? lc > indData.sma_20 ? "bullish" : "bearish" : null),
-      indRow("SMA 50", indData.sma_50, lc && indData.sma_50 ? lc > indData.sma_50 ? "bullish" : "bearish" : null),
-      indRow("Supertrend", indData.supertrend, lc && indData.supertrend ? lc > indData.supertrend ? "bullish" : "bearish" : null),
-      indRow("ATR (14)", indData.atr_14),
-      indRow("CCI (20)", indData.cci_20, indData.cci_20 > 100 ? "overbought" : indData.cci_20 < -100 ? "oversold" : "neutral"),
-      indRow("MFI (14)", indData.mfi_14, indData.mfi_14 > 80 ? "overbought" : indData.mfi_14 < 20 ? "oversold" : "neutral"),
-      indRow("Stoch RSI K", indData.stochRSI ? indData.stochRSI.k : null, indData.stochRSI && indData.stochRSI.k > 80 ? "overbought" : indData.stochRSI && indData.stochRSI.k < 20 ? "oversold" : "neutral"),
-      indRow("BB Upper", indData.bb ? indData.bb.upper : null),
-      indRow("BB Lower", indData.bb ? indData.bb.lower : null),
-      indRow("OBV", indData.obv),
-      indRow("VWAP", indData.vwap),
-      indRow("ROC (12)", indData.roc_12, indData.roc_12 > 0 ? "bullish" : "bearish"),
-      indRow("PSAR", indData.psar, lc && indData.psar ? lc > indData.psar ? "bullish" : "bearish" : null),
-      indRow("WMA 20", indData.wma_20),
-      indRow("HMA 16", indData.hma_16),
-      indRow("KAMA 10", indData.kama_10),
-      indRow("CMF (20)", indData.cmf_20, indData.cmf_20 > 0 ? "bullish" : "bearish"),
-      indRow("TSI", indData.tsi, indData.tsi > 0 ? "bullish" : "bearish"),
-      indRow("STC", indData.stc, indData.stc > 0 ? "bullish" : "bearish"),
-      indRow("KVO", indData.kvo, indData.kvo > 0 ? "bullish" : "bearish"),
-      indRow("PVT", indData.pvt),
-      indRow("Chandelier Long", indData.chandelier ? indData.chandelier.long : null, lc && indData.chandelier && indData.chandelier.long ? lc > indData.chandelier.long ? "bullish" : "bearish" : null),
-      indRow("Chandelier Short", indData.chandelier ? indData.chandelier.short : null, lc && indData.chandelier && indData.chandelier.short ? lc > indData.chandelier.short ? "bullish" : "bearish" : null),
-      indRow("Choppiness", indData.choppiness, indData.choppiness != null ? indData.choppiness < 38.2 ? "trending" : indData.choppiness > 61.8 ? "ranging" : "neutral" : null),
-      indRow("Williams %R", indData.williamsR, indData.williamsR != null ? indData.williamsR > -20 ? "overbought" : indData.williamsR < -80 ? "oversold" : "neutral" : null),
-      indRow("Awesome Osc", indData.awesomeOsc, indData.awesomeOsc != null ? indData.awesomeOsc > 0 ? "bullish" : "bearish" : null),
-      indRow("Force Index", indData.forceIndex, indData.forceIndex != null ? indData.forceIndex > 0 ? "bullish" : "bearish" : null),
-      indRow("Aroon Up", indData.aroon ? indData.aroon.up : null),
-      indRow("Aroon Down", indData.aroon ? indData.aroon.down : null),
-      indRow("Aroon Osc", indData.aroon ? indData.aroon.osc : null, indData.aroon && indData.aroon.osc != null ? indData.aroon.osc > 50 ? "bullish" : indData.aroon.osc < -50 ? "bearish" : "neutral" : null),
-      indRow("Vortex +", indData.vortex ? indData.vortex.plus : null),
-      indRow("Vortex -", indData.vortex ? indData.vortex.minus : null, indData.vortex && indData.vortex.plus != null && indData.vortex.minus != null ? indData.vortex.plus > indData.vortex.minus ? "bullish" : "bearish" : null),
-      indRow("HA Trend", indData.heikinAshi ? indData.heikinAshi.trend : null, indData.heikinAshi ? indData.heikinAshi.trend : null),
-      indRow("52W %From High", indData.week52HL ? indData.week52HL.pctFromHigh : null, indData.week52HL ? indData.week52HL.pctFromHigh > -5 ? "bullish" : indData.week52HL.pctFromHigh > -15 ? "neutral" : "bearish" : null),
-      indRow("52W High", indData.week52HL ? indData.week52HL.high52w : null),
-      indRow("52W Low", indData.week52HL ? indData.week52HL.low52w : null)
-    );
-  };
+    if (!indData) return React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", padding: "6px 0" } }, "No indicator data available for this timeframe");
+    const signals = _TI && _TI.interpret ? _TI.interpret(indData) : {};
+    const filtered = catFilter === "all" ? INDS : INDS.filter(function (i) { return i.cat === catFilter; });
+    const catKeys = ["all"].concat(CATS);
 
-  const tfCard = (label, weight, score, tfKey) => {
-    const isExp = !!expandedTF[tfKey];
-    if (!score) return React.createElement("div", { key: tfKey, style: { padding: 12, borderRadius: 10, background: "var(--bg4)", textAlign: "center" } },
-      React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 2 } }, label + " (" + weight + ")"),
-      React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: "var(--text6)", fontFamily: "var(--font-heading)" } }, "N/A"),
-      React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, "No data")
-    );
-    return React.createElement("div", { key: tfKey, style: { borderRadius: 10, background: "var(--bg4)", border: "1px solid " + score.decision.color + "22", overflow: "hidden" } },
-      React.createElement("div", { onClick: () => setExpandedTF(prev => ({ ...prev, [tfKey]: !prev[tfKey] })), style: { padding: 12, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" } },
-        React.createElement("div", { style: { textAlign: "left" } },
-          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 2 } }, label + " (" + weight + ")"),
-          React.createElement("div", { style: { fontSize: 20, fontWeight: 900, color: score.decision.color, fontFamily: "var(--font-heading)", lineHeight: 1 } }, score.total)
-        ),
-        React.createElement("div", { style: { textAlign: "right" } },
-          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: score.decision.color } }, score.decision.label),
-          React.createElement("div", { style: { fontSize: 9, color: "var(--text5)" } }, isExp ? "\u25b4 Hide" : "\u25bc Details")
-        )
+    return React.createElement("div", null,
+      React.createElement("div", { style: { display: "flex", gap: 3, marginBottom: 10, flexWrap: "wrap" } },
+        catKeys.map(function (cat) {
+          var label = cat === "all" ? "All" : cat;
+          var count = cat === "all" ? INDS.length : INDS.filter(function (i) { return i.cat === cat; }).length;
+          var active = catFilter === cat;
+          return React.createElement("button", {
+            key: cat,
+            onClick: function () { setCatFilter(cat); },
+            style: {
+              padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: active ? 700 : 500,
+              border: "none", cursor: "pointer",
+              background: active ? "var(--accent)" : "var(--bg4)",
+              color: active ? "#fff" : "var(--text5)",
+              transition: "all .15s",
+            }
+          }, label + " (" + count + ")");
+        })
       ),
-      isExp && React.createElement("div", { style: { padding: "0 12px 12px" } },
-        React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 } },
-          factorBar("Trend", score.trendScore, score.trendMax, "#3b82f6"),
-          factorBar("Momentum", score.momentumScore, score.momentumMax, "#a855f7"),
-          factorBar("Volume", score.volumeScore, score.volumeMax, "#06b6d4"),
-          factorBar("Structure", score.structureScore, score.structureMax, "#ec4899")
-        ),
-        React.createElement("div", { style: { borderTop: "1px solid var(--border)", paddingTop: 8 } },
-          React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--text4)", marginBottom: 6 } }, "Technical Indicators"),
-          renderIndicators(ind[tfKey])
-        )
+      React.createElement("div", {
+        style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 6 }
+      },
+        filtered.map(function (def) {
+          var val = indData[def.key];
+          if (val === null || val === undefined) return null;
+          var sig = signals[def.key] || null;
+          var sigStyle = sig ? SIGNAL_COLORS[sig] || SIGNAL_COLORS.neutral : null;
+
+          var cardBg = "var(--bg4)";
+          var cardBorderLeft = "none";
+          if (sig === "bullish") { cardBg = "rgba(22,163,74,.06)"; cardBorderLeft = "3px solid #20c46a"; }
+          else if (sig === "bearish") { cardBg = "rgba(239,68,68,.06)"; cardBorderLeft = "3px solid #f0473f"; }
+          else if (sig === "overbought") { cardBg = "rgba(234,88,12,.05)"; cardBorderLeft = "3px solid #ea580c"; }
+          else if (sig === "oversold") { cardBg = "rgba(37,99,235,.05)"; cardBorderLeft = "3px solid #2563eb"; }
+          else if (sig === "trending") { cardBg = "rgba(168,85,247,.05)"; cardBorderLeft = "3px solid #a855f7"; }
+          else if (sig === "ranging") { cardBg = "rgba(107,114,128,.04)"; cardBorderLeft = "3px solid #6b7280"; }
+
+          return React.createElement("div", {
+            key: def.key,
+            style: {
+              padding: "8px 10px", borderRadius: 8,
+              background: cardBg, border: "1px solid var(--border)", borderLeft: cardBorderLeft,
+              display: "flex", flexDirection: "column", gap: 2,
+              transition: "background .3s, border-color .3s",
+            }
+          },
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.3 } }, def.name),
+              sigStyle && sig !== "neutral" && React.createElement("span", {
+                style: {
+                  fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 6,
+                  background: sigStyle.bg, border: "1px solid " + sigStyle.border, color: sigStyle.text,
+                  textTransform: "uppercase",
+                }
+              }, sigStyle.label)
+            ),
+            React.createElement("div", { style: { fontSize: 14, fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--text)" } }, _fmtVal(def, val)),
+            def.type === "macd" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "MACD: " + _fmt(val.macd, 4)),
+              React.createElement("span", null, "Sig: " + _fmt(val.signal, 4)),
+              React.createElement("span", { style: { color: val.histogram >= 0 ? "#20c46a" : "#f0473f" } },
+                "Hist: " + _fmt(val.histogram, 4))
+            ),
+            def.type === "bands" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "U: " + _fmt(val.upper)),
+              React.createElement("span", null, "M: " + _fmt(val.middle)),
+              React.createElement("span", null, "L: " + _fmt(val.lower))
+            ),
+            def.type === "stoch" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "%K: " + _fmt(val.k)),
+              React.createElement("span", null, "%D: " + _fmt(val.d))
+            ),
+            def.type === "ichimoku" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 6, flexWrap: "wrap" }
+            },
+              React.createElement("span", null, "T: " + _fmt(val.tenkan)),
+              React.createElement("span", null, "K: " + _fmt(val.kijun)),
+              React.createElement("span", null, "SA: " + _fmt(val.senkouA)),
+              React.createElement("span", null, "SB: " + _fmt(val.senkouB))
+            ),
+            def.type === "chandelier" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "L: " + _fmt(val.long)),
+              React.createElement("span", null, "S: " + _fmt(val.short))
+            ),
+            def.type === "heikinAshi" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 6 }
+            },
+              React.createElement("span", null, "O: " + _fmt(val.open)),
+              React.createElement("span", null, "H: " + _fmt(val.high)),
+              React.createElement("span", null, "L: " + _fmt(val.low)),
+              React.createElement("span", null, "C: " + _fmt(val.close))
+            ),
+            def.type === "aroon" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "Up: " + _fmt(val.up)),
+              React.createElement("span", null, "Dn: " + _fmt(val.down)),
+              React.createElement("span", { style: { color: val.osc > 0 ? "#20c46a" : "#f0473f" } }, "Osc: " + _fmt(val.osc))
+            ),
+            def.type === "vortex" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", { style: { color: "#20c46a" } }, "VI+: " + _fmt(val.plus)),
+              React.createElement("span", { style: { color: "#f0473f" } }, "VI-: " + _fmt(val.minus))
+            ),
+            def.type === "volumeProfile" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "POC: " + _fmt(val.poc)),
+              val.valueAreaHigh && React.createElement("span", null, "VAH: " + _fmt(val.valueAreaHigh)),
+              val.valueAreaLow && React.createElement("span", null, "VAL: " + _fmt(val.valueAreaLow))
+            ),
+            def.type === "rs" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "RS: " + _fmt(val.rs, 4)),
+              val.mansfield != null && React.createElement("span", { style: { color: val.mansfield > 0 ? "#20c46a" : "#f0473f" } }, "Mans: " + _fmt(val.mansfield, 2) + "%")
+            )
+          );
+        })
       )
     );
   };
 
   return React.createElement("div", null,
-    // Header
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 } },
       React.createElement("div", null,
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 } },
@@ -1200,8 +1298,6 @@ function EntryScoreAnalysis({ entry, onBack }) {
         React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, entry.ticker)
       )
     ),
-
-    // Price + Final Score header
     React.createElement("div", { className: "stx-card", style: { marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 2 } }, "Current Price"),
@@ -1212,8 +1308,6 @@ function EntryScoreAnalysis({ entry, onBack }) {
         React.createElement("div", { style: { fontSize: 36, fontWeight: 900, color: r.decision ? r.decision.color : "var(--text6)", fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore != null ? r.finalScore : "\u2014")
       )
     ),
-
-    // Decision badge + position
     r.decision && React.createElement("div", { className: "stx-card", style: { marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
         React.createElement("div", { style: { padding: "6px 14px", borderRadius: 8, background: r.decision.color + "18", border: "1px solid " + r.decision.color + "33" } },
@@ -1224,20 +1318,47 @@ function EntryScoreAnalysis({ entry, onBack }) {
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
         React.createElement("div", { style: { fontSize: 9, color: "var(--text5)", textAlign: "right" } },
           "Base: ", React.createElement("span", { style: { fontWeight: 700, color: "var(--text3)" } }, r.baseScore),
-          " \u00b7 Pen: ", React.createElement("span", { style: { fontWeight: 700, color: r.penalties < 0 ? "#ef4444" : "var(--text3)" } }, r.penalties),
-          " \u00b7 Bonus: ", React.createElement("span", { style: { fontWeight: 700, color: r.bonuses > 0 ? "#22c55e" : "var(--text3)" } }, r.bonuses)
+          " \u00b7 Pen: ", React.createElement("span", { style: { fontWeight: 700, color: r.penalties < 0 ? "#f0473f" : "var(--text3)" } }, r.penalties),
+          " \u00b7 Bonus: ", React.createElement("span", { style: { fontWeight: 700, color: r.bonuses > 0 ? "#20c46a" : "var(--text3)" } }, r.bonuses)
         )
       )
     ),
-
-    // 3-column timeframe cards
-    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 } },
-      tfCard("Weekly", "30%", r.weekly, "weekly"),
-      tfCard("Daily", "50%", r.daily, "daily"),
-      tfCard("Hourly", "20%", r.hourly, "hourly")
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
+      React.createElement("div", { style: { display: "flex", gap: 2, background: "var(--bg4)", borderRadius: 8, padding: 3, marginBottom: 14 } },
+        TF_DEFS.map(function (tf) {
+          var score = r[tf.key];
+          var isActive = activeTF === tf.key;
+          return React.createElement("button", {
+            key: tf.key,
+            onClick: function () { setActiveTF(tf.key); setCatFilter("all"); },
+            style: {
+              flex: 1, padding: "8px 12px", borderRadius: 6, fontSize: 11, fontWeight: isActive ? 700 : 500,
+              border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+              background: isActive ? "var(--accent)" : "transparent",
+              color: isActive ? "#fff" : "var(--text5)",
+              transition: "all .15s",
+            }
+          },
+            React.createElement("span", null, tf.label + " (" + tf.weight + ")"),
+            score ? React.createElement("span", { style: { fontSize: 14, fontWeight: 900, fontFamily: "var(--font-heading)", color: isActive ? "#fff" : score.decision.color, lineHeight: 1 } }, score.total) : React.createElement("span", { style: { fontSize: 10 } }, "N/A"),
+            score && React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: isActive ? "rgba(255,255,255,.8)" : score.decision.color } }, score.decision.label)
+          );
+        })
+      ),
+      activeScore && React.createElement("div", null,
+        React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, marginBottom: 14 } },
+          factorBar("Trend", activeScore.trendScore, activeScore.trendMax, "#4a8fe0"),
+          factorBar("Momentum", activeScore.momentumScore, activeScore.momentumMax, "#a855f7"),
+          factorBar("Volume", activeScore.volumeScore, activeScore.volumeMax, "#06b6d4"),
+          factorBar("Structure", activeScore.structureScore, activeScore.structureMax, "#ec4899")
+        ),
+        React.createElement("div", { style: { borderTop: "1px solid var(--border)", paddingTop: 10 } },
+          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text4)", marginBottom: 8 } }, "Technical Indicators"),
+          renderIndicators(activeInd)
+        )
+      ),
+      !activeScore && React.createElement("div", { style: { textAlign: "center", padding: 16, color: "var(--text6)", fontSize: 11 } }, "No score data for " + activeTF)
     ),
-
-    // Penalties & Bonuses
     r.hardFilters && r.hardFilters.length > 0 && React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
       React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text3)", marginBottom: 8 } }, "Penalties & Bonuses"),
       r.hardFilters.map((f, i) => {
@@ -1247,12 +1368,10 @@ function EntryScoreAnalysis({ entry, onBack }) {
         var label = valStr ? f.replace(valStr, "").replace(/\s*\u2014\s*/, " \u2014 ").trim() : f;
         return React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "5px 0", borderBottom: "1px solid var(--border)" } },
           React.createElement("span", { style: { color: "var(--text3)", fontSize: 12, flex: 1 } }, isBonus ? "\u2713 " + label : "\u26a0 " + label),
-          valStr && React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: isBonus ? "#22c55e" : "#ef4444", background: isBonus ? "rgba(34,197,94,.08)" : "rgba(239,68,68,.08)", padding: "2px 8px", borderRadius: 4, fontFamily: "var(--font-mono)" } }, valStr)
+          valStr && React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: isBonus ? "#20c46a" : "#f0473f", background: isBonus ? "rgba(34,197,94,.08)" : "rgba(239,68,68,.08)", padding: "2px 8px", borderRadius: 4, fontFamily: "var(--font-mono)" } }, valStr)
         );
       })
     ),
-
-    // Added date
     React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", textAlign: "center", padding: "8px 0" } },
       "Added " + new Date(entry.addedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
     )
@@ -3879,6 +3998,181 @@ function PulsePage({ holdings }) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   PAGE: Info (Changelog & Version History)
+   ══════════════════════════════════════════════════════════════════════════ */
+function InfoPage() {
+  const [expandedVersion, setExpandedVersion] = useState(null);
+
+  const CHANGELOG = [
+    {
+      version: "2.2.0",
+      date: "July 2026",
+      label: "Latest",
+      changes: [
+        { type: "fixed", text: "Entry Score Analysis — technical indicator values now display correctly on cards (was always showing em-dash due to missing stoxFormatValue)" },
+        { type: "improved", text: "Entry Score Analysis — complete _fmtVal formatter covering all 18 indicator types with human-readable volume suffixes (K/L/Cr/B)" },
+      ]
+    },
+    {
+      version: "2.1.0",
+      date: "July 2026",
+      changes: [
+        { type: "feature", text: "Info page with full changelog, version history, feature highlights, and data source attributions" },
+        { type: "improved", text: "Entry Score Analysis — category-filtered indicator grid with signal-colored cards replacing flat 2-column layout" },
+        { type: "improved", text: "Entry Score Analysis — tab-based timeframe selector (Weekly/Daily/Hourly) replacing expandable 3-column cards" },
+        { type: "improved", text: "Entry Score Analysis — 10 complex sub-indicator renderers (MACD, Bollinger Bands, Stochastic, Ichimoku, Chandelier, Heikin Ashi, Aroon, Vortex, Volume Profile, Relative Strength)" },
+        { type: "improved", text: "Entry Score Analysis — dynamic signal interpretation via TechIndicators.interpret() instead of hardcoded thresholds" },
+      ]
+    },
+    {
+      version: "2.0.0",
+      date: "July 2026",
+      changes: [
+        { type: "feature", text: "Single Stock Analysis — enter any ticker for full technical analysis with 50+ indicators, candlestick chart, and signal gauge" },
+        { type: "feature", text: "Entry Score engine with multi-timeframe analysis (Weekly/Daily/Hourly)" },
+        { type: "feature", text: "Stock Screener with custom filters and bulk scoring" },
+        { type: "feature", text: "Exit Score — momentum-based exit engine with price recommendations (take profit, stop loss, trailing stop, time stop)" },
+        { type: "feature", text: "Market Ticker — live scrolling strip for NSE indices + Gold/Silver/Crude commodities" },
+        { type: "feature", text: "Market News panel powered by Marketaux (India markets + holdings news)" },
+        { type: "feature", text: "Technical Indicators Inline — compact indicator view below each holding card" },
+        { type: "feature", text: "Dark/Light theme toggle in Settings" },
+        { type: "feature", text: "Data Backup & Restore (JSON export/import)" },
+        { type: "feature", text: "File System Access auto-save support" },
+        { type: "feature", text: "Google Drive cloud backup integration" },
+        { type: "feature", text: "Trade History with P&L tracking and FY classification" },
+        { type: "feature", text: "Reports page with portfolio analytics" },
+        { type: "improved", text: "50+ technical indicators including SuperTrend, Ichimoku, Darvas Box, Smart Money, MTF Alignment" },
+        { type: "improved", text: "Multiple CORS proxy fallbacks for reliable Yahoo Finance data fetching" },
+        { type: "improved", text: "Responsive mobile layout with bottom navigation" },
+        { type: "improved", text: "PWA support with service worker caching" },
+      ]
+    },
+    {
+      version: "1.0.0",
+      date: "June 2026",
+      label: "Initial Release",
+      changes: [
+        { type: "feature", text: "Portfolio tracking with buy/sell transactions" },
+        { type: "feature", text: "Watchlist for tracking stocks of interest" },
+        { type: "feature", text: "Real-time price fetching via Yahoo Finance" },
+        { type: "feature", text: "IndexedDB persistence — all data stored locally on device" },
+        { type: "feature", text: "INR currency formatting (Indian numbering system)" },
+        { type: "feature", text: "Capital gains classification (STCG/LTCG) per Indian tax rules" },
+        { type: "feature", text: "XIRR calculation for multi-cashflow holdings" },
+        { type: "feature", text: "Financial Year tracking (April–March Indian FY)" },
+        { type: "feature", text: "Basic technical indicators (SMA, EMA, RSI, MACD)" },
+        { type: "improved", text: "Desktop sidebar + mobile bottom nav layout" },
+        { type: "improved", text: "Splash screen with animated branding" },
+        { type: "improved", text: "Auto-refresh prices every 60 seconds" },
+        { type: "improved", text: "NSE holiday calendar for trading day detection" },
+      ]
+    }
+  ];
+
+  const TYPE_STYLES = {
+    feature: { bg: "var(--accentbg)", border: "var(--accentbg5)", color: "var(--accent)", label: "New" },
+    improved: { bg: "var(--infobg)", border: "var(--infoborder)", color: "var(--info)", label: "Improved" },
+    fixed: { bg: "var(--warnbg)", border: "var(--warnborder)", color: "var(--warn)", label: "Fixed" },
+  };
+
+  return React.createElement("div", null,
+    React.createElement("div", { style: { marginBottom: 24 } },
+      React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--accent)", letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 4 } }, "INFO"),
+      React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, "Changelog & Version History")
+    ),
+
+    /* App identity card */
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 20, display: "flex", alignItems: "center", gap: 16 } },
+      React.createElement("div", { style: { width: 52, height: 52, borderRadius: 14, background: "linear-gradient(135deg, var(--accent), var(--accent2))", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, color: "#fff", fontFamily: "var(--font-heading)", fontSize: 24, flexShrink: 0, boxShadow: "0 4px 16px var(--accentbg)" } }, "S"),
+      React.createElement("div", { style: { flex: 1 } },
+        React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
+          React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.2.0"))
+        ),
+        React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
+          React.createElement("span", null, "NSE \u00b7 BSE"),
+          React.createElement("span", null, "50+ Indicators"),
+          React.createElement("span", null, "100% On-Device")
+        )
+      )
+    ),
+
+    /* Feature highlights */
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 20 } },
+      React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--text)" } }, "Key Features"),
+      React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 } },
+        [
+          { icon: Icons.chart(14), label: "50+ Technical Indicators", desc: "SMA, EMA, RSI, MACD, SuperTrend, Ichimoku, Darvas Box, and more" },
+          { icon: Icons.briefcase(14), label: "Portfolio Tracking", desc: "Buy/sell transactions with P&L, XIRR, and capital gains" },
+          { icon: Icons.search(14), label: "Stock Screener", desc: "Filter and score stocks with custom criteria" },
+          { icon: Icons.trendingUp(14), label: "Entry & Exit Scores", desc: "Multi-timeframe analysis with actionable recommendations" },
+          { icon: Icons.eye(14), label: "Market Pulse", desc: "Live indices, commodities, and market news" },
+          { icon: Icons.clock(14), label: "Trade History", desc: "Complete transaction log with FY classification" },
+        ].map(function (f, i) {
+          return React.createElement("div", { key: i, style: { padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "flex-start" } },
+            React.createElement("span", { style: { color: "var(--accent)", marginTop: 1, flexShrink: 0 } }, f.icon),
+            React.createElement("div", null,
+              React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 2 } }, f.label),
+              React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", lineHeight: 1.4 } }, f.desc)
+            )
+          );
+        })
+      )
+    ),
+
+    /* Changelog */
+    React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
+      CHANGELOG.map(function (release) {
+        var isExpanded = expandedVersion === release.version || expandedVersion === null;
+        return React.createElement("div", { key: release.version, className: "stx-card", style: { padding: "16px 18px" } },
+          React.createElement("div", {
+            onClick: function () { setExpandedVersion(isExpanded && expandedVersion !== null ? null : release.version); },
+            style: { display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none" }
+          },
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+              React.createElement("div", { style: { width: 40, height: 40, borderRadius: 10, background: release.label === "Latest" ? "var(--accentbg)" : "var(--bg4)", border: "1px solid " + (release.label === "Latest" ? "var(--accentbg5)" : "var(--border)"), display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } },
+                React.createElement("span", { style: { fontSize: 12, fontWeight: 800, color: release.label === "Latest" ? "var(--accent)" : "var(--text4)", fontFamily: "var(--font-mono)" } }, "v" + release.version)
+              ),
+              React.createElement("div", null,
+                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+                  React.createElement("span", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Version " + release.version),
+                  release.label === "Latest" && React.createElement("span", { style: { fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "var(--accentbg)", color: "var(--accent)", border: "1px solid var(--accentbg5)" } }, "LATEST")
+                ),
+                React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, release.date + " \u00b7 " + release.changes.length + " changes")
+              )
+            ),
+            React.createElement("span", { style: { fontSize: 14, color: "var(--text5)", transition: "transform .2s", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" } }, "\u25bc")
+          ),
+          isExpanded && React.createElement("div", { style: { marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)" } },
+            React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+              release.changes.map(function (ch, ci) {
+                var ts = TYPE_STYLES[ch.type] || TYPE_STYLES.feature;
+                return React.createElement("div", { key: ci, style: { display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, lineHeight: 1.5, animation: "stxFadeIn .25s ease " + (ci * 0.03) + "s both" } },
+                  React.createElement("span", { style: { fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: ts.bg, border: "1px solid " + ts.border, color: ts.color, flexShrink: 0, marginTop: 2, letterSpacing: 0.3, textTransform: "uppercase" } }, ts.label),
+                  React.createElement("span", { style: { color: "var(--text3)" } }, ch.text)
+                );
+              })
+            )
+          )
+        );
+      })
+    ),
+
+    /* Data sources note */
+    React.createElement("div", { className: "stx-card", style: { marginTop: 16, padding: "14px 18px" } },
+      React.createElement("h3", { style: { fontSize: 13, fontWeight: 700, marginBottom: 8, color: "var(--text)" } }, "Data Sources & Disclaimer"),
+      React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", lineHeight: 1.7 } },
+        React.createElement("p", null, "Stock prices sourced from Yahoo Finance via CORS proxies. Data may be delayed 15+ minutes."),
+        React.createElement("p", null, "Market index data from NSE India API. Commodity prices from Stooq."),
+        React.createElement("p", null, "News powered by Marketaux API."),
+        React.createElement("p", { style: { marginTop: 6, color: "var(--text6)" } }, "This application is for informational purposes only and does not constitute financial advice. Always do your own research before investing.")
+      )
+    )
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    PAGE: Settings
    ══════════════════════════════════════════════════════════════════════════ */
 function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareSnapshots, watchlist, setWatchlist }) {
@@ -3938,7 +4232,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "1.0.0"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.2.0"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
@@ -4099,6 +4393,7 @@ function App() {
       case "reports": return React.createElement(ReportsPage, { shares: holdings, soldShareSnapshots });
       case "watchlist": return React.createElement(PulsePage, { holdings });
       case "settings": return React.createElement(SettingsPage, pageProps);
+      case "info": return React.createElement(InfoPage, null);
       default: return React.createElement(Dashboard, pageProps);
     }
   };
@@ -4110,6 +4405,7 @@ function App() {
     { key: "reports", label: "Reports", icon: Icons.chart },
     { key: "watchlist", label: "Pulse", icon: Icons.eye },
     { key: "settings", label: "Settings", icon: Icons.settings },
+    { key: "info", label: "Info", icon: Icons.info },
   ];
 
   // Desktop sidebar + content
