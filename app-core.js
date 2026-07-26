@@ -3349,7 +3349,7 @@ function StockScreener() {
         await new Promise(function(r) { setTimeout(r, 1000); });
         remain--;
       }
-      DF.clearProxyCooldowns();
+      DF.clearCache(); DF.clearProxyCooldowns();
       var recMap = {};
       var recIdx = 0;
       var recW = async function() {
