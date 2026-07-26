@@ -3341,48 +3341,6 @@ function StockScreener() {
       return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
     });
 
-    var doRecoveryPass = async function(label, waitMs, stocksToRecover) {
-      setProgress({ done: 0, total: stocksToRecover.length, current: label });
-      var remain = Math.ceil(waitMs / 1000);
-      while (remain > 0) {
-        setProgress({ done: 0, total: stocksToRecover.length, current: label + " (" + remain + "s)" });
-        await new Promise(function(r) { setTimeout(r, 1000); });
-        remain--;
-      }
-      DF.clearCache(); DF.clearProxyCooldowns();
-      var recMap = {};
-      var recIdx = 0;
-      var recW = async function() {
-        while (recIdx < stocksToRecover.length) {
-          var ri = recIdx++;
-          var rr = await processStock(stocksToRecover[ri].s);
-          recMap[stocksToRecover[ri].s.t] = rr;
-          setProgress({ done: Object.keys(recMap).length, total: stocksToRecover.length, current: rr.s.t.replace(".NS", "") });
-        }
-      };
-      var allW = [];
-      for (var rw = 0; rw < Math.min(POOL_SIZE, stocksToRecover.length); rw++) allW.push(recW());
-      await Promise.all(allW);
-      return recMap;
-    };
-
-    if (failedCount > total * 0.1) {
-      var recMap = await doRecoveryPass("Recovery pass 1/2 (60s cooldown)...", 60000, out.filter(function(r) { return r.failed; }));
-      out = out.map(function(r) { return recMap[r.s.t] || r; });
-      out.sort(function(a, b) {
-        if (a.failed && !b.failed) return 1; if (!a.failed && b.failed) return -1; return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
-      });
-      failedCount = out.filter(function(r) { return r.failed; }).length;
-      if (failedCount > total * 0.05) {
-        recMap = await doRecoveryPass("Recovery pass 2/2 (120s cooldown)...", 120000, out.filter(function(r) { return r.failed; }));
-        out = out.map(function(r) { return recMap[r.s.t] || r; });
-        out.sort(function(a, b) {
-          if (a.failed && !b.failed) return 1; if (!a.failed && b.failed) return -1; return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
-        });
-        failedCount = out.filter(function(r) { return r.failed; }).length;
-      }
-    }
-
     if (isPart) {
       var batchTickerSet = new Set(stocks.map(function(s) { return s.t; }));
       out = prevResults.filter(function(r) { return !batchTickerSet.has(r.s.t); }).concat(out);
@@ -3402,7 +3360,6 @@ function StockScreener() {
     setScanTime(now);
     setScanning(false);
     setProgress({ done: total, total: 0, current: "" });
-    if (!isPart && failedCount > 0) startBackgroundRetry(out.filter(function(r) { return r.failed; }).map(function(r) { return r.s; }));
   };
 
   var failedCount = results.filter(function(r) { return r.failed; }).length;
@@ -3411,6 +3368,7 @@ function StockScreener() {
     if (retryingFailed || !TI || !DF) return;
     var failed = results.filter(function(r) { return r.failed; });
     if (failed.length === 0) return;
+    stopBackgroundRetry();
     setRetryingFailed(true); setScanErr("");
 
     var runPass = async function(label, waitMs, stockObjs) {
@@ -3495,7 +3453,10 @@ function StockScreener() {
     setProgress({ done: 0, total: 0, current: "" });
     var recovered = prevFailedCount - stillFailed.length;
     if (stillFailed.length === 0) { setScanErr(""); }
-    else { setScanErr(recovered + " recovered. " + stillFailed.length + " of " + results.length + " stocks still unavailable."); }
+    else {
+      setScanErr(recovered + " recovered. " + stillFailed.length + " of " + results.length + " stocks still unavailable.");
+      startBackgroundRetry(stillFailed);
+    }
   };
 
   var toggleSort = function(key) {
@@ -3614,6 +3575,12 @@ function StockScreener() {
     ) : null,
     retryingFailed ? React.createElement("div", { style: { marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.15)", fontSize: 11, color: "#f0473f" } },
       "Retrying failed stocks (3 passes)..."
+    ) : null,
+    failedCount > 0 && !retryingFailed && !bgStatus.active ? React.createElement("div", { style: { marginBottom: 10, display: "flex", justifyContent: "center", gap: 8 } },
+      React.createElement("button", {
+        onClick: function() { startBackgroundRetry(results.filter(function(r) { return r.failed; }).map(function(r) { return r.s; })); },
+        style: { padding: "6px 16px", borderRadius: 6, fontSize: 11, fontWeight: 700, border: "1px solid var(--accent)", background: "rgba(32,196,106,.08)", color: "var(--accent)", cursor: "pointer", whiteSpace: "nowrap" }
+      }, "\u27f3 Background Fetch (" + failedCount + ")")
     ) : null,
     bgStatus.active ? React.createElement("div", { style: { marginBottom: 10, padding: "6px 12px", borderRadius: 8, background: "rgba(32,196,106,.06)", border: "1px solid rgba(32,196,106,.12)", fontSize: 10, color: "var(--text5)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 } },
       React.createElement("span", null, "\u27f3 Background: " + bgStatus.done + "/" + bgStatus.total + " stocks \u00b7 fetching " + bgStatus.current),
