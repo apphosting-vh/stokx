@@ -1,14 +1,14 @@
-/* ══════════════════════════════════════════════════════════════════════════
+﻿/* ══════════════════════════════════════════════════════════════════════════
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "1.0.0";
+window.__STOX_APP_VERSION = "1.0.1";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    UTILITIES
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const _inrFmt = {
   0: new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 0, maximumFractionDigits: 0 }),
   2: new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }),
@@ -40,7 +40,7 @@ const isTradingWeekday = () => {
   return !NSE_HOLIDAYS.has(istDate.toISOString().split("T")[0]);
 };
 
-/* ── XIRR for single-buy holdings (Newton–Raphson) ── */
+/* â”€â”€ XIRR for single-buy holdings (Newtonâ€“Raphson) â”€â”€ */
 function xirrSingleBuy(costBasis, currentVal, buyDateStr) {
   if (!buyDateStr || costBasis <= 0 || currentVal <= 0) return null;
   const buyD = new Date(buyDateStr + "T12:00:00");
@@ -54,7 +54,7 @@ function xirrSingleBuy(costBasis, currentVal, buyDateStr) {
   return isFinite(rate) ? rate * 100 : null;
 }
 
-/* ── XIRR for multi-cashflow (Newton–Raphson) ── */
+/* â”€â”€ XIRR for multi-cashflow (Newtonâ€“Raphson) â”€â”€ */
 const computeXIRR = (cashflows, dates, guess = 0.1) => {
   if (!cashflows || cashflows.length < 2) return null;
   if (dates[0] === dates[dates.length - 1]) return null;
@@ -75,7 +75,7 @@ const computeXIRR = (cashflows, dates, guess = 0.1) => {
   return Math.round(r * 10000) / 100;
 };
 
-/* ── Capital gains classification (Indian tax rules) ── */
+/* â”€â”€ Capital gains classification (Indian tax rules) â”€â”€ */
 function capitalGainsInfo(buyDateStr) {
   if (!buyDateStr) return null;
   const buyD = new Date(buyDateStr + "T12:00:00");
@@ -89,7 +89,7 @@ function capitalGainsInfo(buyDateStr) {
   return { daysHeld, isLT, cgType, taxRate, daysToLT };
 }
 
-/* ── Day change calc (placeholder — uses prevClose from prices) ── */
+/* â”€â”€ Day change calc (placeholder â€” uses prevClose from prices) â”€â”€ */
 function dayChangeInfo(currentPrice, prevClose) {
   if (!prevClose || !currentPrice || prevClose <= 0) return null;
   const abs = currentPrice - prevClose;
@@ -97,7 +97,7 @@ function dayChangeInfo(currentPrice, prevClose) {
   return { abs, pct: pctVal };
 }
 
-/* ── Indian Financial Year key (April–March) ── */
+/* â”€â”€ Indian Financial Year key (Aprilâ€“March) â”€â”€ */
 function getFYKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00");
   const yr = d.getFullYear();
@@ -106,7 +106,7 @@ function getFYKey(dateStr) {
   return "FY" + fyStart + "-" + String(fyStart + 1).slice(-2);
 }
 
-/* ── Persist snapshots to IDB settings store ── */
+/* â”€â”€ Persist snapshots to IDB settings store â”€â”€ */
 async function persistSnapshots(soldShareSnapshots) {
   await dbPut("settings", { key: "soldShareSnapshots", value: soldShareSnapshots });
 }
@@ -119,9 +119,9 @@ async function loadSnapshots() {
   } catch { return {}; }
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
-   DATA LAYER — LocalStorage / IndexedDB persistence
-   ══════════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   DATA LAYER â€” LocalStorage / IndexedDB persistence
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const DB_NAME = "stox_db";
 const DB_VER = 1;
 
@@ -200,9 +200,9 @@ async function dbDeleteSetting(key) {
   });
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
-   PRICE FETCHER — Yahoo Finance + Stooq for Indian stocks
-   ══════════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   PRICE FETCHER â€” Yahoo Finance + Stooq for Indian stocks
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const _fetchX = (url, opts = {}, ms = 5000) => {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), ms);
@@ -254,7 +254,7 @@ async function fetchMultiplePrices(tickers) {
   return results;
 }
 
-/* ── Historical daily prices fetcher (buyDate → today) ── */
+/* â”€â”€ Historical daily prices fetcher (buyDate â†’ today) â”€â”€ */
 const fetchHistoricalPrices = async (rawTicker, fromDate) => {
   const ticker = (rawTicker || "").trim().toUpperCase();
   if (!ticker || !fromDate) return null;
@@ -305,9 +305,9 @@ const fetchHistoricalPrices = async (rawTicker, fromDate) => {
   return Promise.race([_fetch(), capTimer]);
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
-   MARKET INDICES FETCHER — NSE India + Stooq commodities
-   ══════════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   MARKET INDICES FETCHER â€” NSE India + Stooq commodities
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const MARKET_INDEX_MAP = [
   { nseKey: "NIFTY 50", name: "Nifty 50", group: "Broad" },
   { nseKey: "NIFTY 100", name: "Nifty 100", group: "Broad" },
@@ -334,7 +334,7 @@ async function fetchMarketIndices() {
   const overallCap = new Promise(r => setTimeout(() => r(null), 18000));
 
   const _fetch = async () => {
-    /* ── NSE India API for all Indian indexes ── */
+    /* â”€â”€ NSE India API for all Indian indexes â”€â”€ */
     const nseUrl = "https://www.nseindia.com/api/allIndices";
     const nseProxies = [
       "https://corsproxy.io/?" + encodeURIComponent(nseUrl),
@@ -374,7 +374,7 @@ async function fetchMarketIndices() {
       }
     }
 
-    /* ── Commodities via Stooq ── */
+    /* â”€â”€ Commodities via Stooq â”€â”€ */
     const fetchStooq = async (item) => {
       const stooqUrl = "https://stooq.com/q/l/?s=" + encodeURIComponent(item.stooq) + "&f=sd2t2ohlcv&h&e=csv";
       const proxies = [
@@ -415,9 +415,9 @@ async function fetchMarketIndices() {
   return Promise.race([_fetch(), overallCap]).then(r => r || []);
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
-   OHLCV DATA FETCHER — for technical analysis
-   ══════════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   OHLCV DATA FETCHER â€” for technical analysis
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const Y_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
 
 async function fetchOHLCV(ticker, timeframe) {
@@ -473,14 +473,14 @@ async function fetchOHLCV(ticker, timeframe) {
   return null;
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    TECHNICAL INDICATORS ENGINE
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const TechIndicators = window.TechIndicators;
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    NIFTY 50 / SENSEX REFERENCE DATA
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const INDICES = [
   { name: "NIFTY 50", ticker: "^NSEI", exchange: "NSE" },
   { name: "SENSEX", ticker: "^BSESN", exchange: "BSE" },
@@ -522,23 +522,27 @@ const SECTORS = [
   "Metal & Mining", "Real Estate", "Media", "Chemicals", "Textiles"
 ];
 
-/* ══════════════════════════════════════════════════════════════════════════
-   ICONS — SVG icon helpers
-   ══════════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   ICONS â€” modern minimalistic SVG icons
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const Icons = {
   home: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
-    React.createElement("path", { d: "M4 10.5L12 3l8 7.5V20a1 1 0 0 1-1 1h-4v-5a1 1 0 0 0-1-1h-2a1 1 0 0 0-1 1v5H5a1 1 0 0 1-1-1V10.5z" })
+    React.createElement("path", { d: "M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" }),
+    React.createElement("polyline", { points: "9 22 9 12 15 12 15 22" })
   ),
   search: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("circle", { cx: 11, cy: 11, r: 7 }),
     React.createElement("line", { x1: 16.5, y1: 16.5, x2: 21, y2: 21 })
   ),
   chart: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
-    React.createElement("polyline", { points: "22 12 18 12 15 21 9 3 6 12 2 12" })
+    React.createElement("line", { x1: 3, y1: 20, x2: 21, y2: 20 }),
+    React.createElement("rect", { x: 5, y: 14, width: 3, height: 6, rx: 1 }),
+    React.createElement("rect", { x: 10.5, y: 9, width: 3, height: 11, rx: 1 }),
+    React.createElement("rect", { x: 16, y: 5, width: 3, height: 15, rx: 1 })
   ),
   briefcase: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
-    React.createElement("rect", { x: 2, y: 7, width: 20, height: 14, rx: 2 }),
-    React.createElement("path", { d: "M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" })
+    React.createElement("circle", { cx: 12, cy: 12, r: 8 }),
+    React.createElement("path", { d: "M12 12 L12 4 A8 8 0 0 1 18.93 16 Z", fill: "currentColor", fillOpacity: 0.2 })
   ),
   eye: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("path", { d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" }),
@@ -546,7 +550,7 @@ const Icons = {
   ),
   settings: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("circle", { cx: 12, cy: 12, r: 3 }),
-    React.createElement("path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" })
+    React.createElement("path", { d: "M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" })
   ),
   plus: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("line", { x1: 12, y1: 5, x2: 12, y2: 19 }),
@@ -565,15 +569,15 @@ const Icons = {
     React.createElement("path", { d: "M20.49 15a9 9 0 1 1-2.12-9.36L23 10" })
   ),
   sun: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
-    React.createElement("circle", { cx: 12, cy: 12, r: 4 }),
-    React.createElement("line", { x1: 12, y1: 2, x2: 12, y2: 5 }),
-    React.createElement("line", { x1: 12, y1: 19, x2: 12, y2: 22 }),
-    React.createElement("line", { x1: 4.93, y1: 4.93, x2: 7.05, y2: 7.05 }),
-    React.createElement("line", { x1: 16.95, y1: 16.95, x2: 19.07, y2: 19.07 }),
-    React.createElement("line", { x1: 2, y1: 12, x2: 5, y2: 12 }),
-    React.createElement("line", { x1: 19, y1: 12, x2: 22, y2: 12 }),
-    React.createElement("line", { x1: 4.93, y1: 19.07, x2: 7.05, y2: 16.95 }),
-    React.createElement("line", { x1: 16.95, y1: 7.05, x2: 19.07, y2: 4.93 })
+    React.createElement("circle", { cx: 12, cy: 12, r: 5 }),
+    React.createElement("line", { x1: 12, y1: 1, x2: 12, y2: 3 }),
+    React.createElement("line", { x1: 12, y1: 21, x2: 12, y2: 23 }),
+    React.createElement("line", { x1: 4.22, y1: 4.22, x2: 5.64, y2: 5.64 }),
+    React.createElement("line", { x1: 18.36, y1: 18.36, x2: 19.78, y2: 19.78 }),
+    React.createElement("line", { x1: 1, y1: 12, x2: 3, y2: 12 }),
+    React.createElement("line", { x1: 21, y1: 12, x2: 23, y2: 12 }),
+    React.createElement("line", { x1: 4.22, y1: 19.78, x2: 5.64, y2: 18.36 }),
+    React.createElement("line", { x1: 18.36, y1: 5.64, x2: 19.78, y2: 4.22 })
   ),
   moon: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("path", { d: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" })
@@ -604,7 +608,7 @@ const Icons = {
   ),
   edit: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("path", { d: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
-    React.createElement("path", { d: "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" })
+    React.createElement("path", { d: "M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" })
   ),
   clock: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("circle", { cx: 12, cy: 12, r: 10 }),
@@ -620,9 +624,9 @@ const Icons = {
   ),
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    TOAST SYSTEM
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 let _toastId = 0;
 let _toasts = [];
 let _setToasts = null;
@@ -653,9 +657,9 @@ function ToastHost() {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    COMPONENT: StatCard
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function StatCard({ label, value, sub, icon, color, className }) {
   return React.createElement("div", {
     className: "stx-card stx-statcard " + (className || ""),
@@ -670,9 +674,9 @@ function StatCard({ label, value, sub, icon, color, className }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    COMPONENT: SignalBadge
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const SIGNAL_COLORS = {
   bullish: { bg: "var(--profitbg)", border: "var(--profitborder)", text: "var(--profit)", label: "Bullish" },
   bearish: { bg: "var(--lossbg)", border: "var(--lossborder)", text: "var(--loss)", label: "Bearish" },
@@ -691,9 +695,9 @@ function SignalBadge(signal) {
   }, s.label);
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    COMPONENT: MiniSparkline
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function MiniSparkline({ data, width = 100, height = 32, color }) {
   if (!data || data.length < 2) return null;
   const min = Math.min(...data), max = Math.max(...data);
@@ -710,9 +714,9 @@ function MiniSparkline({ data, width = 100, height = 32, color }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
-   MarketTicker — live scrolling ticker for Indian indices + commodities
-   ══════════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   MarketTicker â€” live scrolling ticker for Indian indices + commodities
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const MarketTicker = React.memo(function MarketTicker() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -776,7 +780,7 @@ const MarketTicker = React.memo(function MarketTicker() {
     /* Header row */
     React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 7 } },
-        React.createElement("div", { style: { width: 3, height: 14, borderRadius: 2, background: "#16a34a", flexShrink: 0 } }),
+        React.createElement("div", { style: { width: 3, height: 14, borderRadius: 2, background: "#20c46a", flexShrink: 0 } }),
         React.createElement("span", { style: { fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: "var(--text5)" } }, "Market Indices"),
         loading && React.createElement("span", { style: { fontSize: 12, color: "var(--text6)" } }, "\u27f3")
       ),
@@ -786,13 +790,13 @@ const MarketTicker = React.memo(function MarketTicker() {
         ),
         React.createElement("button", {
           onClick: load, disabled: loading,
-          style: { fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(22,163,74,.3)", background: loading ? "var(--bg5)" : "rgba(22,163,74,.08)", color: "#16a34a", cursor: loading ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600, opacity: loading ? 0.5 : 1 }
+          style: { fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(22,163,74,.3)", background: loading ? "var(--bg5)" : "rgba(22,163,74,.08)", color: "#20c46a", cursor: loading ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600, opacity: loading ? 0.5 : 1 }
         }, loading ? "\u27f3 \u2026" : "\u27f3 Refresh")
       )
     ),
     /* Ticker strip */
     error && !data.length
-      ? React.createElement("div", { style: { padding: "12px 16px", borderRadius: 10, background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.2)", fontSize: 12, color: "#ef4444", textAlign: "center" } }, error)
+      ? React.createElement("div", { style: { padding: "12px 16px", borderRadius: 10, background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.2)", fontSize: 12, color: "#f0473f", textAlign: "center" } }, error)
       : React.createElement("div", { ref: scrollRef, style: {
           display: "flex", gap: 10, overflowX: "auto", overflowY: "hidden",
           paddingBottom: 6, scrollbarWidth: "thin",
@@ -800,7 +804,7 @@ const MarketTicker = React.memo(function MarketTicker() {
         }},
         data.map((item, idx) => {
           const isUp = item.change >= 0;
-          const col = isUp ? "#16a34a" : "#ef4444";
+          const col = isUp ? "#20c46a" : "#f0473f";
           const bgCol = isUp ? "rgba(22,163,74,.06)" : "rgba(239,68,68,.06)";
           const borderCol = isUp ? "rgba(22,163,74,.18)" : "rgba(239,68,68,.18)";
           const groupCol = item.group === "Commodity" ? "#b45309" : item.group === "Sector" ? "#6d28d9" : "#0e7490";
@@ -836,9 +840,9 @@ const MarketTicker = React.memo(function MarketTicker() {
   );
 });
 
-/* ══════════════════════════════════════════════════════════════════════════
-   MARKET NEWS PANEL — Marketaux API
-   ══════════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   MARKET NEWS PANEL â€” Marketaux API
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const MARKETAUX_KEY = "2DxOjtOp2p5Nu2hU21aYGPNEIX2dxmOj4oHJta6x";
 
 function MarketNewsPanel({ holdings }) {
@@ -924,7 +928,7 @@ function MarketNewsPanel({ holdings }) {
             React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, timeAgo(article.published_at)),
             entities.length > 0 && React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap", marginLeft: 4 } },
               entities.map((ent, ei) => {
-                const sentColor = ent.sentiment_score > 0.1 ? "#10b981" : ent.sentiment_score < -0.1 ? "#ef4444" : "var(--text6)";
+                const sentColor = ent.sentiment_score > 0.1 ? "#20c46a" : ent.sentiment_score < -0.1 ? "#f0473f" : "var(--text6)";
                 return React.createElement("span", {
                   key: ei,
                   style: { fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--bg5)", border: "1px solid var(--border2)", color: sentColor, letterSpacing: 0.3 }
@@ -980,25 +984,11 @@ function MarketNewsPanel({ holdings }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Dashboard
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
   const [loading, setLoading] = useState(false);
-
-  const totalInvested = useMemo(() => {
-    return holdings.reduce((s, h) => s + ((h.buyPrice || h.avgPrice || 0) * h.qty), 0);
-  }, [holdings]);
-
-  const totalCurrent = useMemo(() => {
-    return holdings.reduce((s, h) => {
-      const p = prices[h.ticker]?.price || h.currentPrice || h.buyPrice || h.avgPrice || 0;
-      return s + (p * h.qty);
-    }, 0);
-  }, [holdings, prices]);
-
-  const totalPnL = totalCurrent - totalInvested;
-  const totalPnLPct = totalInvested > 0 ? ((totalPnL / totalInvested) * 100) : 0;
   const todayStr = TODAY();
 
   return React.createElement("div", null,
@@ -1017,14 +1007,6 @@ function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
       }, React.createElement("span", { style: { display: "inline-block", animation: loading ? "screener-spin .8s linear infinite" : "none" } }, Icons.refresh(14)), loading ? "Refreshing..." : "Refresh")
     ),
 
-    // Stats row
-    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 14, marginBottom: 24 } },
-      React.createElement(StatCard, { label: "Total Invested", value: INR(totalInvested), color: "var(--info)" }),
-      React.createElement(StatCard, { label: "Current Value", value: INR(totalCurrent), color: "var(--accent)" }),
-      React.createElement(StatCard, { label: "Total P&L", value: INR(totalPnL), sub: (totalPnLPct >= 0 ? "+" : "") + totalPnLPct.toFixed(2) + "%", color: totalPnL >= 0 ? "var(--profit)" : "var(--loss)" }),
-      React.createElement(StatCard, { label: "Holdings", value: holdings.length.toString(), sub: watchlist.length + " in watchlist", color: "var(--warn)" })
-    ),
-
     // Market Indices
     React.createElement(MarketTicker),
 
@@ -1033,9 +1015,9 @@ function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Stock Analysis
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
   const [ticker, setTicker] = useState(initialTicker || "");
 
@@ -1072,121 +1054,178 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
 }
 
 function EntryScoreAnalysis({ entry, onBack }) {
-  const [expandedTF, setExpandedTF] = useState({});
+  const [activeTF, setActiveTF] = useState("daily");
+  const [catFilter, setCatFilter] = useState("all");
   const r = entry.result || {};
   const ind = entry.indicators || {};
   const price = entry.currentPrice || r.lastClose || 0;
 
+  const INDS = window.STOX_INDICATORS || [];
+  const CATS = window.STOX_CATEGORIES || [];
+  const _fmt = window.stoxFmt || function (v, d) { return v != null ? Number(v).toFixed(d != null ? d : 2) : "\u2014"; };
+  const _fmtVal = window.stoxFormatValue || function () { return "\u2014"; };
+
+  const TF_DEFS = [
+    { key: "weekly", label: "Weekly", weight: "30%" },
+    { key: "daily", label: "Daily", weight: "50%" },
+    { key: "hourly", label: "Hourly", weight: "20%" },
+  ];
+
+  const activeScore = r[activeTF] || null;
+  const activeInd = ind[activeTF] || null;
+
   const factorBar = (label, val, max, color) => {
     if (val == null || max == null) return null;
     const pct = max > 0 ? (Math.abs(val) / max * 100) : 0;
-    const barColor = val < 0 ? "#ef4444" : color;
+    const barColor = val < 0 ? "#f0473f" : color;
     return React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
       React.createElement("span", { style: { width: 90, fontSize: 11, fontWeight: 600, color: "var(--text4)", textAlign: "right", flexShrink: 0 } }, label),
       React.createElement("div", { style: { flex: 1, height: 6, borderRadius: 3, background: "var(--bg5)", overflow: "hidden" } },
         React.createElement("div", { style: { width: pct + "%", height: "100%", borderRadius: 3, background: barColor, transition: "width .3s" } })
       ),
-      React.createElement("span", { style: { width: 44, fontSize: 10, fontWeight: 700, color: val < 0 ? "#ef4444" : "var(--text4)", fontFamily: "var(--font-mono)", textAlign: "right" } }, (val >= 0 ? "+" : "") + val + "/" + max)
-    );
-  };
-
-  const indRow = (label, val, signal) => {
-    if (val == null) return null;
-    const sigColor = signal === "bullish" ? "#22c55e" : signal === "bearish" ? "#ef4444" : signal === "overbought" ? "#f59e0b" : signal === "oversold" ? "#3b82f6" : "var(--text5)";
-    return React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0" } },
-      React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, label),
-      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
-        React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--text3)", fontFamily: "var(--font-mono)" } }, typeof val === "number" ? val.toFixed(2) : "\u2014"),
-        signal && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: sigColor, padding: "1px 5px", borderRadius: 3, background: sigColor + "15" } }, signal)
-      )
+      React.createElement("span", { style: { width: 44, fontSize: 10, fontWeight: 700, color: val < 0 ? "#f0473f" : "var(--text4)", fontFamily: "var(--font-mono)", textAlign: "right" } }, (val >= 0 ? "+" : "") + val + "/" + max)
     );
   };
 
   const renderIndicators = (indData) => {
-    if (!indData) return React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", padding: "6px 0" } }, "No data available");
-    const lc = indData.lastClose;
-    return React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px" } },
-      indRow("RSI (14)", indData.rsi_14, indData.rsi_14 > 70 ? "overbought" : indData.rsi_14 < 30 ? "oversold" : "neutral"),
-      indRow("ADX (14)", indData.adx_14, indData.adx_14 > 25 ? "trending" : "ranging"),
-      indRow("MACD", indData.macd ? indData.macd.macd : null, indData.macd && indData.macd.histogram > 0 ? "bullish" : "bearish"),
-      indRow("MACD Signal", indData.macd ? indData.macd.signal : null),
-      indRow("EMA 9", indData.ema_9, lc && indData.ema_9 ? lc > indData.ema_9 ? "bullish" : "bearish" : null),
-      indRow("EMA 21", indData.ema_21, lc && indData.ema_21 ? lc > indData.ema_21 ? "bullish" : "bearish" : null),
-      indRow("EMA 50", indData.ema_50, lc && indData.ema_50 ? lc > indData.ema_50 ? "bullish" : "bearish" : null),
-      indRow("SMA 20", indData.sma_20, lc && indData.sma_20 ? lc > indData.sma_20 ? "bullish" : "bearish" : null),
-      indRow("SMA 50", indData.sma_50, lc && indData.sma_50 ? lc > indData.sma_50 ? "bullish" : "bearish" : null),
-      indRow("Supertrend", indData.supertrend, lc && indData.supertrend ? lc > indData.supertrend ? "bullish" : "bearish" : null),
-      indRow("ATR (14)", indData.atr_14),
-      indRow("CCI (20)", indData.cci_20, indData.cci_20 > 100 ? "overbought" : indData.cci_20 < -100 ? "oversold" : "neutral"),
-      indRow("MFI (14)", indData.mfi_14, indData.mfi_14 > 80 ? "overbought" : indData.mfi_14 < 20 ? "oversold" : "neutral"),
-      indRow("Stoch RSI K", indData.stochRSI ? indData.stochRSI.k : null, indData.stochRSI && indData.stochRSI.k > 80 ? "overbought" : indData.stochRSI && indData.stochRSI.k < 20 ? "oversold" : "neutral"),
-      indRow("BB Upper", indData.bb ? indData.bb.upper : null),
-      indRow("BB Lower", indData.bb ? indData.bb.lower : null),
-      indRow("OBV", indData.obv),
-      indRow("VWAP", indData.vwap),
-      indRow("ROC (12)", indData.roc_12, indData.roc_12 > 0 ? "bullish" : "bearish"),
-      indRow("PSAR", indData.psar, lc && indData.psar ? lc > indData.psar ? "bullish" : "bearish" : null),
-      indRow("WMA 20", indData.wma_20),
-      indRow("HMA 16", indData.hma_16),
-      indRow("KAMA 10", indData.kama_10),
-      indRow("CMF (20)", indData.cmf_20, indData.cmf_20 > 0 ? "bullish" : "bearish"),
-      indRow("TSI", indData.tsi, indData.tsi > 0 ? "bullish" : "bearish"),
-      indRow("STC", indData.stc, indData.stc > 0 ? "bullish" : "bearish"),
-      indRow("KVO", indData.kvo, indData.kvo > 0 ? "bullish" : "bearish"),
-      indRow("PVT", indData.pvt),
-      indRow("Chandelier Long", indData.chandelier ? indData.chandelier.long : null, lc && indData.chandelier && indData.chandelier.long ? lc > indData.chandelier.long ? "bullish" : "bearish" : null),
-      indRow("Chandelier Short", indData.chandelier ? indData.chandelier.short : null, lc && indData.chandelier && indData.chandelier.short ? lc > indData.chandelier.short ? "bullish" : "bearish" : null),
-      indRow("Choppiness", indData.choppiness, indData.choppiness != null ? indData.choppiness < 38.2 ? "trending" : indData.choppiness > 61.8 ? "ranging" : "neutral" : null),
-      indRow("Williams %R", indData.williamsR, indData.williamsR != null ? indData.williamsR > -20 ? "overbought" : indData.williamsR < -80 ? "oversold" : "neutral" : null),
-      indRow("Awesome Osc", indData.awesomeOsc, indData.awesomeOsc != null ? indData.awesomeOsc > 0 ? "bullish" : "bearish" : null),
-      indRow("Force Index", indData.forceIndex, indData.forceIndex != null ? indData.forceIndex > 0 ? "bullish" : "bearish" : null),
-      indRow("Aroon Up", indData.aroon ? indData.aroon.up : null),
-      indRow("Aroon Down", indData.aroon ? indData.aroon.down : null),
-      indRow("Aroon Osc", indData.aroon ? indData.aroon.osc : null, indData.aroon && indData.aroon.osc != null ? indData.aroon.osc > 50 ? "bullish" : indData.aroon.osc < -50 ? "bearish" : "neutral" : null),
-      indRow("Vortex +", indData.vortex ? indData.vortex.plus : null),
-      indRow("Vortex -", indData.vortex ? indData.vortex.minus : null, indData.vortex && indData.vortex.plus != null && indData.vortex.minus != null ? indData.vortex.plus > indData.vortex.minus ? "bullish" : "bearish" : null),
-      indRow("HA Trend", indData.heikinAshi ? indData.heikinAshi.trend : null, indData.heikinAshi ? indData.heikinAshi.trend : null),
-      indRow("52W %From High", indData.week52HL ? indData.week52HL.pctFromHigh : null, indData.week52HL ? indData.week52HL.pctFromHigh > -5 ? "bullish" : indData.week52HL.pctFromHigh > -15 ? "neutral" : "bearish" : null),
-      indRow("52W High", indData.week52HL ? indData.week52HL.high52w : null),
-      indRow("52W Low", indData.week52HL ? indData.week52HL.low52w : null)
-    );
-  };
+    if (!indData) return React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", padding: "6px 0" } }, "No indicator data available for this timeframe");
+    const signals = TechIndicators.interpret ? TechIndicators.interpret(indData) : {};
+    const filtered = catFilter === "all" ? INDS : INDS.filter(function (i) { return i.cat === catFilter; });
+    const catKeys = ["all"].concat(CATS);
 
-  const tfCard = (label, weight, score, tfKey) => {
-    const isExp = !!expandedTF[tfKey];
-    if (!score) return React.createElement("div", { key: tfKey, style: { padding: 12, borderRadius: 10, background: "var(--bg4)", textAlign: "center" } },
-      React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 2 } }, label + " (" + weight + ")"),
-      React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: "var(--text6)", fontFamily: "var(--font-heading)" } }, "N/A"),
-      React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, "No data")
-    );
-    return React.createElement("div", { key: tfKey, style: { borderRadius: 10, background: "var(--bg4)", border: "1px solid " + score.decision.color + "22", overflow: "hidden" } },
-      React.createElement("div", { onClick: () => setExpandedTF(prev => ({ ...prev, [tfKey]: !prev[tfKey] })), style: { padding: 12, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" } },
-        React.createElement("div", { style: { textAlign: "left" } },
-          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 2 } }, label + " (" + weight + ")"),
-          React.createElement("div", { style: { fontSize: 20, fontWeight: 900, color: score.decision.color, fontFamily: "var(--font-heading)", lineHeight: 1 } }, score.total)
-        ),
-        React.createElement("div", { style: { textAlign: "right" } },
-          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: score.decision.color } }, score.decision.label),
-          React.createElement("div", { style: { fontSize: 9, color: "var(--text5)" } }, isExp ? "\u25b4 Hide" : "\u25bc Details")
-        )
+    return React.createElement("div", null,
+      React.createElement("div", { style: { display: "flex", gap: 3, marginBottom: 10, flexWrap: "wrap" } },
+        catKeys.map(function (cat) {
+          var label = cat === "all" ? "All" : cat;
+          var count = cat === "all" ? INDS.length : INDS.filter(function (i) { return i.cat === cat; }).length;
+          var active = catFilter === cat;
+          return React.createElement("button", {
+            key: cat,
+            onClick: function () { setCatFilter(cat); },
+            style: {
+              padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: active ? 700 : 500,
+              border: "none", cursor: "pointer",
+              background: active ? "var(--accent)" : "var(--bg4)",
+              color: active ? "#fff" : "var(--text5)",
+              transition: "all .15s",
+            }
+          }, label + " (" + count + ")");
+        })
       ),
-      isExp && React.createElement("div", { style: { padding: "0 12px 12px" } },
-        React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 } },
-          factorBar("Trend", score.trendScore, score.trendMax, "#3b82f6"),
-          factorBar("Momentum", score.momentumScore, score.momentumMax, "#a855f7"),
-          factorBar("Volume", score.volumeScore, score.volumeMax, "#06b6d4"),
-          factorBar("Structure", score.structureScore, score.structureMax, "#ec4899")
-        ),
-        React.createElement("div", { style: { borderTop: "1px solid var(--border)", paddingTop: 8 } },
-          React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--text4)", marginBottom: 6 } }, "Technical Indicators"),
-          renderIndicators(ind[tfKey])
-        )
+      React.createElement("div", {
+        style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 6 }
+      },
+        filtered.map(function (def) {
+          var val = indData[def.key];
+          if (val === null || val === undefined) return null;
+          var sig = signals[def.key] || null;
+          var sigStyle = sig ? SIGNAL_COLORS[sig] || SIGNAL_COLORS.neutral : null;
+
+          var cardBg = "var(--bg4)";
+          var cardBorderLeft = "none";
+          if (sig === "bullish") { cardBg = "rgba(22,163,74,.06)"; cardBorderLeft = "3px solid #20c46a"; }
+          else if (sig === "bearish") { cardBg = "rgba(239,68,68,.06)"; cardBorderLeft = "3px solid #f0473f"; }
+          else if (sig === "overbought") { cardBg = "rgba(234,88,12,.05)"; cardBorderLeft = "3px solid #ea580c"; }
+          else if (sig === "oversold") { cardBg = "rgba(37,99,235,.05)"; cardBorderLeft = "3px solid #2563eb"; }
+          else if (sig === "trending") { cardBg = "rgba(168,85,247,.05)"; cardBorderLeft = "3px solid #a855f7"; }
+          else if (sig === "ranging") { cardBg = "rgba(107,114,128,.04)"; cardBorderLeft = "3px solid #6b7280"; }
+
+          return React.createElement("div", {
+            key: def.key,
+            style: {
+              padding: "8px 10px", borderRadius: 8,
+              background: cardBg, border: "1px solid var(--border)", borderLeft: cardBorderLeft,
+              display: "flex", flexDirection: "column", gap: 2,
+              transition: "background .3s, border-color .3s",
+            }
+          },
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.3 } }, def.name),
+              sigStyle && sig !== "neutral" && React.createElement("span", {
+                style: {
+                  fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 6,
+                  background: sigStyle.bg, border: "1px solid " + sigStyle.border, color: sigStyle.text,
+                  textTransform: "uppercase",
+                }
+              }, sigStyle.label)
+            ),
+            React.createElement("div", { style: { fontSize: 14, fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--text)" } }, _fmtVal(def, val)),
+            def.type === "macd" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "MACD: " + _fmt(val.macd, 4)),
+              React.createElement("span", null, "Sig: " + _fmt(val.signal, 4)),
+              React.createElement("span", { style: { color: val.histogram >= 0 ? "#20c46a" : "#f0473f" } },
+                "Hist: " + _fmt(val.histogram, 4))
+            ),
+            def.type === "bands" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "U: " + _fmt(val.upper)),
+              React.createElement("span", null, "M: " + _fmt(val.middle)),
+              React.createElement("span", null, "L: " + _fmt(val.lower))
+            ),
+            def.type === "stoch" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "%K: " + _fmt(val.k)),
+              React.createElement("span", null, "%D: " + _fmt(val.d))
+            ),
+            def.type === "ichimoku" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 6, flexWrap: "wrap" }
+            },
+              React.createElement("span", null, "T: " + _fmt(val.tenkan)),
+              React.createElement("span", null, "K: " + _fmt(val.kijun)),
+              React.createElement("span", null, "SA: " + _fmt(val.senkouA)),
+              React.createElement("span", null, "SB: " + _fmt(val.senkouB))
+            ),
+            def.type === "chandelier" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "L: " + _fmt(val.long)),
+              React.createElement("span", null, "S: " + _fmt(val.short))
+            ),
+            def.type === "heikinAshi" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 6 }
+            },
+              React.createElement("span", null, "O: " + _fmt(val.open)),
+              React.createElement("span", null, "H: " + _fmt(val.high)),
+              React.createElement("span", null, "L: " + _fmt(val.low)),
+              React.createElement("span", null, "C: " + _fmt(val.close))
+            ),
+            def.type === "aroon" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "Up: " + _fmt(val.up)),
+              React.createElement("span", null, "Dn: " + _fmt(val.down)),
+              React.createElement("span", { style: { color: val.osc > 0 ? "#20c46a" : "#f0473f" } }, "Osc: " + _fmt(val.osc))
+            ),
+            def.type === "vortex" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", { style: { color: "#20c46a" } }, "VI+: " + _fmt(val.plus)),
+              React.createElement("span", { style: { color: "#f0473f" } }, "VI-: " + _fmt(val.minus))
+            ),
+            def.type === "volumeProfile" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "POC: " + _fmt(val.poc)),
+              val.valueAreaHigh && React.createElement("span", null, "VAH: " + _fmt(val.valueAreaHigh)),
+              val.valueAreaLow && React.createElement("span", null, "VAL: " + _fmt(val.valueAreaLow))
+            ),
+            def.type === "rs" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
+            },
+              React.createElement("span", null, "RS: " + _fmt(val.rs, 4)),
+              val.mansfield != null && React.createElement("span", { style: { color: val.mansfield > 0 ? "#20c46a" : "#f0473f" } }, "Mans: " + _fmt(val.mansfield, 2) + "%")
+            )
+          );
+        })
       )
     );
   };
 
   return React.createElement("div", null,
-    // Header
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 } },
       React.createElement("div", null,
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 } },
@@ -1200,8 +1239,6 @@ function EntryScoreAnalysis({ entry, onBack }) {
         React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, entry.ticker)
       )
     ),
-
-    // Price + Final Score header
     React.createElement("div", { className: "stx-card", style: { marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 2 } }, "Current Price"),
@@ -1212,8 +1249,6 @@ function EntryScoreAnalysis({ entry, onBack }) {
         React.createElement("div", { style: { fontSize: 36, fontWeight: 900, color: r.decision ? r.decision.color : "var(--text6)", fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore != null ? r.finalScore : "\u2014")
       )
     ),
-
-    // Decision badge + position
     r.decision && React.createElement("div", { className: "stx-card", style: { marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
         React.createElement("div", { style: { padding: "6px 14px", borderRadius: 8, background: r.decision.color + "18", border: "1px solid " + r.decision.color + "33" } },
@@ -1224,20 +1259,47 @@ function EntryScoreAnalysis({ entry, onBack }) {
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
         React.createElement("div", { style: { fontSize: 9, color: "var(--text5)", textAlign: "right" } },
           "Base: ", React.createElement("span", { style: { fontWeight: 700, color: "var(--text3)" } }, r.baseScore),
-          " \u00b7 Pen: ", React.createElement("span", { style: { fontWeight: 700, color: r.penalties < 0 ? "#ef4444" : "var(--text3)" } }, r.penalties),
-          " \u00b7 Bonus: ", React.createElement("span", { style: { fontWeight: 700, color: r.bonuses > 0 ? "#22c55e" : "var(--text3)" } }, r.bonuses)
+          " \u00b7 Pen: ", React.createElement("span", { style: { fontWeight: 700, color: r.penalties < 0 ? "#f0473f" : "var(--text3)" } }, r.penalties),
+          " \u00b7 Bonus: ", React.createElement("span", { style: { fontWeight: 700, color: r.bonuses > 0 ? "#20c46a" : "var(--text3)" } }, r.bonuses)
         )
       )
     ),
-
-    // 3-column timeframe cards
-    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 } },
-      tfCard("Weekly", "30%", r.weekly, "weekly"),
-      tfCard("Daily", "50%", r.daily, "daily"),
-      tfCard("Hourly", "20%", r.hourly, "hourly")
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
+      React.createElement("div", { style: { display: "flex", gap: 2, background: "var(--bg4)", borderRadius: 8, padding: 3, marginBottom: 14 } },
+        TF_DEFS.map(function (tf) {
+          var score = r[tf.key];
+          var isActive = activeTF === tf.key;
+          return React.createElement("button", {
+            key: tf.key,
+            onClick: function () { setActiveTF(tf.key); setCatFilter("all"); },
+            style: {
+              flex: 1, padding: "8px 12px", borderRadius: 6, fontSize: 11, fontWeight: isActive ? 700 : 500,
+              border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+              background: isActive ? "var(--accent)" : "transparent",
+              color: isActive ? "#fff" : "var(--text5)",
+              transition: "all .15s",
+            }
+          },
+            React.createElement("span", null, tf.label + " (" + tf.weight + ")"),
+            score ? React.createElement("span", { style: { fontSize: 14, fontWeight: 900, fontFamily: "var(--font-heading)", color: isActive ? "#fff" : score.decision.color, lineHeight: 1 } }, score.total) : React.createElement("span", { style: { fontSize: 10 } }, "N/A"),
+            score && React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: isActive ? "rgba(255,255,255,.8)" : score.decision.color } }, score.decision.label)
+          );
+        })
+      ),
+      activeScore && React.createElement("div", null,
+        React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, marginBottom: 14 } },
+          factorBar("Trend", activeScore.trendScore, activeScore.trendMax, "#4a8fe0"),
+          factorBar("Momentum", activeScore.momentumScore, activeScore.momentumMax, "#a855f7"),
+          factorBar("Volume", activeScore.volumeScore, activeScore.volumeMax, "#06b6d4"),
+          factorBar("Structure", activeScore.structureScore, activeScore.structureMax, "#ec4899")
+        ),
+        React.createElement("div", { style: { borderTop: "1px solid var(--border)", paddingTop: 10 } },
+          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text4)", marginBottom: 8 } }, "Technical Indicators"),
+          renderIndicators(activeInd)
+        )
+      ),
+      !activeScore && React.createElement("div", { style: { textAlign: "center", padding: 16, color: "var(--text6)", fontSize: 11 } }, "No score data for " + activeTF)
     ),
-
-    // Penalties & Bonuses
     r.hardFilters && r.hardFilters.length > 0 && React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
       React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text3)", marginBottom: 8 } }, "Penalties & Bonuses"),
       r.hardFilters.map((f, i) => {
@@ -1247,26 +1309,24 @@ function EntryScoreAnalysis({ entry, onBack }) {
         var label = valStr ? f.replace(valStr, "").replace(/\s*\u2014\s*/, " \u2014 ").trim() : f;
         return React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "5px 0", borderBottom: "1px solid var(--border)" } },
           React.createElement("span", { style: { color: "var(--text3)", fontSize: 12, flex: 1 } }, isBonus ? "\u2713 " + label : "\u26a0 " + label),
-          valStr && React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: isBonus ? "#22c55e" : "#ef4444", background: isBonus ? "rgba(34,197,94,.08)" : "rgba(239,68,68,.08)", padding: "2px 8px", borderRadius: 4, fontFamily: "var(--font-mono)" } }, valStr)
+          valStr && React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: isBonus ? "#20c46a" : "#f0473f", background: isBonus ? "rgba(34,197,94,.08)" : "rgba(239,68,68,.08)", padding: "2px 8px", borderRadius: 4, fontFamily: "var(--font-mono)" } }, valStr)
         );
       })
     ),
-
-    // Added date
     React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", textAlign: "center", padding: "8px 0" } },
       "Added " + new Date(entry.addedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
     )
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    HOLDING VALUE HISTORY CHART
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const HoldingValueChart = ({ pts, qty, buyPrice, color, gradId }) => {
   const [hoverIdx, setHoverIdx] = React.useState(null);
   const svgRef = React.useRef(null);
   if (!pts || pts.length < 2) return null;
-  color = color || "#10b981";
+  color = color || "#20c46a";
   gradId = gradId || "hvh0";
   const INRshort = v => {
     if (v >= 10000000) return "\u20b9" + (v / 10000000).toFixed(2) + "Cr";
@@ -1327,12 +1387,12 @@ const HoldingValueChart = ({ pts, qty, buyPrice, color, gradId }) => {
   },
     React.createElement("defs", null,
       React.createElement("linearGradient", { id: greenGradId, x1: "0", y1: "0", x2: "0", y2: "1" },
-        React.createElement("stop", { offset: "0%", stopColor: "#10b981", stopOpacity: .28 }),
-        React.createElement("stop", { offset: "100%", stopColor: "#10b981", stopOpacity: .02 })
+        React.createElement("stop", { offset: "0%", stopColor: "#20c46a", stopOpacity: .28 }),
+        React.createElement("stop", { offset: "100%", stopColor: "#20c46a", stopOpacity: .02 })
       ),
       React.createElement("linearGradient", { id: redGradId, x1: "0", y1: "0", x2: "0", y2: "1" },
-        React.createElement("stop", { offset: "0%", stopColor: "#ef4444", stopOpacity: .28 }),
-        React.createElement("stop", { offset: "100%", stopColor: "#ef4444", stopOpacity: .02 })
+        React.createElement("stop", { offset: "0%", stopColor: "#f0473f", stopOpacity: .28 }),
+        React.createElement("stop", { offset: "100%", stopColor: "#f0473f", stopOpacity: .02 })
       ),
       React.createElement("clipPath", { id: clipAboveId },
         React.createElement("rect", { x: 0, y: 0, width: W, height: yCostBasis })
@@ -1348,16 +1408,16 @@ const HoldingValueChart = ({ pts, qty, buyPrice, color, gradId }) => {
         React.createElement("text", { x: padL - 10, y: gy + 7, textAnchor: "end", fill: "var(--text5)", fontSize: 19, fontWeight: 500 }, INRshort(v))
       );
     }),
-    React.createElement("line", { x1: padL, y1: yCostBasis, x2: W - padR, y2: yCostBasis, stroke: "#f59e0b", strokeWidth: 2.8, strokeDasharray: "12,8", opacity: .8 }),
-    React.createElement("text", { x: W - padR + 6, y: yCostBasis + 7, fill: "#f59e0b", fontSize: 15, fontWeight: 700, textAnchor: "start" }, "Cost"),
+    React.createElement("line", { x1: padL, y1: yCostBasis, x2: W - padR, y2: yCostBasis, stroke: "#e0a527", strokeWidth: 2.8, strokeDasharray: "12,8", opacity: .8 }),
+    React.createElement("text", { x: W - padR + 6, y: yCostBasis + 7, fill: "#e0a527", fontSize: 15, fontWeight: 700, textAnchor: "start" }, "Cost"),
     React.createElement("polygon", { points: polyFill, fill: "url(#" + greenGradId + ")", clipPath: "url(#" + clipAboveId + ")" }),
     React.createElement("polygon", { points: polyFill, fill: "url(#" + redGradId + ")", clipPath: "url(#" + clipBelowId + ")" }),
-    React.createElement("polyline", { points: ptStr, fill: "none", stroke: pts[pts.length - 1].value >= costBasis ? "#10b981" : "#ef4444", strokeWidth: 4.4, strokeLinejoin: "round", strokeLinecap: "round" }),
+    React.createElement("polyline", { points: ptStr, fill: "none", stroke: pts[pts.length - 1].value >= costBasis ? "#20c46a" : "#f0473f", strokeWidth: 4.4, strokeLinejoin: "round", strokeLinecap: "round" }),
     React.createElement("line", { x1: padL, y1: padT + chartH, x2: W - padR, y2: padT + chartH, stroke: "var(--border)", strokeWidth: 2 }),
     (() => {
       const dotR = pts.length <= 20 ? 4.8 : pts.length <= 40 ? 3.2 : pts.length <= 70 ? 2.2 : 0;
       if (dotR === 0) return null;
-      return pts.map((d, i) => i === hoverIdx ? null : React.createElement("circle", { key: "d" + i, cx: padL + i * xStep, cy: yFn(d.value), r: dotR, fill: d.value >= costBasis ? "#10b981" : "#ef4444", opacity: .6 }));
+      return pts.map((d, i) => i === hoverIdx ? null : React.createElement("circle", { key: "d" + i, cx: padL + i * xStep, cy: yFn(d.value), r: dotR, fill: d.value >= costBasis ? "#20c46a" : "#f0473f", opacity: .6 }));
     })(),
     pts.map((d, i) => {
       const isStrideHit = i % stride === 0;
@@ -1375,11 +1435,11 @@ const HoldingValueChart = ({ pts, qty, buyPrice, color, gradId }) => {
       React.createElement("rect", { x: tipX, y: tipY, width: tipW, height: 8, rx: 16, fill: color }),
       React.createElement("rect", { x: tipX, y: tipY + 4, width: tipW, height: 8, fill: color }),
       React.createElement("text", { x: tipX + 24, y: tipY + 40, fill: "var(--text4)", fontSize: 19, fontWeight: 600, letterSpacing: .3 }, hp.date),
-      React.createElement("text", { x: tipX + 24, y: tipY + 84, fill: color, fontSize: 30, fontWeight: 800, fontFamily: "'Sora',sans-serif" }, INR(hp.value)),
+      React.createElement("text", { x: tipX + 24, y: tipY + 84, fill: color, fontSize: 30, fontWeight: 800, fontFamily: "'Manrope',sans-serif" }, INR(hp.value)),
       (() => {
         const diff = hp.value - costBasis;
         const diffPct = costBasis > 0 ? ((diff / costBasis) * 100).toFixed(2) : "0.00";
-        const col = diff >= 0 ? "#10b981" : "#ef4444";
+        const col = diff >= 0 ? "#20c46a" : "#f0473f";
         const sign = diff >= 0 ? "\u25b2 +" : "\u25bc ";
         return React.createElement("text", { x: tipX + 24, y: tipY + 122, fill: col, fontSize: 18, fontWeight: 600 }, sign + INR(Math.abs(diff)) + " (" + Math.abs(diffPct) + "%)");
       })()
@@ -1387,10 +1447,10 @@ const HoldingValueChart = ({ pts, qty, buyPrice, color, gradId }) => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    HOLDING HISTORY PANEL
-   Fetches daily closing prices from buyDate → today, renders chart
-   ══════════════════════════════════════════════════════════════════════════ */
+   Fetches daily closing prices from buyDate â†’ today, renders chart
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const HoldingHistoryPanel = ({ h, prices }) => {
   const [histLoading, setHistLoading] = React.useState(false);
   const [histPts, setHistPts] = React.useState(null);
@@ -1431,7 +1491,7 @@ const HoldingHistoryPanel = ({ h, prices }) => {
     const oldestVal = chartPts[0].value;
     const overallChg = latestVal - oldestVal;
     const overallChgPct = oldestVal > 0 ? ((overallChg / oldestVal) * 100).toFixed(2) : "0.00";
-    const chgCol = overallChg >= 0 ? "#10b981" : "#ef4444";
+    const chgCol = overallChg >= 0 ? "#20c46a" : "#f0473f";
     return React.createElement("div", { style: { marginTop: 20, marginBottom: 6, background: "var(--bg4)", borderRadius: 14, padding: "20px 20px 14px", border: "1px solid var(--border2)" } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 } },
         React.createElement("span", { style: { fontSize: 14, fontWeight: 700, color: "var(--text4)", textTransform: "uppercase", letterSpacing: .5 } }, "Holding Value History"),
@@ -1448,15 +1508,15 @@ const HoldingHistoryPanel = ({ h, prices }) => {
       ),
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 16, marginBottom: 8, fontSize: 12, color: "var(--text6)" } },
         React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 5 } },
-          React.createElement("span", { style: { display: "inline-block", width: 24, height: 3, background: isGain ? "#10b981" : "#ef4444", borderRadius: 2, verticalAlign: "middle" } }),
+          React.createElement("span", { style: { display: "inline-block", width: 24, height: 3, background: isGain ? "#20c46a" : "#f0473f", borderRadius: 2, verticalAlign: "middle" } }),
           "Holding value"
         ),
         React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 5 } },
-          React.createElement("span", { style: { display: "inline-block", width: 24, height: 0, borderTop: "3px dashed #f59e0b", verticalAlign: "middle" } }),
+          React.createElement("span", { style: { display: "inline-block", width: 24, height: 0, borderTop: "3px dashed #e0a527", verticalAlign: "middle" } }),
           "Cost basis (" + INR(costBasisVal) + ")"
         )
       ),
-      React.createElement(HoldingValueChart, { pts: chartPts, qty: h.qty, buyPrice: h.buyPrice || h.avgPrice || 0, color: isGain ? "#10b981" : "#ef4444", gradId: safeId })
+      React.createElement(HoldingValueChart, { pts: chartPts, qty: h.qty, buyPrice: h.buyPrice || h.avgPrice || 0, color: isGain ? "#20c46a" : "#f0473f", gradId: safeId })
     );
   }
 
@@ -1464,12 +1524,12 @@ const HoldingHistoryPanel = ({ h, prices }) => {
     return React.createElement("div", { style: {
       marginTop: 12, padding: "10px 14px", borderRadius: 9, fontSize: 12,
       background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.18)",
-      color: "#ef4444", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap"
+      color: "#f0473f", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap"
     }},
       React.createElement("span", { style: { flex: 1 } }, "\u26a0 Could not fetch price history for " + h.ticker + ". Check connection or try again."),
       React.createElement("button", {
         onClick: () => { setHistPts(null); setRefreshKey(k => k + 1); },
-        style: { display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 11px", borderRadius: 7, border: "1px solid rgba(239,68,68,.3)", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer", fontSize: 11, fontWeight: 600 }
+        style: { display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 11px", borderRadius: 7, border: "1px solid rgba(239,68,68,.3)", background: "rgba(239,68,68,.08)", color: "#f0473f", cursor: "pointer", fontSize: 11, fontWeight: 600 }
       }, "\u21bb Retry")
     );
   }
@@ -1477,9 +1537,9 @@ const HoldingHistoryPanel = ({ h, prices }) => {
   return null;
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
-   SNAPSHOT CHART PANEL (for Trade History — uses saved chartPts or fetches)
-   ══════════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   SNAPSHOT CHART PANEL (for Trade History â€” uses saved chartPts or fetches)
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const SnapshotChartPanel = ({ sn }) => {
   const [loading, setLoading] = React.useState(false);
   const [histPts, setHistPts] = React.useState(sn.chartPts && sn.chartPts.length >= 2 ? sn.chartPts : null);
@@ -1525,7 +1585,7 @@ const SnapshotChartPanel = ({ sn }) => {
   const oldestVal = chartPts[0].value;
   const overallChg = latestVal - oldestVal;
   const overallChgPct = oldestVal > 0 ? ((overallChg / oldestVal) * 100).toFixed(2) : "0.00";
-  const chgCol = overallChg >= 0 ? "#10b981" : "#ef4444";
+  const chgCol = overallChg >= 0 ? "#20c46a" : "#f0473f";
 
   return React.createElement("div", { style: { marginTop: 12, background: "var(--bg5)", borderRadius: 10, padding: "14px 14px 10px", border: "1px solid var(--border2)" } },
     React.createElement("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 6 } },
@@ -1535,21 +1595,21 @@ const SnapshotChartPanel = ({ sn }) => {
     ),
     React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 4, fontSize: 10, color: "var(--text6)" } },
       React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 4 } },
-        React.createElement("span", { style: { display: "inline-block", width: 16, height: 2, background: isGain ? "#10b981" : "#ef4444", borderRadius: 1, verticalAlign: "middle" } }),
+        React.createElement("span", { style: { display: "inline-block", width: 16, height: 2, background: isGain ? "#20c46a" : "#f0473f", borderRadius: 1, verticalAlign: "middle" } }),
         "Value"
       ),
       React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 4 } },
-        React.createElement("span", { style: { display: "inline-block", width: 16, height: 0, borderTop: "2px dashed #f59e0b", verticalAlign: "middle" } }),
+        React.createElement("span", { style: { display: "inline-block", width: 16, height: 0, borderTop: "2px dashed #e0a527", verticalAlign: "middle" } }),
         "Cost"
       )
     ),
-    React.createElement(HoldingValueChart, { pts: chartPts, qty: sn.qty, buyPrice: sn.buyPrice, color: isGain ? "#10b981" : "#ef4444", gradId: safeId })
+    React.createElement(HoldingValueChart, { pts: chartPts, qty: sn.qty, buyPrice: sn.buyPrice, color: isGain ? "#20c46a" : "#f0473f", gradId: safeId })
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Portfolio Management
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, refreshPrices, setSoldShareSnapshots }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editShare, setEditShare] = useState(null);
@@ -1620,7 +1680,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
   const f = form; /* shorthand */
 
   return React.createElement("div", null,
-    /* ── Inline analysis view ── */
+    /* â”€â”€ Inline analysis view â”€â”€ */
     analyzingTicker && React.createElement(StockAnalysis, {
       ticker: analyzingTicker,
       prices,
@@ -1628,10 +1688,10 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       onBack: () => setAnalyzingTicker(null)
     }),
 
-    /* ── Portfolio view (hidden when analyzing) ── */
+    /* â”€â”€ Portfolio view (hidden when analyzing) â”€â”€ */
     !analyzingTicker && React.createElement(React.Fragment, null,
 
-    /* ── Header ── */
+    /* â”€â”€ Header â”€â”€ */
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--accent)", letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 4 } }, "PORTFOLIO"),
@@ -1649,7 +1709,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       )
     ),
 
-    /* ── Summary stats row ── */
+    /* â”€â”€ Summary stats row â”€â”€ */
     holdings.length > 0 && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12, marginBottom: 20 } },
       React.createElement(StatCard, {
         label: "Total Invested",
@@ -1687,7 +1747,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       })
     ),
 
-    /* ── Add Share Modal ── */
+    /* â”€â”€ Add Share Modal â”€â”€ */
     showAdd && React.createElement("div", { className: "modal-bd", onClick: (e) => { if (e.target === e.currentTarget) { setShowAdd(false); resetForm(); } } },
       React.createElement("div", { className: "stx-card stx-fu", style: { maxWidth: 520, margin: "40px auto", width: "92vw" } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
@@ -1695,7 +1755,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           React.createElement("button", { onClick: () => { setShowAdd(false); resetForm(); }, style: { background: "transparent", border: "none", color: "var(--text5)", cursor: "pointer", fontSize: 20 } }, "\u00d7")
         ),
 
-        /* ── Mode toggle: Active holding vs Past trade ── */
+        /* â”€â”€ Mode toggle: Active holding vs Past trade â”€â”€ */
         React.createElement("div", { style: { display: "flex", borderRadius: 9, overflow: "hidden", border: "1px solid var(--border2)", marginBottom: 16 } },
           React.createElement("button", {
             onClick: () => setMode("active"),
@@ -1707,7 +1767,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           }, Icons.clock(12), " Past Trade (Sold)")
         ),
 
-        /* ── Common fields ── */
+        /* â”€â”€ Common fields â”€â”€ */
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
           React.createElement("div", null,
             React.createElement("label", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", textTransform: "uppercase", display: "block", marginBottom: 4 } }, "Company Name"),
@@ -1727,7 +1787,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           )
         ),
 
-        /* ── Active holding: Acquisition date + current price ── */
+        /* â”€â”€ Active holding: Acquisition date + current price â”€â”€ */
         mode === "active" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 } },
           React.createElement("div", null,
             React.createElement("label", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", textTransform: "uppercase", display: "block", marginBottom: 4 } }, "Date of Acquisition"),
@@ -1739,7 +1799,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           )
         ),
 
-        /* ── Past trade: sell date + sell price ── */
+        /* â”€â”€ Past trade: sell date + sell price â”€â”€ */
         mode === "past" && React.createElement(React.Fragment, null,
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 } },
             React.createElement("div", null,
@@ -1770,7 +1830,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           })()
         ),
 
-        /* ── Extra fields ── */
+        /* â”€â”€ Extra fields â”€â”€ */
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 } },
           React.createElement("div", null,
             React.createElement("label", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", textTransform: "uppercase", display: "block", marginBottom: 4 } }, "Sector"),
@@ -1792,7 +1852,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           )
         ),
 
-        /* ── Action buttons ── */
+        /* â”€â”€ Action buttons â”€â”€ */
         React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 16 } },
           React.createElement("button", { className: "stx-btn stx-btn-primary", style: { flex: 1 }, onClick: handleAdd }, mode === "active" ? "Add Share" : "Save to Previous Trades"),
           React.createElement("button", { className: "stx-btn stx-btn-ghost", onClick: () => { setShowAdd(false); resetForm(); } }, "Cancel")
@@ -1800,7 +1860,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       )
     ),
 
-    /* ── Edit Share Modal ── */
+    /* â”€â”€ Edit Share Modal â”€â”€ */
     editShare && React.createElement("div", { className: "modal-bd", onClick: (e) => { if (e.target === e.currentTarget) setEditShare(null); } },
       React.createElement("div", { className: "stx-card stx-fu", style: { maxWidth: 520, margin: "40px auto", width: "92vw" } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
@@ -1863,7 +1923,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       )
     ),
 
-    /* ── Holdings card grid ── */
+    /* â”€â”€ Holdings card grid â”€â”€ */
     holdings.length > 0
       ? React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))", gap: 16 } },
           holdings.map((h) => {
@@ -1881,7 +1941,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
 
             return React.createElement("div", { key: h.id, className: "stx-card", style: { animation: "stxFadeIn .35s ease both" } },
 
-              /* ── Header: company + ticker + market value ── */
+              /* â”€â”€ Header: company + ticker + market value â”€â”€ */
               React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 } },
                 React.createElement("div", null,
                   React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", marginBottom: 4, lineHeight: 1.3 } }, h.company || h.ticker),
@@ -1897,7 +1957,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 )
               ),
 
-              /* ── Buy price vs Current price ── */
+              /* â”€â”€ Buy price vs Current price â”€â”€ */
               React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, borderRadius: 9, overflow: "hidden", marginBottom: 10, border: "1px solid var(--border)" } },
                 React.createElement("div", { style: { padding: "9px 12px", background: "var(--bg5)" } },
                   React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 } }, "Buy Price"),
@@ -1909,7 +1969,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 )
               ),
 
-              /* ── P&L box ── */
+              /* â”€â”€ P&L box â”€â”€ */
               React.createElement("div", { style: {
                 padding: "10px 13px", borderRadius: 9, marginBottom: 10,
                 background: isGain ? "var(--profitbg)" : "var(--lossbg)",
@@ -1932,7 +1992,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 )
               ),
 
-              /* ── Capital Gains classification ── */
+              /* â”€â”€ Capital Gains classification â”€â”€ */
               cg && React.createElement("div", { style: {
                 display: "flex", alignItems: "center", justifyContent: "space-between",
                 padding: "6px 10px", borderRadius: 7, marginBottom: 8,
@@ -1947,16 +2007,16 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 cg.isLT && pnl > 0 && React.createElement("span", { style: { fontSize: 10, color: "var(--profit)", fontWeight: 600 } }, "LTCG: " + INR(Math.round(pnl)))
               ),
 
-              /* ── Entry score badge ── */
+              /* â”€â”€ Entry score badge â”€â”€ */
               h.entryScore != null && h.entryScore > 0 && React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 8 } },
                 React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, "Entry Score:"),
                 React.createElement("span", { style: { fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: h.entryScore >= 70 ? "var(--profitbg)" : h.entryScore >= 40 ? "var(--warnbg)" : "var(--lossbg)", color: h.entryScore >= 70 ? "var(--profit)" : h.entryScore >= 40 ? "var(--warn)" : "var(--loss)", border: "1px solid " + (h.entryScore >= 70 ? "var(--profitborder)" : h.entryScore >= 40 ? "var(--warnborder)" : "var(--lossborder)") } }, h.entryScore + "/100")
               ),
 
-              /* ── Notes preview ── */
+              /* â”€â”€ Notes preview â”€â”€ */
               h.notes && React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8, fontStyle: "italic" } }, h.notes),
 
-              /* ── Action buttons ── */
+              /* â”€â”€ Action buttons â”€â”€ */
               React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" } },
                 React.createElement("button", {
                   onClick: () => setEditShare({ ...h, qty: String(h.qty || ""), buyPrice: String(h.buyPrice || h.avgPrice || ""), currentPrice: String(h.currentPrice || ""), brokerage: String(h.brokerage || 0) }),
@@ -2036,9 +2096,9 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Trade History
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapshot }) {
   const fyKeys = Object.keys(soldShareSnapshots).sort().reverse();
   const [collapsed, setCollapsed] = useState({});
@@ -2105,7 +2165,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
   }
 
   return React.createElement("div", null,
-    /* ── Header ── */
+    /* â”€â”€ Header â”€â”€ */
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, flexWrap: "wrap", gap: 12 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "#6d28d9", letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 4 } }, "TRADE HISTORY"),
@@ -2118,7 +2178,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
       )
     ),
 
-    /* ── FY groups ── */
+    /* â”€â”€ FY groups â”€â”€ */
     fyKeys.map((fy) => {
       const snaps = soldShareSnapshots[fy] || [];
       if (!snaps.length) return null;
@@ -2127,7 +2187,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
       const totalCost = snaps.reduce((s, sn) => s + sn.costBasis, 0);
 
       return React.createElement("div", { key: fy, style: { marginBottom: 24 } },
-        /* ── FY header row ── */
+        /* â”€â”€ FY header row â”€â”€ */
         React.createElement("div", {
           onClick: () => toggleFY(fy),
           style: {
@@ -2142,7 +2202,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
           totalCost > 0 && React.createElement("span", { style: { fontSize: 12, fontWeight: 700, padding: "2px 10px", borderRadius: 8, background: totalPnl >= 0 ? "var(--profitbg)" : "var(--lossbg)", color: totalPnl >= 0 ? "var(--profit)" : "var(--loss)", border: "1px solid " + (totalPnl >= 0 ? "var(--profitborder)" : "var(--lossborder)") } }, "Net P&L: " + (totalPnl >= 0 ? "+" : "") + INR(totalPnl))
         ),
 
-        /* ── Month groups ── */
+        /* â”€â”€ Month groups â”€â”€ */
         !isCollapsedFY && (() => {
           const monthGroups = {};
           snaps.forEach((sn) => {
@@ -2164,7 +2224,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
             const mPnl = mg.snaps.reduce((s, sn) => s + sn.pnl, 0);
 
             return React.createElement("div", { key: mk, style: { marginBottom: 12, marginLeft: 12, borderLeft: "2px solid var(--border2)", paddingLeft: 12 } },
-              /* ── Month header ── */
+              /* â”€â”€ Month header â”€â”€ */
               React.createElement("div", {
                 onClick: () => toggleMonth(mk),
                 style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, marginBottom: mIsCollapsed ? 0 : 8, cursor: "pointer", background: "var(--bg5)", border: "1px solid var(--border)", transition: "all .15s" }
@@ -2175,7 +2235,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
                 React.createElement("span", { style: { fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 7, background: mPnl >= 0 ? "var(--profitbg)" : "var(--lossbg)", color: mPnl >= 0 ? "var(--profit)" : "var(--loss)", border: "1px solid " + (mPnl >= 0 ? "var(--profitborder)" : "var(--lossborder)") } }, (mPnl >= 0 ? "+" : "") + INR(mPnl))
               ),
 
-              /* ── Snapshot cards ── */
+              /* â”€â”€ Snapshot cards â”€â”€ */
               !mIsCollapsed && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 16 } },
                 mg.snaps.map((sn, idx) => {
                   const isGain = sn.pnl >= 0;
@@ -2259,7 +2319,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
       );
     }),
 
-    /* ── Edit Snapshot Modal ── */
+    /* â”€â”€ Edit Snapshot Modal â”€â”€ */
     editSnap && React.createElement("div", { className: "modal-bd", onClick: (e) => { if (e.target === e.currentTarget) setEditSnap(null); } },
       React.createElement("div", { className: "stx-card stx-fu", style: { maxWidth: 520, margin: "40px auto", width: "92vw" } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
@@ -2324,9 +2384,9 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
-   Entry Score Panel — Momentum Trading Entry Scoring Engine
-   ══════════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Entry Score Panel â€” Momentum Trading Entry Scoring Engine
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const LS_ENTRY_SCORES = "mm_entry_scores";
 const LS_ENTRY_SNAPSHOTS = "mm_entry_score_snapshots";
 const EntryScorePanel = ({ shares }) => {
@@ -2448,13 +2508,13 @@ const EntryScorePanel = ({ shares }) => {
 
   const factorBar = (label, val, max, color, hasNeg) => {
     const pct = max > 0 ? (Math.abs(val) / max * 100) : 0;
-    const barColor = val < 0 ? "#ef4444" : color;
+    const barColor = val < 0 ? "#f0473f" : color;
     return React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
       React.createElement("span", { style: { width: 90, fontSize: 9, fontWeight: 600, color: "var(--text4)", textAlign: "right", flexShrink: 0 } }, label),
       React.createElement("div", { style: { flex: 1, height: 5, borderRadius: 3, background: "var(--bg5)", overflow: "hidden" } },
         React.createElement("div", { style: { width: pct + "%", height: "100%", borderRadius: 3, background: barColor, transition: "width .3s" } })
       ),
-      React.createElement("span", { style: { width: 38, fontSize: 9, fontWeight: 700, color: val < 0 ? "#ef4444" : "var(--text4)", fontFamily: "var(--font-mono)", textAlign: "right" } }, (val >= 0 ? "+" : "") + val + "/" + max)
+      React.createElement("span", { style: { width: 38, fontSize: 9, fontWeight: 700, color: val < 0 ? "#f0473f" : "var(--text4)", fontFamily: "var(--font-mono)", textAlign: "right" } }, (val >= 0 ? "+" : "") + val + "/" + max)
     );
   };
 
@@ -2464,11 +2524,11 @@ const EntryScorePanel = ({ shares }) => {
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
         React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "var(--text3)" } }, label),
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: score.decision.color, fontFamily: "var(--font-heading)" } }, score.total + " · " + score.decision.label)
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: score.decision.color, fontFamily: "var(--font-heading)" } }, score.total + " Â· " + score.decision.label)
         )
       ),
       React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 3 } },
-        factorBar("Trend", score.trendScore, score.trendMax, "#3b82f6", false),
+        factorBar("Trend", score.trendScore, score.trendMax, "#4a8fe0", false),
         factorBar("Momentum", score.momentumScore, score.momentumMax, "#a855f7", false),
         factorBar("Volume", score.volumeScore, score.volumeMax, "#06b6d4", false),
         factorBar("Structure", score.structureScore, score.structureMax, "#ec4899", false)
@@ -2487,13 +2547,13 @@ const EntryScorePanel = ({ shares }) => {
     const snapFactorBar = (label, val, max, color) => {
       if (val == null || max == null) return null;
       const pct = max > 0 ? (Math.abs(val) / max * 100) : 0;
-      const barColor = val < 0 ? "#ef4444" : color;
+      const barColor = val < 0 ? "#f0473f" : color;
       return React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4 } },
         React.createElement("span", { style: { width: 65, fontSize: 8, fontWeight: 600, color: "var(--text5)", textAlign: "right", flexShrink: 0 } }, label),
         React.createElement("div", { style: { flex: 1, height: 4, borderRadius: 2, background: "var(--bg5)", overflow: "hidden" } },
           React.createElement("div", { style: { width: pct + "%", height: "100%", borderRadius: 2, background: barColor } })
         ),
-        React.createElement("span", { style: { width: 32, fontSize: 8, fontWeight: 700, color: val < 0 ? "#ef4444" : "var(--text5)", fontFamily: "var(--font-mono)", textAlign: "right" } }, (val >= 0 ? "+" : "") + val + "/" + max)
+        React.createElement("span", { style: { width: 32, fontSize: 8, fontWeight: 700, color: val < 0 ? "#f0473f" : "var(--text5)", fontFamily: "var(--font-mono)", textAlign: "right" } }, (val >= 0 ? "+" : "") + val + "/" + max)
       );
     };
     const snapTfSection = (label, score) => {
@@ -2501,10 +2561,10 @@ const EntryScorePanel = ({ shares }) => {
       return React.createElement("div", { style: { marginBottom: 6 } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 } },
           React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: "var(--text3)" } }, label),
-          React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: score.decision.color, fontFamily: "var(--font-heading)" } }, score.total + " · " + score.decision.label)
+          React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: score.decision.color, fontFamily: "var(--font-heading)" } }, score.total + " Â· " + score.decision.label)
         ),
         React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 2 } },
-          snapFactorBar("Trend", score.trendScore, score.trendMax, "#3b82f6"),
+          snapFactorBar("Trend", score.trendScore, score.trendMax, "#4a8fe0"),
           snapFactorBar("Momentum", score.momentumScore, score.momentumMax, "#a855f7"),
           snapFactorBar("Volume", score.volumeScore, score.volumeMax, "#06b6d4"),
           snapFactorBar("Structure", score.structureScore, score.structureMax, "#ec4899")
@@ -2513,7 +2573,7 @@ const EntryScorePanel = ({ shares }) => {
     };
     const indRow = (label, val, signal) => {
       if (val == null) return null;
-      const sigColor = signal === "bullish" ? "#22c55e" : signal === "bearish" ? "#ef4444" : signal === "overbought" ? "#f59e0b" : signal === "oversold" ? "#3b82f6" : "var(--text5)";
+      const sigColor = signal === "bullish" ? "#20c46a" : signal === "bearish" ? "#f0473f" : signal === "overbought" ? "#e0a527" : signal === "oversold" ? "#4a8fe0" : "var(--text5)";
       return React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0" } },
         React.createElement("span", { style: { fontSize: 9, color: "var(--text5)" } }, label),
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4 } },
@@ -2589,7 +2649,7 @@ const EntryScorePanel = ({ shares }) => {
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 6, background: r.decision.color + "12", marginBottom: 6 } },
         React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: r.decision.color, fontFamily: "var(--font-heading)" } }, r.decision.label),
         React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--text5)", fontStyle: "italic" } }, r.decision.position),
-        r.hardFilters && r.hardFilters.length > 0 && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: "#ef4444", padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,.1)" } }, r.hardFilters.length + " filter")
+        r.hardFilters && r.hardFilters.length > 0 && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: "#f0473f", padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,.1)" } }, r.hardFilters.length + " filter")
       ),
       React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 } },
         ["weekly", "daily", "hourly"].map(tf => {
@@ -2620,7 +2680,7 @@ const EntryScorePanel = ({ shares }) => {
             var isBonus = f.indexOf("(+") >= 0;
             var valMatch = f.match(/\([+\-\u2212]?\d+\)$/);
             var valStr = valMatch ? valMatch[0] : "";
-            var label = valStr ? f.replace(valStr, "").replace(/\s*—\s*/, " — ").trim() : f;
+            var label = valStr ? f.replace(valStr, "").replace(/\s*â€”\s*/, " â€” ").trim() : f;
             return React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4, fontSize: 9, lineHeight: 1.4 } },
               React.createElement("span", { style: { color: "var(--text3)", flex: 1, minWidth: 0, overflow: "hidden", wordBreak: "break-word" } }, isBonus ? "\u2713 " + label : "\u26a0 " + label),
               valStr && React.createElement("span", { style: { fontSize: 9, fontWeight: 800, color: "var(--text3)", background: "var(--bg4)", padding: "1px 5px", borderRadius: 3, fontFamily: "var(--font-mono)", flexShrink: 0 } }, valStr)
@@ -2673,7 +2733,7 @@ const EntryScorePanel = ({ shares }) => {
               React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, (isMExp ? "\u25be " : "\u25b8 ") + mKey.split("-").slice(1).join("-")),
               React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
                 React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, mSnaps + " snap" + (mSnaps !== 1 ? "s" : "")),
-                React.createElement("span", { onClick: (e) => { e.stopPropagation(); if (window.confirm("Delete all " + mSnaps + " snapshot" + (mSnaps !== 1 ? "s" : "") + " in " + mKey.split("-").slice(1).join("-") + "?")) deleteSnapshotsWhere(s => { const d = new Date(s.savedAt); return String(d.getFullYear()) + "-" + d.toLocaleString("en-IN", { month: "long" }) === mKey; }); }, style: { fontSize: 9, color: "#ef4444", cursor: "pointer", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, mSnaps === 1 ? "Delete" : "Delete All")
+                React.createElement("span", { onClick: (e) => { e.stopPropagation(); if (window.confirm("Delete all " + mSnaps + " snapshot" + (mSnaps !== 1 ? "s" : "") + " in " + mKey.split("-").slice(1).join("-") + "?")) deleteSnapshotsWhere(s => { const d = new Date(s.savedAt); return String(d.getFullYear()) + "-" + d.toLocaleString("en-IN", { month: "long" }) === mKey; }); }, style: { fontSize: 9, color: "#f0473f", cursor: "pointer", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, mSnaps === 1 ? "Delete" : "Delete All")
               )
             ),
             isMExp && Object.keys(days).sort().reverse().map(dayKey => {
@@ -2684,7 +2744,7 @@ const EntryScorePanel = ({ shares }) => {
                   React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "var(--text3)" } }, (isDExp ? "\u25be " : "\u25b8 ") + day.label),
                   React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
                     React.createElement("span", { style: { fontSize: 9, color: "var(--text5)" } }, day.snaps.length + " snap" + (day.snaps.length !== 1 ? "s" : "")),
-                    React.createElement("span", { onClick: (e) => { e.stopPropagation(); if (window.confirm("Delete all " + day.snaps.length + " snapshot" + (day.snaps.length !== 1 ? "s" : "") + " on " + day.label + "?")) deleteSnapshotsWhere(s => { const d = new Date(s.savedAt); const dk = mKey + "-" + d.getDate(); return dk === dayKey; }); }, style: { fontSize: 9, color: "#ef4444", cursor: "pointer", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, day.snaps.length === 1 ? "Delete" : "Delete All")
+                    React.createElement("span", { onClick: (e) => { e.stopPropagation(); if (window.confirm("Delete all " + day.snaps.length + " snapshot" + (day.snaps.length !== 1 ? "s" : "") + " on " + day.label + "?")) deleteSnapshotsWhere(s => { const d = new Date(s.savedAt); const dk = mKey + "-" + d.getDate(); return dk === dayKey; }); }, style: { fontSize: 9, color: "#f0473f", cursor: "pointer", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, day.snaps.length === 1 ? "Delete" : "Delete All")
                   )
                 ),
                 isDExp && React.createElement("div", { style: { padding: "6px 14px 6px 56px" } },
@@ -2730,7 +2790,7 @@ const EntryScorePanel = ({ shares }) => {
         }, adding ? "Calculating..." : "Calculate Score"),
         React.createElement("button", { onClick: () => { setShowAdd(false); setAddErr(""); }, className: "stx-btn stx-btn-ghost", style: { fontSize: 12 } }, "Cancel")
       ),
-      addErr && React.createElement("div", { style: { marginTop: 8, fontSize: 11, color: addErr.startsWith("Error") ? "#ef4444" : "#eab308" } }, addErr)
+      addErr && React.createElement("div", { style: { marginTop: 8, fontSize: 11, color: addErr.startsWith("Error") ? "#f0473f" : "#eab308" } }, addErr)
     ),
     entries.length === 0 && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
       "No entry scores yet. Click \"+ Add Entry\" to analyze a stock."
@@ -2757,7 +2817,7 @@ const EntryScorePanel = ({ shares }) => {
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "6px 10px", borderRadius: 8, background: r.decision.color + "12" } },
             React.createElement("span", { style: { fontSize: 12, fontWeight: 800, color: r.decision.color, fontFamily: "var(--font-heading)" } }, r.decision.label),
             React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--text5)", fontStyle: "italic" } }, r.decision.position),
-            r.hardFilters && r.hardFilters.length > 0 && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: "#ef4444", padding: "2px 5px", borderRadius: 3, background: "rgba(239,68,68,.1)" } }, r.hardFilters.length + " filter" + (r.hardFilters.length > 1 ? "s" : ""))
+            r.hardFilters && r.hardFilters.length > 0 && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: "#f0473f", padding: "2px 5px", borderRadius: 3, background: "rgba(239,68,68,.1)" } }, r.hardFilters.length + " filter" + (r.hardFilters.length > 1 ? "s" : ""))
           ),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 } },
             ["weekly", "daily", "hourly"].map(tf => {
@@ -2788,7 +2848,7 @@ const EntryScorePanel = ({ shares }) => {
                 var isBonus = f.indexOf("(+") >= 0;
                 var valMatch = f.match(/\([+\-\u2212]?\d+\)$/);
                 var valStr = valMatch ? valMatch[0] : "";
-                var label = valStr ? f.replace(valStr, "").replace(/\s*—\s*/, " — ").trim() : f;
+                var label = valStr ? f.replace(valStr, "").replace(/\s*â€”\s*/, " â€” ").trim() : f;
                 return React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, lineHeight: 1.5, fontSize: 10 } },
                   React.createElement("span", { style: { color: "var(--text3)", flex: 1, minWidth: 0, overflow: "hidden", wordBreak: "break-word" } }, isBonus ? "\u2713 " + label : "\u26a0 " + label),
                   valStr && React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "var(--text3)", background: "var(--bg4)", padding: "1px 6px", borderRadius: 4, fontFamily: "var(--font-mono)", flexShrink: 0 } }, valStr)
@@ -2815,10 +2875,10 @@ const EntryScorePanel = ({ shares }) => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
-   NIFTY_100 TICKER LIST
-   ══════════════════════════════════════════════════════════════════════════ */
-var NIFTY_100 = [
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   NIFTY_200 TICKER LIST
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+var NIFTY_200 = [
   {t:"360ONE.NS",n:"360 One"},{t:"ABB.NS",n:"ABB India"},{t:"APLAPOLLO.NS",n:"APL Apollo Tubes"},{t:"AUBANK.NS",n:"AU Small Finance Bank"},{t:"ADANIENSOL.NS",n:"Adani Energy Solutions"},
   {t:"ADANIENT.NS",n:"Adani Enterprises"},{t:"ADANIGREEN.NS",n:"Adani Green Energy"},{t:"ADANIPORTS.NS",n:"Adani Ports & SEZ"},{t:"ADANIPOWER.NS",n:"Adani Power"},{t:"ATGL.NS",n:"Adani Total Gas"},
   {t:"ABCAPITAL.NS",n:"Aditya Birla Capital"},{t:"ALKEM.NS",n:"Alkem Laboratories"},{t:"AMBUJACEM.NS",n:"Ambuja Cements"},{t:"APOLLOHOSP.NS",n:"Apollo Hospitals"},{t:"ASHOKLEY.NS",n:"Ashok Leyland"},
@@ -2861,11 +2921,12 @@ var NIFTY_100 = [
   {t:"VOLTAS.NS",n:"Voltas"},{t:"WAAREEENER.NS",n:"Waaree Energies"},{t:"WIPRO.NS",n:"Wipro"},{t:"YESBANK.NS",n:"Yes Bank"},{t:"ZYDUSLIFE.NS",n:"Zydus Lifesciences"}
 ];
 var _nseen = new Set();
-var NIFTY_100_UNIQUE = NIFTY_100.filter(function(s) { if (_nseen.has(s.t)) return false; _nseen.add(s.t); return true; });
+var NIFTY_200_UNIQUE = NIFTY_200.filter(function(s) { if (_nseen.has(s.t)) return false; _nseen.add(s.t); return true; });
 
-/* ══════════════════════════════════════════════════════════════════════════
+
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    STOCK SCREENER (Nifty 200 multi-TF entry score)
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function StockScreener() {
   var TI = window.TechIndicators;
   var DF = window.OHLCVFetcher;
@@ -2929,8 +2990,7 @@ function StockScreener() {
       s.textContent = "@keyframes screener-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}";
       document.head.appendChild(s);
     }
-    return function() { var el = document.getElementById(id); if (el) el.remove(); };
-  }, []);
+    return function() { var el = document.getElementById(id); if (el) el.remove(); }; }, []);
 
   var saveSnapshot = function() {
     if (!results.length) return;
@@ -3031,7 +3091,7 @@ function StockScreener() {
   var startScan = async function() {
     if (scanning || !TI || !DF) return;
     setScanning(true); setResults([]); setScanErr("");
-    var stocks = NIFTY_100_UNIQUE;
+    var stocks = NIFTY_200_UNIQUE;
     var total = stocks.length;
     setProgress({ done: 0, total: total, current: "Starting..." });
     var out = [];
@@ -3148,7 +3208,7 @@ function StockScreener() {
     scanning && React.createElement("div", { style: { marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)" } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 6 } },
         React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "var(--text3)" } },
-          "Progress: " + progress.done + "/" + (progress.total || NIFTY_100_UNIQUE.length) + " stocks"),
+          "Progress: " + progress.done + "/" + (progress.total || NIFTY_200_UNIQUE.length) + " stocks"),
         React.createElement("span", { style: { fontSize: 10, color: "var(--text5)" } }, progress.current)
       ),
       React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--bg5)", overflow: "hidden" } },
@@ -3235,9 +3295,9 @@ function StockScreener() {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SCREENER SNAPSHOTS (expandable Year > Month > Day tree)
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function ScreenerSnapshots(props) {
   var snapshots = props.snapshots;
   var deleteSnapshot = props.deleteSnapshot;
@@ -3295,10 +3355,10 @@ function ScreenerSnapshots(props) {
               React.createElement("td", { style: Object.assign({}, snapTdStyle, { fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" }) }, r.s.t.replace(".NS", "")),
               React.createElement("td", { style: Object.assign({}, snapTdStyle, { color: "var(--text4)", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }) }, r.s.n),
               React.createElement("td", { style: Object.assign({}, snapTdStyle, { fontWeight: 600, color: "var(--text3)", fontFamily: "var(--font-heading)" }) }, "\u20b9" + Number(Math.round(r.lc)).toLocaleString("en-IN")),
-              React.createElement("td", { style: Object.assign({}, snapTdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.todayChg != null ? (r.todayChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.todayChg != null ? (r.todayChg >= 0 ? "+" : "") + Number(r.todayChg).toFixed(2) + "%" : "--"),
-              React.createElement("td", { style: Object.assign({}, snapTdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.dayChg != null ? (r.dayChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.dayChg != null ? (r.dayChg >= 0 ? "+" : "") + Number(r.dayChg).toFixed(2) + "%" : "--"),
-              React.createElement("td", { style: Object.assign({}, snapTdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.weekChg != null ? (r.weekChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.weekChg != null ? (r.weekChg >= 0 ? "+" : "") + Number(r.weekChg).toFixed(2) + "%" : "--"),
-              React.createElement("td", { style: Object.assign({}, snapTdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.monthChg != null ? (r.monthChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.monthChg != null ? (r.monthChg >= 0 ? "+" : "") + Number(r.monthChg).toFixed(2) + "%" : "--"),
+              React.createElement("td", { style: Object.assign({}, snapTdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.todayChg != null ? (r.todayChg >= 0 ? "#20c46a" : "#f0473f") : "var(--text6)" }) }, r.todayChg != null ? (r.todayChg >= 0 ? "+" : "") + Number(r.todayChg).toFixed(2) + "%" : "--"),
+              React.createElement("td", { style: Object.assign({}, snapTdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.dayChg != null ? (r.dayChg >= 0 ? "#20c46a" : "#f0473f") : "var(--text6)" }) }, r.dayChg != null ? (r.dayChg >= 0 ? "+" : "") + Number(r.dayChg).toFixed(2) + "%" : "--"),
+              React.createElement("td", { style: Object.assign({}, snapTdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.weekChg != null ? (r.weekChg >= 0 ? "#20c46a" : "#f0473f") : "var(--text6)" }) }, r.weekChg != null ? (r.weekChg >= 0 ? "+" : "") + Number(r.weekChg).toFixed(2) + "%" : "--"),
+              React.createElement("td", { style: Object.assign({}, snapTdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.monthChg != null ? (r.monthChg >= 0 ? "#20c46a" : "#f0473f") : "var(--text6)" }) }, r.monthChg != null ? (r.monthChg >= 0 ? "+" : "") + Number(r.monthChg).toFixed(2) + "%" : "--"),
               React.createElement("td", { style: snapTdStyle },
                 React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 4 } },
                   React.createElement("span", { style: { fontSize: 11, fontWeight: 900, color: d.color, fontFamily: "var(--font-heading)" } }, r.result.finalScore),
@@ -3339,7 +3399,7 @@ function ScreenerSnapshots(props) {
                 React.createElement("div", null, React.createElement("span", { style: arrowStyle(monthOpen) }, "\u25b6"), React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--text4)" } }, month),
                   React.createElement("span", { style: { fontSize: 9, color: "var(--text6)", marginLeft: 6 } }, monthSnapCount + " snapshots")
                 ),
-                React.createElement("span", { onClick: function(e) { e.stopPropagation(); var ids = Object.values(days).flat().map(function(s) { return s.id; }); if (window.confirm("Delete all " + monthSnapCount + " snapshot" + (monthSnapCount !== 1 ? "s" : "") + " in " + month + "?")) deleteSnapshotsBatch(ids); }, style: { fontSize: 9, color: "#ef4444", cursor: "pointer", fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, monthSnapCount === 1 ? "Delete" : "Delete All")
+                React.createElement("span", { onClick: function(e) { e.stopPropagation(); var ids = Object.values(days).flat().map(function(s) { return s.id; }); if (window.confirm("Delete all " + monthSnapCount + " snapshot" + (monthSnapCount !== 1 ? "s" : "") + " in " + month + "?")) deleteSnapshotsBatch(ids); }, style: { fontSize: 9, color: "#f0473f", cursor: "pointer", fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, monthSnapCount === 1 ? "Delete" : "Delete All")
               ),
               monthOpen && React.createElement("div", { style: { paddingLeft: 14 } },
                 Object.keys(days).sort(function(a, b) { return b.localeCompare(a); }).map(function(dayKey) {
@@ -3360,7 +3420,7 @@ function ScreenerSnapshots(props) {
                           React.createElement("button", {
                             onClick: function(e) { e.stopPropagation(); deleteSnapshot(snap.id); },
                             className: "stx-btn",
-                            style: { padding: "3px 8px", fontSize: 9, fontWeight: 600, border: "1px solid rgba(239,68,68,.2)", background: "rgba(239,68,68,.06)", color: "#ef4444", cursor: "pointer" }
+                            style: { padding: "3px 8px", fontSize: 9, fontWeight: 600, border: "1px solid rgba(239,68,68,.2)", background: "rgba(239,68,68,.06)", color: "#f0473f", cursor: "pointer" }
                           }, "Delete")
                         ),
                         isOpen && renderSnapTable(snap.results)
@@ -3377,15 +3437,388 @@ function ScreenerSnapshots(props) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   COMPONENT: Single Stock Analysis (Pulse sub-tab)
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+function SingleStockAnalysis() {
+  var TI = window.TechIndicators;
+  var DF = window.OHLCVFetcher;
+  var INDS = window.STOX_INDICATORS || [];
+  var CATS = window.STOX_CATEGORIES || [];
+  var _fmt = window.stoxFmt || function (v, d) { return v != null ? Number(v).toFixed(d != null ? d : 2) : "\u2014"; };
+  var _fmtVal = window.stoxFormatValue || function () { return "\u2014"; };
+
+  var _LS_KEY = "stox_single_stock";
+  var _saved = (function () { try { return JSON.parse(localStorage.getItem(_LS_KEY)) || {}; } catch (e) { return {}; } })();
+
+  var _a = useState(_saved.ticker || ""), ticker = _a[0], setTicker = _a[1];
+  var _b = useState(_saved.timeframe || "daily"), timeframe = _b[0], setTimeframe = _b[1];
+  var _c = useState(null), candles = _c[0], setCandles = _c[1];
+  var _d = useState(false), loading = _d[0], setLoading = _d[1];
+  var _e = useState(null), error = _e[0], setError = _e[1];
+  var _f = useState(null), indicators = _f[0], setIndicators = _f[1];
+  var _g = useState(null), signals = _g[0], setSignals = _g[1];
+  var _h = useState(!!_saved.autoRefresh), autoRefresh = _h[0], setAutoRefresh = _h[1];
+  var _i = useState(null), lastUpdated = _i[0], setLastUpdated = _i[1];
+  var _j = useState(_saved.category || "all"), category = _j[0], setCategory = _j[1];
+  var _k = useState(0), refreshTick = _k[0], setRefreshTick = _k[1];
+  var _l = useState(null), dataSource = _l[0], setDataSource = _l[1];
+  var _m = useState(_saved.ticker || ""), inputVal = _m[0], setInputVal = _m[1];
+  var timerRef = useRef(null);
+
+  useEffect(function () {
+    try { localStorage.setItem(_LS_KEY, JSON.stringify({ ticker: ticker, timeframe: timeframe, category: category, autoRefresh: autoRefresh })); } catch (e) {}
+  }, [ticker, timeframe, category, autoRefresh]);
+
+  var TF_DEFS = [
+    { key: "daily", label: "Daily" },
+    { key: "weekly", label: "Weekly" },
+    { key: "1h", label: "1H" },
+    { key: "15m", label: "15m" },
+    { key: "5m", label: "5m" },
+    { key: "1m", label: "1m" },
+  ];
+
+  var fetchData = useCallback(async function () {
+    if (!ticker) return;
+    setLoading(true); setError(null);
+    try {
+      var result = await DF.fetchOHLCVCached(ticker, timeframe);
+      var data = result.data;
+      var source = result.source;
+      if (!data || data.length < 10) {
+        setError("Insufficient data for " + ticker + ". Try a different timeframe.");
+        setLoading(false); return;
+      }
+      setCandles(data); setDataSource(source);
+      var ind = TI.computeAll(data);
+      setIndicators(ind);
+      var sig = TI.interpret(ind);
+      setSignals(sig);
+      setLastUpdated(new Date());
+    } catch (e) {
+      setError("Failed to fetch data: " + (e.message || "error"));
+    }
+    setLoading(false);
+  }, [ticker, timeframe]);
+
+  useEffect(function () { fetchData(); }, [fetchData]);
+
+  useEffect(function () {
+    if (!autoRefresh) { clearInterval(timerRef.current); return; }
+    timerRef.current = setInterval(function () { DF.clearCache(); setRefreshTick(function (t) { return t + 1; }); }, 60000);
+    return function () { clearInterval(timerRef.current); };
+  }, [autoRefresh]);
+
+  useEffect(function () { fetchData(); }, [refreshTick, fetchData]);
+
+  var filteredIndicators = useMemo(function () {
+    if (category === "all") return INDS;
+    return INDS.filter(function (ind) { return ind.cat === category; });
+  }, [category]);
+
+  var catKeys = ["all"].concat(CATS);
+
+  var handleSubmit = function () {
+    var t = inputVal.trim().toUpperCase().replace(/\.NS$/i, "").replace(/\.BO$/i, "");
+    if (t) { setTicker(t); DF.clearCache(); }
+  };
+
+  /* â”€â”€ Candlestick chart (SVG) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  var renderCandleChart = function () {
+    if (!candles || candles.length < 2) return null;
+    var data = candles.filter(function (c) {
+      return c && typeof c.o === "number" && !isNaN(c.o) && typeof c.h === "number" && !isNaN(c.h) &&
+             typeof c.l === "number" && !isNaN(c.l) && typeof c.c === "number" && !isNaN(c.c);
+    });
+    if (data.length < 2) return null;
+    data = data.slice(-80);
+    var w = 700, h = 240, padL = 50, padR = 10, padT = 14, padB = 40;
+    var cw = w - padL - padR, ch = h - padT - padB;
+    var allH = data.map(function (c) { return c.h; });
+    var allL = data.map(function (c) { return c.l; });
+    var hi = Math.max.apply(null, allH), lo = Math.min.apply(null, allL);
+    if (isNaN(hi) || isNaN(lo)) return null;
+    var range = hi - lo || 1;
+    var barW = Math.max(1, Math.floor(cw / data.length) - 1);
+    var gap = cw / data.length;
+    var yScale = function (v) { return padT + ch - ((v - lo) / range) * ch; };
+
+    var isIntra = timeframe !== "daily" && timeframe !== "weekly";
+    var formatXLabel = function (ts) {
+      if (ts == null) return "";
+      var d;
+      if (typeof ts === "number") {
+        d = new Date(ts * 1000);
+      } else {
+        var s = String(ts).trim();
+        if (s.indexOf("T") !== -1 || s.indexOf(":") !== -1) {
+          d = new Date(s.indexOf("T") !== -1 ? s : s.replace(" ", "T"));
+        } else {
+          d = new Date(s + "T00:00:00");
+        }
+      }
+      if (isNaN(d.getTime())) return "";
+      if (isIntra) {
+        var h2 = d.getHours(), m = d.getMinutes();
+        var ampm = h2 >= 12 ? "PM" : "AM";
+        var h12 = h2 % 12 || 12;
+        return h12 + ":" + (m < 10 ? "0" : "") + m + " " + ampm;
+      }
+      var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      return months[d.getMonth()] + " " + d.getDate();
+    };
+
+    var fmtY = function (v) {
+      if (v == null || isNaN(v)) return "\u2014";
+      return "\u20b9" + Number(v).toFixed(v >= 1000 ? 0 : 2);
+    };
+
+    var yLabel = "Price (\u20b9)";
+    var xLabel = isIntra ? "Time" : "Date";
+
+    var gridLines = [0, 0.25, 0.5, 0.75, 1].map(function (pct, gi) {
+      var y = padT + ch * (1 - pct);
+      var val = lo + range * pct;
+      return React.createElement("g", { key: "g" + gi },
+        React.createElement("line", { x1: padL, y1: y, x2: w - padR, y2: y, stroke: "var(--border)", strokeWidth: 0.5, strokeDasharray: "3,3" }),
+        React.createElement("text", { x: padL - 4, y: y + 3, fontSize: 8, fill: "var(--text6)", textAnchor: "end", fontFamily: "var(--font-mono)" }, fmtY(val))
+      );
+    });
+
+    var xTickCount = Math.min(6, data.length);
+    var xTickStep = Math.max(1, Math.floor(data.length / xTickCount));
+    var xTicks = [];
+    for (var xi = 0; xi < data.length; xi += xTickStep) {
+      xTicks.push(xi);
+    }
+    if (xTicks[xTicks.length - 1] !== data.length - 1) xTicks.push(data.length - 1);
+
+    var xTickEls = xTicks.map(function (idx) {
+      var x = padL + idx * gap + gap / 2;
+      var label = formatXLabel(data[idx].t);
+      return React.createElement("text", { key: "xt" + idx, x: x, y: h - 18, fontSize: 8, fill: "var(--text6)", textAnchor: "middle", fontFamily: "var(--font-mono)" }, label);
+    });
+
+    var candleEls = data.map(function (c, ci) {
+      var x = padL + ci * gap + gap / 2;
+      var isUp = c.c >= c.o;
+      var color = isUp ? "#20c46a" : "#f0473f";
+      var bodyTop = yScale(Math.max(c.o, c.c));
+      var bodyBot = yScale(Math.min(c.o, c.c));
+      var bodyH = Math.max(1, bodyBot - bodyTop);
+      return React.createElement("g", { key: ci },
+        React.createElement("line", { x1: x, y1: yScale(c.h), x2: x, y2: yScale(c.l), stroke: color, strokeWidth: 1 }),
+        React.createElement("rect", { x: x - barW / 2, y: bodyTop, width: barW, height: bodyH, fill: color, rx: 0.5 })
+      );
+    });
+
+    var lastC = data[data.length - 1];
+    var firstC = data[0];
+    var priceColor = lastC.c >= firstC.c ? "#20c46a" : "#f0473f";
+
+    return React.createElement("div", { style: { background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 12, overflow: "hidden" } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
+        React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
+          React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: priceColor } }, "\u20b9" + _fmt(lastC.c)),
+          React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "O: " + _fmt(lastC.o) + " H: " + _fmt(lastC.h) + " L: " + _fmt(lastC.l) + " C: " + _fmt(lastC.c))
+        )
+      ),
+      React.createElement("svg", { viewBox: "0 0 " + w + " " + h, style: { width: "100%", height: "auto" } },
+        React.createElement("text", { x: 8, y: padT + ch / 2, fontSize: 8, fill: "var(--text6)", textAnchor: "middle", fontFamily: "var(--font-mono)", transform: "rotate(-90, 8, " + (padT + ch / 2) + ")" }, yLabel),
+        React.createElement("text", { x: padL + cw / 2, y: h - 2, fontSize: 8, fill: "var(--text6)", textAnchor: "middle", fontFamily: "var(--font-mono)" }, xLabel),
+        gridLines,
+        xTickEls,
+        candleEls
+      )
+    );
+  };
+
+  /* â”€â”€ Signal score gauge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  var renderGauge = function () {
+    if (!signals || !signals._score) return null;
+    var sc = signals._score;
+    if (sc.total === 0) return null;
+    var bullPct = sc.bull / sc.total * 100;
+    var neutralPct = sc.neutral / sc.total * 100;
+    var bearPct = sc.bear / sc.total * 100;
+    var col = sc.bull > sc.bear ? "#20c46a" : sc.bear > sc.bull ? "#f0473f" : "#6b7280";
+    return React.createElement("div", {
+      style: { display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 8, marginBottom: 12, background: "var(--bg4)", border: "1px solid var(--border)" }
+    },
+      React.createElement("div", { style: { flex: 1 } },
+        React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "var(--text4)", marginBottom: 4 } }, "Overall Signal"),
+        React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--bg5)", overflow: "hidden", display: "flex" } },
+          bullPct > 0 && React.createElement("div", { style: { width: bullPct + "%", height: "100%", background: "#20c46a" } }),
+          neutralPct > 0 && React.createElement("div", { style: { width: neutralPct + "%", height: "100%", background: "#9ca3af" } }),
+          bearPct > 0 && React.createElement("div", { style: { width: bearPct + "%", height: "100%", background: "#f0473f" } })
+        ),
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 3, fontSize: 9, color: "var(--text5)" } },
+          React.createElement("span", null, sc.bull + " Bull"),
+          React.createElement("span", null, sc.neutral + " Neutral"),
+          React.createElement("span", null, sc.bear + " Bear")
+        )
+      ),
+      React.createElement("div", { style: { width: 48, height: 48, borderRadius: "50%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: col + "15", border: "2px solid " + col, flexShrink: 0 } },
+        React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "#20c46a", lineHeight: 1.2, fontFamily: "var(--font-mono)" } }, sc.bull),
+        React.createElement("span", { style: { fontSize: 8, fontWeight: 600, color: "#6b7280", lineHeight: 1.2 } }, sc.neutral),
+        React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "#f0473f", lineHeight: 1.2, fontFamily: "var(--font-mono)" } }, sc.bear)
+      )
+    );
+  };
+
+  return React.createElement("div", null,
+    /* â”€â”€ Ticker input â”€â”€ */
+    React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 14, alignItems: "center" } },
+      React.createElement("input", {
+        type: "text", value: inputVal, placeholder: "Enter ticker (e.g. RELIANCE, TCS, INFY)",
+        onChange: function (e) { setInputVal(e.target.value); },
+        onKeyDown: function (e) { if (e.key === "Enter") handleSubmit(); },
+        style: { flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg3)", color: "var(--text)", fontSize: 13, fontFamily: "var(--font-mono)", fontWeight: 600, outline: "none" }
+      }),
+      React.createElement("button", {
+        onClick: handleSubmit, disabled: loading || !inputVal.trim(),
+        className: "stx-btn stx-btn-primary",
+        style: { padding: "10px 18px", fontSize: 12, fontWeight: 700, cursor: loading ? "wait" : "pointer", whiteSpace: "nowrap" }
+      }, loading ? "Loading..." : "Analyze")
+    ),
+
+    !ticker && React.createElement("div", { style: { textAlign: "center", padding: "60px 20px", color: "var(--text6)", fontSize: 13 } },
+      "Enter a stock ticker above and click Analyze to view technical indicators and candlestick chart."
+    ),
+
+    ticker && React.createElement("div", null,
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 } },
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: "var(--text)", fontFamily: "var(--font-heading)" } }, ticker + ".NS"),
+          lastUpdated && React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 2 } },
+            timeframe + " \u00b7 " + lastUpdated.toLocaleTimeString() + (dataSource ? " \u00b7 " + dataSource : "")
+          )
+        ),
+        React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
+          React.createElement("div", { style: { display: "flex", gap: 2, background: "var(--bg4)", borderRadius: 6, padding: 2 } },
+            TF_DEFS.map(function (tf) {
+              return React.createElement("button", {
+                key: tf.key, onClick: function () { setTimeframe(tf.key); DF.clearCache(); },
+                style: { padding: "4px 10px", borderRadius: 5, fontSize: 10, fontWeight: timeframe === tf.key ? 700 : 500, border: "none", cursor: "pointer", background: timeframe === tf.key ? "var(--accent)" : "transparent", color: timeframe === tf.key ? "#fff" : "var(--text5)", transition: "all .15s" }
+              }, tf.label);
+            })
+          ),
+          React.createElement("button", {
+            onClick: function () { setAutoRefresh(!autoRefresh); },
+            style: { padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 600, border: "1px solid " + (autoRefresh ? "rgba(22,163,74,.4)" : "var(--border)"), background: autoRefresh ? "rgba(22,163,74,.1)" : "var(--bg4)", color: autoRefresh ? "#20c46a" : "var(--text5)", cursor: "pointer" }
+          }, autoRefresh ? "\u25cf Live" : "\u25cb Auto"),
+          React.createElement("button", {
+            onClick: function () { DF.clearCache(); setRefreshTick(function (t) { return t + 1; }); },
+            disabled: loading,
+            style: { padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text5)", cursor: loading ? "wait" : "pointer", opacity: loading ? 0.6 : 1 }
+          }, loading ? "..." : "\u21bb")
+        )
+      ),
+      error && React.createElement("div", { style: { padding: "8px 12px", borderRadius: 8, marginBottom: 10, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", fontSize: 11, color: "#f0473f" } }, error),
+      loading && !candles && React.createElement("div", { style: { textAlign: "center", padding: 30, color: "var(--text6)", fontSize: 12 } }, "Fetching data..."),
+      candles && React.createElement("div", null,
+        renderCandleChart(),
+        renderGauge(),
+        React.createElement("div", { style: { display: "flex", gap: 3, marginBottom: 10, flexWrap: "wrap" } },
+          catKeys.map(function (cat) {
+            var label = cat === "all" ? "All" : cat;
+            var count = cat === "all" ? INDS.length : INDS.filter(function (i) { return i.cat === cat; }).length;
+            var active = category === cat;
+            return React.createElement("button", {
+              key: cat, onClick: function () { setCategory(cat); },
+              style: { padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: active ? 700 : 500, border: "none", cursor: "pointer", background: active ? "var(--accent)" : "var(--bg4)", color: active ? "#fff" : "var(--text5)", transition: "all .15s" }
+            }, label + " (" + count + ")");
+          })
+        ),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 6 } },
+          filteredIndicators.map(function (def) {
+            var val = indicators ? indicators[def.key] : undefined;
+            if (val === null || val === undefined) return null;
+            var sig = signals ? signals[def.key] || null : null;
+            var sigStyle = sig ? SIGNAL_COLORS[sig] || SIGNAL_COLORS.neutral : null;
+            var cardBg = "var(--bg4)", cardBorderLeft = "none";
+            if (sig === "bullish") { cardBg = "rgba(22,163,74,.06)"; cardBorderLeft = "3px solid #20c46a"; }
+            else if (sig === "bearish") { cardBg = "rgba(239,68,68,.06)"; cardBorderLeft = "3px solid #f0473f"; }
+            else if (sig === "overbought") { cardBg = "rgba(234,88,12,.05)"; cardBorderLeft = "3px solid #ea580c"; }
+            else if (sig === "oversold") { cardBg = "rgba(37,99,235,.05)"; cardBorderLeft = "3px solid #2563eb"; }
+            else if (sig === "trending") { cardBg = "rgba(168,85,247,.05)"; cardBorderLeft = "3px solid #a855f7"; }
+            else if (sig === "ranging") { cardBg = "rgba(107,114,128,.04)"; cardBorderLeft = "3px solid #6b7280"; }
+            return React.createElement("div", {
+              key: def.key,
+              style: { padding: "8px 10px", borderRadius: 8, background: cardBg, border: "1px solid var(--border)", borderLeft: cardBorderLeft, display: "flex", flexDirection: "column", gap: 2, transition: "background .3s, border-color .3s" }
+            },
+              React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.3 } }, def.name),
+                sigStyle && sig !== "neutral" && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 6, background: sigStyle.bg, border: "1px solid " + sigStyle.border, color: sigStyle.text, textTransform: "uppercase" } }, sigStyle.label)
+              ),
+              React.createElement("div", { style: { fontSize: 14, fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--text)" } }, _fmtVal(def, val)),
+              def.type === "macd" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 } },
+                React.createElement("span", null, "MACD: " + _fmt(val.macd, 4)),
+                React.createElement("span", null, "Sig: " + _fmt(val.signal, 4)),
+                React.createElement("span", { style: { color: val.histogram >= 0 ? "#20c46a" : "#f0473f" } }, "Hist: " + _fmt(val.histogram, 4))
+              ),
+              def.type === "bands" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 } },
+                React.createElement("span", null, "U: " + _fmt(val.upper)),
+                React.createElement("span", null, "M: " + _fmt(val.middle)),
+                React.createElement("span", null, "L: " + _fmt(val.lower))
+              ),
+              def.type === "stoch" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 } },
+                React.createElement("span", null, "%K: " + _fmt(val.k)),
+                React.createElement("span", null, "%D: " + _fmt(val.d))
+              ),
+              def.type === "ichimoku" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 6, flexWrap: "wrap" } },
+                React.createElement("span", null, "T: " + _fmt(val.tenkan)),
+                React.createElement("span", null, "K: " + _fmt(val.kijun)),
+                React.createElement("span", null, "SA: " + _fmt(val.senkouA)),
+                React.createElement("span", null, "SB: " + _fmt(val.senkouB))
+              ),
+              def.type === "chandelier" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 } },
+                React.createElement("span", null, "L: " + _fmt(val.long)),
+                React.createElement("span", null, "S: " + _fmt(val.short))
+              ),
+              def.type === "heikinAshi" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 6 } },
+                React.createElement("span", null, "O: " + _fmt(val.open)),
+                React.createElement("span", null, "H: " + _fmt(val.high)),
+                React.createElement("span", null, "L: " + _fmt(val.low)),
+                React.createElement("span", null, "C: " + _fmt(val.close))
+              ),
+              def.type === "aroon" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 } },
+                React.createElement("span", null, "Up: " + _fmt(val.up)),
+                React.createElement("span", null, "Dn: " + _fmt(val.down)),
+                React.createElement("span", { style: { color: val.osc > 0 ? "#20c46a" : "#f0473f" } }, "Osc: " + _fmt(val.osc))
+              ),
+              def.type === "vortex" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 } },
+                React.createElement("span", { style: { color: "#20c46a" } }, "VI+: " + _fmt(val.plus)),
+                React.createElement("span", { style: { color: "#f0473f" } }, "VI-: " + _fmt(val.minus))
+              ),
+              def.type === "volumeProfile" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 } },
+                React.createElement("span", null, "POC: " + _fmt(val.poc)),
+                val.valueAreaHigh && React.createElement("span", null, "VAH: " + _fmt(val.valueAreaHigh)),
+                val.valueAreaLow && React.createElement("span", null, "VAL: " + _fmt(val.valueAreaLow))
+              ),
+              def.type === "rs" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 } },
+                React.createElement("span", null, "RS: " + _fmt(val.rs, 4)),
+                val.mansfield != null && React.createElement("span", { style: { color: val.mansfield > 0 ? "#20c46a" : "#f0473f" } }, "Mans: " + _fmt(val.mansfield, 2) + "%")
+              )
+            );
+          })
+        )
+      )
+    )
+  );
+}
+
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Pulse (Watchlist + Entry Score + Stock Screener)
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function PulsePage({ holdings }) {
   const [activeTab, setActiveTab] = useState("screener");
 
   const TABS = [
     { key: "screener", label: "Stock Screener", icon: Icons.chart },
     { key: "entryscore", label: "Entry Score", icon: Icons.trendingUp },
+    { key: "singlestock", label: "Single Stock Analysis", icon: Icons.search },
   ];
 
   return React.createElement("div", null,
@@ -3409,14 +3842,21 @@ function PulsePage({ holdings }) {
       }, t.icon(14), t.label))
     ),
 
-    activeTab === "screener" && React.createElement(StockScreener, null),
-    activeTab === "entryscore" && React.createElement(EntryScorePanel, { shares: holdings || [] })
+    React.createElement("div", { style: { display: activeTab === "screener" ? "block" : "none" } },
+      React.createElement(StockScreener, null)
+    ),
+    React.createElement("div", { style: { display: activeTab === "entryscore" ? "block" : "none" } },
+      React.createElement(EntryScorePanel, { shares: holdings || [] })
+    ),
+    React.createElement("div", { style: { display: activeTab === "singlestock" ? "block" : "none" } },
+      React.createElement(SingleStockAnalysis, null)
+    )
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Settings
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareSnapshots, watchlist, setWatchlist }) {
   const [theme, setTheme] = useState("light");
 
@@ -3474,14 +3914,14 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "1.0.0"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "1.0.1"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
 
     // Data management (danger zone)
     React.createElement("div", { className: "stx-card", style: { border: "1px solid rgba(239,68,68,.25)", background: "rgba(239,68,68,.04)" } },
-      React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 8, color: "#ef4444" } }, "Danger Zone"),
+      React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 8, color: "#f0473f" } }, "Danger Zone"),
       React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", marginBottom: 12 } }, "Permanently delete all data from this browser. Download a backup first."),
       React.createElement("button", {
         className: "stx-btn stx-btn-ghost",
@@ -3500,9 +3940,9 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    MAIN APP
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function App() {
   const [page, setPage] = useState("dashboard");
   const [pageParam, setPageParam] = useState(null);
@@ -3661,9 +4101,9 @@ function App() {
       },
         React.createElement("div", { style: { padding: "0 20px 20px", borderBottom: "1px solid rgba(255,255,255,.08)" } },
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
-            React.createElement("div", { style: { width: 36, height: 36, borderRadius: 10, background: "rgba(16,185,129,.2)", border: "1px solid rgba(16,185,129,.3)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, color: "#10b981", fontFamily: "var(--font-heading)", fontSize: 18 } }, "S"),
+            React.createElement("div", { style: { width: 36, height: 36, borderRadius: 10, background: "rgba(76,141,217,.16)", border: "1px solid rgba(76,141,217,.3)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, color: "#4c8dd9", fontFamily: "var(--font-heading)", fontSize: 18 } }, "S"),
             React.createElement("div", null,
-              React.createElement("div", { style: { fontWeight: 800, fontSize: 16, color: "#ecfdf5", fontFamily: "var(--font-heading)" } }, "Sto", React.createElement("span", { style: { color: "#10b981" } }, "X")),
+              React.createElement("div", { style: { fontWeight: 800, fontSize: 16, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Sto", React.createElement("span", { style: { color: "#4c8dd9" } }, "X")),
               React.createElement("div", { style: { fontSize: 9, color: "rgba(255,255,255,.4)", letterSpacing: 1 } }, "STOCK ANALYSIS")
             )
           )
@@ -3676,11 +4116,11 @@ function App() {
               style: {
                 display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px",
                 borderRadius: 10, border: "none", cursor: "pointer", transition: "all .15s",
-                background: active ? "rgba(16,185,129,.15)" : "transparent",
-                color: active ? "#10b981" : "rgba(255,255,255,.55)",
+                background: active ? "rgba(76,141,217,.14)" : "transparent",
+                color: active ? "#4c8dd9" : "rgba(255,255,255,.55)",
                 fontWeight: active ? 700 : 500, fontSize: 13,
                 fontFamily: "var(--font-body)", textAlign: "left",
-                borderLeft: active ? "3px solid #10b981" : "3px solid transparent"
+                borderLeft: active ? "3px solid #4c8dd9" : "3px solid transparent"
               }
             },
               React.createElement("span", null, item.icon(18)),
@@ -3691,7 +4131,7 @@ function App() {
         // Market status footer
         React.createElement("div", { style: { padding: "12px 20px", borderTop: "1px solid rgba(255,255,255,.08)", fontSize: 10, color: "rgba(255,255,255,.35)" } },
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
-            React.createElement("div", { style: { width: 6, height: 6, borderRadius: "50%", background: isTradingWeekday() ? "#10b981" : "#6b7280" } }),
+            React.createElement("div", { style: { width: 6, height: 6, borderRadius: "50%", background: isTradingWeekday() ? "#20c46a" : "#6b7280" } }),
             isTradingWeekday() ? "Market Open" : "Market Closed"
           ),
           React.createElement("div", { style: { marginTop: 4 } }, "NSE \u00b7 BSE")
@@ -3727,8 +4167,8 @@ function App() {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    MOUNT
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(React.createElement(App));

@@ -16,8 +16,8 @@ window.TechnicalIndicatorsPanel = (function () {
 
   /* ── Color palette for signals ─────────────────────────────────────────── */
   var SIGNAL_COLORS = {
-    bullish: { bg: "rgba(22,163,74,.12)", border: "rgba(22,163,74,.3)", text: "#20c46a", label: "Bullish" },
-    bearish: { bg: "rgba(239,68,68,.12)", border: "rgba(239,68,68,.3)", text: "#f0473f", label: "Bearish" },
+    bullish: { bg: "rgba(22,163,74,.12)", border: "rgba(22,163,74,.3)", text: "#16a34a", label: "Bullish" },
+    bearish: { bg: "rgba(239,68,68,.12)", border: "rgba(239,68,68,.3)", text: "#ef4444", label: "Bearish" },
     overbought: { bg: "rgba(234,88,12,.12)", border: "rgba(234,88,12,.3)", text: "#ea580c", label: "Overbought" },
     oversold: { bg: "rgba(37,99,235,.12)", border: "rgba(37,99,235,.3)", text: "#2563eb", label: "Oversold" },
     neutral: { bg: "var(--bg5)", border: "var(--border)", text: "var(--text5)", label: "Neutral" },
@@ -139,8 +139,8 @@ window.TechnicalIndicatorsPanel = (function () {
 
     var cardBg = "var(--bg3)";
     var cardBorderLeft = "none";
-    if (signal === "bullish") { cardBg = "rgba(22,163,74,.06)"; cardBorderLeft = "3px solid #20c46a"; }
-    else if (signal === "bearish") { cardBg = "rgba(239,68,68,.06)"; cardBorderLeft = "3px solid #f0473f"; }
+    if (signal === "bullish") { cardBg = "rgba(22,163,74,.06)"; cardBorderLeft = "3px solid #16a34a"; }
+    else if (signal === "bearish") { cardBg = "rgba(239,68,68,.06)"; cardBorderLeft = "3px solid #ef4444"; }
     else if (signal === "overbought") { cardBg = "rgba(234,88,12,.05)"; cardBorderLeft = "3px solid #ea580c"; }
     else if (signal === "oversold") { cardBg = "rgba(37,99,235,.05)"; cardBorderLeft = "3px solid #2563eb"; }
     else if (signal === "trending") { cardBg = "rgba(168,85,247,.05)"; cardBorderLeft = "3px solid #a855f7"; }
@@ -165,7 +165,7 @@ window.TechnicalIndicatorsPanel = (function () {
       ),
       React.createElement("div", {
         style: {
-          fontSize: 18, fontWeight: 800, fontFamily: "'Manrope',sans-serif",
+          fontSize: 18, fontWeight: 800, fontFamily: "'Sora',sans-serif",
           color: "var(--text)", lineHeight: 1.2,
         }
       }, formatValue(ind, val)),
@@ -175,7 +175,7 @@ window.TechnicalIndicatorsPanel = (function () {
       },
         React.createElement("span", null, "MACD: ", fmt(val.macd, 4)),
         React.createElement("span", null, "Signal: ", fmt(val.signal, 4)),
-        React.createElement("span", { style: { color: val.histogram >= 0 ? "#20c46a" : "#f0473f" } },
+        React.createElement("span", { style: { color: val.histogram >= 0 ? "#16a34a" : "#ef4444" } },
           "Hist: ", fmt(val.histogram, 4))
       ),
       ind.type === "bands" && val && typeof val === "object" && React.createElement("div", {
@@ -205,7 +205,7 @@ window.TechnicalIndicatorsPanel = (function () {
         React.createElement("span", null, "Top: ", fmt(val.boxTop)),
         React.createElement("span", null, "Bottom: ", fmt(val.boxBottom)),
         val.breakout && React.createElement("span", {
-          style: { color: val.breakout === "up" ? "#20c46a" : val.breakout === "down" ? "#f0473f" : "var(--text5)" }
+          style: { color: val.breakout === "up" ? "#16a34a" : val.breakout === "down" ? "#ef4444" : "var(--text5)" }
         }, "Breakout: ", val.breakout.toUpperCase())
       ),
       ind.type === "smartMoney" && val && typeof val === "object" && React.createElement("div", {
@@ -226,7 +226,7 @@ window.TechnicalIndicatorsPanel = (function () {
       },
         React.createElement("span", null, "Long: ", fmt(val.long)),
         React.createElement("span", null, "Short: ", fmt(val.short)),
-        lastClose && val.long && React.createElement("span", { style: { color: lastClose > val.long ? "#20c46a" : "#f0473f" } }, lastClose > val.long ? "Above Long" : "Below Long")
+        lastClose && val.long && React.createElement("span", { style: { color: lastClose > val.long ? "#16a34a" : "#ef4444" } }, lastClose > val.long ? "Above Long" : "Below Long")
       ),
       ind.type === "heikinAshi" && val && typeof val === "object" && React.createElement("div", {
         style: { display: "flex", gap: 10, fontSize: 10, color: "var(--text5)", marginTop: 2 }
@@ -235,7 +235,7 @@ window.TechnicalIndicatorsPanel = (function () {
         React.createElement("span", null, "H: ", fmt(val.high)),
         React.createElement("span", null, "L: ", fmt(val.low)),
         React.createElement("span", null, "C: ", fmt(val.close)),
-        React.createElement("span", { style: { color: val.trend === "bullish" ? "#20c46a" : val.trend === "bearish" ? "#f0473f" : "var(--text5)" } }, val.trend ? val.trend.toUpperCase() : "—")
+        React.createElement("span", { style: { color: val.trend === "bullish" ? "#16a34a" : val.trend === "bearish" ? "#ef4444" : "var(--text5)" } }, val.trend ? val.trend.toUpperCase() : "—")
       ),
       ind.type === "fibonacci" && val && typeof val === "object" && val.retrace && React.createElement("div", {
         style: { display: "flex", gap: 8, flexWrap: "wrap", fontSize: 10, color: "var(--text5)", marginTop: 2 }
@@ -248,34 +248,34 @@ window.TechnicalIndicatorsPanel = (function () {
         style: { display: "flex", gap: 8, flexWrap: "wrap", fontSize: 10, color: "var(--text5)", marginTop: 2 }
       },
         React.createElement("span", null, "P: ", fmt(val.classic.P)),
-        React.createElement("span", { style: { color: "#20c46a" } }, "R1: ", fmt(val.classic.R1)),
-        React.createElement("span", { style: { color: "#20c46a" } }, "R2: ", fmt(val.classic.R2)),
-        React.createElement("span", { style: { color: "#f0473f" } }, "S1: ", fmt(val.classic.S1)),
-        React.createElement("span", { style: { color: "#f0473f" } }, "S2: ", fmt(val.classic.S2))
+        React.createElement("span", { style: { color: "#16a34a" } }, "R1: ", fmt(val.classic.R1)),
+        React.createElement("span", { style: { color: "#16a34a" } }, "R2: ", fmt(val.classic.R2)),
+        React.createElement("span", { style: { color: "#ef4444" } }, "S1: ", fmt(val.classic.S1)),
+        React.createElement("span", { style: { color: "#ef4444" } }, "S2: ", fmt(val.classic.S2))
       ),
       ind.type === "aroon" && val && typeof val === "object" && React.createElement("div", {
         style: { display: "flex", gap: 12, fontSize: 10, color: "var(--text5)", marginTop: 2 }
       },
         React.createElement("span", null, "Up: ", fmt(val.up)),
         React.createElement("span", null, "Down: ", fmt(val.down)),
-        React.createElement("span", { style: { color: val.osc > 0 ? "#20c46a" : "#f0473f" } }, "Osc: ", fmt(val.osc))
+        React.createElement("span", { style: { color: val.osc > 0 ? "#16a34a" : "#ef4444" } }, "Osc: ", fmt(val.osc))
       ),
       ind.type === "vortex" && val && typeof val === "object" && React.createElement("div", {
         style: { display: "flex", gap: 12, fontSize: 10, color: "var(--text5)", marginTop: 2 }
       },
-        React.createElement("span", { style: { color: "#20c46a" } }, "VI+: ", fmt(val.plus)),
-        React.createElement("span", { style: { color: "#f0473f" } }, "VI-: ", fmt(val.minus))
+        React.createElement("span", { style: { color: "#16a34a" } }, "VI+: ", fmt(val.plus)),
+        React.createElement("span", { style: { color: "#ef4444" } }, "VI-: ", fmt(val.minus))
       ),
       ind.type === "rs" && val && typeof val === "object" && React.createElement("div", {
         style: { display: "flex", gap: 10, fontSize: 10, color: "var(--text5)", marginTop: 2 }
       },
         React.createElement("span", null, "RS: ", fmt(val.rs, 4)),
-        val.mansfield != null && React.createElement("span", { style: { color: val.mansfield > 0 ? "#20c46a" : "#f0473f" } }, "Mansfield: ", fmt(val.mansfield, 2) + "%")
+        val.mansfield != null && React.createElement("span", { style: { color: val.mansfield > 0 ? "#16a34a" : "#ef4444" } }, "Mansfield: ", fmt(val.mansfield, 2) + "%")
       ),
       deviation !== null && React.createElement("div", {
         style: {
           fontSize: 10, marginTop: 2,
-          color: deviation >= 0 ? "#20c46a" : "#f0473f",
+          color: deviation >= 0 ? "#16a34a" : "#ef4444",
         }
       }, (deviation >= 0 ? "+" : "") + fmt(deviation, 1) + "% from close")
     );
@@ -313,7 +313,7 @@ window.TechnicalIndicatorsPanel = (function () {
     var bullPct = (score.bull / score.total * 100);
     var neutralPct = (score.neutral / score.total * 100);
     var bearPct = (score.bear / score.total * 100);
-    var color = score.bull > score.bear ? "#20c46a" : score.bear > score.bull ? "#f0473f" : "#6b7280";
+    var color = score.bull > score.bear ? "#16a34a" : score.bear > score.bull ? "#ef4444" : "#6b7280";
 
     return React.createElement("div", {
       style: {
@@ -330,7 +330,7 @@ window.TechnicalIndicatorsPanel = (function () {
           bullPct > 0 && React.createElement("div", {
             style: {
               width: bullPct + "%", height: "100%",
-              background: "linear-gradient(90deg, #20c46a, #20c46a)",
+              background: "linear-gradient(90deg, #16a34a, #22c55e)",
               transition: "width .3s",
             }
           }),
@@ -344,7 +344,7 @@ window.TechnicalIndicatorsPanel = (function () {
           bearPct > 0 && React.createElement("div", {
             style: {
               width: bearPct + "%", height: "100%",
-              background: "linear-gradient(90deg, #f0473f, #dc2626)",
+              background: "linear-gradient(90deg, #ef4444, #dc2626)",
               transition: "width .3s",
             }
           })
@@ -366,27 +366,27 @@ window.TechnicalIndicatorsPanel = (function () {
         }
       },
         React.createElement("span", {
-          style: { fontSize: 11, fontWeight: 800, color: "#20c46a", lineHeight: 1.2, fontFamily: "'Manrope',sans-serif" }
+          style: { fontSize: 11, fontWeight: 800, color: "#16a34a", lineHeight: 1.2, fontFamily: "'Sora',sans-serif" }
         }, score.bull),
         React.createElement("span", {
           style: { fontSize: 9, fontWeight: 600, color: "#6b7280", lineHeight: 1.2 }
         }, score.neutral),
         React.createElement("span", {
-          style: { fontSize: 11, fontWeight: 800, color: "#f0473f", lineHeight: 1.2, fontFamily: "'Manrope',sans-serif" }
+          style: { fontSize: 11, fontWeight: 800, color: "#ef4444", lineHeight: 1.2, fontFamily: "'Sora',sans-serif" }
         }, score.bear)
       )
     );
   }
 
   /* ── Exit Score Card ────────────────────────────────────────────────── */
-  function ExitScoreCard(candles, ind, buyPrice, buyDate, currentPrice, entryScore, indexTrendScore) {
-    var es = TI.computeExitScore(candles, ind, {entryPrice: buyPrice, buyDate: buyDate, currentPrice: currentPrice, entryScore: entryScore, indexTrendScore: indexTrendScore});
+  function ExitScoreCard(candles, ind, buyPrice, buyDate, currentPrice, entryScore) {
+    var es = TI.computeExitScore(candles, ind, {entryPrice: buyPrice, buyDate: buyDate, currentPrice: currentPrice, entryScore: entryScore});
     if (!es) return null;
 
     var factors = [
-      { label: "Trend Breakdown", val: es.trend, max: es.trendMax, color: "#4a8fe0" },
+      { label: "Trend Breakdown", val: es.trend, max: es.trendMax, color: "#3b82f6" },
       { label: "Momentum Exhaustion", val: es.momentum, max: es.momentumMax, color: "#a855f7" },
-      { label: "Volume Distribution", val: es.volume, max: es.volumeMax, color: "#e0a527" },
+      { label: "Volume Distribution", val: es.volume, max: es.volumeMax, color: "#f59e0b" },
       { label: "Structure Breakdown", val: es.structure, max: es.structureMax, color: "#ec4899" },
     ];
 
@@ -415,10 +415,10 @@ window.TechnicalIndicatorsPanel = (function () {
       var aboveEntry2Pct = cp >= ep * 1.02;
 
       var rules = [];
-      rules.push({ label: "Take Profit (+4%)", price: target, trigger: cp >= target, active: cp >= target, type: "exit", color: "#20c46a" });
-      rules.push({ label: "Stop Loss (1.5\u00d7ATR)", price: stopLoss, trigger: cp <= stopLoss, active: cp <= stopLoss, type: "exit", color: "#f0473f" });
+      rules.push({ label: "Take Profit (+4%)", price: target, trigger: cp >= target, active: cp >= target, type: "exit", color: "#16a34a" });
+      rules.push({ label: "Stop Loss (1.5\u00d7ATR)", price: stopLoss, trigger: cp <= stopLoss, active: cp <= stopLoss, type: "exit", color: "#ef4444" });
       if (aboveEntry2Pct) {
-        rules.push({ label: "Trailing Stop (2\u00d7ATR from high)", price: trailingStop, trigger: cp <= trailingStop, active: cp <= trailingStop, type: "exit", color: "#f0473f" });
+        rules.push({ label: "Trailing Stop (2\u00d7ATR from high)", price: trailingStop, trigger: cp <= trailingStop, active: cp <= trailingStop, type: "exit", color: "#ef4444" });
       }
       var timeStopActive = holdingDays >= 20 && cp < ep * 1.02;
       rules.push({ label: "Time Stop (20d, <2% gain)", price: null, trigger: timeStopActive, active: timeStopActive, type: "exit", color: "#f97316" });
@@ -446,7 +446,7 @@ window.TechnicalIndicatorsPanel = (function () {
         style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }
       },
         React.createElement("div", null,
-          React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "'Manrope',sans-serif" } }, "Exit Score"),
+          React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "'Sora',sans-serif" } }, "Exit Score"),
           React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 2 } },
             "Momentum Exit Engine \u00b7 0\u2013100 \u00b7 4 Components"
           )
@@ -458,7 +458,7 @@ window.TechnicalIndicatorsPanel = (function () {
         },
           React.createElement("div", { style: { textAlign: "right" } },
             React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, "Decision"),
-            React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: es.decision.color, fontFamily: "'Manrope',sans-serif" } }, es.decision.label)
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: es.decision.color, fontFamily: "'Sora',sans-serif" } }, es.decision.label)
           ),
           React.createElement("div", {
             style: {
@@ -469,7 +469,7 @@ window.TechnicalIndicatorsPanel = (function () {
             }
           },
             React.createElement("span", {
-              style: { fontSize: 20, fontWeight: 900, color: es.decision.color, fontFamily: "'Manrope',sans-serif", lineHeight: 1 }
+              style: { fontSize: 20, fontWeight: 900, color: es.decision.color, fontFamily: "'Sora',sans-serif", lineHeight: 1 }
             }, es.total)
           )
         )
@@ -489,7 +489,7 @@ window.TechnicalIndicatorsPanel = (function () {
                 }
               })
             ),
-            React.createElement("span", { style: { width: 40, fontSize: 10, fontWeight: 700, color: "var(--text4)", fontFamily: "'Manrope',sans-serif", textAlign: "right" } },
+            React.createElement("span", { style: { width: 40, fontSize: 10, fontWeight: 700, color: "var(--text4)", fontFamily: "'Sora',sans-serif", textAlign: "right" } },
               f.val + "/" + f.max
             )
           );
@@ -517,7 +517,7 @@ window.TechnicalIndicatorsPanel = (function () {
             var label = valStr ? f.replace(valStr, "").replace(/\s*—\s*/, " — ").trim() : f;
             return React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, lineHeight: 1.6, fontSize: 10 } },
               React.createElement("span", { style: { color: "var(--text3)", flex: 1, minWidth: 0, overflow: "hidden", wordBreak: "break-word" } }, isBonus ? "\u2713 " + label : "\u26a0 " + label),
-              valStr && React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "var(--text3)", background: "var(--bg4)", padding: "1px 6px", borderRadius: 4, fontFamily: "'Manrope',sans-serif", flexShrink: 0 } }, valStr)
+              valStr && React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "var(--text3)", background: "var(--bg4)", padding: "1px 6px", borderRadius: 4, fontFamily: "'Sora',sans-serif", flexShrink: 0 } }, valStr)
             );
           })
         )
@@ -530,9 +530,9 @@ window.TechnicalIndicatorsPanel = (function () {
           background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.2)",
         }
       },
-        React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#f0473f", marginBottom: 4 } }, "\u26a0 Critical Overrides"),
+        React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#ef4444", marginBottom: 4 } }, "\u26a0 Critical Overrides"),
         es.overrides.map(function (o, i) {
-          return React.createElement("div", { key: i, style: { fontSize: 10, color: "#f0473f", lineHeight: 1.5 } }, "\u2022 " + o);
+          return React.createElement("div", { key: i, style: { fontSize: 10, color: "#ef4444", lineHeight: 1.5 } }, "\u2022 " + o);
         })
       ),
 
@@ -544,11 +544,11 @@ window.TechnicalIndicatorsPanel = (function () {
         }
       },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
-          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)", fontFamily: "'Manrope',sans-serif" } }, "Exit Price Recommendations"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)", fontFamily: "'Sora',sans-serif" } }, "Exit Price Recommendations"),
           React.createElement("div", { style: { display: "flex", gap: 12, fontSize: 10 } },
             React.createElement("span", { style: { color: "var(--text5)" } }, "Entry: \u20b9" + INR(ep)),
             React.createElement("span", { style: { color: "var(--text5)" } }, "Current: \u20b9" + INR(cp)),
-            React.createElement("span", { style: { color: exitRecs.pnlPct >= 0 ? "#20c46a" : "#f0473f", fontWeight: 700 } }, (exitRecs.pnlPct >= 0 ? "+" : "") + exitRecs.pnlPct.toFixed(1) + "%"),
+            React.createElement("span", { style: { color: exitRecs.pnlPct >= 0 ? "#16a34a" : "#ef4444", fontWeight: 700 } }, (exitRecs.pnlPct >= 0 ? "+" : "") + exitRecs.pnlPct.toFixed(1) + "%"),
             React.createElement("span", { style: { color: "var(--text5)" } }, exitRecs.holdingDays + "d held")
           )
         ),
@@ -578,7 +578,7 @@ window.TechnicalIndicatorsPanel = (function () {
               }
             },
               React.createElement("div", { style: { fontSize: 9, fontWeight: 600, color: r.active ? r.color : "var(--text5)", marginBottom: 3 } }, r.label),
-              React.createElement("div", { style: { fontSize: 13, fontWeight: 800, color: r.active ? "var(--text)" : "var(--text5)", fontFamily: "'Manrope',sans-serif" } },
+              React.createElement("div", { style: { fontSize: 13, fontWeight: 800, color: r.active ? "var(--text)" : "var(--text5)", fontFamily: "'Sora',sans-serif" } },
                 r.price !== null ? "\u20b9" + INR(r.price) : "\u2014"
               ),
               React.createElement("div", { style: { fontSize: 9, color: r.active ? r.color : "var(--text6)", marginTop: 2 } },
@@ -610,6 +610,8 @@ window.TechnicalIndicatorsPanel = (function () {
     var _l = useState(null), dataSource = _l[0], setDataSource = _l[1];
     var timerRef = useRef(null);
 
+    var avKey = DF.getAVKey();
+
     var fetchData = useCallback(async function () {
       if (!ticker) return;
       setLoading(true);
@@ -619,7 +621,7 @@ window.TechnicalIndicatorsPanel = (function () {
         var data = result.data;
         var source = result.source;
         if (!data || data.length < 10) {
-          setError("Insufficient data for " + ticker + ". Try a different timeframe or check your internet connection.");
+          setError("Insufficient data for " + ticker + ". Try a different timeframe or add an Alpha Vantage API key in settings for daily data.");
           setLoading(false);
           return;
         }
@@ -669,10 +671,12 @@ window.TechnicalIndicatorsPanel = (function () {
         React.createElement("span", {
           style: {
             width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-            background: "#20c46a",
+            background: avKey ? "#16a34a" : "var(--text6)",
           }
         }),
-        React.createElement("span", null, "Yahoo Finance")
+        avKey
+          ? React.createElement("span", null, "Alpha Vantage: ", React.createElement("span", { style: { color: "#16a34a", fontWeight: 600 } }, "Connected"))
+          : React.createElement("span", null, "Using Yahoo Finance fallback — set API key in ", React.createElement("span", { style: { fontWeight: 600 } }, "Settings → API Keys"))
       ),
 
       /* ── Controls row ── */
@@ -731,7 +735,7 @@ window.TechnicalIndicatorsPanel = (function () {
             padding: "6px 12px", borderRadius: 8, fontSize: 11, fontWeight: 600,
             border: "1px solid " + (autoRefresh ? "rgba(22,163,74,.4)" : "var(--border)"),
             background: autoRefresh ? "rgba(22,163,74,.1)" : "var(--bg4)",
-            color: autoRefresh ? "#20c46a" : "var(--text5)",
+            color: autoRefresh ? "#16a34a" : "var(--text5)",
             cursor: "pointer",
           }
         }, autoRefresh ? "● Live" : "○ Auto"),
@@ -758,7 +762,7 @@ window.TechnicalIndicatorsPanel = (function () {
         style: {
           padding: "12px 16px", borderRadius: 10, marginBottom: 14,
           background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)",
-          fontSize: 12, color: "#f0473f", lineHeight: 1.5,
+          fontSize: 12, color: "#ef4444", lineHeight: 1.5,
         }
       }, error),
 
@@ -829,7 +833,8 @@ window.TechnicalIndicatorsPanel = (function () {
         }
       },
         React.createElement("strong", { style: { color: "var(--text4)" } }, "Data Sources:"),
-        " OHLCV data from Yahoo Finance (daily, weekly, intraday).",
+        " Daily OHLCV from Alpha Vantage (requires free API key) or Yahoo Finance (fallback).",
+        " Intraday OHLCV from Yahoo Finance.",
         " Technical indicators calculated locally in-browser.",
         " Data may be delayed 15+ minutes — not suitable for live trading."
       )
@@ -924,7 +929,7 @@ window.TechnicalIndicatorsPanel = (function () {
         style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }
       },
         React.createElement("div", null,
-          React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "'Manrope',sans-serif" } },
+          React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "'Sora',sans-serif" } },
             "Technical Indicators"
           ),
           lastUpdated && React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 2 } },
@@ -955,7 +960,7 @@ window.TechnicalIndicatorsPanel = (function () {
               padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 600,
               border: "1px solid " + (autoRefresh ? "rgba(22,163,74,.4)" : "var(--border)"),
               background: autoRefresh ? "rgba(22,163,74,.1)" : "var(--bg4)",
-              color: autoRefresh ? "#20c46a" : "var(--text5)", cursor: "pointer",
+              color: autoRefresh ? "#16a34a" : "var(--text5)", cursor: "pointer",
             }
           }, autoRefresh ? "● Live" : "○ Auto"),
           React.createElement("button", {
@@ -976,7 +981,7 @@ window.TechnicalIndicatorsPanel = (function () {
         style: {
           padding: "8px 12px", borderRadius: 8, marginBottom: 10,
           background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)",
-          fontSize: 11, color: "#f0473f",
+          fontSize: 11, color: "#ef4444",
         }
       }, error),
 
@@ -992,7 +997,7 @@ window.TechnicalIndicatorsPanel = (function () {
         var bullPct = sc.bull / sc.total * 100;
         var neutralPct = sc.neutral / sc.total * 100;
         var bearPct = sc.bear / sc.total * 100;
-        var col = sc.bull > sc.bear ? "#20c46a" : sc.bear > sc.bull ? "#f0473f" : "#6b7280";
+        var col = sc.bull > sc.bear ? "#16a34a" : sc.bear > sc.bull ? "#ef4444" : "#6b7280";
         return React.createElement("div", {
           style: {
             display: "flex", alignItems: "center", gap: 12,
@@ -1006,13 +1011,13 @@ window.TechnicalIndicatorsPanel = (function () {
               style: { height: 6, borderRadius: 3, background: "var(--bg5)", overflow: "hidden", display: "flex" }
             },
               bullPct > 0 && React.createElement("div", {
-                style: { width: bullPct + "%", height: "100%", background: "linear-gradient(90deg, #20c46a, #20c46a)" }
+                style: { width: bullPct + "%", height: "100%", background: "linear-gradient(90deg, #16a34a, #22c55e)" }
               }),
               neutralPct > 0 && React.createElement("div", {
                 style: { width: neutralPct + "%", height: "100%", background: "linear-gradient(90deg, #6b7280, #9ca3af)" }
               }),
               bearPct > 0 && React.createElement("div", {
-                style: { width: bearPct + "%", height: "100%", background: "linear-gradient(90deg, #f0473f, #dc2626)" }
+                style: { width: bearPct + "%", height: "100%", background: "linear-gradient(90deg, #ef4444, #dc2626)" }
               })
             ),
             React.createElement("div", {
@@ -1031,15 +1036,15 @@ window.TechnicalIndicatorsPanel = (function () {
               flexShrink: 0,
             }
           },
-            React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "#20c46a", lineHeight: 1.2, fontFamily: "'Manrope',sans-serif" } }, sc.bull),
+            React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "#16a34a", lineHeight: 1.2, fontFamily: "'Sora',sans-serif" } }, sc.bull),
             React.createElement("span", { style: { fontSize: 8, fontWeight: 600, color: "#6b7280", lineHeight: 1.2 } }, sc.neutral),
-            React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "#f0473f", lineHeight: 1.2, fontFamily: "'Manrope',sans-serif" } }, sc.bear)
+            React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "#ef4444", lineHeight: 1.2, fontFamily: "'Sora',sans-serif" } }, sc.bear)
           )
         );
       })(),
 
       /* Exit Score */
-      showExitScore && indicators && candles && ExitScoreCard(candles, indicators, buyPrice, buyDate, currentPrice, entryScore, props.indexTrendScore),
+      showExitScore && indicators && candles && ExitScoreCard(candles, indicators, buyPrice, buyDate, currentPrice, entryScore),
 
       /* Category filter pills */
       React.createElement("div", {
@@ -1079,8 +1084,8 @@ window.TechnicalIndicatorsPanel = (function () {
           var cardBg = "var(--bg4)";
           var cardBorder = "1px solid var(--border)";
           var cardBorderLeft = "none";
-          if (sig === "bullish") { cardBg = "rgba(22,163,74,.06)"; cardBorderLeft = "3px solid #20c46a"; }
-          else if (sig === "bearish") { cardBg = "rgba(239,68,68,.06)"; cardBorderLeft = "3px solid #f0473f"; }
+          if (sig === "bullish") { cardBg = "rgba(22,163,74,.06)"; cardBorderLeft = "3px solid #16a34a"; }
+          else if (sig === "bearish") { cardBg = "rgba(239,68,68,.06)"; cardBorderLeft = "3px solid #ef4444"; }
           else if (sig === "overbought") { cardBg = "rgba(234,88,12,.05)"; cardBorderLeft = "3px solid #ea580c"; }
           else if (sig === "oversold") { cardBg = "rgba(37,99,235,.05)"; cardBorderLeft = "3px solid #2563eb"; }
           else if (sig === "trending") { cardBg = "rgba(168,85,247,.05)"; cardBorderLeft = "3px solid #a855f7"; }
@@ -1111,14 +1116,14 @@ window.TechnicalIndicatorsPanel = (function () {
               }, sigStyle.label)
             ),
             React.createElement("div", {
-              style: { fontSize: 14, fontWeight: 700, fontFamily: "'Manrope',sans-serif", color: "var(--text)" }
+              style: { fontSize: 14, fontWeight: 700, fontFamily: "'Sora',sans-serif", color: "var(--text)" }
             }, formatValue(ind, val)),
             ind.type === "macd" && val && typeof val === "object" && React.createElement("div", {
               style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
             },
               React.createElement("span", null, "MACD: " + fmt(val.macd, 4)),
               React.createElement("span", null, "Sig: " + fmt(val.signal, 4)),
-              React.createElement("span", { style: { color: val.histogram >= 0 ? "#20c46a" : "#f0473f" } },
+              React.createElement("span", { style: { color: val.histogram >= 0 ? "#16a34a" : "#ef4444" } },
                 "Hist: " + fmt(val.histogram, 4))
             ),
             ind.type === "bands" && val && typeof val === "object" && React.createElement("div", {
@@ -1149,11 +1154,6 @@ window.TechnicalIndicatorsPanel = (function () {
   }
 
   window.TechnicalIndicatorsInline = React.memo(TechnicalIndicatorsInline);
-  window.STOX_INDICATORS = INDICATORS;
-  window.STOX_CATEGORIES = CATEGORIES;
-  window.stoxFmt = fmt;
-  window.stoxFmtVol = fmtVol;
-  window.stoxFormatValue = formatValue;
 
   return React.memo(TechnicalIndicatorsPanelInner);
 })();
