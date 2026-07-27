@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.2.0";
+window.__STOX_APP_VERSION = "2.3.0";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -3079,6 +3079,51 @@ function StockScreener() {
     setScanTime(0);
   };
 
+  var exportJSON = function() {
+    if (!results.length) return;
+    var payload = {
+      appVersion: window.__STOX_APP_VERSION || "2.3.0",
+      exportDate: new Date().toISOString(),
+      scanTime: scanTime,
+      results: results,
+      timestamps: timestamps
+    };
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "stox-screener-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  var importJSON = function() {
+    var input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.onchange = async function(e) {
+      var file = e.target.files[0];
+      if (!file) return;
+      try {
+        var text = await file.text();
+        var data = JSON.parse(text);
+        if (!data.results || !Array.isArray(data.results)) {
+          setScanErr("Invalid file: missing results array");
+          return;
+        }
+        setResults(data.results);
+        setTimestamps(data.timestamps || {});
+        setScanTime(data.scanTime || 0);
+        setScanErr("");
+      } catch (err) {
+        setScanErr("Failed to import: " + err.message);
+      }
+    };
+    input.click();
+  };
+
   var refreshStock = async function(s) {
     if (!TI || !DF) return;
     setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = true; return c; });
@@ -3252,6 +3297,16 @@ function StockScreener() {
           className: "stx-btn",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid var(--accent)", background: "var(--accentbg)", color: "var(--accent)", cursor: "pointer" }
         }, "Save Snapshot") : null,
+        results.length > 0 && !scanning ? React.createElement("button", {
+          onClick: exportJSON,
+          className: "stx-btn",
+          style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
+        }, "\u2b07 Export") : null,
+        React.createElement("button", {
+          onClick: importJSON,
+          className: "stx-btn",
+          style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
+        }, "\u2b06 Import"),
         results.length > 0 && !scanning ? React.createElement("button", {
           onClick: purgeData,
           className: "stx-btn",
@@ -4007,7 +4062,14 @@ function InfoPage() {
     {
       version: "2.2.0",
       date: "July 2026",
-      label: "Latest",
+      changes: [
+        { type: "fixed", text: "Entry Score Analysis — technical indicator values now display correctly on cards (was always showing em-dash due to missing stoxFormatValue)" },
+        { type: "improved", text: "Entry Score Analysis — complete _fmtVal formatter covering all 18 indicator types with human-readable volume suffixes (K/L/Cr/B)" },
+      ]
+    },
+    {
+      version: "2.2.0",
+      date: "July 2026",
       changes: [
         { type: "fixed", text: "Entry Score Analysis — technical indicator values now display correctly on cards (was always showing em-dash due to missing stoxFormatValue)" },
         { type: "improved", text: "Entry Score Analysis — complete _fmtVal formatter covering all 18 indicator types with human-readable volume suffixes (K/L/Cr/B)" },
@@ -4087,7 +4149,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.2.0"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.3.0"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -4232,7 +4294,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.2.0"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.3.0"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
