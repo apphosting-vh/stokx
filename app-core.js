@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.3";
+window.__STOX_APP_VERSION = "2.4.4";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -641,6 +641,13 @@ function showToast(msg, duration = 3000) {
   }, duration);
 }
 
+window.addEventListener('stox:update-ready', function() {
+  showToast('New version available \u2014 updating\u2026', 5000);
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
+  }
+});
+
 function ToastHost() {
   const [toasts, setToasts] = useState([]);
   _setToasts = setToasts;
@@ -1047,6 +1054,7 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
   const isMobile = window.innerWidth < 768;
 
   const price = prices[ticker?.toUpperCase()]?.price;
+  const holding = (holdings || []).find(h => h.ticker === (ticker || "").toUpperCase());
 
   return React.createElement("div", null,
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 } },
@@ -1070,6 +1078,14 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
         React.createElement("div", { style: { fontSize: 28, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--accent)" } }, INR(price, 2))
       )
     ),
+
+    // Exit Score Trend (active holdings only)
+    ticker && holding && React.createElement(ExitScoreTrend, {
+      ticker: ticker,
+      buyPrice: holding.buyPrice,
+      buyDate: holding.buyDate,
+      entryScore: holding.entryScore,
+    }),
 
     // Full technical indicators panel
     React.createElement(window.TechnicalIndicatorsPanel, { shares: holdings || [], isMobile: isMobile })
@@ -1502,6 +1518,231 @@ const HoldingValueChart = ({ pts, qty, buyPrice, color, gradId }) => {
         const sign = diff >= 0 ? "\u25b2 +" : "\u25bc ";
         return React.createElement("text", { x: tipX + 24, y: tipY + 122, fill: col, fontSize: 18, fontWeight: 600 }, sign + INR(Math.abs(diff)) + " (" + Math.abs(diffPct) + "%)");
       })()
+    )
+  );
+};
+
+const ExitScoreTrend = ({ ticker, buyPrice, buyDate, entryScore }) => {
+  const TI = window.TechIndicators;
+  const DF = window.OHLCVFetcher;
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  const [trendData, setTrendData] = React.useState([]);
+  const [expanded, setExpanded] = React.useState(true);
+  const [hoverIdx, setHoverIdx] = React.useState(null);
+  const svgRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!ticker || !DF || !TI) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true); setError(null);
+      try {
+        const [resW, resD, resH] = await Promise.all([
+          DF.fetchOHLCVCached(ticker, "weekly"),
+          DF.fetchOHLCVCached(ticker, "daily"),
+          DF.fetchOHLCVCached(ticker, "1h"),
+        ]);
+        if (cancelled) return;
+        const computeSeries = (candles) => {
+          if (!candles || candles.length < 12) return [];
+          const minCandles = 40;
+          let startIdx = 0;
+          if (buyDate) {
+            const bd = buyDate + "T00:00:00";
+            for (let j = 0; j < candles.length; j++) {
+              const ct = candles[j].t ? candles[j].t.split(" ")[0] : "";
+              if (ct >= buyDate) { startIdx = j; break; }
+            }
+          }
+          startIdx = Math.max(startIdx, minCandles - 1);
+          const total = candles.length;
+          if (total - startIdx < 2) return [];
+          const sampleCount = Math.min(20, total - startIdx);
+          const step = Math.max(1, Math.floor((total - startIdx - 1) / (sampleCount - 1)));
+          const pts = [];
+          for (let s = 0; s < sampleCount; s++) {
+            const endIdx = Math.min(startIdx + s * step, total - 1);
+            const slice = candles.slice(0, endIdx + 1);
+            if (slice.length < 12) continue;
+            const lastCandle = slice[slice.length - 1];
+            const histClose = lastCandle.c;
+            const dateStr = lastCandle.t ? lastCandle.t.split(" ")[0] : "";
+            if (!dateStr) continue;
+            try {
+              const ind = TI.computeAll(slice);
+              const es = TI.computeExitScore(slice, ind, { entryPrice: buyPrice || 0, buyDate: buyDate || "", currentPrice: histClose, entryScore: entryScore || 0 });
+              if (es) pts.push({ date: dateStr, score: es.total, decision: es.decision, open: lastCandle.o, close: lastCandle.c, prevClose: slice.length >= 2 ? slice[slice.length - 2].c : null });
+            } catch {}
+          }
+          return pts;
+        };
+        const weeklyPts = computeSeries(resW.data);
+        const dailyPts = computeSeries(resD.data);
+        const hourlyPts = computeSeries(resH.data);
+        const dateSet = new Set();
+        weeklyPts.forEach(p => dateSet.add(p.date));
+        dailyPts.forEach(p => dateSet.add(p.date));
+        hourlyPts.forEach(p => dateSet.add(p.date));
+        const allDates = Array.from(dateSet).sort();
+        const wMap = {}; weeklyPts.forEach(p => { wMap[p.date] = p; });
+        const dMap = {}; dailyPts.forEach(p => { dMap[p.date] = p; });
+        const hMap = {}; hourlyPts.forEach(p => { hMap[p.date] = p; });
+        const merged = allDates.map(date => ({ date, weekly: wMap[date] || null, daily: dMap[date] || null, hourly: hMap[date] || null }));
+        if (!cancelled) setTrendData(merged);
+      } catch (e) {
+        if (!cancelled) setError("Failed to compute exit score trend");
+      }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [ticker, buyPrice, buyDate, entryScore]);
+
+  if (loading) {
+    return React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: "10px 14px" } },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, "Exit Score Trend"),
+        React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "Computing...")
+      )
+    );
+  }
+  if (error || !trendData.length) {
+    return null;
+  }
+  const hasW = trendData.some(p => p.weekly);
+  const hasD = trendData.some(p => p.daily);
+  const hasH = trendData.some(p => p.hourly);
+  const series = [
+    { key: "weekly", color: "#3b82f6", label: "W", show: hasW },
+    { key: "daily", color: "#22c55e", label: "D", show: hasD },
+    { key: "hourly", color: "#f59e0b", label: "H", show: hasH },
+  ].filter(s => s.show);
+  if (!series.length) return null;
+  const W = 800, padL = 68, padR = 14, padT = 16, padB = 28;
+  const H = 140;
+  const chartW = W - padL - padR, chartH = H - padT - padB;
+  const xStep = trendData.length > 1 ? chartW / (trendData.length - 1) : chartW;
+  const yFn = v => padT + chartH * (1 - v / 100);
+  const thresholds = [
+    { val: 25, color: "#84cc16", label: "MONITOR" },
+    { val: 40, color: "#eab308", label: "TIGHTEN STOP" },
+    { val: 55, color: "#f97316", label: "PARTIAL EXIT" },
+    { val: 70, color: "#ef4444", label: "EXIT" },
+  ];
+  const buildPolyline = (key) => {
+    const pts = trendData.map((d, i) => {
+      const v = d[key] ? d[key].score : null;
+      return v !== null ? `${padL + i * xStep},${yFn(v)}` : null;
+    }).filter(Boolean);
+    return pts.length >= 2 ? pts.join(" ") : null;
+  };
+  const handleMouseMove = e => {
+    const svg = svgRef.current; if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const svgX = (e.clientX - rect.left) * (W / rect.width) - padL;
+    const idx = Math.round(svgX / xStep);
+    setHoverIdx(Math.max(0, Math.min(trendData.length - 1, idx)));
+  };
+  const hp = hoverIdx !== null ? trendData[hoverIdx] : null;
+  const hx = hoverIdx !== null ? padL + hoverIdx * xStep : null;
+  const fmtDate = d => {
+    if (!d) return "";
+    const m = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const parts = d.split("-");
+    return parseInt(parts[2]) + " " + m[parseInt(parts[1]) - 1];
+  };
+  const scoreColor = s => {
+    if (s == null) return "var(--text6)";
+    if (s >= 70) return "#ef4444";
+    if (s >= 55) return "#f97316";
+    if (s >= 40) return "#eab308";
+    if (s >= 25) return "#84cc16";
+    return "#22c55e";
+  };
+  const stride = Math.max(1, Math.ceil(trendData.length / 6));
+  const latest = trendData[trendData.length - 1];
+  return React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: "10px 14px" } },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, "Exit Score Trend"),
+        React.createElement("div", { style: { display: "flex", gap: 6, fontSize: 9 } },
+          series.map(s => React.createElement("span", { key: s.key, style: { display: "flex", alignItems: "center", gap: 3, color: s.color, fontWeight: 600 } },
+            React.createElement("span", { style: { width: 8, height: 2, borderRadius: 1, background: s.color, display: "inline-block" } }), s.label
+          ))
+        )
+      ),
+      React.createElement("button", {
+        onClick: () => setExpanded(!expanded),
+        style: { background: "none", border: "none", color: "var(--text5)", cursor: "pointer", fontSize: 12, padding: "2px 4px" }
+      }, expanded ? "\u25b2" : "\u25bc")
+    ),
+    expanded && React.createElement(React.Fragment, null,
+      React.createElement("svg", {
+        ref: svgRef, width: "100%", viewBox: `0 0 ${W} ${H}`,
+        style: { display: "block", cursor: "crosshair", overflow: "visible" },
+        onMouseMove: handleMouseMove, onMouseLeave: () => setHoverIdx(null)
+      },
+        thresholds.map((th, i) => React.createElement("g", { key: "yt" + i },
+          React.createElement("line", { x1: padL, y1: yFn(th.val), x2: W - padR, y2: yFn(th.val), stroke: th.color, strokeWidth: 0.7, strokeDasharray: "3,5", opacity: 0.3 }),
+          React.createElement("text", { x: padL - 4, y: yFn(th.val) + 3, textAnchor: "end", fill: th.color, fontSize: 7, fontWeight: 600, opacity: 0.8 }, th.label)
+        )),
+        [0, 50, 100].map(v => React.createElement("text", { key: "ytv" + v, x: padL - 4, y: yFn(v) + 3, textAnchor: "end", fill: "var(--text6)", fontSize: 7 }, v)),
+        series.map(s => {
+          const line = buildPolyline(s.key);
+          return line ? React.createElement("polyline", { key: s.key, points: line, fill: "none", stroke: s.color, strokeWidth: 2, strokeLinejoin: "round", strokeLinecap: "round", opacity: 0.85 }) : null;
+        }),
+        trendData.map((d, i) => {
+          if (i % stride !== 0 && i !== trendData.length - 1) return null;
+          return React.createElement("text", { key: "xl" + i, x: padL + i * xStep, y: H - 4, textAnchor: "middle", fill: "var(--text6)", fontSize: 8 }, fmtDate(d.date));
+        }),
+        hp && React.createElement("g", null,
+          React.createElement("line", { x1: hx, y1: padT, x2: hx, y2: padT + chartH, stroke: "var(--text5)", strokeWidth: 1, strokeDasharray: "3,3", opacity: 0.5 }),
+          series.map(s => {
+            const v = hp[s.key] ? hp[s.key].score : null;
+            if (v == null) return null;
+            return React.createElement("circle", { key: "dot_" + s.key, cx: hx, cy: yFn(v), r: 4, fill: s.color, stroke: "#fff", strokeWidth: 1.5 });
+          }),
+          (() => {
+            const ohlcPt = hp.weekly || hp.daily || hp.hourly;
+            const o = ohlcPt ? ohlcPt.open : null;
+            const c = ohlcPt ? ohlcPt.close : null;
+            const pc = ohlcPt ? ohlcPt.prevClose : null;
+            const pctChg = (o != null && c != null && pc) ? ((c - pc) / pc * 100) : null;
+            const tipW = 160, tipH = 80;
+            const tipX = hx + tipW + padR + 10 > W ? hx - tipW - 10 : hx + 10;
+            const tipY = Math.max(padT, Math.min(padT + chartH - tipH, yFn(hp[series[0].key] ? hp[series[0].key].score : 50) - tipH / 2));
+            return React.createElement("g", null,
+              React.createElement("rect", { x: tipX, y: tipY, width: tipW, height: tipH, rx: 6, fill: "var(--modal-bg)", stroke: "var(--border)", strokeWidth: 1 }),
+              React.createElement("text", { x: tipX + 8, y: tipY + 12, fill: "var(--text4)", fontSize: 9, fontWeight: 600 }, fmtDate(hp.date)),
+              o != null && React.createElement("text", { x: tipX + 8, y: tipY + 24, fill: "var(--text5)", fontSize: 8 },
+                "Open " + o.toFixed(2)
+              ),
+              c != null && React.createElement("text", { x: tipX + 8, y: tipY + 35, fill: "var(--text5)", fontSize: 8 },
+                "Close " + c.toFixed(2)
+              ),
+              pctChg != null && React.createElement("text", { x: tipX + 8, y: tipY + 46, fill: pctChg >= 0 ? "#22c55e" : "#ef4444", fontSize: 8, fontWeight: 700 },
+                (pctChg >= 0 ? "+" : "") + pctChg.toFixed(1) + "% vs prev close"
+              ),
+              series.map((s, si) => {
+                const v = hp[s.key] ? hp[s.key].score : null;
+                return React.createElement("text", { key: s.key, x: tipX + 8, y: tipY + 58 + si * 10, fill: s.color, fontSize: 8, fontWeight: 700 },
+                  s.label + " " + (v != null ? v : "\u2014")
+                );
+              })
+            );
+          })()
+        )
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 12, marginTop: 4, fontSize: 9, color: "var(--text6)" } },
+        series.map(s => {
+          const val = latest[s.key] ? latest[s.key].score : null;
+          const dec = latest[s.key] && latest[s.key].decision ? latest[s.key].decision.label : "";
+          return React.createElement("span", { key: s.key, style: { color: s.color, fontWeight: 600 } },
+            s.label + ": " + (val != null ? val + " " + dec : "\u2014")
+          );
+        }),
+        React.createElement("span", { style: { marginLeft: "auto", color: "var(--text6)" } }, trendData.length + " pts")
+      )
     )
   );
 };
@@ -3133,7 +3374,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.3",
+      appVersion: window.__STOX_APP_VERSION || "2.4.4",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -4111,9 +4352,21 @@ function InfoPage() {
 
   const CHANGELOG = [
     {
-      version: "2.4.3",
+      version: "2.4.4",
       date: "July 2026",
       label: "Latest",
+      changes: [
+        { type: "feature", text: "Exit Score Trend — compact SVG chart showing historical exit scores across weekly, daily, and hourly timeframes from buy date onwards" },
+        { type: "feature", text: "Exit Score Trend tooltip — shows open price, closing price, and percentage change vs previous close on hover" },
+        { type: "feature", text: "Exit Score Trend Y-axis — displays score threshold labels (MONITOR, TIGHTEN STOP, PARTIAL EXIT, EXIT) alongside dashed lines" },
+        { type: "feature", text: "Exit Score Trend X-axis — dates now shown in DD Mon format (e.g. 27 Jul) for clarity" },
+        { type: "feature", text: "FSA auto-write — any data change (holdings, watchlist, snapshots, prices) now triggers a debounced file write within 2 seconds" },
+        { type: "feature", text: "Service Worker auto-update — new version detected toast and automatic page reload on version bump" },
+      ]
+    },
+    {
+      version: "2.4.3",
+      date: "July 2026",
       changes: [
         { type: "fixed", text: "FSA auto-save now writes actual data instead of empty file — fixed stale closure in writeNow that captured initial empty state" },
       ]
@@ -4233,7 +4486,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.3"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.4"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -4378,7 +4631,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.3"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.4"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
@@ -4461,6 +4714,18 @@ function App() {
     })();
     return () => { cancelled = true; };
   }, [allTickers.join(",")]);
+
+  // Auto-write FSA file when any app data changes (debounced 2s)
+  const _fsaTimerRef = React.useRef(null);
+  useEffect(() => {
+    if (_fsaTimerRef.current) clearTimeout(_fsaTimerRef.current);
+    _fsaTimerRef.current = setTimeout(() => {
+      if (window.__fsa && window.__fsa.writeNow) {
+        window.__fsa.writeNow().catch(function() {});
+      }
+    }, 2000);
+    return () => { if (_fsaTimerRef.current) clearTimeout(_fsaTimerRef.current); };
+  }, [holdings, watchlist, soldShareSnapshots, prices]);
 
   // Auto-refresh every 60s
   useEffect(() => {
