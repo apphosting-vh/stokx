@@ -2,28 +2,51 @@
 // reports.js -- extracted from app-bundle.js | 12-tab Reports wrapper
 // ============================================================================
 
-/* global React, useState, useMemo, useEffect, INR */
+/* global React, useMemo, useEffect, INR */
 /* eslint-disable react/no-array-index-key */
 
 // -- shared helpers ----------------------------------------------------------
-const Icon = ({ name, n, size = 16, className = '' }) => {
+const Icon = ({ name, n, size = 16, col, className = '' }) => {
   const iconName = name || n;
-  const icons = {
-    'trending-up': '\u2191', 'trending-down': '\u2193', 'activity': '\u25C6',
-    'bar-chart': '\u25AE', 'pie-chart': '\u25CE', 'clock': '\u25F7',
-    'calendar': '\uD83D\uDCC5', 'target': '\u25CE', 'shield': '\u26E8', 'zap': '\u26A1',
-    'chevron-left': '\u2039', 'chevron-right': '\u203A', 'chevron-down': '\u25BE',
-    'search': '\u2384', 'filter': '\u2261', 'download': '\u2193',
-    'refresh': '\u21BB', 'check': '\u2713', 'x': '\u2715',
-    'info': '\u2139', 'alert-triangle': '\u26A0', 'alert-circle': '\u25CF',
-    'bolt': '\u26A1', 'chart': '\u25B6', 'user': '\u263A',
-  };
-  return (
-    React.createElement('span', {
-      className,
-      style: { fontSize: size * 0.75, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }
-    }, icons[iconName] || '\u25CF')
-  );
+  const S = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: col || 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', display: 'inline-block', verticalAlign: 'middle' };
+  const svg = (...ch) => React.createElement('svg', S, ...ch);
+  const p = d => React.createElement('path', { d });
+  const l = (x1,y1,x2,y2) => React.createElement('line', { x1,y1,x2,y2 });
+  const c = (cx,cy,r) => React.createElement('circle', { cx,cy,r });
+  const pl = pts => React.createElement('polyline', { points: pts });
+  const rct = (x,y,w,h,rx) => React.createElement('rect', { x,y,width:w,height:h,rx:rx||0 });
+  const pg = pts => React.createElement('polygon', { points: pts });
+  switch(iconName) {
+    case 'invest': return svg(pl('2 18 9 11 13 15 22 6'), pl('17 6 22 6 22 11'));
+    case 'trenddown': return svg(pl('23 18 13.5 8.5 8.5 13.5 1 6'), pl('17 18 23 18 23 12'));
+    case 'building': return svg(rct(4,2,16,20,2), l(9,22,9,18), l(15,22,15,18), l(9,6,15,6), l(9,10,15,10));
+    case 'calendar': return svg(rct(3,4,18,18,2), l(16,2,16,6), l(8,2,8,6), l(3,10,21,10));
+    case 'chart': return svg(pl('22 12 18 12 15 21 9 3 6 12 2 12'));
+    case 'grid': return svg(rct(3,3,7,7,1), rct(14,3,7,7,1), rct(3,14,7,7,1), rct(14,14,7,7,1));
+    case 'fire': return svg(p('M12 23c-4.97 0-9-3.58-9-8 0-3.19 2.13-6.04 4-8 0 3 2 4 3 2-1 2-2 5 2 6 1-3 4-4 5-7 1 3 3 5 3 7 0 4.42-4.03 8-8 8z'));
+    case 'lightbulb': return svg(p('M9 21h6'), p('M9 18h6'), p('M12 2a7 7 0 00-3 13.33V17h6v-1.67A7 7 0 0012 2z'));
+    case 'target': return svg(c(12,12,10), c(12,12,6), c(12,12,2));
+    case 'shield': return svg(p('M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'));
+    case 'money': return svg(l(12,1,12,23), p('M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6'));
+    case 'expense': return svg(c(12,12,10), l(12,7,12,17), pl('8 13 12 17 16 13'));
+    case 'warning': return svg(p('M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z'), l(12,9,12,13), c(12,16,0.5));
+    case 'checkcircle': return svg(c(12,12,10), pl('8 12 11 15 16 9'));
+    case 'clock': return svg(c(12,12,10), l(12,6,12,12), pl('12 9 15 11'));
+    case 'alarmclock': return svg(c(12,12,10), l(12,6,12,12), pl('12 9 15 11'), l(5,2,2,5), l(19,2,22,5));
+    case 'list': return svg(l(8,6,21,6), l(8,12,21,12), l(8,18,21,18), rct(3,5,1.5,1.5,0.5), rct(3,11,1.5,1.5,0.5), rct(3,17,1.5,1.5,0.5));
+    case 'search': return svg(c(11,11,7), l(16.5,16.5,21,21));
+    case 'refresh': return svg(pl('23 4 23 10 17 10'), p('M20.49 15a9 9 0 11-2.12-9.36L23 10'));
+    case 'info': return svg(c(12,12,10), l(12,16,12,12), l(12,8,12.01,8));
+    case 'sun': return svg(c(12,12,4), l(12,2,12,5), l(12,19,12,22), l(4.93,4.93,7.05,7.05), l(16.95,16.95,19.07,19.07), l(2,12,5,12), l(19,12,22,12), l(4.93,19.07,7.05,16.95), l(16.95,7.05,19.07,4.93));
+    case 'bolt': return svg(pg('13 2 3 14 12 14 11 22 21 10 12 10 13 2'));
+    case 'delete': return svg(pl('3 6 5 6 21 6'), p('M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2'));
+    case 'cloud': return svg(p('M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z'));
+    case 'balance': return svg(l(12,3,12,21), p('M4 8h4l-4 8h4'), p('M20 8h-4l4 8h-4'), c(4,8,1), c(20,8,1));
+    case 'compare': return svg(rct(4,3,4,18,1), rct(16,3,4,18,1));
+    case 'crystal': return svg(pg('12 2 22 12 12 22 2 12'), l(12,2,12,22), l(2,12,22,12));
+    case 'percent': return svg(c(9,9,2), c(15,15,2), l(20,4,4,20));
+    default: return svg(c(12,12,4));
+  }
 };
 
 const pnlColor = (v) => v > 0 ? '#10b981' : v < 0 ? '#ef4444' : '#94a3b8';

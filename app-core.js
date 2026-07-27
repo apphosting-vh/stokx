@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.8";
+window.__STOX_APP_VERSION = "2.4.9";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -3478,7 +3478,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.8",
+      appVersion: window.__STOX_APP_VERSION || "2.4.9",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -4457,10 +4457,17 @@ function InfoPage() {
 
   const CHANGELOG = [
     {
-      version: "2.4.8",
+      version: "2.4.9",
       date: "July 2026",
       label: "Latest",
       changes: [
+        { type: "fixed", text: "Report icon mojibake — replaced emoji/unicode icons with proper SVG icon component covering all 27 icon names" },
+        { type: "fixed", text: "Icon component reference error — fixed undefined variable in className prop" },
+        { type: "fixed", text: "Reports header encoding corruption — rewrote header with clean ASCII and proper Unicode escapes" },
+      ]
+    },
+    {
+      version: "2.4.8",
         { type: "fixed", text: "Holding Value History chart Y-axis values corrected — Finsight imports with pre-computed {date,value} format no longer get double-multiplied by qty" },
         { type: "fixed", text: "Snapshots normalised on load and import — finightsight and StoX backup restores now convert {date,value} to {date,close} consistently" },
         { type: "improved", text: "Reports & Analytics fully reconstructed from reference — all 12 tabs with calendar heatmap, streaks, trade detail tables, and methodology footnotes" },
@@ -4631,7 +4638,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.8"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.9"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -4793,7 +4800,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.8"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.9"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
