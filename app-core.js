@@ -4817,7 +4817,6 @@ function App() {
         setWatchlist(w);
         setSoldShareSnapshots(snaps);
       } catch (e) { console.warn("Failed to load data:", e); }
-      } catch (e) { console.warn("Failed to load data:", e); }
       setLoading(false);
     })();
   }, []);
