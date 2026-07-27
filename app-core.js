@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.3.0";
+window.__STOX_APP_VERSION = "2.4.0";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -3082,7 +3082,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.3.0",
+      appVersion: window.__STOX_APP_VERSION || "2.4.0",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -4060,19 +4060,27 @@ function InfoPage() {
 
   const CHANGELOG = [
     {
-      version: "2.2.0",
+      version: "2.4.0",
       date: "July 2026",
+      label: "Latest",
       changes: [
-        { type: "fixed", text: "Entry Score Analysis — technical indicator values now display correctly on cards (was always showing em-dash due to missing stoxFormatValue)" },
-        { type: "improved", text: "Entry Score Analysis — complete _fmtVal formatter covering all 18 indicator types with human-readable volume suffixes (K/L/Cr/B)" },
+        { type: "improved", text: "Technical indicator recalibration — aligned all scoring formulas with sample_indicators.js reference implementation" },
+        { type: "fixed", text: "Bollinger Bands — switched from population to sample standard deviation for more accurate volatility bands" },
+        { type: "fixed", text: "MFI — direction check now uses typical price instead of raw money flow for correct overbought/oversold detection" },
+        { type: "fixed", text: "Aroon — corrected loop bounds and denominator (period instead of period-1) for proper oscillator calculation" },
+        { type: "improved", text: "Volume Profile — 24 bins (from 12) using close prices with value area (VAH/VAL) computation for tighter support/resistance" },
+        { type: "improved", text: "Entry Score — wider crossover lookback (3 candles via justCrossedAbove) for MACD, TSI, STC, Force Index, Ichimoku Tenkan/Kijun" },
+        { type: "improved", text: "Entry Score — reweighted ADX, Supertrend, PSAR, Keltner, Darvas Box, RSI, StochRSI, Williams %R scoring for balanced signals" },
+        { type: "improved", text: "Entry Score — added RS Mansfield relative strength, MFI/CMF crossedAbove helper, and Accumulation/Distribution composite" },
+        { type: "improved", text: "Exit Score — replaced sector/FII dependencies with distribution day ratio and accumulation/detection logic" },
+        { type: "improved", text: "Multi-TF Entry Score — added High Beta + Volatility penalty, Accumulation + MTF bonus, RS Mansfield + Aroon bonus, Above Key Levels bonus, Pivot R1 resistance detection" },
       ]
     },
     {
-      version: "2.2.0",
+      version: "2.3.0",
       date: "July 2026",
       changes: [
-        { type: "fixed", text: "Entry Score Analysis — technical indicator values now display correctly on cards (was always showing em-dash due to missing stoxFormatValue)" },
-        { type: "improved", text: "Entry Score Analysis — complete _fmtVal formatter covering all 18 indicator types with human-readable volume suffixes (K/L/Cr/B)" },
+        { type: "fixed", text: "JSON Export and Import functionality" },
       ]
     },
     {
@@ -4149,7 +4157,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.3.0"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.0"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -4294,7 +4302,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.3.0"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.0"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
