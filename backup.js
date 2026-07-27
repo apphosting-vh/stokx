@@ -119,9 +119,18 @@ async function restoreStoxBackup(fileText) {
   if (d.entrySnapshots) { try { await dbSetSetting("mm_entry_score_snapshots", d.entrySnapshots); } catch(e) {} }
   if (d.screenerData) { try { await dbSetSetting("stox_screener_data", d.screenerData); } catch(e) {} }
   if (d.screenerSnapshots) { try { await dbSetSetting("stox_screener_snapshots", d.screenerSnapshots); } catch(e) {} }
+  var snaps = d.soldShareSnapshots || {};
+  Object.keys(snaps).forEach(function(fyKey) {
+    snaps[fyKey].forEach(function(sn) {
+      if (sn.chartPts && sn.chartPts.length > 0 && sn.chartPts[0].close == null && sn.chartPts[0].value != null) {
+        var q = Number(sn.qty) || 1;
+        sn.chartPts = sn.chartPts.map(function(p) { return { date: p.date, close: q > 0 ? p.value / q : p.value }; });
+      }
+    });
+  });
   return {
     holdings: d.holdings || [],
-    soldShareSnapshots: d.soldShareSnapshots || {},
+    soldShareSnapshots: snaps,
     watchlist: d.watchlist || []
   };
 }
@@ -158,6 +167,14 @@ function importFinsightBackup(fileText) {
     };
   });
   var soldShareSnapshots = d.soldShareSnapshots || {};
+  Object.keys(soldShareSnapshots).forEach(function(fyKey) {
+    soldShareSnapshots[fyKey].forEach(function(sn) {
+      if (sn.chartPts && sn.chartPts.length > 0 && sn.chartPts[0].close == null && sn.chartPts[0].value != null) {
+        var q = Number(sn.qty) || 1;
+        sn.chartPts = sn.chartPts.map(function(p) { return { date: p.date, close: q > 0 ? p.value / q : p.value }; });
+      }
+    });
+  });
   var summary = {
     finsightActiveHoldings: activeShares.length,
     finsightSoldShares: soldSharesInArray.length,

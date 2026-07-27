@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.6";
+window.__STOX_APP_VERSION = "2.4.7";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -115,7 +115,16 @@ async function loadSnapshots() {
   try {
     const rows = await dbGetAll("settings");
     const row = rows.find((r) => r.key === "soldShareSnapshots");
-    return row ? row.value : {};
+    const snaps = row ? row.value : {};
+    Object.keys(snaps).forEach(fyKey => {
+      (snaps[fyKey] || []).forEach(sn => {
+        if (sn.chartPts && sn.chartPts.length > 0 && sn.chartPts[0].close == null && sn.chartPts[0].value != null) {
+          const q = Number(sn.qty) || 1;
+          sn.chartPts = sn.chartPts.map(p => ({ date: p.date, close: q > 0 ? p.value / q : p.value }));
+        }
+      });
+    });
+    return snaps;
   } catch { return {}; }
 }
 
@@ -1918,71 +1927,52 @@ const HoldingHistoryPanel = ({ h, prices }) => {
 /* ══════════════════════════════════════════════════════════════════════════
    SNAPSHOT CHART PANEL (for Trade History — uses saved chartPts or fetches)
    ══════════════════════════════════════════════════════════════════════════ */
-const SnapshotChartPanel = ({ sn }) => {
-  const [loading, setLoading] = React.useState(false);
-  const [histPts, setHistPts] = React.useState(sn.chartPts && sn.chartPts.length >= 2 ? sn.chartPts : null);
-  const tkr = (sn.ticker || "").trim().toUpperCase();
-  const isGain = sn.sellPrice >= sn.buyPrice;
-  const costBasisVal = sn.qty * sn.buyPrice;
-  const safeId = "svc_" + (sn.id || "x").replace(/[^a-zA-Z0-9]/g, "_");
-
-  React.useEffect(() => {
-    if (histPts && histPts.length >= 2) return;
-    if (!tkr || !sn.buyDate) return;
-    let cancelled = false;
-    setLoading(true);
-    fetchHistoricalPrices(tkr, sn.buyDate)
-      .then(pts => {
-        if (cancelled) return;
-        if (pts && pts.length >= 2) {
-          const cutoff = sn.savedAt || TODAY();
-          const filtered = pts.filter(p => p.date <= cutoff);
-          setHistPts(filtered.length >= 2 ? filtered.map(p => ({ date: p.date, close: p.close })) : []);
-        } else {
-          setHistPts([]);
-        }
-        setLoading(false);
-      })
-      .catch(() => { if (!cancelled) { setHistPts([]); setLoading(false); } });
-    return () => { cancelled = true; };
-  }, [tkr, sn.buyDate, sn.savedAt]);
-
-  if (loading) return React.createElement("div", { style: {
-    marginTop: 10, padding: "10px 14px", borderRadius: 9, fontSize: 12,
+const SnapshotChartPanel = ({ sn, dispatch }) => {
+  const hasChart = sn.chartPts && sn.chartPts.length >= 2;
+  const canLoad = !hasChart && sn.ticker && sn.buyDate && sn.savedAt;
+  const [loadingChart, setLoadingChart] = React.useState(false);
+  const [chartError, setChartError] = React.useState(null);
+  if (!hasChart && !canLoad) return null;
+  if (!hasChart && canLoad) return React.createElement("div", { style: {
+    marginTop: 12, padding: "10px 14px", borderRadius: 9,
     background: "var(--bg5)", border: "1px solid var(--border2)",
-    display: "flex", alignItems: "center", gap: 8
+    display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap"
   }},
-    React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, "\u21bb"),
-    React.createElement("span", { style: { color: "var(--text5)" } }, "Loading chart...")
-  );
-
-  if (!histPts || histPts.length < 2) return null;
-
-  const chartPts = histPts.map(p => ({ date: p.date, value: sn.qty * p.close }));
-  const latestVal = chartPts[chartPts.length - 1].value;
-  const oldestVal = chartPts[0].value;
-  const overallChg = latestVal - oldestVal;
-  const overallChgPct = oldestVal > 0 ? ((overallChg / oldestVal) * 100).toFixed(2) : "0.00";
-  const chgCol = overallChg >= 0 ? "#10b981" : "#ef4444";
-
-  return React.createElement("div", { style: { marginTop: 12, background: "var(--bg5)", borderRadius: 10, padding: "14px 14px 10px", border: "1px solid var(--border2)" } },
-    React.createElement("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 6 } },
-      React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--text5)", textTransform: "uppercase", letterSpacing: .4 } }, "Holding Value History"),
-      React.createElement("span", { style: { fontSize: 10, padding: "2px 7px", borderRadius: 6, fontWeight: 700, background: overallChg >= 0 ? "rgba(16,185,129,.1)" : "rgba(239,68,68,.1)", color: chgCol } }, (overallChg >= 0 ? "+" : "") + Math.abs(overallChgPct) + "%"),
-      React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, chartPts.length + " days")
+    React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", flex: 1 } },
+      chartError ? React.createElement(React.Fragment, null, "\u26a0 " + chartError) : "No chart data saved with this snapshot."
     ),
-    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 4, fontSize: 10, color: "var(--text6)" } },
-      React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 4 } },
-        React.createElement("span", { style: { display: "inline-block", width: 16, height: 2, background: isGain ? "#10b981" : "#ef4444", borderRadius: 1, verticalAlign: "middle" } }),
-        "Value"
-      ),
-      React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 4 } },
-        React.createElement("span", { style: { display: "inline-block", width: 16, height: 0, borderTop: "2px dashed #f59e0b", verticalAlign: "middle" } }),
-        "Cost"
-      )
-    ),
-    React.createElement(HoldingValueChart, { pts: chartPts, qty: sn.qty, buyPrice: sn.buyPrice, color: isGain ? "#10b981" : "#ef4444", gradId: safeId })
+    React.createElement("button", {
+      disabled: loadingChart,
+      onClick: async () => {
+        setLoadingChart(true); setChartError(null);
+        const tkr__ = (sn.ticker || "").trim().toUpperCase();
+        try {
+          const raw = await fetchHistoricalPrices(tkr__, sn.buyDate);
+          if (raw && raw.length >= 2) {
+            const cutoff = sn.savedAt || TODAY();
+            const pts = raw.filter(p => p.date <= cutoff).map(p => ({ date: p.date, close: p.close }));
+            if (pts.length >= 2) {
+              if (dispatch) {
+                dispatch({ type: "UPDATE_SNAPSHOT_CHART", snapshotId: sn.id, chartPts: pts });
+              }
+            } else { setChartError("No price data found for this date range."); }
+          } else { setChartError("Could not fetch price history. Check ticker or internet connection."); }
+        } catch (e) { setChartError("Fetch failed. Try again later."); }
+        setLoadingChart(false);
+      },
+      style: {
+        display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 7,
+        cursor: loadingChart ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 600,
+        fontFamily: "var(--font-body)", border: "1px solid rgba(109,40,217,.35)",
+        background: loadingChart ? "var(--bg5)" : "rgba(109,40,217,.08)", color: "#6d28d9",
+        opacity: loadingChart ? 0.6 : 1
+      }
+    },
+      loadingChart ? React.createElement(React.Fragment, null, React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, "\u21bb"), " Fetching\u2026")
+        : React.createElement(React.Fragment, null, "\u{1F4C8} Load Chart")
+    )
   );
+  return null;
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2687,7 +2677,39 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
                         style: { fontSize: 10, padding: "3px 10px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontFamily: "var(--font-body)", border: "1px solid var(--lossborder)", background: "var(--lossbg)", color: "var(--loss)" }
                       }, "\u00d7 Remove")
                     ),
-                    React.createElement(SnapshotChartPanel, { sn: sn })
+                    React.createElement(SnapshotChartPanel, { sn: sn }),
+                    sn.chartPts && sn.chartPts.length >= 2 && (() => {
+                      const snIsGain = sn.pnl >= 0;
+                      const snGradId = "snlg_" + (sn.id || "x").replace(/[^a-zA-Z0-9]/g, "_");
+                      const snChartPts = sn.chartPts.map(p => ({ date: p.date, value: p.close != null ? (sn.qty || 0) * p.close : (p.value || 0) }));
+                      if (snChartPts.length < 2) return null;
+                      const snChgAbs = snChartPts[snChartPts.length - 1].value - snChartPts[0].value;
+                      const snChgPct = snChartPts[0].value > 0 ? ((snChgAbs / snChartPts[0].value) * 100).toFixed(2) : "0.00";
+                      const snChgCol = snChgAbs >= 0 ? "#16a34a" : "#ef4444";
+                      return React.createElement("div", { style: { marginTop: 14, marginBottom: 8, background: "var(--bg5)", borderRadius: 12, padding: "14px 16px 10px", border: "1px solid var(--border2)" } },
+                        React.createElement("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 8 } },
+                          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--text5)", textTransform: "uppercase", letterSpacing: .5 } }, "Holding Value History"),
+                          React.createElement("span", { style: { fontSize: 10, color: "var(--text6)", background: "var(--accentbg2)", border: "1px solid var(--border2)", borderRadius: 5, padding: "1px 7px", whiteSpace: "nowrap" } },
+                            sn.chartPts[0].date + " \u2192 " + sn.chartPts[sn.chartPts.length - 1].date
+                          ),
+                          React.createElement("div", { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 } },
+                            React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", borderRadius: 7, fontWeight: 700, background: snChgAbs >= 0 ? "rgba(22,163,74,.12)" : "rgba(239,68,68,.12)", border: "1px solid " + (snChgAbs >= 0 ? "rgba(22,163,74,.25)" : "rgba(239,68,68,.25)"), color: snChgCol } }, (snChgAbs >= 0 ? "\u25b2 +" : "\u25bc ") + Math.abs(snChgPct) + "%"),
+                            React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, sn.chartPts.length + " days")
+                          )
+                        ),
+                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14, marginBottom: 6, fontSize: 11, color: "var(--text6)" } },
+                          React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 4 } },
+                            React.createElement("span", { style: { display: "inline-block", width: 20, height: 3, background: snIsGain ? "#16a34a" : "#ef4444", borderRadius: 2, verticalAlign: "middle" } }),
+                            "Holding value"
+                          ),
+                          React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 4 } },
+                            React.createElement("span", { style: { display: "inline-block", width: 20, height: 0, borderTop: "3px dashed #f59e0b", verticalAlign: "middle" } }),
+                            "Cost basis (" + INR(sn.costBasis) + ")"
+                          )
+                        ),
+                        React.createElement(HoldingValueChart, { pts: snChartPts, qty: sn.qty, buyPrice: sn.buyPrice, color: snIsGain ? "#16a34a" : "#ef4444", gradId: snGradId })
+                      );
+                    })()
                   );
                 })
               )
@@ -3456,7 +3478,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.6",
+      appVersion: window.__STOX_APP_VERSION || "2.4.7",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -4435,9 +4457,18 @@ function InfoPage() {
 
   const CHANGELOG = [
     {
-      version: "2.4.6",
+      version: "2.4.7",
       date: "July 2026",
       label: "Latest",
+      changes: [
+        { type: "fixed", text: "Holding Value History chart on Previous Trades snapshot cards now renders correctly — restructured to match reference architecture" },
+        { type: "improved", text: "SnapshotChartPanel refactored — Load Chart button and inline chart rendering separated to avoid stale state issues" },
+        { type: "improved", text: "Previous Trades chart now shows date range, percentage change, and cost basis legend matching the reference app" },
+      ]
+    },
+    {
+      version: "2.4.6",
+      date: "July 2026",
       changes: [
         { type: "feature", text: "Theme system — 14 theme variants (Violet, Indigo, Blue, Green, Yellow, Orange, Red in light+dark) with visual swatch picker in Settings" },
         { type: "feature", text: "Font picker — 6 switchable body fonts (DM Sans, Inter, Plus Jakarta Sans, Manrope, Outfit, Space Grotesk) in Settings" },
@@ -4591,7 +4622,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.6"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.7"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -4753,7 +4784,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.6"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.7"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
