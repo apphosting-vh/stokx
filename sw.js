@@ -32,9 +32,21 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  event.respondWith(
-    caches.match(event.request).then(response => response || fetch(event.request))
-  );
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).then(r => {
+        if (r && r.status === 200) {
+          var clone = r.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        }
+        return r;
+      }).catch(() => caches.match(event.request))
+    );
+  } else {
+    event.respondWith(
+      caches.match(event.request).then(response => response || fetch(event.request))
+    );
+  }
 });
 
 self.addEventListener('message', event => {

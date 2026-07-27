@@ -4468,9 +4468,11 @@ function InfoPage() {
     },
     {
       version: "2.4.8",
-        { type: "fixed", text: "Holding Value History chart Y-axis values corrected — Finsight imports with pre-computed {date,value} format no longer get double-multiplied by qty" },
-        { type: "fixed", text: "Snapshots normalised on load and import — finightsight and StoX backup restores now convert {date,value} to {date,close} consistently" },
-        { type: "improved", text: "Reports & Analytics fully reconstructed from reference — all 12 tabs with calendar heatmap, streaks, trade detail tables, and methodology footnotes" },
+      date: "July 2026",
+      changes: [
+        { type: "fixed", text: "Holding Value History chart Y-axis values corrected \u2014 Finsight imports with pre-computed {date,value} format no longer get double-multiplied by qty" },
+        { type: "fixed", text: "Snapshots normalised on load and import \u2014 finsight and StoX backup restores now convert {date,value} to {date,close} consistently" },
+        { type: "improved", text: "Reports & Analytics fully reconstructed from reference \u2014 all 12 tabs with calendar heatmap, streaks, trade detail tables, and methodology footnotes" },
       ]
     },
     {
