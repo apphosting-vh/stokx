@@ -2809,7 +2809,15 @@ const EntryScorePanel = ({ shares }) => {
     (async () => {
       try {
         const val = await dbGetSetting(LS_ENTRY_SCORES);
-        if (val && Array.isArray(val)) setEntries(val);
+        if (val && Array.isArray(val)) {
+          const backfilled = val.map(e => {
+            if (!e.frozenResult && e.result) return { ...e, frozenResult: JSON.parse(JSON.stringify(e.result)) };
+            return e;
+          });
+          setEntries(backfilled);
+          const needsSave = backfilled.some((e, i) => e !== val[i]);
+          if (needsSave) dbSetSetting(LS_ENTRY_SCORES, backfilled);
+        }
       } catch {}
       setEntriesLoaded(true);
     })();
@@ -2961,7 +2969,7 @@ const EntryScorePanel = ({ shares }) => {
       const indD = TI.computeAll(resD.data);
       const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
       const result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, price);
-      const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, indicators: { weekly: indW, daily: indD, hourly: indH } };
+      const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result)), indicators: { weekly: indW, daily: indD, hourly: indH } };
       saveEntries([entry, ...entries]);
       setAddTicker(""); setAddPrice(""); setShowAdd(false);
     } catch (e) { setAddErr("Error: " + (e.message || "Failed")); }
@@ -3443,19 +3451,20 @@ const EntryScorePanel = ({ shares }) => {
               var addedDate = new Date(entry.addedAt);
               var now = new Date();
               var daysElapsed = Math.max(1, Math.floor((now - addedDate) / (1000 * 60 * 60 * 24)));
-              var dailyScore = entry.result && entry.result.daily ? entry.result.daily.total : null;
-              var weeklyScore = entry.result && entry.result.weekly ? entry.result.weekly.total : null;
-              var hourlyScore = entry.result && entry.result.hourly ? entry.result.hourly.total : null;
-              var priceOnAdd = entry.currentPrice || (entry.result ? entry.result.lastClose : 0) || 0;
+              var fr = entry.frozenResult || entry.result;
+              var dailyScore = fr && fr.daily ? fr.daily.total : null;
+              var weeklyScore = fr && fr.weekly ? fr.weekly.total : null;
+              var hourlyScore = fr && fr.hourly ? fr.hourly.total : null;
+              var priceOnAdd = entry.currentPrice || (fr ? fr.lastClose : 0) || 0;
               var currentPrice = perfTrackerPrices[entry.ticker] || 0;
               var pctChange = priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100) : null;
               var pctColor = pctChange === null ? "var(--text6)" : pctChange >= 0 ? "#22c55e" : "#ef4444";
               var scoreCellStyle = { padding: "8px 10px", textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", fontSize: 11 };
-              var dailyColor = entry.result && entry.result.daily && entry.result.daily.decision ? entry.result.daily.decision.color : "var(--text6)";
-              var weeklyColor = entry.result && entry.result.weekly && entry.result.weekly.decision ? entry.result.weekly.decision.color : "var(--text6)";
-              var hourlyColor = entry.result && entry.result.hourly && entry.result.hourly.decision ? entry.result.hourly.decision.color : "var(--text6)";
-              var finalScore = entry.result ? entry.result.finalScore : null;
-              var finalColor = entry.result && entry.result.decision ? entry.result.decision.color : "var(--text6)";
+              var dailyColor = fr && fr.daily && fr.daily.decision ? fr.daily.decision.color : "var(--text6)";
+              var weeklyColor = fr && fr.weekly && fr.weekly.decision ? fr.weekly.decision.color : "var(--text6)";
+              var hourlyColor = fr && fr.hourly && fr.hourly.decision ? fr.hourly.decision.color : "var(--text6)";
+              var finalScore = fr ? fr.finalScore : null;
+              var finalColor = fr && fr.decision ? fr.decision.color : "var(--text6)";
               var rowBg = "rgba(220, 170, 190, 0.10)";
               return React.createElement("tr", { key: entry.id, style: { borderBottom: "1px solid var(--border)", background: rowBg } },
                 React.createElement("td", { style: { padding: "8px 10px", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap" } }, entry.ticker),
