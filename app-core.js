@@ -643,8 +643,9 @@ function showToast(msg, duration = 3000, action) {
 
 window.addEventListener('stox:update-ready', function() {
   showToast('New version available \u2014 updating\u2026', 5000);
-  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-    navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
+  var reg = window.__swReg;
+  if (reg && reg.waiting) {
+    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
   }
 });
 
