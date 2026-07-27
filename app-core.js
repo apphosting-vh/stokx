@@ -2469,13 +2469,13 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
    ══════════════════════════════════════════════════════════════════════════ */
 function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapshot }) {
   const fyKeys = Object.keys(soldShareSnapshots).sort().reverse();
-  const [collapsed, setCollapsed] = useState({});
-  const [monthCollapsed, setMonthCollapsed] = useState({});
+  const [expanded, setExpanded] = useState({});
+  const [monthExpanded, setMonthExpanded] = useState({});
   const [editSnap, setEditSnap] = useState(null);
 
-  const toggleFY = (fy) => setCollapsed((p) => ({ ...p, [fy]: !p[fy] }));
-  const toggleMonth = (mk) => setMonthCollapsed((p) => ({ ...p, [mk]: !p[mk] }));
-  const collapseAll = () => {
+  const toggleFY = (fy) => setExpanded((p) => ({ ...p, [fy]: !p[fy] }));
+  const toggleMonth = (mk) => setMonthExpanded((p) => ({ ...p, [mk]: !p[mk] }));
+  const expandAll = () => {
     const c = {};
     fyKeys.forEach((fy) => {
       c[fy] = true;
@@ -2486,10 +2486,10 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
         c[mk] = true;
       });
     });
-    setCollapsed(c);
-    setMonthCollapsed(c);
+    setExpanded(c);
+    setMonthExpanded(c);
   };
-  const expandAll = () => { setCollapsed({}); setMonthCollapsed({}); };
+  const collapseAll = () => { setExpanded({}); setMonthExpanded({}); };
 
   const saveEditedSnapshot = () => {
     if (!editSnap) return;
@@ -2550,7 +2550,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
     fyKeys.map((fy) => {
       const snaps = soldShareSnapshots[fy] || [];
       if (!snaps.length) return null;
-      const isCollapsedFY = !!collapsed[fy];
+      const isCollapsedFY = !expanded[fy];
       const totalPnl = snaps.reduce((s, sn) => s + sn.pnl, 0);
       const totalCost = snaps.reduce((s, sn) => s + sn.costBasis, 0);
 
@@ -2588,7 +2588,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
 
           return mKeys.map((mk) => {
             const mg = monthGroups[mk];
-            const mIsCollapsed = !!monthCollapsed[mk];
+            const mIsCollapsed = !monthExpanded[mk];
             const mPnl = mg.snaps.reduce((s, sn) => s + sn.pnl, 0);
 
             return React.createElement("div", { key: mk, style: { marginBottom: 12, marginLeft: 12, borderLeft: "2px solid var(--border2)", paddingLeft: 12 } },
