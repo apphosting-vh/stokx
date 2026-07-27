@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.1";
+window.__STOX_APP_VERSION = "2.4.3";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -2462,6 +2462,7 @@ const EntryScorePanel = ({ shares }) => {
   const [viewingAnalysis, setViewingAnalysis] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
   const [snapshotsLoaded, setSnapshotsLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -2516,6 +2517,32 @@ const EntryScorePanel = ({ shares }) => {
       saveEntries(updated);
     })();
   }, []);
+
+  const refreshEntries = async () => {
+    if (!entries.length || refreshing) return;
+    setRefreshing(true);
+    const updated = [...entries];
+    for (let i = 0; i < updated.length; i++) {
+      const entry = updated[i];
+      const tk = entry.ticker.toUpperCase();
+      try {
+        const [resW, resD, resH] = await Promise.all([
+          DF.fetchOHLCVCached(tk, "weekly"),
+          DF.fetchOHLCVCached(tk, "daily"),
+          DF.fetchOHLCVCached(tk, "1h"),
+        ]);
+        if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) continue;
+        const indW = TI.computeAll(resW.data);
+        const indD = TI.computeAll(resD.data);
+        const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
+        const lastClose = resD.data[resD.data.length - 1]?.close || entry.currentPrice || 0;
+        const result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lastClose);
+        updated[i] = { ...updated[i], currentPrice: entry.currentPrice || lastClose, result, indicators: { weekly: indW, daily: indD, hourly: indH } };
+      } catch {}
+    }
+    saveEntries(updated);
+    setRefreshing(false);
+  };
 
   const saveSnapshots = (arr) => { setSnapshots(arr); dbSetSetting(LS_ENTRY_SNAPSHOTS, arr); };
   const saveSnapshot = (entry) => {
@@ -2828,8 +2855,15 @@ const EntryScorePanel = ({ shares }) => {
         React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Entry Score"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, "Momentum Trading Entry Engine \u00b7 Weekly(30%) + Daily(50%) + Hourly(20%)")
       ),
-      React.createElement("button", { onClick: () => setShowAdd(true), className: "stx-btn stx-btn-primary", style: { fontSize: 12, padding: "8px 16px" } },
-        "+ Add Entry"
+      React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+        React.createElement("button", {
+          onClick: refreshEntries, disabled: refreshing || !entries.length,
+          className: "stx-btn stx-btn-ghost",
+          style: { fontSize: 12, padding: "8px 14px", opacity: refreshing || !entries.length ? 0.5 : 1, cursor: refreshing ? "wait" : "pointer" }
+        }, refreshing ? "Refreshing..." : "\u21bb Refresh"),
+        React.createElement("button", { onClick: () => setShowAdd(true), className: "stx-btn stx-btn-primary", style: { fontSize: 12, padding: "8px 16px" } },
+          "+ Add Entry"
+        )
       )
     ),
     showAdd && React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
@@ -3082,7 +3116,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.1",
+      appVersion: window.__STOX_APP_VERSION || "2.4.3",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -4060,9 +4094,23 @@ function InfoPage() {
 
   const CHANGELOG = [
     {
-      version: "2.4.1",
+      version: "2.4.3",
       date: "July 2026",
       label: "Latest",
+      changes: [
+        { type: "fixed", text: "FSA auto-save now writes actual data instead of empty file — fixed stale closure in writeNow that captured initial empty state" },
+      ]
+    },
+    {
+      version: "2.4.2",
+      date: "July 2026",
+      changes: [
+        { type: "feature", text: "Entry Score — Refresh button fetches live prices and recalculates all entry scores in one click" },
+      ]
+    },
+    {
+      version: "2.4.1",
+      date: "July 2026",
       changes: [
         { type: "fixed", text: "Refresh button now fetches live prices without stale cache — added cache-busting timestamp to Yahoo Finance API calls" },
         { type: "fixed", text: "Failed price fetches no longer overwrite valid cached prices (null results filtered from merge)" },
@@ -4168,7 +4216,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.1"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.3"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -4313,7 +4361,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.1"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.3"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),

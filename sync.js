@@ -762,6 +762,8 @@ window._gdriveAutoBackup = gdriveAutoBackup;
 
 window.FSAStoragePanel = function(props) {
   var stateData = props.stateData;
+  var stateDataRef = React.useRef(stateData);
+  stateDataRef.current = stateData;
   var _s = React.useState(function() { return !!(window.__fsa && window.__fsa.handle && window.__fsa.ready); });
   var connected = _s[0], setConnected = _s[1];
   var _s2 = React.useState(function() { return (window.__fsa && window.__fsa.filename) || ""; });
@@ -806,7 +808,7 @@ window.FSAStoragePanel = function(props) {
           window.__fsa.handle = h; window.__fsa.filename = h.name; window.__fsa.ready = true;
           window.__fsa.writeNow = async function() {
             if (!window.__fsa.handle || !window.__fsa.ready) return false;
-            var ok = await fsaWriteFile(window.__fsa.handle, stateData);
+            var ok = await fsaWriteFile(window.__fsa.handle, stateDataRef.current);
             if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
             return ok;
           };
@@ -834,12 +836,12 @@ window.FSAStoragePanel = function(props) {
       window.__fsa.handle = handle; window.__fsa.filename = handle.name; window.__fsa.ready = true;
       window.__fsa.writeNow = async function() {
         if (!window.__fsa.handle || !window.__fsa.ready) return false;
-        var ok = await fsaWriteFile(window.__fsa.handle, stateData);
+        var ok = await fsaWriteFile(window.__fsa.handle, stateDataRef.current);
         if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
         return ok;
       };
       setConnected(true); setFilename(handle.name); setPermNeeded(false);
-      var ok = await fsaWriteFile(handle, stateData);
+      var ok = await fsaWriteFile(handle, stateDataRef.current);
       if (ok) { window.__fsa.lastSaved = new Date(); setLastSaved(window.__fsa.lastSaved); say("Connected! Current data saved to " + handle.name); }
       else say("File connected, but initial write failed. Try 'Save Now'.", false);
     } catch (e) { if (e.name !== "AbortError") say("Could not connect file: " + e.message, false); }
@@ -894,7 +896,7 @@ window.FSAStoragePanel = function(props) {
       window.__fsa.ready = true;
       window.__fsa.writeNow = async function() {
         if (!window.__fsa.handle || !window.__fsa.ready) return false;
-        var ok = await fsaWriteFile(window.__fsa.handle, stateData);
+        var ok = await fsaWriteFile(window.__fsa.handle, stateDataRef.current);
         if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
         return ok;
       };
