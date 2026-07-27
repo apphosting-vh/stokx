@@ -785,7 +785,12 @@ window.FSAStoragePanel = function(props) {
 
   React.useEffect(function() {
     var onSaved = function() { setLastSaved(new Date(window.__fsa.lastSaved)); };
-    var onWriteFailed = function() { say("Auto-save failed - file may have been moved, deleted, or permission has lapsed.", false); };
+    var onWriteFailed = function() {
+      say("Auto-save failed - file may have been moved, deleted, or permission has lapsed.", false);
+      if (window.__fsa && window.__fsa.handle && !window.__fsa.ready) {
+        window.dispatchEvent(new CustomEvent("fsa:permission-needed"));
+      }
+    };
     var onGranted = function() { setConnected(true); setPermNeeded(false); setFilename(window.__fsa.filename || ""); };
     window.addEventListener("fsa:saved", onSaved);
     window.addEventListener("fsa:write-failed", onWriteFailed);
@@ -817,6 +822,7 @@ window.FSAStoragePanel = function(props) {
         } else {
           window.__fsa.handle = h; window.__fsa.filename = h.name; window.__fsa.ready = false;
           setFilename(h.name); setPermNeeded(true);
+          window.dispatchEvent(new CustomEvent("fsa:permission-needed"));
         }
       } catch (e) {}
     })();
@@ -903,9 +909,11 @@ window.FSAStoragePanel = function(props) {
       var ok = await window.__fsa.writeNow();
       setPermNeeded(false); setConnected(true);
       say(ok ? "Permission granted - data saved to " + window.__fsa.filename : "Permission granted - save queued.");
+      window.dispatchEvent(new CustomEvent("fsa:permission-granted"));
     } else say("Permission was denied.", false);
     setBusy(false);
   };
+  window.__fsa.grantPermission = handleGrantPerm;
 
   var handleDisconnect = async function() {
     await fsaClearHandle();
@@ -1093,8 +1101,8 @@ window.CloudBackupPanel = function(props) {
     setTimeout(function() { setSecretSaved(false); }, 2500);
   };
 
-  var clearCreds = function() {
-    if (!window.confirm("Disconnect Google Drive? Sync will stop until you reconnect.")) return;
+  var clearCreds = async function() {
+    if (!await window.showConfirm("Disconnect Google Drive? Sync will stop until you reconnect.")) return;
     try {
       localStorage.removeItem("stox_gdrive_cid");
       localStorage.removeItem(GDRIVE_LS_CLIENT_SECRET);
@@ -1144,7 +1152,7 @@ window.CloudBackupPanel = function(props) {
         setPulling(false); setTimeout(function() { setPullMsg(""); }, 5000);
         return;
       }
-      if (!window.confirm("A newer version was found on Google Drive (saved " + fmtTs(remote.modifiedTime) + ").\n\nRestore from Drive? This will overwrite your current local data.")) {
+      if (!await window.showConfirm("A newer version was found on Google Drive (saved " + fmtTs(remote.modifiedTime) + ").\n\nRestore from Drive? This will overwrite your current local data.")) {
         setPullMsg("Pull cancelled."); setPulling(false); setTimeout(function() { setPullMsg(""); }, 2500);
         return;
       }

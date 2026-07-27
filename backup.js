@@ -249,7 +249,7 @@ function DataBackupSection(props) {
 
   async function handleRestore() {
     try {
-      if (!confirm("This will OVERWRITE your current holdings, watchlist, and trade history. Continue?")) return;
+      if (!await showConfirm("This will OVERWRITE your current holdings, watchlist, and trade history. Continue?")) return;
       var text = await loadBackupFile();
       if (!text) return;
       var result = await restoreStoxBackup(text);
@@ -264,7 +264,7 @@ function DataBackupSection(props) {
 
   async function handleFinsightImport() {
     try {
-      if (!confirm("Import holdings and past trades from a finsight backup? This will MERGE with your existing data.")) return;
+      if (!await showConfirm("Import holdings and past trades from a finsight backup? This will MERGE with your existing data.")) return;
       var text = await loadBackupFile();
       if (!text) return;
       var result = importFinsightBackup(text);

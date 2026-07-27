@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.4";
+window.__STOX_APP_VERSION = "2.4.5";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -632,10 +632,10 @@ let _toastId = 0;
 let _toasts = [];
 let _setToasts = null;
 
-function showToast(msg, duration = 3000) {
+function showToast(msg, duration = 3000, action) {
   if (!_setToasts) return;
   const id = ++_toastId;
-  _setToasts((prev) => [...prev, { id, msg }]);
+  _setToasts((prev) => [...prev, { id, msg, action }]);
   setTimeout(() => {
     _setToasts((prev) => prev.filter((t) => t.id !== id));
   }, duration);
@@ -648,6 +648,36 @@ window.addEventListener('stox:update-ready', function() {
   }
 });
 
+window.addEventListener('fsa:permission-needed', function() {
+  if (window.__fsa && window.__fsa.handle && !window.__fsa.ready) {
+    showToast("File auto-save needs write permission", 15000, { label: "Grant Permission", onClick: function() {
+      if (window.__fsa && window.__fsa.grantPermission) window.__fsa.grantPermission();
+    }});
+  }
+});
+
+var _confirmResolve = null;
+function showConfirm(msg) {
+  return new Promise(function(resolve) {
+    _confirmResolve = resolve;
+    var el = document.createElement("div");
+    el.className = "modal-bd";
+    el.id = "stox-confirm-modal";
+    el.style.zIndex = "3000";
+    el.onclick = function(e) { if (e.target === e.currentTarget) { el.remove(); _confirmResolve = null; resolve(false); } };
+    el.innerHTML = '<div class="stx-card stx-fu" style="max-width:400px;margin:40px auto;width:92vw;padding:24px;text-align:center">'
+      + '<p style="font-size:14px;font-weight:600;color:var(--text);margin:0 0 20px;line-height:1.5">' + msg + '</p>'
+      + '<div style="display:flex;gap:10px;justify-content:center">'
+      + '<button id="stox-confirm-cancel" class="stx-btn stx-btn-ghost" style="padding:8px 20px;font-size:13px">Cancel</button>'
+      + '<button id="stox-confirm-ok" class="stx-btn" style="padding:8px 20px;font-size:13px;background:#ef4444;color:#fff;border-color:#ef4444">Confirm</button>'
+      + '</div></div>';
+    document.body.appendChild(el);
+    document.getElementById("stox-confirm-cancel").onclick = function() { el.remove(); _confirmResolve = null; resolve(false); };
+    document.getElementById("stox-confirm-ok").onclick = function() { el.remove(); _confirmResolve = null; resolve(true); };
+  });
+}
+window.showConfirm = showConfirm;
+
 function ToastHost() {
   const [toasts, setToasts] = useState([]);
   _setToasts = setToasts;
@@ -656,6 +686,10 @@ function ToastHost() {
     toasts.map((t) =>
       React.createElement("div", { key: t.id, className: "stx-toast" },
         React.createElement("span", { className: "stx-toast-msg" }, t.msg),
+        t.action && React.createElement("button", {
+          className: "stx-toast-action",
+          onClick: () => { t.action.onClick(); setToasts((prev) => prev.filter((x) => x.id !== t.id)); }
+        }, t.action.label),
         React.createElement("button", {
           className: "stx-toast-close",
           onClick: () => setToasts((prev) => prev.filter((x) => x.id !== t.id))
@@ -1613,9 +1647,9 @@ const ExitScoreTrend = ({ ticker, buyPrice, buyDate, entryScore }) => {
   const hasD = trendData.some(p => p.daily);
   const hasH = trendData.some(p => p.hourly);
   const series = [
-    { key: "weekly", color: "#3b82f6", label: "W", show: hasW },
-    { key: "daily", color: "#22c55e", label: "D", show: hasD },
-    { key: "hourly", color: "#f59e0b", label: "H", show: hasH },
+    { key: "weekly", color: "#ec4899", label: "W", show: hasW },
+    { key: "daily", color: "#a855f7", label: "D", show: hasD },
+    { key: "hourly", color: "#3b82f6", label: "H", show: hasH },
   ].filter(s => s.show);
   if (!series.length) return null;
   const W = 800, padL = 68, padR = 14, padT = 16, padB = 28;
@@ -2371,7 +2405,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                   title: "Save a snapshot of this holding to Trade History"
                 }, Icons.save(13), " Save Snapshot"),
                 React.createElement("button", {
-                  onClick: () => { if (confirm("Remove " + h.ticker + " from portfolio?")) handleDelete(h.id); },
+                  onClick: async () => { if (await showConfirm("Remove " + h.ticker + " from portfolio?")) handleDelete(h.id); },
                   style: { display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 13px", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", border: "1px solid var(--lossborder)", background: "var(--lossbg)", color: "var(--loss)", transition: "all .15s" },
                   title: "Remove this holding"
                 }, Icons.trash(13), " Remove"),
@@ -2605,7 +2639,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
                         style: { fontSize: 10, padding: "3px 10px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontFamily: "var(--font-body)", border: "1px solid var(--infoborder)", background: "var(--infobg)", color: "var(--info)" }
                       }, Icons.edit(12), " Edit"),
                       React.createElement("button", {
-                        onClick: () => { if (confirm("Remove this snapshot? This cannot be undone.")) deleteSnapshot(fy, sn.id); },
+                        onClick: async () => { if (await showConfirm("Remove this snapshot? This cannot be undone.")) deleteSnapshot(fy, sn.id); },
                         style: { fontSize: 10, padding: "3px 10px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontFamily: "var(--font-body)", border: "1px solid var(--lossborder)", background: "var(--lossbg)", color: "var(--loss)" }
                       }, "\u00d7 Remove")
                     ),
@@ -3077,7 +3111,7 @@ const EntryScorePanel = ({ shares }) => {
               React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, (isMExp ? "\u25be " : "\u25b8 ") + mKey.split("-").slice(1).join("-")),
               React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
                 React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, mSnaps + " snap" + (mSnaps !== 1 ? "s" : "")),
-                React.createElement("span", { onClick: (e) => { e.stopPropagation(); if (window.confirm("Delete all " + mSnaps + " snapshot" + (mSnaps !== 1 ? "s" : "") + " in " + mKey.split("-").slice(1).join("-") + "?")) deleteSnapshotsWhere(s => { const d = new Date(s.savedAt); return String(d.getFullYear()) + "-" + d.toLocaleString("en-IN", { month: "long" }) === mKey; }); }, style: { fontSize: 9, color: "#ef4444", cursor: "pointer", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, mSnaps === 1 ? "Delete" : "Delete All")
+                React.createElement("span", { onClick: async (e) => { e.stopPropagation(); if (await showConfirm("Delete all " + mSnaps + " snapshot" + (mSnaps !== 1 ? "s" : "") + " in " + mKey.split("-").slice(1).join("-") + "?")) deleteSnapshotsWhere(s => { const d = new Date(s.savedAt); return String(d.getFullYear()) + "-" + d.toLocaleString("en-IN", { month: "long" }) === mKey; }); }, style: { fontSize: 9, color: "#ef4444", cursor: "pointer", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, mSnaps === 1 ? "Delete" : "Delete All")
               )
             ),
             isMExp && Object.keys(days).sort().reverse().map(dayKey => {
@@ -3088,7 +3122,7 @@ const EntryScorePanel = ({ shares }) => {
                   React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "var(--text3)" } }, (isDExp ? "\u25be " : "\u25b8 ") + day.label),
                   React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
                     React.createElement("span", { style: { fontSize: 9, color: "var(--text5)" } }, day.snaps.length + " snap" + (day.snaps.length !== 1 ? "s" : "")),
-                    React.createElement("span", { onClick: (e) => { e.stopPropagation(); if (window.confirm("Delete all " + day.snaps.length + " snapshot" + (day.snaps.length !== 1 ? "s" : "") + " on " + day.label + "?")) deleteSnapshotsWhere(s => { const d = new Date(s.savedAt); const dk = mKey + "-" + d.getDate(); return dk === dayKey; }); }, style: { fontSize: 9, color: "#ef4444", cursor: "pointer", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, day.snaps.length === 1 ? "Delete" : "Delete All")
+                    React.createElement("span", { onClick: async (e) => { e.stopPropagation(); if (await showConfirm("Delete all " + day.snaps.length + " snapshot" + (day.snaps.length !== 1 ? "s" : "") + " on " + day.label + "?")) deleteSnapshotsWhere(s => { const d = new Date(s.savedAt); const dk = mKey + "-" + d.getDate(); return dk === dayKey; }); }, style: { fontSize: 9, color: "#ef4444", cursor: "pointer", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, day.snaps.length === 1 ? "Delete" : "Delete All")
                   )
                 ),
                 isDExp && React.createElement("div", { style: { padding: "6px 14px 6px 56px" } },
@@ -3378,7 +3412,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.4",
+      appVersion: window.__STOX_APP_VERSION || "2.4.5",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -3810,7 +3844,7 @@ function ScreenerSnapshots(props) {
                 React.createElement("div", null, React.createElement("span", { style: arrowStyle(monthOpen) }, "\u25b6"), React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--text4)" } }, month),
                   React.createElement("span", { style: { fontSize: 9, color: "var(--text6)", marginLeft: 6 } }, monthSnapCount + " snapshots")
                 ),
-                React.createElement("span", { onClick: function(e) { e.stopPropagation(); var ids = Object.values(days).flat().map(function(s) { return s.id; }); if (window.confirm("Delete all " + monthSnapCount + " snapshot" + (monthSnapCount !== 1 ? "s" : "") + " in " + month + "?")) deleteSnapshotsBatch(ids); }, style: { fontSize: 9, color: "#ef4444", cursor: "pointer", fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, monthSnapCount === 1 ? "Delete" : "Delete All")
+                React.createElement("span", { onClick: async function(e) { e.stopPropagation(); var ids = Object.values(days).flat().map(function(s) { return s.id; }); if (await showConfirm("Delete all " + monthSnapCount + " snapshot" + (monthSnapCount !== 1 ? "s" : "") + " in " + month + "?")) deleteSnapshotsBatch(ids); }, style: { fontSize: 9, color: "#ef4444", cursor: "pointer", fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, monthSnapCount === 1 ? "Delete" : "Delete All")
               ),
               monthOpen && React.createElement("div", { style: { paddingLeft: 14 } },
                 Object.keys(days).sort(function(a, b) { return b.localeCompare(a); }).map(function(dayKey) {
@@ -4357,9 +4391,19 @@ function InfoPage() {
 
   const CHANGELOG = [
     {
-      version: "2.4.4",
+      version: "2.4.5",
       date: "July 2026",
       label: "Latest",
+      changes: [
+        { type: "feature", text: "Inline confirm modals — replaced all browser confirm() dialogs with styled inline popups across the app" },
+        { type: "feature", text: "FSA permission toast — home screen shows Grant Permission button when file write access is needed" },
+        { type: "feature", text: "FSA auto-write on screener changes — screener scans, refreshes, and snapshot CRUD now trigger file writes" },
+        { type: "improved", text: "Exit Score Trend chart — recoloured trend lines (Pink=Weekly, Purple=Daily, Blue=Hourly)" },
+      ]
+    },
+    {
+      version: "2.4.4",
+      date: "July 2026",
       changes: [
         { type: "feature", text: "Exit Score Trend — compact SVG chart showing historical exit scores across weekly, daily, and hourly timeframes from buy date onwards" },
         { type: "feature", text: "Exit Score Trend tooltip — shows open price, closing price, and percentage change vs previous close on hover" },
@@ -4491,7 +4535,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.4"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.5"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -4636,7 +4680,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.4"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.5"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
@@ -4649,7 +4693,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
         className: "stx-btn stx-btn-ghost",
         style: { color: "var(--loss)", borderColor: "var(--lossborder)" },
         onClick: async () => {
-          if (confirm("Clear ALL data? This cannot be undone.")) {
+          if (await showConfirm("Clear ALL data? This cannot be undone.")) {
             localStorage.clear();
             const db = await openDB();
             const stores = ["holdings", "watchlist", "snapshots", "settings"];
