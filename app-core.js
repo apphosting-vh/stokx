@@ -2521,6 +2521,8 @@ const EntryScorePanel = ({ shares }) => {
   const refreshEntries = async () => {
     if (!entries.length || refreshing) return;
     setRefreshing(true);
+    const oldScores = {};
+    entries.forEach(e => { oldScores[e.ticker] = e.result ? e.result.finalScore : null; });
     const updated = [...entries];
     for (let i = 0; i < updated.length; i++) {
       const entry = updated[i];
@@ -2542,6 +2544,21 @@ const EntryScorePanel = ({ shares }) => {
     }
     saveEntries(updated);
     setRefreshing(false);
+    const changes = [];
+    updated.forEach(e => {
+      const old = oldScores[e.ticker];
+      const now = e.result ? e.result.finalScore : null;
+      if (old !== null && now !== null && old !== now) {
+        const diff = Math.round((now - old) * 10) / 10;
+        const sign = diff > 0 ? "+" : "";
+        changes.push(e.ticker + " " + sign + diff + " (" + (e.result.decision ? e.result.decision.label : "") + ")");
+      }
+    });
+    if (changes.length > 0) {
+      showToast("Scores updated: " + changes.join(", "), 5000);
+    } else {
+      showToast("Entry scores refreshed — no changes");
+    }
   };
 
   const saveSnapshots = (arr) => { setSnapshots(arr); dbSetSetting(LS_ENTRY_SNAPSHOTS, arr); };

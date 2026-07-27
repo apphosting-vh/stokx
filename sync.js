@@ -87,7 +87,7 @@ var fsaVerifyPermission = async function(handle) {
 /* ── FSA Write: builds StoX envelope and writes to file ── */
 var fsaWriteFile = async function(handle, stateData) {
   try {
-    var payload = window.__stoxBuildSyncPayload(stateData, true);
+    var payload = await window.__stoxBuildSyncPayload(stateData, true);
     var writable = await handle.createWritable();
     await writable.write(JSON.stringify(payload, null, 2));
     await writable.close();
