@@ -2729,7 +2729,7 @@ const EntryScorePanel = ({ shares }) => {
   const [expandedMonth, setExpandedMonth] = useState(null);
   const [expandedDay, setExpandedDay] = useState(null);
 
-  const saveEntries = (arr) => { setEntries(arr); dbSetSetting(LS_ENTRY_SCORES, arr); };
+  const saveEntries = (arr) => { setEntries(arr); dbSetSetting(LS_ENTRY_SCORES, arr); window.dispatchEvent(new CustomEvent("stox:data-changed")); };
   const deleteEntry = (id) => { saveEntries(entries.filter(e => e.id !== id)); };
 
   useEffect(() => {
@@ -2802,7 +2802,7 @@ const EntryScorePanel = ({ shares }) => {
     }
   };
 
-  const saveSnapshots = (arr) => { setSnapshots(arr); dbSetSetting(LS_ENTRY_SNAPSHOTS, arr); };
+  const saveSnapshots = (arr) => { setSnapshots(arr); dbSetSetting(LS_ENTRY_SNAPSHOTS, arr); window.dispatchEvent(new CustomEvent("stox:data-changed")); };
   const saveSnapshot = (entry) => {
     const snap = { id: Date.now(), ticker: entry.ticker, currentPrice: entry.currentPrice, savedAt: new Date().toISOString(), result: JSON.parse(JSON.stringify(entry.result)), indicators: entry.indicators ? JSON.parse(JSON.stringify(entry.indicators)) : null, entryAddedAt: entry.addedAt };
     saveSnapshots([snap, ...snapshots]);
@@ -3330,6 +3330,7 @@ function StockScreener() {
     if (results.length > 0 || scanTime > 0) {
       dbSetSetting("stox_screener_data", { results: results, timestamps: timestamps, scanTime: scanTime });
     }
+    window.dispatchEvent(new CustomEvent("stox:data-changed"));
   }, [results, timestamps, scanTime]);
 
   /* Inject spin keyframes */
@@ -3349,12 +3350,14 @@ function StockScreener() {
     var updated = [snap].concat(snapshots);
     setSnapshots(updated);
     dbSetSetting("stox_screener_snapshots", updated);
+    window.dispatchEvent(new CustomEvent("stox:data-changed"));
   };
 
   var deleteSnapshot = function(id) {
     var updated = snapshots.filter(function(s) { return s.id !== id; });
     setSnapshots(updated);
     dbSetSetting("stox_screener_snapshots", updated);
+    window.dispatchEvent(new CustomEvent("stox:data-changed"));
   };
 
   var deleteSnapshotsBatch = function(ids) {
@@ -3362,6 +3365,7 @@ function StockScreener() {
     var updated = snapshots.filter(function(s) { return !idSet.has(s.id); });
     setSnapshots(updated);
     dbSetSetting("stox_screener_snapshots", updated);
+    window.dispatchEvent(new CustomEvent("stox:data-changed"));
   };
 
   var purgeData = function() {
@@ -3479,6 +3483,7 @@ function StockScreener() {
       var entry = { id: Date.now(), ticker: tk, currentPrice: 0, addedAt: new Date().toISOString(), result: result, indicators: { weekly: indW, daily: indD, hourly: indH } };
       entries.unshift(entry);
       await dbSetSetting("mm_entry_scores", entries);
+      window.dispatchEvent(new CustomEvent("stox:data-changed"));
       setAddedToES(function(p) { var c = Object.assign({}, p); c[tk] = true; return c; });
     } catch (e) {}
     setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
@@ -4726,6 +4731,21 @@ function App() {
     }, 2000);
     return () => { if (_fsaTimerRef.current) clearTimeout(_fsaTimerRef.current); };
   }, [holdings, watchlist, soldShareSnapshots, prices]);
+
+  // Auto-write FSA when screener/entry-score data changes (outside main state)
+  const _fsaExternalRef = React.useRef(null);
+  useEffect(() => {
+    const handler = () => {
+      if (_fsaExternalRef.current) clearTimeout(_fsaExternalRef.current);
+      _fsaExternalRef.current = setTimeout(() => {
+        if (window.__fsa && window.__fsa.writeNow) {
+          window.__fsa.writeNow().catch(function() {});
+        }
+      }, 2000);
+    };
+    window.addEventListener("stox:data-changed", handler);
+    return () => { window.removeEventListener("stox:data-changed", handler); if (_fsaExternalRef.current) clearTimeout(_fsaExternalRef.current); };
+  }, []);
 
   // Auto-refresh every 60s
   useEffect(() => {
