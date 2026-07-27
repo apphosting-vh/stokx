@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.0";
+window.__STOX_APP_VERSION = "2.4.1";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -227,7 +227,7 @@ async function fetchTickerPrice(rawTicker) {
   for (const sym of symbols) {
     for (const proxy of PROXY_FNS) {
       try {
-        const url = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?interval=1d&range=1d";
+        const url = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?interval=1d&range=1d&_t=" + Date.now();
         const r = await _fetchX(proxy(url), {}, 6000);
         if (!r.ok) continue;
         const txt = await _readBody(r);
@@ -248,7 +248,7 @@ async function fetchMultiplePrices(tickers) {
   const results = {};
   const promises = tickers.map(async (t) => {
     const data = await fetchTickerPrice(t);
-    results[t.toUpperCase()] = data;
+    if (data) results[t.toUpperCase()] = data;
   });
   await Promise.allSettled(promises);
   return results;
@@ -2135,7 +2135,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                   title: "Remove this holding"
                 }, Icons.trash(13), " Remove"),
                 React.createElement("button", {
-                  onClick: () => setAnalyzingTicker(h.ticker),
+                  onClick: async () => { try { await fetchSinglePrice(h.ticker); } catch(e) {} setAnalyzingTicker(h.ticker); },
                   style: { display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 13px", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "var(--font-body)", border: "1px solid var(--accentborder)", background: "rgba(16,185,129,.08)", color: "var(--accent)", transition: "all .15s" },
                   title: "Analyze this stock"
                 }, Icons.chart(13), " Analyze")
@@ -3082,7 +3082,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.0",
+      appVersion: window.__STOX_APP_VERSION || "2.4.1",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -4060,9 +4060,20 @@ function InfoPage() {
 
   const CHANGELOG = [
     {
-      version: "2.4.0",
+      version: "2.4.1",
       date: "July 2026",
       label: "Latest",
+      changes: [
+        { type: "fixed", text: "Refresh button now fetches live prices without stale cache — added cache-busting timestamp to Yahoo Finance API calls" },
+        { type: "fixed", text: "Failed price fetches no longer overwrite valid cached prices (null results filtered from merge)" },
+        { type: "fixed", text: "Analyze button now fetches fresh price before navigating to stock analysis page" },
+        { type: "fixed", text: "FSA auto-save on page reload — wired up writeNow() handler so file is written after permission is restored" },
+        { type: "fixed", text: "FSA Re-grant Permission now writes data immediately instead of silently failing" },
+      ]
+    },
+    {
+      version: "2.4.0",
+      date: "July 2026",
       changes: [
         { type: "improved", text: "Technical indicator recalibration — aligned all scoring formulas with sample_indicators.js reference implementation" },
         { type: "fixed", text: "Bollinger Bands — switched from population to sample standard deviation for more accurate volatility bands" },
@@ -4157,7 +4168,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.0"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.1"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -4302,7 +4313,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.0"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.1"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
@@ -4402,6 +4413,11 @@ function App() {
     if (allTickers.length === 0) return;
     const result = await fetchMultiplePrices(allTickers);
     setPrices((prev) => ({ ...prev, ...result }));
+  };
+
+  const fetchSinglePrice = async (ticker) => {
+    const data = await fetchTickerPrice(ticker);
+    if (data) setPrices((prev) => ({ ...prev, [ticker.toUpperCase()]: data }));
   };
 
   // Hide splash

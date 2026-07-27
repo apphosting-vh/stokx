@@ -804,6 +804,12 @@ window.FSAStoragePanel = function(props) {
         var perm = await fsaQueryPermission(h);
         if (perm === "granted") {
           window.__fsa.handle = h; window.__fsa.filename = h.name; window.__fsa.ready = true;
+          window.__fsa.writeNow = async function() {
+            if (!window.__fsa.handle || !window.__fsa.ready) return false;
+            var ok = await fsaWriteFile(window.__fsa.handle, stateData);
+            if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
+            return ok;
+          };
           setConnected(true); setFilename(h.name);
           setTimeout(function() { if (window.__fsa.writeNow) window.__fsa.writeNow(); }, 50);
         } else {
@@ -826,6 +832,12 @@ window.FSAStoragePanel = function(props) {
       if (!perm) { setPermNeeded(true); setBusy(false); say("Write permission was denied. Click 'Re-grant Permission' to enable auto-save.", false); return; }
       await fsaSetHandle(handle);
       window.__fsa.handle = handle; window.__fsa.filename = handle.name; window.__fsa.ready = true;
+      window.__fsa.writeNow = async function() {
+        if (!window.__fsa.handle || !window.__fsa.ready) return false;
+        var ok = await fsaWriteFile(window.__fsa.handle, stateData);
+        if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
+        return ok;
+      };
       setConnected(true); setFilename(handle.name); setPermNeeded(false);
       var ok = await fsaWriteFile(handle, stateData);
       if (ok) { window.__fsa.lastSaved = new Date(); setLastSaved(window.__fsa.lastSaved); say("Connected! Current data saved to " + handle.name); }
@@ -880,7 +892,13 @@ window.FSAStoragePanel = function(props) {
     var granted = await fsaVerifyPermission(window.__fsa.handle);
     if (granted) {
       window.__fsa.ready = true;
-      var ok = window.__fsa.writeNow ? await window.__fsa.writeNow() : false;
+      window.__fsa.writeNow = async function() {
+        if (!window.__fsa.handle || !window.__fsa.ready) return false;
+        var ok = await fsaWriteFile(window.__fsa.handle, stateData);
+        if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
+        return ok;
+      };
+      var ok = await window.__fsa.writeNow();
       setPermNeeded(false); setConnected(true);
       say(ok ? "Permission granted - data saved to " + window.__fsa.filename : "Permission granted - save queued.");
     } else say("Permission was denied.", false);
@@ -889,7 +907,7 @@ window.FSAStoragePanel = function(props) {
 
   var handleDisconnect = async function() {
     await fsaClearHandle();
-    window.__fsa.handle = null; window.__fsa.filename = ""; window.__fsa.ready = false; window.__fsa.lastSaved = null;
+    window.__fsa.handle = null; window.__fsa.filename = ""; window.__fsa.ready = false; window.__fsa.lastSaved = null; window.__fsa.writeNow = null;
     setConnected(false); setFilename(""); setPermNeeded(false); setLastSaved(null);
     say("File storage disconnected. Data continues to save to browser storage.");
   };
