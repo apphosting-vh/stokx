@@ -2828,9 +2828,27 @@ const EntryScorePanel = ({ shares }) => {
   const [expandedYear, setExpandedYear] = useState(null);
   const [expandedMonth, setExpandedMonth] = useState(null);
   const [expandedDay, setExpandedDay] = useState(null);
+  const [expandedGroups, setExpandedGroups] = useState({});
+  const [perfTrackerExpanded, setPerfTrackerExpanded] = useState(false);
+  const [perfTrackerRefreshing, setPerfTrackerRefreshing] = useState(false);
+  const [perfTrackerPrices, setPerfTrackerPrices] = useState({});
 
   const saveEntries = (arr) => { setEntries(arr); dbSetSetting(LS_ENTRY_SCORES, arr); window.dispatchEvent(new CustomEvent("stox:data-changed")); };
   const deleteEntry = (id) => { saveEntries(entries.filter(e => e.id !== id)); };
+
+  const refreshPerfTracker = async () => {
+    if (!entries.length || perfTrackerRefreshing) return;
+    setPerfTrackerRefreshing(true);
+    const prices = {};
+    for (const entry of entries) {
+      try {
+        const data = await fetchTickerPrice(entry.ticker);
+        if (data && data.price > 0) prices[entry.ticker] = data.price;
+      } catch {}
+    }
+    setPerfTrackerPrices(prices);
+    setPerfTrackerRefreshing(false);
+  };
 
   useEffect(() => {
     if (!entries.length || !TI || !DF) return;
@@ -3246,10 +3264,40 @@ const EntryScorePanel = ({ shares }) => {
     entries.length === 0 && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
       "No entry scores yet. Click \"+ Add Entry\" to analyze a stock."
     ),
-    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(380px,1fr))", gap: 14 } },
-      entries.map(entry => {
-        const r = entry.result;
-        const isExpanded = !!expandedIds[entry.id];
+    (() => {
+      var sortedEntries = entries.slice().sort(function(a, b) { return new Date(b.addedAt) - new Date(a.addedAt); });
+      var monthGroups = {};
+      sortedEntries.forEach(function(entry) {
+        var d = new Date(entry.addedAt);
+        var monthKey = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+        var dayKey = monthKey + "-" + String(d.getDate()).padStart(2, "0");
+        var monthLabel = d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+        var dayLabel = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+        if (!monthGroups[monthKey]) monthGroups[monthKey] = { label: monthLabel, days: {} };
+        if (!monthGroups[monthKey].days[dayKey]) monthGroups[monthKey].days[dayKey] = { label: dayLabel, entries: [] };
+        monthGroups[monthKey].days[dayKey].entries.push(entry);
+      });
+      var monthKeys = Object.keys(monthGroups).sort().reverse();
+      var totalGroups = monthKeys.length;
+      var expandedCount = 0;
+      monthKeys.forEach(function(mk) {
+        if (expandedGroups[mk]) { expandedCount++; return; }
+        Object.keys(monthGroups[mk].days).forEach(function(dk) {
+          if (expandedGroups[dk]) expandedCount++;
+        });
+      });
+      var allExpanded = expandedCount > 0;
+      var toggleAll = function() {
+        if (allExpanded) { setExpandedGroups({}); }
+        else {
+          var newExpanded = {};
+          monthKeys.forEach(function(mk) { newExpanded[mk] = true; });
+          setExpandedGroups(newExpanded);
+        }
+      };
+      var renderEntryCard = function(entry) {
+        var r = entry.result;
+        var isExpanded = !!expandedIds[entry.id];
         return React.createElement("div", { key: entry.id, className: "stx-card", style: { border: "2px solid " + r.decision.color + "33" } },
           React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 } },
             React.createElement("div", null,
@@ -3261,8 +3309,8 @@ const EntryScorePanel = ({ shares }) => {
                 React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, "Final Score"),
                 React.createElement("div", { style: { fontSize: 22, fontWeight: 900, color: r.decision.color, fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore)
               ),
-              React.createElement("div", { onClick: () => saveSnapshot(entry), style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--accent)", fontSize: 13, title: "Save Snapshot" } }, Icons.save(14)),
-              React.createElement("div", { onClick: () => deleteEntry(entry.id), style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--text6)", fontSize: 14 }, title: "Delete" }, Icons.trash(14))
+              React.createElement("div", { onClick: function() { saveSnapshot(entry); }, style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--accent)", fontSize: 13, title: "Save Snapshot" } }, Icons.save(14)),
+              React.createElement("div", { onClick: function() { deleteEntry(entry.id); }, style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--text6)", fontSize: 14 }, title: "Delete" }, Icons.trash(14))
             )
           ),
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "6px 10px", borderRadius: 8, background: r.decision.color + "12" } },
@@ -3271,9 +3319,9 @@ const EntryScorePanel = ({ shares }) => {
             r.hardFilters && r.hardFilters.length > 0 && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: "#ef4444", padding: "2px 5px", borderRadius: 3, background: "rgba(239,68,68,.1)" } }, r.hardFilters.length + " filter" + (r.hardFilters.length > 1 ? "s" : ""))
           ),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 } },
-            ["weekly", "daily", "hourly"].map(tf => {
-              const s = r[tf];
-              const label = tf === "weekly" ? "Weekly (30%)" : tf === "daily" ? "Daily (50%)" : "Hourly (20%)";
+            ["weekly", "daily", "hourly"].map(function(tf) {
+              var s = r[tf];
+              var label = tf === "weekly" ? "Weekly (30%)" : tf === "daily" ? "Daily (50%)" : "Hourly (20%)";
               return React.createElement("div", { key: tf, style: { padding: "6px 8px", borderRadius: 8, background: "var(--bg4)", textAlign: "center" } },
                 React.createElement("div", { style: { fontSize: 9, fontWeight: 600, color: "var(--text5)", marginBottom: 2 } }, label),
                 React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: s ? s.decision.color : "var(--text6)", fontFamily: "var(--font-heading)" } }, s ? s.total : "N/A"),
@@ -3282,10 +3330,10 @@ const EntryScorePanel = ({ shares }) => {
             })
           ),
           React.createElement("div", { style: { display: "flex", justifyContent: "center", gap: 12, marginBottom: 6 } },
-            React.createElement("div", { onClick: () => setExpandedIds(prev => ({ ...prev, [entry.id]: !prev[entry.id] })), style: { fontSize: 10, color: "var(--accent)", cursor: "pointer", fontWeight: 600 } },
+            React.createElement("div", { onClick: function() { setExpandedIds(function(prev) { var next = Object.assign({}, prev); next[entry.id] = !next[entry.id]; return next; }); }, style: { fontSize: 10, color: "var(--accent)", cursor: "pointer", fontWeight: 600 } },
               isExpanded ? "\u25b2 Hide Details" : "\u25bc Show Details"
             ),
-            window.TechnicalIndicatorsInline && React.createElement("div", { onClick: () => setViewingAnalysis(viewingAnalysis && viewingAnalysis.id === entry.id ? null : entry), style: { fontSize: 10, color: "#f97316", cursor: "pointer", fontWeight: 600 } },
+            window.TechnicalIndicatorsInline && React.createElement("div", { onClick: function() { setViewingAnalysis(viewingAnalysis && viewingAnalysis.id === entry.id ? null : entry); }, style: { fontSize: 10, color: "#f97316", cursor: "pointer", fontWeight: 600 } },
               "\u26a1 Technicals"
             )
           ),
@@ -3295,7 +3343,7 @@ const EntryScorePanel = ({ shares }) => {
             r.hourly && tfSection("Hourly Breakdown", r.hourly),
             r.hardFilters && r.hardFilters.length > 0 && React.createElement("div", { style: { marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.15)" } },
               React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--text3)", marginBottom: 4 } }, "Penalties & Bonuses"),
-              r.hardFilters.map((f, i) => {
+              r.hardFilters.map(function(f, i) {
                 var isBonus = f.indexOf("(+") >= 0;
                 var valMatch = f.match(/\([+\-\u2212]?\d+\)$/);
                 var valStr = valMatch ? valMatch[0] : "";
@@ -3311,7 +3359,120 @@ const EntryScorePanel = ({ shares }) => {
             )
           )
         );
-      })
+      };
+      return React.createElement(React.Fragment, null,
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", fontWeight: 600 } },
+            entries.length + " entr" + (entries.length !== 1 ? "ies" : "y") + " \u00b7 " + monthKeys.length + " group" + (monthKeys.length !== 1 ? "s" : "")
+          ),
+          entries.length > 0 && React.createElement("div", { onClick: toggleAll, style: { fontSize: 11, color: "var(--accent)", cursor: "pointer", fontWeight: 600, padding: "4px 10px", borderRadius: 6, background: "var(--bg4)" } },
+            allExpanded ? "\u25b8 Collapse All" : "\u25be Expand All"
+          )
+        ),
+        monthKeys.map(function(monthKey) {
+          var mg = monthGroups[monthKey];
+          var monthExpanded = !!expandedGroups[monthKey];
+          var dayKeys = Object.keys(mg.days).sort().reverse();
+          var monthEntryCount = dayKeys.reduce(function(sum, dk) { return sum + mg.days[dk].entries.length; }, 0);
+          var allMonthDaysExpanded = dayKeys.length > 0 && dayKeys.every(function(dk) { return expandedGroups[dk]; });
+          return React.createElement("div", { key: monthKey, style: { marginBottom: 16 } },
+            React.createElement("div", { onClick: function() { setExpandedGroups(function(prev) { var next = Object.assign({}, prev); if (prev[monthKey]) delete next[monthKey]; else next[monthKey] = true; return next; }); }, style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "var(--bg3)", cursor: "pointer", marginBottom: 6, border: "1px solid var(--border)" } },
+              React.createElement("span", { style: { fontSize: 12, color: "var(--text)", fontWeight: 700, fontFamily: "var(--font-heading)" } }, monthExpanded ? "\u25be" : "\u25b8"),
+              React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, mg.label),
+              React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, monthEntryCount + " entr" + (monthEntryCount !== 1 ? "ies" : "y")),
+              React.createElement("div", { style: { flex: 1 } }),
+              React.createElement("div", { onClick: function(e) { e.stopPropagation(); var next = Object.assign({}, expandedGroups); dayKeys.forEach(function(dk) { if (allMonthDaysExpanded) delete next[dk]; else next[dk] = true; }); setExpandedGroups(next); }, style: { fontSize: 10, color: "var(--accent)", cursor: "pointer", fontWeight: 600, padding: "2px 6px", borderRadius: 4 } },
+                allMonthDaysExpanded ? "Collapse" : "Expand"
+              )
+            ),
+            monthExpanded && dayKeys.map(function(dayKey) {
+              var dg = mg.days[dayKey];
+              var dayExpanded = !!expandedGroups[dayKey];
+              return React.createElement("div", { key: dayKey, style: { marginBottom: 8 } },
+                React.createElement("div", { onClick: function() { setExpandedGroups(function(prev) { var next = Object.assign({}, prev); if (prev[dayKey]) delete next[dayKey]; else next[dayKey] = true; return next; }); }, style: { display: "flex", alignItems: "center", gap: 8, padding: "5px 12px 5px 28px", borderRadius: 6, background: "var(--bg2)", cursor: "pointer", marginBottom: 4 } },
+                  React.createElement("span", { style: { fontSize: 10, color: "var(--text5)" } }, dayExpanded ? "\u25be" : "\u25b8"),
+                  React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "var(--text2)" } }, dg.label),
+                  React.createElement("span", { style: { fontSize: 9, color: "var(--text6)" } }, dg.entries.length + " entr" + (dg.entries.length !== 1 ? "ies" : "y"))
+                ),
+                dayExpanded && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(380px,1fr))", gap: 14, paddingLeft: 28 } },
+                  dg.entries.map(function(entry) { return renderEntryCard(entry); })
+                )
+              );
+            })
+          );
+        })
+      );
+    })(),
+
+    // Performance Tracker section
+    !viewingAnalysis && entries.length > 0 && React.createElement("div", { style: { marginTop: 24, borderTop: "1px solid var(--border)", paddingTop: 20 } },
+      React.createElement("div", { onClick: function() { setPerfTrackerExpanded(!perfTrackerExpanded); }, style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", marginBottom: perfTrackerExpanded ? 12 : 0, padding: "8px 0" } },
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+          React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, (perfTrackerExpanded ? "\u25be " : "\u25b8 ") + "Entry Score Performance Tracker")
+        ),
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+          perfTrackerExpanded && React.createElement("div", { onClick: function(e) { e.stopPropagation(); refreshPerfTracker(); }, style: { fontSize: 10, color: perfTrackerRefreshing ? "var(--text6)" : "var(--accent)", cursor: perfTrackerRefreshing ? "wait" : "pointer", fontWeight: 600, padding: "4px 10px", borderRadius: 6, background: "var(--bg4)" } }, perfTrackerRefreshing ? "Refreshing..." : "\u21bb Refresh Prices")
+        )
+      ),
+      perfTrackerExpanded && React.createElement("div", { style: { overflowX: "auto", marginTop: 4 } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } },
+          React.createElement("thead", null,
+            React.createElement("tr", null,
+              React.createElement("th", { style: { padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Stock"),
+              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Date Added"),
+              React.createElement("th", { colSpan: 4, style: { padding: "8px 10px", textAlign: "center", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Entry Score"),
+              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Price on Add"),
+              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Days"),
+              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Current Price"),
+              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "% Change")
+            ),
+            React.createElement("tr", null,
+              React.createElement("th", { style: { background: "var(--bg3)" } }),
+              React.createElement("th", { style: { background: "var(--bg3)" } }),
+              ["Daily", "Weekly", "Hourly", "Final"].map(function(sub) {
+                return React.createElement("th", { key: sub, style: { padding: "4px 10px", textAlign: "center", fontWeight: 600, color: "var(--text5)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, sub);
+              }),
+              React.createElement("th", { style: { background: "var(--bg3)" } }),
+              React.createElement("th", { style: { background: "var(--bg3)" } }),
+              React.createElement("th", { style: { background: "var(--bg3)" } }),
+              React.createElement("th", { style: { background: "var(--bg3)" } })
+            )
+          ),
+          React.createElement("tbody", null,
+            entries.map(function(entry) {
+              var addedDate = new Date(entry.addedAt);
+              var now = new Date();
+              var daysElapsed = Math.max(1, Math.floor((now - addedDate) / (1000 * 60 * 60 * 24)));
+              var dailyScore = entry.result && entry.result.daily ? entry.result.daily.total : null;
+              var weeklyScore = entry.result && entry.result.weekly ? entry.result.weekly.total : null;
+              var hourlyScore = entry.result && entry.result.hourly ? entry.result.hourly.total : null;
+              var priceOnAdd = entry.currentPrice || (entry.result ? entry.result.lastClose : 0) || 0;
+              var currentPrice = perfTrackerPrices[entry.ticker] || 0;
+              var pctChange = priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100) : null;
+              var pctColor = pctChange === null ? "var(--text6)" : pctChange >= 0 ? "#22c55e" : "#ef4444";
+              var scoreCellStyle = { padding: "8px 10px", textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", fontSize: 11 };
+              var dailyColor = entry.result && entry.result.daily && entry.result.daily.decision ? entry.result.daily.decision.color : "var(--text6)";
+              var weeklyColor = entry.result && entry.result.weekly && entry.result.weekly.decision ? entry.result.weekly.decision.color : "var(--text6)";
+              var hourlyColor = entry.result && entry.result.hourly && entry.result.hourly.decision ? entry.result.hourly.decision.color : "var(--text6)";
+              var finalScore = entry.result ? entry.result.finalScore : null;
+              var finalColor = entry.result && entry.result.decision ? entry.result.decision.color : "var(--text6)";
+              var rowBg = "rgba(220, 170, 190, 0.10)";
+              return React.createElement("tr", { key: entry.id, style: { borderBottom: "1px solid var(--border)", background: rowBg } },
+                React.createElement("td", { style: { padding: "8px 10px", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap" } }, entry.ticker),
+                React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text3)", whiteSpace: "nowrap" } }, addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })),
+                React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: dailyColor }) }, dailyScore !== null ? dailyScore : "—"),
+                React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: weeklyColor }) }, weeklyScore !== null ? weeklyScore : "—"),
+                React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: hourlyColor }) }, hourlyScore !== null ? hourlyScore : "—"),
+                React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: finalColor, fontWeight: 900 }) }, finalScore !== null ? finalScore : "—"),
+                React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text2)", fontFamily: "var(--font-mono)" } }, priceOnAdd > 0 ? INR(priceOnAdd) : "—"),
+                React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text4)" } }, daysElapsed),
+                React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text2)", fontFamily: "var(--font-mono)" } }, currentPrice > 0 ? INR(currentPrice) : (perfTrackerRefreshing ? "..." : "—")),
+                React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: pctColor, fontFamily: "var(--font-mono)" } }, pctChange !== null ? (pctChange >= 0 ? "+" : "") + pctChange.toFixed(2) + "%" : "—")
+              );
+            })
+          )
+        )
+      )
     ),
 
     // Snapshots section
