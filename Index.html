@@ -113,12 +113,12 @@
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin/>
 <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com"/>
 
-<!-- Fonts: Sora (headings), DM Sans (body) -->
+<!-- Fonts: Sora (headings), DM Sans + Inter + Plus Jakarta Sans + Manrope + Outfit + Space Grotesk (body) -->
 <link rel="preload" as="style"
-      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       onload="this.onload=null;this.rel='stylesheet'"/>
 <noscript>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap"/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"/>
 </noscript>
 
 <!-- Font-face fallback -->
@@ -174,7 +174,7 @@ body{
 /* ════════════════════════════════════════════════
    DARK THEME (default)
    ════════════════════════════════════════════════ */
-html[data-theme="dark"]{
+html[data-mode="dark"]{
   --bg:#06090f;--bg2:#0c1118;--bg3:#111824;--bg4:#161f2e;--bg5:#1c2738;
   --border:#1e2d42;--border2:#263852;--border3:#2e4568;
   --text:rgba(255,255,255,.92);--text2:rgba(255,255,255,.80);--text3:rgba(255,255,255,.65);
@@ -197,7 +197,7 @@ html[data-theme="dark"]{
 /* ════════════════════════════════════════════════
    LIGHT THEME
    ════════════════════════════════════════════════ */
-html[data-theme="light"]{
+html[data-mode="light"]{
   --bg:#f0f4fa;--bg2:#e4ebf5;--bg3:#ffffff;--bg4:#f8fafc;--bg5:#eef2f8;
   --border:#d1d9e6;--border2:#dde4ee;--border3:#c4d0e0;
   --text:#0a1628;--text2:#1a2744;--text3:#2e3f5e;
@@ -215,6 +215,46 @@ html[data-theme="light"]{
   --scrollbar:#c4d0e0;--scrollbar2:#a0b0c8;--scrolltrack:#e4ebf5;
   --mr-hover:#e4ebf5;--modal-bg:#ffffff;--overlay:rgba(0,0,0,.52);
   --shadow-sm:0 1px 3px rgba(0,0,0,.04);--shadow-md:0 4px 16px rgba(0,0,0,.06);--shadow-lg:0 8px 32px rgba(0,0,0,.08);
+}
+
+/* ════════════════════════════════════════════════
+   THEME VARIANTS — accent overrides
+   ════════════════════════════════════════════════ */
+[data-theme="violet"]  { --accent:#7c3aed; --accent2:#6d28d9; --accentbg:rgba(124,58,237,.15); --accentbg2:rgba(124,58,237,.08); --accentbg3:rgba(124,58,237,.10); --accentbg4:rgba(124,58,237,.06); --accentbg5:rgba(124,58,237,.22); }
+[data-theme="indigo"]  { --accent:#4f46e5; --accent2:#4338ca; --accentbg:rgba(79,70,229,.15); --accentbg2:rgba(79,70,229,.08); --accentbg3:rgba(79,70,229,.10); --accentbg4:rgba(79,70,229,.06); --accentbg5:rgba(79,70,229,.22); }
+[data-theme="blue"]    { --accent:#2563eb; --accent2:#1d4ed8; --accentbg:rgba(37,99,235,.15); --accentbg2:rgba(37,99,235,.08); --accentbg3:rgba(37,99,235,.10); --accentbg4:rgba(37,99,235,.06); --accentbg5:rgba(37,99,235,.22); }
+[data-theme="green"]   { --accent:#16a34a; --accent2:#15803d; --accentbg:rgba(22,163,74,.15); --accentbg2:rgba(22,163,74,.08); --accentbg3:rgba(22,163,74,.10); --accentbg4:rgba(22,163,74,.06); --accentbg5:rgba(22,163,74,.22); }
+[data-theme="yellow"]  { --accent:#ca8a04; --accent2:#a16207; --accentbg:rgba(202,138,4,.15); --accentbg2:rgba(202,138,4,.08); --accentbg3:rgba(202,138,4,.10); --accentbg4:rgba(202,138,4,.06); --accentbg5:rgba(202,138,4,.22); }
+[data-theme="orange"]  { --accent:#ea580c; --accent2:#c2410c; --accentbg:rgba(234,88,12,.15); --accentbg2:rgba(234,88,12,.08); --accentbg3:rgba(234,88,12,.10); --accentbg4:rgba(234,88,12,.06); --accentbg5:rgba(234,88,12,.22); }
+[data-theme="red"]     { --accent:#dc2626; --accent2:#b91c1c; --accentbg:rgba(220,38,38,.15); --accentbg2:rgba(220,38,38,.08); --accentbg3:rgba(220,38,38,.10); --accentbg4:rgba(220,38,38,.06); --accentbg5:rgba(220,38,38,.22); }
+
+/* Dark theme variants */
+[data-theme="violet-dark"]  { --accent:#a78bfa; --accent2:#8b5cf6; --accentbg:rgba(167,139,250,.15); --accentbg2:rgba(167,139,250,.08); --accentbg3:rgba(167,139,250,.10); --accentbg4:rgba(167,139,250,.06); --accentbg5:rgba(167,139,250,.22); }
+[data-theme="indigo-dark"]  { --accent:#818cf8; --accent2:#6366f1; --accentbg:rgba(129,140,248,.15); --accentbg2:rgba(129,140,248,.08); --accentbg3:rgba(129,140,248,.10); --accentbg4:rgba(129,140,248,.06); --accentbg5:rgba(129,140,248,.22); }
+[data-theme="blue-dark"]    { --accent:#60a5fa; --accent2:#3b82f6; --accentbg:rgba(96,165,250,.15); --accentbg2:rgba(96,165,250,.08); --accentbg3:rgba(96,165,250,.10); --accentbg4:rgba(96,165,250,.06); --accentbg5:rgba(96,165,250,.22); }
+[data-theme="green-dark"]   { --accent:#4ade80; --accent2:#22c55e; --accentbg:rgba(74,222,128,.15); --accentbg2:rgba(74,222,128,.08); --accentbg3:rgba(74,222,128,.10); --accentbg4:rgba(74,222,128,.06); --accentbg5:rgba(74,222,128,.22); }
+[data-theme="yellow-dark"]  { --accent:#facc15; --accent2:#eab308; --accentbg:rgba(250,204,21,.15); --accentbg2:rgba(250,204,21,.08); --accentbg3:rgba(250,204,21,.10); --accentbg4:rgba(250,204,21,.06); --accentbg5:rgba(250,204,21,.22); }
+[data-theme="orange-dark"]  { --accent:#fb923c; --accent2:#f97316; --accentbg:rgba(251,146,60,.15); --accentbg2:rgba(251,146,60,.08); --accentbg3:rgba(251,146,60,.10); --accentbg4:rgba(251,146,60,.06); --accentbg5:rgba(251,146,60,.22); }
+[data-theme="red-dark"]     { --accent:#f87171; --accent2:#ef4444; --accentbg:rgba(248,113,113,.15); --accentbg2:rgba(248,113,113,.08); --accentbg3:rgba(248,113,113,.10); --accentbg4:rgba(248,113,113,.06); --accentbg5:rgba(248,113,113,.22); }
+
+/* ════════════════════════════════════════════════
+   THEME SWATCH GRID
+   ════════════════════════════════════════════════ */
+.stx-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
+}
+.stx-theme-swatch {
+  display: flex; flex-direction: column; align-items: center; padding: 10px 6px;
+  border-radius: 12px; border: 2px solid var(--border); cursor: pointer;
+  transition: border-color .18s, box-shadow .18s;
+  background: transparent;
+}
+.stx-theme-swatch:hover { border-color: var(--accent); }
+.stx-theme-swatch.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accentbg5); }
+.stx-theme-swatch-preview {
+  width: 100%; height: 36px; border-radius: 8px;
 }
 
 *{box-sizing:border-box;margin:0;padding:0}

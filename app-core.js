@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.5";
+window.__STOX_APP_VERSION = "2.4.6";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -656,6 +656,49 @@ window.addEventListener('fsa:permission-needed', function() {
     }});
   }
 });
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THEMES & FONTS
+   ══════════════════════════════════════════════════════════════════════════ */
+const THEMES = [
+  { id: "violet",      name: "Violet Light",  desc: "Rich purple-violet",   dark: false, preview: ["#f8f6ff","#7c3aed","#ddd8f5","#6d28d9"] },
+  { id: "indigo",      name: "Indigo Light",  desc: "Deep indigo-blue",     dark: false, preview: ["#eef2ff","#4f46e5","#c8d4f8","#4338ca"] },
+  { id: "blue",        name: "Blue Light",    desc: "Classic bright blue",  dark: false, preview: ["#eff6ff","#2563eb","#bfdbfe","#1d4ed8"] },
+  { id: "green",       name: "Green Light",   desc: "Fresh emerald green",  dark: false, preview: ["#f0fdf4","#16a34a","#bbf7d0","#15803d"] },
+  { id: "yellow",      name: "Yellow Light",  desc: "Warm golden yellow",   dark: false, preview: ["#fffbeb","#ca8a04","#fde68a","#a16207"] },
+  { id: "orange",      name: "Orange Light",  desc: "Vibrant fiery orange", dark: false, preview: ["#fff7ed","#ea580c","#fed7aa","#c2410c"] },
+  { id: "red",         name: "Red Light",     desc: "Bold crimson red",     dark: false, preview: ["#fef2f2","#dc2626","#fecaca","#b91c1c"] },
+  { id: "violet-dark", name: "Violet Dark",   desc: "Deep violet night",    dark: true,  preview: ["#0c0818","#a78bfa","#38245e","#8b5cf6"] },
+  { id: "indigo-dark", name: "Indigo Dark",   desc: "Indigo midnight",      dark: true,  preview: ["#08081a","#818cf8","#2e2c62","#6366f1"] },
+  { id: "blue-dark",   name: "Blue Dark",     desc: "Deep ocean blue",      dark: true,  preview: ["#070c18","#60a5fa","#26406a","#3b82f6"] },
+  { id: "green-dark",  name: "Green Dark",    desc: "Forest emerald",       dark: true,  preview: ["#060e08","#4ade80","#224232","#22c55e"] },
+  { id: "yellow-dark", name: "Yellow Dark",   desc: "Dark amber glow",      dark: true,  preview: ["#100c04","#facc15","#4e462a","#eab308"] },
+  { id: "orange-dark", name: "Orange Dark",   desc: "Ember orange night",   dark: true,  preview: ["#120a04","#fb923c","#523e24","#f97316"] },
+  { id: "red-dark",    name: "Red Dark",      desc: "Dark blood red",       dark: true,  preview: ["#140606","#f87171","#582828","#ef4444"] },
+];
+const FONTS = [
+  { id: "dm-sans",            name: "DM Sans",            stack: "'DM Sans', sans-serif" },
+  { id: "inter",              name: "Inter",              stack: "'Inter', sans-serif" },
+  { id: "plus-jakarta-sans",  name: "Plus Jakarta Sans",  stack: "'Plus Jakarta Sans', sans-serif" },
+  { id: "manrope",            name: "Manrope",            stack: "'Manrope', sans-serif" },
+  { id: "outfit",             name: "Outfit",             stack: "'Outfit', sans-serif" },
+  { id: "space-grotesk",      name: "Space Grotesk",      stack: "'Space Grotesk', sans-serif" },
+];
+const loadTheme = () => { try { const t = localStorage.getItem("stox_theme_id"); if (t && THEMES.find(th => th.id === t)) return t; } catch {} return "green"; };
+const saveTheme = id => { try { localStorage.setItem("stox_theme_id", id); } catch {} };
+const applyTheme = id => {
+  const th = THEMES.find(t => t.id === id) || THEMES[0];
+  document.documentElement.setAttribute("data-theme", id);
+  document.documentElement.setAttribute("data-mode", th.dark ? "dark" : "light");
+  if (th.dark) { document.documentElement.style.setProperty("color-scheme", "dark"); }
+  else { document.documentElement.style.removeProperty("color-scheme"); }
+};
+const loadFont = () => { try { const f = localStorage.getItem("stox_font_id"); if (f && FONTS.find(fo => fo.id === f)) return f; } catch {} return "dm-sans"; };
+const saveFont = id => { try { localStorage.setItem("stox_font_id", id); } catch {} };
+const applyFont = id => {
+  const font = FONTS.find(f => f.id === id) || FONTS[0];
+  document.documentElement.style.setProperty("--font-body", font.stack);
+};
 
 var _confirmResolve = null;
 function showConfirm(msg) {
@@ -3413,7 +3456,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.5",
+      appVersion: window.__STOX_APP_VERSION || "2.4.6",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -4392,9 +4435,21 @@ function InfoPage() {
 
   const CHANGELOG = [
     {
-      version: "2.4.5",
+      version: "2.4.6",
       date: "July 2026",
       label: "Latest",
+      changes: [
+        { type: "feature", text: "Theme system — 14 theme variants (Violet, Indigo, Blue, Green, Yellow, Orange, Red in light+dark) with visual swatch picker in Settings" },
+        { type: "feature", text: "Font picker — 6 switchable body fonts (DM Sans, Inter, Plus Jakarta Sans, Manrope, Outfit, Space Grotesk) in Settings" },
+        { type: "feature", text: "Per-nav-item colours — sidebar and bottom nav now highlight each section in a unique colour matching the reference app design" },
+        { type: "improved", text: "Settings page redesigned with theme swatch grid and font selector" },
+        { type: "improved", text: "Inline confirm modals — replaced all browser confirm() dialogs with styled inline popups across the app" },
+        { type: "improved", text: "FSA permission toast — home screen shows Grant Permission button when file write access is needed" },
+      ]
+    },
+    {
+      version: "2.4.5",
+      date: "July 2026",
       changes: [
         { type: "feature", text: "Inline confirm modals — replaced all browser confirm() dialogs with styled inline popups across the app" },
         { type: "feature", text: "FSA permission toast — home screen shows Grant Permission button when file write access is needed" },
@@ -4536,7 +4591,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.5"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.6"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -4624,39 +4679,56 @@ function InfoPage() {
 /* ══════════════════════════════════════════════════════════════════════════
    PAGE: Settings
    ══════════════════════════════════════════════════════════════════════════ */
-function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareSnapshots, watchlist, setWatchlist }) {
-  const [theme, setTheme] = useState("light");
-
-  useEffect(() => {
-    dbGetSetting("stox_theme").then(t => {
-      if (t) { setTheme(t); document.documentElement.setAttribute("data-theme", t); }
-    });
-  }, []);
-
-  const changeTheme = (t) => {
-    setTheme(t);
-    document.documentElement.setAttribute("data-theme", t);
-    dbSetSetting("stox_theme", t);
-  };
-
+function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareSnapshots, watchlist, setWatchlist, themeId, setTheme, fontId, setFont }) {
   return React.createElement("div", null,
     React.createElement("div", { style: { marginBottom: 20 } },
       React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--accent)", letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 4 } }, "SETTINGS"),
       React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Settings")
     ),
 
-    // Theme
+    // Theme picker
     React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
-      React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 12 } }, "Appearance"),
-      React.createElement("div", { style: { display: "flex", gap: 8 } },
-        React.createElement("button", {
-          className: "stx-btn " + (theme === "dark" ? "stx-btn-primary" : "stx-btn-ghost"),
-          onClick: () => changeTheme("dark")
-        }, "Dark"),
-        React.createElement("button", {
-          className: "stx-btn " + (theme === "light" ? "stx-btn-primary" : "stx-btn-ghost"),
-          onClick: () => changeTheme("light")
-        }, "Light")
+      React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 12 } }, "Theme"),
+      React.createElement("div", { className: "stx-theme-grid" },
+        THEMES.map(function (th) {
+          var active = themeId === th.id;
+          return React.createElement("button", {
+            key: th.id,
+            className: "stx-theme-swatch" + (active ? " active" : ""),
+            onClick: function () { setTheme(th.id); },
+            style: { background: th.preview[0] }
+          },
+            React.createElement("div", {
+              className: "stx-theme-swatch-preview",
+              style: { background: "linear-gradient(135deg, " + th.preview[1] + ", " + th.preview[2] + ")" }
+            }),
+            React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: active ? th.preview[3] : "var(--text3)", marginTop: 6, textAlign: "center" } }, th.name),
+            React.createElement("div", { style: { fontSize: 8, color: "var(--text5)", textAlign: "center", marginTop: 1 } }, th.desc)
+          );
+        })
+      )
+    ),
+
+    // Font picker
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
+      React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 12 } }, "Font"),
+      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+        FONTS.map(function (fo) {
+          var active = fontId === fo.id;
+          return React.createElement("button", {
+            key: fo.id,
+            onClick: function () { setFont(fo.id); },
+            style: {
+              display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+              padding: "10px 14px", borderRadius: 10, border: active ? "1.5px solid var(--accent)" : "1.5px solid var(--border)",
+              background: active ? "var(--accentbg)" : "transparent", cursor: "pointer", transition: "all .15s",
+              fontFamily: fo.stack
+            }
+          },
+            React.createElement("span", { style: { fontSize: 13, fontWeight: active ? 700 : 500, color: active ? "var(--accent)" : "var(--text)" } }, fo.name),
+            React.createElement("span", { style: { fontSize: 11, color: active ? "var(--accent)" : "var(--text5)", fontStyle: "italic" } }, "Aa Bb Cc 123")
+          );
+        })
       )
     ),
 
@@ -4681,7 +4753,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.5"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.6"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
@@ -4717,14 +4789,17 @@ function App() {
   const [watchlist, setWatchlist] = useState([]);
   const [prices, setPrices] = useState({});
   const [soldShareSnapshots, setSoldShareSnapshots] = useState({});
-  const [theme, setTheme] = useState("light");
+  const [themeId, setThemeId] = useState(loadTheme);
+  const [fontId, setFontId] = useState(loadFont);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [loading, setLoading] = useState(true);
 
-  // Init theme
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
+  const setTheme = id => { setThemeId(id); applyTheme(id); saveTheme(id); };
+  const setFont = id => { setFontId(id); applyFont(id); saveFont(id); };
+
+  // Init theme & font
+  useEffect(() => { applyTheme(themeId); }, [themeId]);
+  useEffect(() => { applyFont(fontId); }, [fontId]);
 
   // Track mobile
   useEffect(() => {
@@ -4737,11 +4812,11 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [h, w, snaps, savedTheme] = await Promise.all([dbGetAll("holdings"), dbGetAll("watchlist"), loadSnapshots(), dbGetSetting("stox_theme")]);
+        const [h, w, snaps] = await Promise.all([dbGetAll("holdings"), dbGetAll("watchlist"), loadSnapshots()]);
         setHoldings(h);
         setWatchlist(w);
         setSoldShareSnapshots(snaps);
-        if (savedTheme) { setTheme(savedTheme); document.documentElement.setAttribute("data-theme", savedTheme); }
+      } catch (e) { console.warn("Failed to load data:", e); }
       } catch (e) { console.warn("Failed to load data:", e); }
       setLoading(false);
     })();
@@ -4873,7 +4948,7 @@ function App() {
       case "tradehistory": return React.createElement(TradeHistoryPage, pageProps);
       case "reports": return React.createElement(ReportsPage, { shares: holdings, soldShareSnapshots });
       case "watchlist": return React.createElement(PulsePage, { holdings });
-      case "settings": return React.createElement(SettingsPage, pageProps);
+      case "settings": return React.createElement(SettingsPage, { ...pageProps, themeId, setTheme, fontId, setFont });
       case "info": return React.createElement(InfoPage, null);
       default: return React.createElement(Dashboard, pageProps);
     }
@@ -4888,6 +4963,21 @@ function App() {
     { key: "settings", label: "Settings", icon: Icons.settings },
     { key: "info", label: "Info", icon: Icons.info },
   ];
+
+  const NAV_COLORS = {
+    dashboard: "#fbbf24",
+    portfolio: "#38bdf8",
+    tradehistory: "#f472b6",
+    reports: "#a78bfa",
+    watchlist: "#2dd4bf",
+    settings: "#93c5fd",
+    info: "#bef264",
+  };
+
+  const hexAlpha = (hex, a) => {
+    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+  };
 
   // Desktop sidebar + content
   if (!isMobile) {
@@ -4912,16 +5002,18 @@ function App() {
         React.createElement("div", { style: { padding: "16px 12px", flex: 1, display: "flex", flexDirection: "column", gap: 2 } },
           NAV_ITEMS.map((item) => {
             const active = page === item.key;
+            const col = NAV_COLORS[item.key] || "var(--accent)";
             return React.createElement("button", {
               key: item.key, onClick: () => navigate(item.key),
               style: {
                 display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px",
-                borderRadius: 10, border: "none", cursor: "pointer", transition: "all .15s",
-                background: active ? "rgba(16,185,129,.15)" : "transparent",
-                color: active ? "#10b981" : "rgba(255,255,255,.55)",
+                borderRadius: 10, border: "none", cursor: "pointer",
+                transition: "background .18s, color .18s, border-color .18s",
+                background: active ? hexAlpha(col, 0.13) : "transparent",
+                color: active ? col : "rgba(255,255,255,.55)",
                 fontWeight: active ? 700 : 500, fontSize: 13,
                 fontFamily: "var(--font-body)", textAlign: "left",
-                borderLeft: active ? "3px solid #10b981" : "3px solid transparent"
+                borderLeft: active ? "3px solid " + col : "3px solid transparent"
               }
             },
               React.createElement("span", null, item.icon(18)),
@@ -4953,16 +5045,18 @@ function App() {
     ),
     // Bottom nav
     React.createElement("div", { className: "stx-botnav" },
-      NAV_ITEMS.map((item) =>
-        React.createElement("button", {
+      NAV_ITEMS.map((item) => {
+        const col = NAV_COLORS[item.key] || "var(--accent)";
+        return React.createElement("button", {
           key: item.key,
           className: "stx-botnav-item" + (page === item.key ? " active" : ""),
-          onClick: () => navigate(item.key)
+          onClick: () => navigate(item.key),
+          style: page === item.key ? { color: col } : {}
         },
           React.createElement("span", null, item.icon(18)),
           React.createElement("span", null, item.label)
-        )
-      )
+        );
+      })
     ),
     React.createElement(ToastHost, null)
   );
