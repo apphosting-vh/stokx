@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.13";
+window.__STOX_APP_VERSION = "2.4.14";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -2793,6 +2793,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
    ══════════════════════════════════════════════════════════════════════════ */
 const LS_ENTRY_SCORES = "mm_entry_scores";
 const LS_ENTRY_SNAPSHOTS = "mm_entry_score_snapshots";
+const LS_ENTRY_PERF_PRICES = "mm_entry_perf_prices";
 const EntryScorePanel = ({ shares }) => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
@@ -2845,6 +2846,15 @@ const EntryScorePanel = ({ shares }) => {
   const [perfTrackerRefreshing, setPerfTrackerRefreshing] = useState(false);
   const [perfTrackerPrices, setPerfTrackerPrices] = useState({});
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const val = await dbGetSetting(LS_ENTRY_PERF_PRICES);
+        if (val && typeof val === "object" && Object.keys(val).length) setPerfTrackerPrices(val);
+      } catch {}
+    })();
+  }, []);
+
   const saveEntries = (arr) => { setEntries(arr); dbSetSetting(LS_ENTRY_SCORES, arr); window.dispatchEvent(new CustomEvent("stox:data-changed")); };
   const deleteEntry = (id) => { saveEntries(entries.filter(e => e.id !== id)); };
 
@@ -2860,6 +2870,7 @@ const EntryScorePanel = ({ shares }) => {
       } catch {}
     }
     setPerfTrackerPrices(prices);
+    dbSetSetting(LS_ENTRY_PERF_PRICES, prices);
     setPerfTrackerRefreshing(false);
     const changes = [];
     const noChanges = [];
@@ -2914,6 +2925,24 @@ const EntryScorePanel = ({ shares }) => {
       saveEntries(updated);
     })();
   }, []);
+
+  useEffect(() => {
+    if (!entries.length || !TI || !DF || perfTrackerRefreshing) return;
+    if (Object.keys(perfTrackerPrices).length > 0) return;
+    (async () => {
+      setPerfTrackerRefreshing(true);
+      const prices = {};
+      for (const entry of entries) {
+        try {
+          const data = await fetchTickerPrice(entry.ticker);
+          if (data && data.price > 0) prices[entry.ticker] = data.price;
+        } catch {}
+      }
+      setPerfTrackerPrices(prices);
+      dbSetSetting(LS_ENTRY_PERF_PRICES, prices);
+      setPerfTrackerRefreshing(false);
+    })();
+  }, [entriesLoaded]);
 
   const refreshEntries = async () => {
     if (!entries.length || refreshing) return;
