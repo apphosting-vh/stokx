@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.12";
+window.__STOX_APP_VERSION = "2.4.13";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -2851,6 +2851,7 @@ const EntryScorePanel = ({ shares }) => {
   const refreshPerfTracker = async () => {
     if (!entries.length || perfTrackerRefreshing) return;
     setPerfTrackerRefreshing(true);
+    const oldPrices = { ...perfTrackerPrices };
     const prices = {};
     for (const entry of entries) {
       try {
@@ -2860,6 +2861,31 @@ const EntryScorePanel = ({ shares }) => {
     }
     setPerfTrackerPrices(prices);
     setPerfTrackerRefreshing(false);
+    const changes = [];
+    const noChanges = [];
+    entries.forEach(entry => {
+      const oldPrice = oldPrices[entry.ticker];
+      const newPrice = prices[entry.ticker];
+      const priceOnAdd = entry.currentPrice || (entry.frozenResult || entry.result ? (entry.frozenResult || entry.result).lastClose : 0) || 0;
+      if (!oldPrice || !newPrice || !priceOnAdd) { noChanges.push(entry.ticker); return; }
+      const oldPct = ((oldPrice - priceOnAdd) / priceOnAdd * 100);
+      const newPct = ((newPrice - priceOnAdd) / priceOnAdd * 100);
+      const diff = Math.round((newPct - oldPct) * 100) / 100;
+      const label = entry.ticker.replace(".NS", "");
+      if (Math.abs(diff) >= 0.01) {
+        const sign = diff > 0 ? "+" : "";
+        changes.push(label + " " + sign + diff.toFixed(2) + "% (" + oldPct.toFixed(1) + "% \u2192 " + newPct.toFixed(1) + "%)");
+      } else {
+        noChanges.push(label);
+      }
+    });
+    if (changes.length > 0) {
+      var msg = "\u2713 " + changes.length + " % change" + (changes.length !== 1 ? "s" : "") + " updated: " + changes.join(", ");
+      if (noChanges.length > 0) msg += " \u00b7 " + noChanges.length + " unchanged";
+      showToast(msg, 0);
+    } else {
+      showToast("Prices refreshed \u2014 no % change updates", 0);
+    }
   };
 
   useEffect(() => {
