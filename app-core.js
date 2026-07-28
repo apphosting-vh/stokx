@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.10";
+window.__STOX_APP_VERSION = "2.4.11";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -644,10 +644,12 @@ let _setToasts = null;
 function showToast(msg, duration = 3000, action) {
   if (!_setToasts) return;
   const id = ++_toastId;
-  _setToasts((prev) => [...prev, { id, msg, action }]);
-  setTimeout(() => {
-    _setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, duration);
+  _setToasts((prev) => [...prev, { id, msg, action, persistent: duration === 0 }]);
+  if (duration > 0) {
+    setTimeout(() => {
+      _setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, duration);
+  }
 }
 
 window.addEventListener('stox:update-ready', function() {
@@ -737,7 +739,8 @@ function ToastHost() {
   if (toasts.length === 0) return null;
   return React.createElement("div", { className: "stx-toast-host" },
     toasts.map((t) =>
-      React.createElement("div", { key: t.id, className: "stx-toast" },
+      React.createElement("div", { key: t.id, className: "stx-toast" + (t.persistent ? " stx-toast-persistent" : ""), style: t.persistent ? { background: "var(--accent)", color: "#fff", border: "none", fontWeight: 700, boxShadow: "0 4px 24px rgba(0,0,0,.25)" } : {} },
+        t.persistent && React.createElement("span", { style: { marginRight: 6, fontSize: 13 } }, "\u26a0"),
         React.createElement("span", { className: "stx-toast-msg" }, t.msg),
         t.action && React.createElement("button", {
           className: "stx-toast-action",
@@ -745,6 +748,7 @@ function ToastHost() {
         }, t.action.label),
         React.createElement("button", {
           className: "stx-toast-close",
+          style: t.persistent ? { color: "rgba(255,255,255,.8)" } : {},
           onClick: () => setToasts((prev) => prev.filter((x) => x.id !== t.id))
         }, "\u00d7")
       )
@@ -2922,9 +2926,9 @@ const EntryScorePanel = ({ shares }) => {
       }
     });
     if (changes.length > 0) {
-      showToast("Scores updated: " + changes.join(", "), 5000);
+      showToast("\u2713 Scores updated: " + changes.join(", "), 0);
     } else {
-      showToast("Entry scores refreshed — no changes");
+      showToast("Entry scores refreshed \u2014 no changes", 0);
     }
   };
 
