@@ -116,6 +116,7 @@ var fsaReadFile = async function(handle) {
       watchlist: d.watchlist || [],
       entryScores: d.entryScores || [],
       entrySnapshots: d.entrySnapshots || [],
+      entryPerfPrices: d.entryPerfPrices || {},
       screenerData: d.screenerData || null,
       screenerSnapshots: d.screenerSnapshots || []
     };
@@ -138,10 +139,12 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
   var entrySnapshots = [];
   var screenerData = null;
   var screenerSnapshots = [];
+  var entryPerfPrices = {};
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch (e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch (e) {}
   try { screenerData = (await dbGetSetting("stox_screener_data")) || null; } catch (e) {}
   try { screenerSnapshots = (await dbGetSetting("stox_screener_snapshots")) || []; } catch (e) {}
+  try { entryPerfPrices = (await dbGetSetting("mm_entry_perf_prices")) || {}; } catch (e) {}
 
   return {
     app: "StoX",
@@ -163,6 +166,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       watchlist: stateData.watchlist || [],
       entryScores: entryScores,
       entrySnapshots: entrySnapshots,
+      entryPerfPrices: entryPerfPrices,
       screenerData: screenerData,
       screenerSnapshots: screenerSnapshots
     }
@@ -184,8 +188,27 @@ window.__stoxRestoreFromPayload = async function(data) {
       for (var i = 0; i < data.holdings.length; i++) await dbPut("holdings", data.holdings[i]);
       for (var j = 0; j < (data.watchlist || []).length; j++) await dbPut("watchlist", data.watchlist[j]);
     }
-    if (data.entryScores) await dbSetSetting("mm_entry_scores", data.entryScores);
+    if (data.entryScores) {
+      var currentScores = [];
+      try { currentScores = (await dbGetSetting("mm_entry_scores")) || []; } catch (e) {}
+      var localMap = {};
+      currentScores.forEach(function(e) { localMap[e.id] = e; });
+      var merged = data.entryScores.map(function(imported) {
+        var local = localMap[imported.id];
+        if (local) {
+          return Object.assign({}, imported, {
+            currentPrice: local.currentPrice,
+            frozenResult: local.frozenResult || imported.frozenResult,
+            result: local.result || imported.result,
+            indicators: local.indicators || imported.indicators
+          });
+        }
+        return imported;
+      });
+      await dbSetSetting("mm_entry_scores", merged);
+    }
     if (data.entrySnapshots) await dbSetSetting("mm_entry_score_snapshots", data.entrySnapshots);
+    if (data.entryPerfPrices) await dbSetSetting("mm_entry_perf_prices", data.entryPerfPrices);
     if (data.screenerData) await dbSetSetting("stox_screener_data", data.screenerData);
     if (data.screenerSnapshots) await dbSetSetting("stox_screener_snapshots", data.screenerSnapshots);
   } catch (e) {
