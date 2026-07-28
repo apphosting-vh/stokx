@@ -4596,7 +4596,7 @@ function PulsePage({ holdings }) {
       )
     ),
 
-    React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid var(--border)", paddingBottom: 0 } },
+    React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid var(--border)", paddingBottom: 0, overflowX: "auto", WebkitOverflowScrolling: "touch" } },
       TABS.map(t => React.createElement("button", {
         key: t.key,
         onClick: () => setActiveTab(t.key),
@@ -4604,19 +4604,15 @@ function PulsePage({ holdings }) {
           padding: "8px 16px", fontSize: 12, fontWeight: activeTab === t.key ? 700 : 600,
           background: "transparent", border: "none", borderBottom: "2px solid " + (activeTab === t.key ? "var(--accent)" : "transparent"),
           color: activeTab === t.key ? "var(--accent)" : "var(--text5)", cursor: "pointer", transition: "all .15s",
-          display: "flex", alignItems: "center", gap: 6
+          display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", flexShrink: 0
         }
       }, t.icon(14), t.label))
     ),
 
-    React.createElement("div", { style: { display: activeTab === "screener" ? "block" : "none" } },
-      React.createElement(StockScreener, null)
-    ),
-    React.createElement("div", { style: { display: activeTab === "entryscore" ? "block" : "none" } },
-      React.createElement(EntryScorePanel, { shares: holdings || [] })
-    ),
-    React.createElement("div", { style: { display: activeTab === "singlestock" ? "block" : "none" } },
-      React.createElement(SingleStockAnalysis, null)
+    React.createElement("div", null,
+      activeTab === "screener" && React.createElement(StockScreener, null),
+      activeTab === "entryscore" && React.createElement(EntryScorePanel, { shares: holdings || [] }),
+      activeTab === "singlestock" && React.createElement(SingleStockAnalysis, null)
     )
   );
 }
