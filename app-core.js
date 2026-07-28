@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.11";
+window.__STOX_APP_VERSION = "2.4.12";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -3582,6 +3582,10 @@ function StockScreener() {
   var addedToES = _s12[0], setAddedToES = _s12[1];
   var _s11 = useState([]);
   var snapshots = _s11[0], setSnapshots = _s11[1];
+  var _s13 = useState({});
+  var selected = _s13[0], setSelected = _s13[1];
+  var _resultsRef = useRef(results);
+  _resultsRef.current = results;
 
   /* Load cached data from IndexedDB on mount */
   React.useEffect(function() {
@@ -3731,6 +3735,60 @@ function StockScreener() {
     setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = false; return c; });
   };
 
+  var refreshSelected = async function() {
+    if (!TI || !DF) return;
+    var tickers = Object.keys(selected).filter(function(t) { return selected[t]; });
+    if (!tickers.length) return;
+    var batch = results.filter(function(r) { return tickers.indexOf(r.s.t) >= 0; });
+    var oldScores = {};
+    batch.forEach(function(r) { oldScores[r.s.t] = r.result ? r.result.finalScore : null; });
+    for (var i = 0; i < batch.length; i++) {
+      await refreshStock(batch[i].s);
+    }
+    var updatedResults = _resultsRef.current;
+    var changes = [];
+    var noChanges = [];
+    batch.forEach(function(r) {
+      var tk = r.s.t;
+      var oldScore = oldScores[tk];
+      var fresh = updatedResults.find(function(u) { return u.s.t === tk; });
+      var newScore = fresh && fresh.result ? fresh.result.finalScore : null;
+      var label = tk.replace(".NS", "");
+      if (oldScore !== null && newScore !== null && oldScore !== newScore) {
+        var diff = Math.round((newScore - oldScore) * 10) / 10;
+        var sign = diff > 0 ? "+" : "";
+        var color = diff > 0 ? "\u2191" : "\u2193";
+        changes.push(label + " " + sign + diff + " (" + oldScore + " \u2192 " + newScore + ")");
+      } else {
+        noChanges.push(label);
+      }
+    });
+    if (changes.length > 0) {
+      var msg = "\u2713 " + changes.length + " score" + (changes.length !== 1 ? "s" : "") + " changed: " + changes.join(", ");
+      if (noChanges.length > 0) msg += " \u00b7 " + noChanges.length + " unchanged";
+      showToast(msg, 0);
+    } else {
+      showToast(batch.length + " stock" + (batch.length !== 1 ? "s" : "") + " refreshed \u2014 no score changes", 0);
+    }
+    setSelected({});
+  };
+
+  var toggleSelect = function(ticker) {
+    setSelected(function(p) { var c = Object.assign({}, p); c[ticker] = !c[ticker]; return c; });
+  };
+
+  var toggleSelectAll = function() {
+    var filteredTickers = filtered.map(function(r) { return r.s.t; });
+    var allSelected = filteredTickers.length > 0 && filteredTickers.every(function(t) { return selected[t]; });
+    setSelected(function(p) {
+      var c = Object.assign({}, p);
+      filteredTickers.forEach(function(t) { c[t] = !allSelected; });
+      return c;
+    });
+  };
+
+  var selectedCount = Object.keys(selected).filter(function(t) { return selected[t]; }).length;
+
   var addToEntryScore = async function(s) {
     var tk = s.t.replace(".NS", "");
     if (!tk || addingToES[tk]) return;
@@ -3865,6 +3923,11 @@ function StockScreener() {
         )
       ),
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+        results.length > 0 && !scanning && selectedCount > 0 ? React.createElement("button", {
+          onClick: refreshSelected,
+          className: "stx-btn stx-btn-primary",
+          style: { padding: "8px 14px", fontSize: 11, fontWeight: 700, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", cursor: "pointer" }
+        }, "\u21bb Refresh Selected (" + selectedCount + ")") : null,
         results.length > 0 && !scanning ? React.createElement("button", {
           onClick: saveSnapshot,
           className: "stx-btn",
@@ -3913,7 +3976,13 @@ function StockScreener() {
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1220 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
-              ["ticker", "name", "price", "todayChg", "dayChg", "weekChg", "monthChg", "finalScore", "weekly", "daily", "hourly", "addToES", "actions"].map(function(k) {
+              ["select", "ticker", "name", "price", "todayChg", "dayChg", "weekChg", "monthChg", "finalScore", "weekly", "daily", "hourly", "addToES", "actions"].map(function(k) {
+                if (k === "select") {
+                  var allFilteredSelected = filtered.length > 0 && filtered.every(function(r) { return selected[r.s.t]; });
+                  return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: "default", textAlign: "center", width: 36 }) },
+                    React.createElement("input", { type: "checkbox", checked: allFilteredSelected, onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
+                  );
+                }
                 var labels = { ticker: "Ticker", name: "Company", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", addToES: "Add to ES", actions: "Last Refreshed" };
                 return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: k === "actions" || k === "addToES" ? "default" : "pointer" }), onClick: k === "actions" || k === "addToES" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" || k === "addToES" ? "" : arrow(k)));
               })
@@ -3922,7 +3991,10 @@ function StockScreener() {
           React.createElement("tbody", null,
             filtered.map(function(r) {
               var d = r.result.decision;
-              return React.createElement("tr", { key: r.s.t, style: { background: "var(--bg3)", transition: "background .15s" } },
+              return React.createElement("tr", { key: r.s.t, style: { background: selected[r.s.t] ? "var(--accentbg)" : "var(--bg3)", transition: "background .15s" } },
+                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                  React.createElement("input", { type: "checkbox", checked: !!selected[r.s.t], onChange: function() { toggleSelect(r.s.t); }, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
+                ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" }) }, r.s.t.replace(".NS", "")),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { color: "var(--text4)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }, r.s.n),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, color: "var(--text3)", fontFamily: "var(--font-heading)" }) }, "\u20b9" + Number(Math.round(r.lc)).toLocaleString("en-IN")),
