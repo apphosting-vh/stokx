@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.15";
+window.__STOX_APP_VERSION = "2.4.17";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -3511,7 +3511,7 @@ const EntryScorePanel = ({ shares }) => {
             entries.map(function(entry) {
               var addedDate = new Date(entry.addedAt);
               var now = new Date();
-              var daysElapsed = Math.max(1, Math.floor((now - addedDate) / (1000 * 60 * 60 * 24)));
+              var daysElapsed = Math.floor((now - addedDate) / (1000 * 60 * 60 * 24));
               var fr = entry.frozenResult || entry.result;
               var dailyScore = fr && fr.daily ? fr.daily.total : null;
               var weeklyScore = fr && fr.weekly ? fr.weekly.total : null;
