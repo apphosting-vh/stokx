@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.21";
+window.__STOX_APP_VERSION = "2.4.22";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -3795,6 +3795,10 @@ function StockScreener() {
   var snapshots = _s11[0], setSnapshots = _s11[1];
   var _s13 = useState({});
   var selected = _s13[0], setSelected = _s13[1];
+  var _s14 = useState("");
+  var manualTicker = _s14[0], setManualTicker = _s14[1];
+  var _s15 = useState(false);
+  var manualLoading = _s15[0], setManualLoading = _s15[1];
   var _resultsRef = useRef(results);
   _resultsRef.current = results;
 
@@ -3869,7 +3873,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.21",
+      appVersion: window.__STOX_APP_VERSION || "2.4.22",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -3944,6 +3948,42 @@ function StockScreener() {
       setTimestamps(function(p) { var c = Object.assign({}, p); c[s.t] = Date.now(); return c; });
     } catch(e) {}
     setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = false; return c; });
+  };
+
+  var addManualStock = async function() {
+    if (!TI || !DF || !manualTicker.trim()) return;
+    var tk = manualTicker.trim().toUpperCase().replace(/\.NS$|\.BO$/, "");
+    if (!tk) return;
+    var existing = results.find(function(r) { return r.s.t === tk + ".NS"; });
+    if (existing) { setScanErr(tk + " already in results"); setManualTicker(""); return; }
+    setManualLoading(true); setScanErr("");
+    var found = NIFTY_100_UNIQUE.find(function(s) { return s.t === tk + ".NS"; });
+    var stockObj = found ? found : { t: tk + ".NS", n: tk };
+    try {
+      var resW = await DF.fetchOHLCVCached(tk, "weekly");
+      var resD = await DF.fetchOHLCVCached(tk, "daily");
+      var resH = await DF.fetchOHLCVCached(tk, "1h");
+      if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
+        setScanErr("Insufficient data for " + tk); setManualLoading(false); setManualTicker(""); return;
+      }
+      var indW = TI.computeAll(resW.data);
+      var indD = TI.computeAll(resD.data);
+      var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
+      var lc = indD ? indD.lastClose : 0;
+      var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
+      var dc = resD.data;
+      var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
+      var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
+      var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
+      var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
+      var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
+      var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
+      var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
+      var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
+      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg }]); });
+      setTimestamps(function(p) { var c = Object.assign({}, p); c[stockObj.t] = Date.now(); return c; });
+    } catch(e) { setScanErr("Failed to fetch " + tk); }
+    setManualLoading(false); setManualTicker("");
   };
 
   var refreshSelected = async function() {
@@ -4164,7 +4204,20 @@ function StockScreener() {
           onClick: startScan, disabled: scanning,
           className: "stx-btn stx-btn-primary",
           style: { padding: "8px 18px", fontSize: 12, fontWeight: 700, cursor: scanning ? "wait" : "pointer" }
-        }, scanning ? "Scanning... (" + progress.done + "/" + progress.total + ")" : "Scan Nifty 200")
+        }, scanning ? "Scanning... (" + progress.done + "/" + progress.total + ")" : "Scan Nifty 200"),
+        React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
+          React.createElement("input", {
+            type: "text", placeholder: "Add ticker...", value: manualTicker,
+            onChange: function(e) { setManualTicker(e.target.value); },
+            onKeyDown: function(e) { if (e.key === "Enter") addManualStock(); },
+            style: { width: 110, padding: "7px 10px", fontSize: 11, borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg3)", color: "var(--text)", outline: "none", fontFamily: "var(--font-mono)" }
+          }),
+          React.createElement("button", {
+            onClick: addManualStock, disabled: manualLoading || !manualTicker.trim(),
+            className: "stx-btn",
+            style: { padding: "7px 12px", fontSize: 11, fontWeight: 600, border: "1px solid var(--accent)", background: "var(--accentbg)", color: "var(--accent)", cursor: manualLoading || !manualTicker.trim() ? "not-allowed" : "pointer", opacity: manualLoading || !manualTicker.trim() ? 0.5 : 1 }
+          }, manualLoading ? "\u27f3" : "+ Add")
+        )
       )
     ),
     scanning && React.createElement("div", { style: { marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)" } },
@@ -4925,7 +4978,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.21"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.22"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -5049,7 +5102,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.21"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.22"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
