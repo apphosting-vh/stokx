@@ -117,6 +117,7 @@ async function restoreStoxBackup(fileText) {
   var d = payload.data;
   if (d.entryScores) { try { await dbSetSetting("mm_entry_scores", d.entryScores); } catch(e) {} }
   if (d.entrySnapshots) { try { await dbSetSetting("mm_entry_score_snapshots", d.entrySnapshots); } catch(e) {} }
+  if (d.entryPerfPrices) { try { await dbSetSetting("mm_entry_perf_prices", d.entryPerfPrices); } catch(e) {} }
   if (d.screenerData) { try { await dbSetSetting("stox_screener_data", d.screenerData); } catch(e) {} }
   if (d.screenerSnapshots) { try { await dbSetSetting("stox_screener_snapshots", d.screenerSnapshots); } catch(e) {} }
   var snaps = d.soldShareSnapshots || {};

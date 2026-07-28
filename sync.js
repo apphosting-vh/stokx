@@ -209,6 +209,9 @@ window.__stoxRestoreFromPayload = async function(data) {
     }
     if (data.entrySnapshots) await dbSetSetting("mm_entry_score_snapshots", data.entrySnapshots);
     if (data.entryPerfPrices) await dbSetSetting("mm_entry_perf_prices", data.entryPerfPrices);
+    if (data.soldShareSnapshots && typeof data.soldShareSnapshots === "object") {
+      try { await dbPut("settings", { key: "soldShareSnapshots", value: data.soldShareSnapshots }); } catch (e) {}
+    }
     if (data.screenerData) await dbSetSetting("stox_screener_data", data.screenerData);
     if (data.screenerSnapshots) await dbSetSetting("stox_screener_snapshots", data.screenerSnapshots);
   } catch (e) {
@@ -612,6 +615,7 @@ var gdriveReadSyncFile = async function(silent) {
         watchlist: data.data.watchlist || [],
         entryScores: data.data.entryScores || [],
         entrySnapshots: data.data.entrySnapshots || [],
+        entryPerfPrices: data.data.entryPerfPrices || {},
         screenerData: data.data.screenerData || null,
         screenerSnapshots: data.data.screenerSnapshots || []
       },

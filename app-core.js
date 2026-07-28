@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.19";
+window.__STOX_APP_VERSION = "2.4.20";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -2471,11 +2471,67 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
 /* ══════════════════════════════════════════════════════════════════════════
    PAGE: Trade History
    ══════════════════════════════════════════════════════════════════════════ */
-function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapshot }) {
+function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapshot, setSoldShareSnapshots }) {
   const fyKeys = Object.keys(soldShareSnapshots).sort().reverse();
   const [expanded, setExpanded] = useState({});
   const [monthExpanded, setMonthExpanded] = useState({});
   const [editSnap, setEditSnap] = useState(null);
+
+  const exportTrades = () => {
+    const payload = {
+      app: "StoX",
+      type: "trade-history",
+      version: 1,
+      exportDate: new Date().toISOString(),
+      soldShareSnapshots: soldShareSnapshots
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "stox-trades-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Exported " + totalSnapshots + " trade snapshot" + (totalSnapshots !== 1 ? "s" : ""), 3000);
+  };
+
+  const importTrades = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        if (data.type !== "trade-history" || !data.soldShareSnapshots || typeof data.soldShareSnapshots !== "object") {
+          showToast("Invalid trade history file", 3000);
+          return;
+        }
+        const importCount = Object.values(data.soldShareSnapshots).reduce((s, a) => s + a.length, 0);
+        if (!await showConfirm("Import " + importCount + " trade snapshot" + (importCount !== 1 ? "s" : "") + "?\nExisting snapshots with the same ID will be replaced.")) return;
+        const merged = {};
+        Object.keys(soldShareSnapshots).forEach(fy => { merged[fy] = [...soldShareSnapshots[fy]]; });
+        Object.keys(data.soldShareSnapshots).forEach(fy => {
+          const existing = merged[fy] || [];
+          const imported = data.soldShareSnapshots[fy] || [];
+          const snapMap = {};
+          existing.forEach(s => { snapMap[s.id] = s; });
+          imported.forEach(s => { snapMap[s.id] = s; });
+          merged[fy] = Object.values(snapMap);
+        });
+        setSoldShareSnapshots(merged);
+        persistSnapshots(merged);
+        showToast("Imported " + importCount + " trade snapshot" + (importCount !== 1 ? "s" : ""), 3000);
+      } catch (err) {
+        showToast("Import failed: " + err.message, 5000);
+      }
+    };
+    input.click();
+  };
 
   const toggleFY = (fy) => setExpanded((p) => ({ ...p, [fy]: !p[fy] }));
   const toggleMonth = (mk) => setMonthExpanded((p) => ({ ...p, [mk]: !p[mk] }));
@@ -2531,7 +2587,8 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
       React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: "48px 24px" } },
         React.createElement("div", { style: { width: 60, height: 60, borderRadius: 16, background: "rgba(109,40,217,.1)", border: "1px solid rgba(109,40,217,.25)", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 16 } }, Icons.save(28)),
         React.createElement("h3", { style: { fontSize: 16, fontWeight: 700, color: "var(--text2)", marginBottom: 8 } }, "No Trade Snapshots"),
-        React.createElement("p", { style: { fontSize: 13, color: "var(--text5)", marginBottom: 20, maxWidth: 400, margin: "0 auto 20px" } }, "Go to Portfolio \u2192 click \"Save Snapshot\" on any active holding to capture its current values as a historical record here.")
+        React.createElement("p", { style: { fontSize: 13, color: "var(--text5)", marginBottom: 20, maxWidth: 400, margin: "0 auto 20px" } }, "Go to Portfolio \u2192 click \"Save Snapshot\" on any active holding to capture its current values as a historical record here."),
+        React.createElement("button", { onClick: importTrades, className: "stx-btn", style: { fontSize: 11, padding: "8px 16px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)" } }, "\u2b06 Import from JSON")
       )
     );
   }
@@ -2544,7 +2601,9 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
         React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, "Previous Trades"),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 2 } }, totalSnapshots + " snapshot" + (totalSnapshots !== 1 ? "s" : "") + " across " + fyKeys.length + " financial year" + (fyKeys.length !== 1 ? "s" : ""))
       ),
-      React.createElement("div", { style: { display: "flex", gap: 6 } },
+      React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
+        React.createElement("button", { onClick: exportTrades, className: "stx-btn", style: { fontSize: 10, padding: "5px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)" } }, "\u2b07 Export"),
+        React.createElement("button", { onClick: importTrades, className: "stx-btn", style: { fontSize: 10, padding: "5px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)" } }, "\u2b06 Import"),
         React.createElement("button", { onClick: expandAll, className: "stx-btn stx-btn-ghost", style: { fontSize: 11, padding: "5px 10px" } }, "Expand All"),
         React.createElement("button", { onClick: collapseAll, className: "stx-btn stx-btn-ghost", style: { fontSize: 11, padding: "5px 10px" } }, "Collapse All")
       )
@@ -2816,8 +2875,11 @@ const EntryScorePanel = ({ shares }) => {
         const val = await dbGetSetting(LS_ENTRY_SCORES);
         if (val && Array.isArray(val)) {
           const backfilled = val.map(e => {
-            if (!e.frozenResult && e.result) return { ...e, frozenResult: JSON.parse(JSON.stringify(e.result)) };
-            return e;
+            let changed = false;
+            let ne = e;
+            if (!e.frozenResult && e.result) { ne = Object.assign({}, ne, { frozenResult: JSON.parse(JSON.stringify(e.result)) }); changed = true; }
+            if (!ne.addedAt) { ne = Object.assign({}, ne, { addedAt: new Date(ne.id || Date.now()).toISOString() }); changed = true; }
+            return ne;
           });
           setEntries(backfilled);
           const needsSave = backfilled.some((e, i) => e !== val[i]);
@@ -2985,6 +3047,87 @@ const EntryScorePanel = ({ shares }) => {
     } else {
       showToast("Entry scores refreshed \u2014 no changes", 0);
     }
+  };
+
+  const exportEntryScores = () => {
+    const payload = {
+      app: "StoX",
+      type: "entry-scores",
+      version: 1,
+      exportDate: new Date().toISOString(),
+      entries: entries,
+      snapshots: snapshots,
+      perfTrackerPrices: perfTrackerPrices
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "stox-entry-scores-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Exported " + entries.length + " entries" + (snapshots.length ? " + " + snapshots.length + " snapshots" : ""), 3000);
+  };
+
+  const importEntryScores = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        if (data.type !== "entry-scores" || !Array.isArray(data.entries)) {
+          showToast("Invalid entry score file", 3000);
+          return;
+        }
+        if (!await showConfirm("Import " + data.entries.length + " entry scores" + (data.snapshots && data.snapshots.length ? " + " + data.snapshots.length + " snapshots" : "") + "?\nExisting entries with the same ticker will be replaced.")) return;
+        const localMap = {};
+        entries.forEach(e => { localMap[e.id] = e; });
+        const importedMap = {};
+        data.entries.forEach(e => { importedMap[e.id] = e; });
+        const merged = data.entries.map(imp => {
+          const local = entries.find(e => e.ticker === imp.ticker && e.id !== imp.id);
+          if (local) {
+            return Object.assign({}, imp, {
+              id: local.id,
+              currentPrice: local.currentPrice,
+              addedAt: local.addedAt,
+              frozenResult: local.frozenResult || imp.frozenResult,
+              result: local.result || imp.result,
+              indicators: local.indicators || imp.indicators
+            });
+          }
+          return imp;
+        });
+        entries.forEach(e => {
+          if (!importedMap[e.id] && !data.entries.find(ie => ie.ticker === e.ticker)) {
+            merged.push(e);
+          }
+        });
+        saveEntries(merged);
+        if (data.snapshots && Array.isArray(data.snapshots)) {
+          const snapMap = {};
+          snapshots.forEach(s => { snapMap[s.id] = s; });
+          data.snapshots.forEach(s => { snapMap[s.id] = s; });
+          const mergedSnaps = Object.values(snapMap);
+          saveSnapshots(mergedSnaps);
+        }
+        if (data.perfTrackerPrices && typeof data.perfTrackerPrices === "object") {
+          setPerfTrackerPrices(data.perfTrackerPrices);
+          dbSetSetting(LS_ENTRY_PERF_PRICES, data.perfTrackerPrices);
+          window.dispatchEvent(new CustomEvent("stox:data-changed"));
+        }
+        showToast("Imported " + data.entries.length + " entries successfully", 3000);
+      } catch (err) {
+        showToast("Import failed: " + err.message, 5000);
+      }
+    };
+    input.click();
   };
 
   const saveSnapshots = (arr) => { setSnapshots(arr); dbSetSetting(LS_ENTRY_SNAPSHOTS, arr); window.dispatchEvent(new CustomEvent("stox:data-changed")); };
@@ -3299,6 +3442,16 @@ const EntryScorePanel = ({ shares }) => {
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, "Momentum Trading Entry Engine \u00b7 Weekly(30%) + Daily(50%) + Hourly(20%)")
       ),
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+        React.createElement("button", {
+          onClick: exportEntryScores, disabled: !entries.length,
+          className: "stx-btn",
+          style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: entries.length ? "pointer" : "default", opacity: entries.length ? 1 : 0.5 }
+        }, "\u2b07 Export"),
+        React.createElement("button", {
+          onClick: importEntryScores,
+          className: "stx-btn",
+          style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
+        }, "\u2b06 Import"),
         React.createElement("button", {
           onClick: refreshEntries, disabled: refreshing || !entries.length,
           className: "stx-btn stx-btn-ghost",
@@ -3716,7 +3869,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.9",
+      appVersion: window.__STOX_APP_VERSION || "2.4.20",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -4755,185 +4908,11 @@ function PulsePage({ holdings }) {
    PAGE: Info (Changelog & Version History)
    ══════════════════════════════════════════════════════════════════════════ */
 function InfoPage() {
-  const [expandedVersion, setExpandedVersion] = useState(null);
-
-  const CHANGELOG = [
-    {
-      version: "2.4.9",
-      date: "July 2026",
-      label: "Latest",
-      changes: [
-        { type: "fixed", text: "Report icon mojibake — replaced emoji/unicode icons with proper SVG icon component covering all 27 icon names" },
-        { type: "fixed", text: "Icon component reference error — fixed undefined variable in className prop" },
-        { type: "fixed", text: "Reports header encoding corruption — rewrote header with clean ASCII and proper Unicode escapes" },
-      ]
-    },
-    {
-      version: "2.4.8",
-      date: "July 2026",
-      changes: [
-        { type: "fixed", text: "Holding Value History chart Y-axis values corrected \u2014 Finsight imports with pre-computed {date,value} format no longer get double-multiplied by qty" },
-        { type: "fixed", text: "Snapshots normalised on load and import \u2014 finsight and StoX backup restores now convert {date,value} to {date,close} consistently" },
-        { type: "improved", text: "Reports & Analytics fully reconstructed from reference \u2014 all 12 tabs with calendar heatmap, streaks, trade detail tables, and methodology footnotes" },
-      ]
-    },
-    {
-      version: "2.4.7",
-      date: "July 2026",
-      changes: [
-        { type: "fixed", text: "Holding Value History chart on Previous Trades snapshot cards now renders correctly — restructured to match reference architecture" },
-        { type: "improved", text: "SnapshotChartPanel refactored — Load Chart button and inline chart rendering separated to avoid stale state issues" },
-        { type: "improved", text: "Previous Trades chart now shows date range, percentage change, and cost basis legend matching the reference app" },
-      ]
-    },
-    {
-      version: "2.4.6",
-      date: "July 2026",
-      changes: [
-        { type: "feature", text: "Theme system — 14 theme variants (Violet, Indigo, Blue, Green, Yellow, Orange, Red in light+dark) with visual swatch picker in Settings" },
-        { type: "feature", text: "Font picker — 6 switchable body fonts (DM Sans, Inter, Plus Jakarta Sans, Manrope, Outfit, Space Grotesk) in Settings" },
-        { type: "feature", text: "Per-nav-item colours — sidebar and bottom nav now highlight each section in a unique colour matching the reference app design" },
-        { type: "improved", text: "Settings page redesigned with theme swatch grid and font selector" },
-        { type: "improved", text: "Inline confirm modals — replaced all browser confirm() dialogs with styled inline popups across the app" },
-        { type: "improved", text: "FSA permission toast — home screen shows Grant Permission button when file write access is needed" },
-      ]
-    },
-    {
-      version: "2.4.5",
-      date: "July 2026",
-      changes: [
-        { type: "feature", text: "Inline confirm modals — replaced all browser confirm() dialogs with styled inline popups across the app" },
-        { type: "feature", text: "FSA permission toast — home screen shows Grant Permission button when file write access is needed" },
-        { type: "feature", text: "FSA auto-write on screener changes — screener scans, refreshes, and snapshot CRUD now trigger file writes" },
-        { type: "improved", text: "Exit Score Trend chart — recoloured trend lines (Pink=Weekly, Purple=Daily, Blue=Hourly)" },
-      ]
-    },
-    {
-      version: "2.4.4",
-      date: "July 2026",
-      changes: [
-        { type: "feature", text: "Exit Score Trend — compact SVG chart showing historical exit scores across weekly, daily, and hourly timeframes from buy date onwards" },
-        { type: "feature", text: "Exit Score Trend tooltip — shows open price, closing price, and percentage change vs previous close on hover" },
-        { type: "feature", text: "Exit Score Trend Y-axis — displays score threshold labels (MONITOR, TIGHTEN STOP, PARTIAL EXIT, EXIT) alongside dashed lines" },
-        { type: "feature", text: "Exit Score Trend X-axis — dates now shown in DD Mon format (e.g. 27 Jul) for clarity" },
-        { type: "feature", text: "FSA auto-write — any data change (holdings, watchlist, snapshots, prices) now triggers a debounced file write within 2 seconds" },
-        { type: "feature", text: "Service Worker auto-update — new version detected toast and automatic page reload on version bump" },
-      ]
-    },
-    {
-      version: "2.4.3",
-      date: "July 2026",
-      changes: [
-        { type: "fixed", text: "FSA auto-save now writes actual data instead of empty file — fixed stale closure in writeNow that captured initial empty state" },
-      ]
-    },
-    {
-      version: "2.4.2",
-      date: "July 2026",
-      changes: [
-        { type: "feature", text: "Entry Score — Refresh button fetches live prices and recalculates all entry scores in one click" },
-      ]
-    },
-    {
-      version: "2.4.1",
-      date: "July 2026",
-      changes: [
-        { type: "fixed", text: "Refresh button now fetches live prices without stale cache — added cache-busting timestamp to Yahoo Finance API calls" },
-        { type: "fixed", text: "Failed price fetches no longer overwrite valid cached prices (null results filtered from merge)" },
-        { type: "fixed", text: "Analyze button now fetches fresh price before navigating to stock analysis page" },
-        { type: "fixed", text: "FSA auto-save on page reload — wired up writeNow() handler so file is written after permission is restored" },
-        { type: "fixed", text: "FSA Re-grant Permission now writes data immediately instead of silently failing" },
-      ]
-    },
-    {
-      version: "2.4.0",
-      date: "July 2026",
-      changes: [
-        { type: "improved", text: "Technical indicator recalibration — aligned all scoring formulas with sample_indicators.js reference implementation" },
-        { type: "fixed", text: "Bollinger Bands — switched from population to sample standard deviation for more accurate volatility bands" },
-        { type: "fixed", text: "MFI — direction check now uses typical price instead of raw money flow for correct overbought/oversold detection" },
-        { type: "fixed", text: "Aroon — corrected loop bounds and denominator (period instead of period-1) for proper oscillator calculation" },
-        { type: "improved", text: "Volume Profile — 24 bins (from 12) using close prices with value area (VAH/VAL) computation for tighter support/resistance" },
-        { type: "improved", text: "Entry Score — wider crossover lookback (3 candles via justCrossedAbove) for MACD, TSI, STC, Force Index, Ichimoku Tenkan/Kijun" },
-        { type: "improved", text: "Entry Score — reweighted ADX, Supertrend, PSAR, Keltner, Darvas Box, RSI, StochRSI, Williams %R scoring for balanced signals" },
-        { type: "improved", text: "Entry Score — added RS Mansfield relative strength, MFI/CMF crossedAbove helper, and Accumulation/Distribution composite" },
-        { type: "improved", text: "Exit Score — replaced sector/FII dependencies with distribution day ratio and accumulation/detection logic" },
-        { type: "improved", text: "Multi-TF Entry Score — added High Beta + Volatility penalty, Accumulation + MTF bonus, RS Mansfield + Aroon bonus, Above Key Levels bonus, Pivot R1 resistance detection" },
-      ]
-    },
-    {
-      version: "2.3.0",
-      date: "July 2026",
-      changes: [
-        { type: "fixed", text: "JSON Export and Import functionality" },
-      ]
-    },
-    {
-      version: "2.1.0",
-      date: "July 2026",
-      changes: [
-        { type: "feature", text: "Info page with full changelog, version history, feature highlights, and data source attributions" },
-        { type: "improved", text: "Entry Score Analysis — category-filtered indicator grid with signal-colored cards replacing flat 2-column layout" },
-        { type: "improved", text: "Entry Score Analysis — tab-based timeframe selector (Weekly/Daily/Hourly) replacing expandable 3-column cards" },
-        { type: "improved", text: "Entry Score Analysis — 10 complex sub-indicator renderers (MACD, Bollinger Bands, Stochastic, Ichimoku, Chandelier, Heikin Ashi, Aroon, Vortex, Volume Profile, Relative Strength)" },
-        { type: "improved", text: "Entry Score Analysis — dynamic signal interpretation via TechIndicators.interpret() instead of hardcoded thresholds" },
-      ]
-    },
-    {
-      version: "2.0.0",
-      date: "July 2026",
-      changes: [
-        { type: "feature", text: "Single Stock Analysis — enter any ticker for full technical analysis with 50+ indicators, candlestick chart, and signal gauge" },
-        { type: "feature", text: "Entry Score engine with multi-timeframe analysis (Weekly/Daily/Hourly)" },
-        { type: "feature", text: "Stock Screener with custom filters and bulk scoring" },
-        { type: "feature", text: "Exit Score — momentum-based exit engine with price recommendations (take profit, stop loss, trailing stop, time stop)" },
-        { type: "feature", text: "Market Ticker — live scrolling strip for NSE indices + Gold/Silver/Crude commodities" },
-        { type: "feature", text: "Market News panel powered by Marketaux (India markets + holdings news)" },
-        { type: "feature", text: "Technical Indicators Inline — compact indicator view below each holding card" },
-        { type: "feature", text: "Dark/Light theme toggle in Settings" },
-        { type: "feature", text: "Data Backup & Restore (JSON export/import)" },
-        { type: "feature", text: "File System Access auto-save support" },
-        { type: "feature", text: "Google Drive cloud backup integration" },
-        { type: "feature", text: "Trade History with P&L tracking and FY classification" },
-        { type: "feature", text: "Reports page with portfolio analytics" },
-        { type: "improved", text: "50+ technical indicators including SuperTrend, Ichimoku, Darvas Box, Smart Money, MTF Alignment" },
-        { type: "improved", text: "Multiple CORS proxy fallbacks for reliable Yahoo Finance data fetching" },
-        { type: "improved", text: "Responsive mobile layout with bottom navigation" },
-        { type: "improved", text: "PWA support with service worker caching" },
-      ]
-    },
-    {
-      version: "1.0.0",
-      date: "June 2026",
-      label: "Initial Release",
-      changes: [
-        { type: "feature", text: "Portfolio tracking with buy/sell transactions" },
-        { type: "feature", text: "Watchlist for tracking stocks of interest" },
-        { type: "feature", text: "Real-time price fetching via Yahoo Finance" },
-        { type: "feature", text: "IndexedDB persistence — all data stored locally on device" },
-        { type: "feature", text: "INR currency formatting (Indian numbering system)" },
-        { type: "feature", text: "Capital gains classification (STCG/LTCG) per Indian tax rules" },
-        { type: "feature", text: "XIRR calculation for multi-cashflow holdings" },
-        { type: "feature", text: "Financial Year tracking (April–March Indian FY)" },
-        { type: "feature", text: "Basic technical indicators (SMA, EMA, RSI, MACD)" },
-        { type: "improved", text: "Desktop sidebar + mobile bottom nav layout" },
-        { type: "improved", text: "Splash screen with animated branding" },
-        { type: "improved", text: "Auto-refresh prices every 60 seconds" },
-        { type: "improved", text: "NSE holiday calendar for trading day detection" },
-      ]
-    }
-  ];
-
-  const TYPE_STYLES = {
-    feature: { bg: "var(--accentbg)", border: "var(--accentbg5)", color: "var(--accent)", label: "New" },
-    improved: { bg: "var(--infobg)", border: "var(--infoborder)", color: "var(--info)", label: "Improved" },
-    fixed: { bg: "var(--warnbg)", border: "var(--warnborder)", color: "var(--warn)", label: "Fixed" },
-  };
 
   return React.createElement("div", null,
     React.createElement("div", { style: { marginBottom: 24 } },
       React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--accent)", letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 4 } }, "INFO"),
-      React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, "Changelog & Version History")
+      React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, "About StoX")
     ),
 
     /* App identity card */
@@ -4942,7 +4921,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.9"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.20"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -4974,44 +4953,6 @@ function InfoPage() {
           );
         })
       )
-    ),
-
-    /* Changelog */
-    React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
-      CHANGELOG.map(function (release) {
-        var isExpanded = expandedVersion === release.version || expandedVersion === null;
-        return React.createElement("div", { key: release.version, className: "stx-card", style: { padding: "16px 18px" } },
-          React.createElement("div", {
-            onClick: function () { setExpandedVersion(isExpanded && expandedVersion !== null ? null : release.version); },
-            style: { display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none" }
-          },
-            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
-              React.createElement("div", { style: { width: 40, height: 40, borderRadius: 10, background: release.label === "Latest" ? "var(--accentbg)" : "var(--bg4)", border: "1px solid " + (release.label === "Latest" ? "var(--accentbg5)" : "var(--border)"), display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } },
-                React.createElement("span", { style: { fontSize: 12, fontWeight: 800, color: release.label === "Latest" ? "var(--accent)" : "var(--text4)", fontFamily: "var(--font-mono)" } }, "v" + release.version)
-              ),
-              React.createElement("div", null,
-                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
-                  React.createElement("span", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Version " + release.version),
-                  release.label === "Latest" && React.createElement("span", { style: { fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "var(--accentbg)", color: "var(--accent)", border: "1px solid var(--accentbg5)" } }, "LATEST")
-                ),
-                React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, release.date + " \u00b7 " + release.changes.length + " changes")
-              )
-            ),
-            React.createElement("span", { style: { fontSize: 14, color: "var(--text5)", transition: "transform .2s", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" } }, "\u25bc")
-          ),
-          isExpanded && React.createElement("div", { style: { marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)" } },
-            React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
-              release.changes.map(function (ch, ci) {
-                var ts = TYPE_STYLES[ch.type] || TYPE_STYLES.feature;
-                return React.createElement("div", { key: ci, style: { display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, lineHeight: 1.5, animation: "stxFadeIn .25s ease " + (ci * 0.03) + "s both" } },
-                  React.createElement("span", { style: { fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: ts.bg, border: "1px solid " + ts.border, color: ts.color, flexShrink: 0, marginTop: 2, letterSpacing: 0.3, textTransform: "uppercase" } }, ts.label),
-                  React.createElement("span", { style: { color: "var(--text3)" } }, ch.text)
-                );
-              })
-            )
-          )
-        );
-      })
     ),
 
     /* Data sources note */
@@ -5104,7 +5045,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.9"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.20"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
