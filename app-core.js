@@ -1305,6 +1305,7 @@ function EntryScoreAnalysis({ entry, onBack }) {
   const [activeTF, setActiveTF] = useState("daily");
   const [catFilter, setCatFilter] = useState("all");
   const [showGuide, setShowGuide] = useState(false);
+  const [freshIndicators, setFreshIndicators] = useState(null);
   const r = entry.result || {};
   const ind = entry.indicators || {};
   const price = entry.currentPrice || r.lastClose || 0;
@@ -1313,6 +1314,30 @@ function EntryScoreAnalysis({ entry, onBack }) {
   const CATS = window.STOX_CATEGORIES || [];
   const _fmt = function (v, d) { return v != null ? Number(v).toFixed(d != null ? d : 2) : "\u2014"; };
   const _TI = window.TechIndicators;
+
+  useEffect(() => {
+    if (!entry.ticker || !_TI || !window.OHLCVFetcher) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const DF = window.OHLCVFetcher;
+        const tk = entry.ticker.toUpperCase();
+        const [resW, resD, resH] = await Promise.all([
+          DF.fetchOHLCVCached(tk, "weekly"),
+          DF.fetchOHLCVCached(tk, "daily"),
+          DF.fetchOHLCVCached(tk, "1h"),
+        ]);
+        if (cancelled) return;
+        const indW = resW.data && resW.data.length >= 12 ? _TI.computeAll(resW.data) : null;
+        const indD = resD.data && resD.data.length >= 12 ? _TI.computeAll(resD.data) : null;
+        const indH = resH.data && resH.data.length >= 12 ? _TI.computeAll(resH.data) : null;
+        setFreshIndicators({ weekly: indW, daily: indD, hourly: indH });
+      } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, [entry.ticker, _TI]);
+
+  const computedInd = freshIndicators || ind;
 
   const _fmtVal = (def, val) => {
     if (val == null) return "\u2014";
@@ -1330,7 +1355,7 @@ function EntryScoreAnalysis({ entry, onBack }) {
         case "macd": return _fmt(val.macd, 4);
         case "bands": return _fmt(val.upper, 2);
         case "stoch": return _fmt(val.k, 2);
-        case "ichimoku": return _fmt(val.tenkan, 2);
+        case "ichimoku": return _fmt(val.tenkan ?? val.tenkan_sen, 2);
         case "chandelier": return _fmt(val.long, 2);
         case "heikinAshi": return (val.trend || "\u2014").toUpperCase();
         case "aroon": return "Up: " + _fmt(val.up) + " / Dn: " + _fmt(val.down);
@@ -1357,7 +1382,7 @@ function EntryScoreAnalysis({ entry, onBack }) {
   ];
 
   const activeScore = r[activeTF] || null;
-  const activeInd = ind[activeTF] || null;
+  const activeInd = computedInd[activeTF] || null;
 
   const factorBar = (label, val, max, color) => {
     if (val == null || max == null) return null;
@@ -1469,10 +1494,10 @@ function EntryScoreAnalysis({ entry, onBack }) {
             def.type === "ichimoku" && val && typeof val === "object" && React.createElement("div", {
               style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 6, flexWrap: "wrap" }
             },
-              React.createElement("span", null, "T: " + _fmt(val.tenkan)),
-              React.createElement("span", null, "K: " + _fmt(val.kijun)),
-              React.createElement("span", null, "SA: " + _fmt(val.senkouA)),
-              React.createElement("span", null, "SB: " + _fmt(val.senkouB))
+              React.createElement("span", null, "T: " + _fmt(val.tenkan ?? val.tenkan_sen)),
+              React.createElement("span", null, "K: " + _fmt(val.kijun ?? val.kijun_sen)),
+              React.createElement("span", null, "SA: " + _fmt(val.senkouA ?? val.senkou_span_a)),
+              React.createElement("span", null, "SB: " + _fmt(val.senkouB ?? val.senkou_span_b))
             ),
             def.type === "chandelier" && val && typeof val === "object" && React.createElement("div", {
               style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
@@ -1508,6 +1533,15 @@ function EntryScoreAnalysis({ entry, onBack }) {
               val.valueAreaHigh && React.createElement("span", null, "VAH: " + _fmt(val.valueAreaHigh)),
               val.valueAreaLow && React.createElement("span", null, "VAL: " + _fmt(val.valueAreaLow))
             ),
+            def.type === "darvas" && val && typeof val === "object" && React.createElement("div", {
+              style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8, flexWrap: "wrap" }
+            },
+              React.createElement("span", null, "Top: " + _fmt(val.boxTop)),
+              React.createElement("span", null, "Bottom: " + _fmt(val.boxBottom)),
+              val.breakout && React.createElement("span", {
+                style: { color: val.breakout === "up" ? "#16a34a" : val.breakout === "down" ? "#ef4444" : "var(--text6)" }
+              }, "Breakout: " + val.breakout.toUpperCase())
+            ),
             def.type === "rs" && val && typeof val === "object" && React.createElement("div", {
               style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 }
             },
@@ -1531,7 +1565,8 @@ function EntryScoreAnalysis({ entry, onBack }) {
       atr_14: ["", ""],
       bb: ["Walking upper band with volume = aggressive institutional expansion.", "Upper band touch + long wick = liquidity sweep, then breakdown."],
       ichimoku: ["Price above cloud = bullish; Tenkan/Kijun cross = signal.", "Price below cloud = bearish."],
-      vwap: ["Dips to VWAP bought by institutional algorithms.", "Price below VWAP; institutions offload on rallies to VWAP."]
+      vwap: ["Dips to VWAP bought by institutional algorithms.", "Price below VWAP; institutions offload on rallies to VWAP."],
+      darvasBox: ["Breakout above box = institutional accumulation.", "Breakdown below box = institutional distribution."]
     };
     var entry = map[key];
     if (!entry) return null;
@@ -1665,16 +1700,21 @@ function EntryScoreAnalysis({ entry, onBack }) {
                   price >= activeInd.bb.upper * 0.99 ? " \u2014 at upper band" : price <= activeInd.bb.lower * 1.01 ? " \u2014 at lower band" : " \u2014 inside bands",
                   _sc("bb", price > activeInd.bb.middle)
                 ),
-                activeInd.ichimoku && activeInd.ichimoku.senkouA != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                  "Ichimoku: T:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.tenkan)), " K:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.kijun)),
-                  " SA:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.senkouA)),
-                  " \u2014 price ", price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0) ? "above cloud" : "below cloud",
-                  _sc("ichimoku", price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0))
+                activeInd.ichimoku && (activeInd.ichimoku.tenkan ?? activeInd.ichimoku.tenkan_sen) != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "Ichimoku: T:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.tenkan ?? activeInd.ichimoku.tenkan_sen)), " K:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.kijun ?? activeInd.ichimoku.kijun_sen)),
+                  " SA:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a)), " SB:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b)),
+                  " \u2014 price ", price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0) ? "above cloud" : "below cloud",
+                  _sc("ichimoku", price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0))
                 ),
                 activeInd.vwap != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
                   "VWAP: ", React.createElement("span", { style: { fontWeight: 600, color: price > activeInd.vwap ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.vwap)),
                   " \u2014 price ", price > activeInd.vwap ? "above (bullish)" : "below (bearish)",
                   _sc("vwap", price > activeInd.vwap)
+                ),
+                activeInd.darvasBox && activeInd.darvasBox.boxTop != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "Darvas Box: ", React.createElement("span", { style: { fontWeight: 600, color: price >= activeInd.darvasBox.boxTop ? "#16a34a" : price <= activeInd.darvasBox.boxBottom ? "#ef4444" : "#eab308" } }, _fmt(activeInd.darvasBox.boxTop)), " / ", React.createElement("span", { style: { fontWeight: 600, color: price >= activeInd.darvasBox.boxTop ? "#16a34a" : price <= activeInd.darvasBox.boxBottom ? "#ef4444" : "#eab308" } }, _fmt(activeInd.darvasBox.boxBottom)),
+                  " \u2014 ", price >= activeInd.darvasBox.boxTop ? "breakout above (bullish)" : price <= activeInd.darvasBox.boxBottom ? "breakdown below (bearish)" : "inside box",
+                  _sc("darvasBox", price >= activeInd.darvasBox.boxTop)
                 ),
                 React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)", fontSize: 9, color: "var(--text6)" } },
                   "Signals are rule-based (price vs indicator). Scores aggregate across Trend, Momentum, Volume, Structure pillars. Switch timeframes above for multi-TF context."
@@ -5203,10 +5243,10 @@ function SingleStockAnalysis() {
                 React.createElement("span", null, "%D: " + _fmt(val.d))
               ),
               def.type === "ichimoku" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 6, flexWrap: "wrap" } },
-                React.createElement("span", null, "T: " + _fmt(val.tenkan)),
-                React.createElement("span", null, "K: " + _fmt(val.kijun)),
-                React.createElement("span", null, "SA: " + _fmt(val.senkouA)),
-                React.createElement("span", null, "SB: " + _fmt(val.senkouB))
+                React.createElement("span", null, "T: " + _fmt(val.tenkan ?? val.tenkan_sen)),
+                React.createElement("span", null, "K: " + _fmt(val.kijun ?? val.kijun_sen)),
+                React.createElement("span", null, "SA: " + _fmt(val.senkouA ?? val.senkou_span_a)),
+                React.createElement("span", null, "SB: " + _fmt(val.senkouB ?? val.senkou_span_b))
               ),
               def.type === "chandelier" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 } },
                 React.createElement("span", null, "L: " + _fmt(val.long)),
@@ -5231,6 +5271,13 @@ function SingleStockAnalysis() {
                 React.createElement("span", null, "POC: " + _fmt(val.poc)),
                 val.valueAreaHigh && React.createElement("span", null, "VAH: " + _fmt(val.valueAreaHigh)),
                 val.valueAreaLow && React.createElement("span", null, "VAL: " + _fmt(val.valueAreaLow))
+              ),
+              def.type === "darvas" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8, flexWrap: "wrap" } },
+                React.createElement("span", null, "Top: " + _fmt(val.boxTop)),
+                React.createElement("span", null, "Bottom: " + _fmt(val.boxBottom)),
+                val.breakout && React.createElement("span", {
+                  style: { color: val.breakout === "up" ? "var(--profit)" : val.breakout === "down" ? "var(--loss)" : "var(--text6)" }
+                }, "Breakout: " + val.breakout.toUpperCase())
               ),
               def.type === "rs" && val && typeof val === "object" && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", display: "flex", gap: 8 } },
                 React.createElement("span", null, "RS: " + _fmt(val.rs, 4)),
