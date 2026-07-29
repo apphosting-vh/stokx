@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stox-v37';
+const CACHE_NAME = 'stox-v39';
 const urlsToCache = [
   './',
   './index.html',
@@ -9,6 +9,7 @@ const urlsToCache = [
   './reports.js',
   './backup.js',
   './sync.js',
+  './notepad.js',
   './manifest.json',
   'https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js',

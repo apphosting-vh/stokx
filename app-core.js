@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.30";
+window.__STOX_APP_VERSION = "2.5.0";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -690,6 +690,9 @@ const Icons = {
     React.createElement("circle", { cx: 12, cy: 12, r: 10 }),
     React.createElement("line", { x1: 12, y1: 16, x2: 12, y2: 12 }),
     React.createElement("line", { x1: 12, y1: 8, x2: 12.01, y2: 8 })
+  ),
+  pen: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("path", { d: "M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" })
   ),
 };
 
@@ -5461,6 +5464,7 @@ function App() {
       case "watchlist": return React.createElement(PulsePage, { holdings });
       case "settings": return React.createElement(SettingsPage, { ...pageProps, themeId, setTheme, fontId, setFont });
       case "info": return React.createElement(InfoPage, null);
+      case "notepad": return React.createElement(window.NotepadPage, null);
       default: return React.createElement(Dashboard, pageProps);
     }
   };
@@ -5472,6 +5476,7 @@ function App() {
     { key: "reports", label: "Reports", icon: Icons.chart },
     { key: "watchlist", label: "Pulse", icon: Icons.eye },
     { key: "settings", label: "Settings", icon: Icons.settings },
+    { key: "notepad", label: "Notes", icon: Icons.pen },
     { key: "info", label: "Info", icon: Icons.info },
   ];
 
@@ -5482,6 +5487,7 @@ function App() {
     reports: "#a78bfa",
     watchlist: "#2dd4bf",
     settings: "#93c5fd",
+    notepad: "#f59e0b",
     info: "#bef264",
   };
 

@@ -40,10 +40,12 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   var entrySnapshots = [];
   var screenerResults = [];
   var screenerSnapshots = [];
+  var notes = [];
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch(e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch(e) {}
   try { screenerResults = (await dbGetSetting("stox_screener_data")) || { results: [], timestamps: {}, scanTime: 0 }; } catch(e) {}
   try { screenerSnapshots = (await dbGetSetting("stox_screener_snapshots")) || []; } catch(e) {}
+  try { notes = (await dbGetSetting("stox_notes")) || []; } catch(e) {}
   return {
     app: "StoX",
     version: 3,
@@ -55,7 +57,8 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       entryScores: entryScores.length,
       entrySnapshots: entrySnapshots.length,
       screenerStocks: screenerResults.results ? screenerResults.results.length : 0,
-      screenerSnapshots: screenerSnapshots.length
+      screenerSnapshots: screenerSnapshots.length,
+      notes: notes.length
     },
     data: {
       holdings: holdings,
@@ -64,7 +67,8 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       entryScores: entryScores,
       entrySnapshots: entrySnapshots,
       screenerData: screenerResults,
-      screenerSnapshots: screenerSnapshots
+      screenerSnapshots: screenerSnapshots,
+      notes: notes
     }
   };
 }
@@ -120,6 +124,7 @@ async function restoreStoxBackup(fileText) {
   if (d.entryPerfPrices) { try { await dbSetSetting("mm_entry_perf_prices", d.entryPerfPrices); } catch(e) {} }
   if (d.screenerData) { try { await dbSetSetting("stox_screener_data", d.screenerData); } catch(e) {} }
   if (d.screenerSnapshots) { try { await dbSetSetting("stox_screener_snapshots", d.screenerSnapshots); } catch(e) {} }
+  if (d.notes) { try { await dbSetSetting("stox_notes", d.notes); } catch(e) {} }
   var snaps = d.soldShareSnapshots || {};
   Object.keys(snaps).forEach(function(fyKey) {
     snaps[fyKey].forEach(function(sn) {
@@ -225,6 +230,7 @@ function DataBackupSection(props) {
   var [entrySnapshots, setEntrySnapshots] = React.useState([]);
   var [screenerData, setScreenerData] = React.useState({ results: [], timestamps: {}, scanTime: 0 });
   var [screenerSnapshots, setScreenerSnapshots] = React.useState([]);
+  var [notes, setNotes] = React.useState([]);
 
   React.useEffect(function() {
     (async function() {
@@ -232,6 +238,7 @@ function DataBackupSection(props) {
       try { var esn = await dbGetSetting("mm_entry_score_snapshots"); if (esn) setEntrySnapshots(esn); } catch(e) {}
       try { var sd = await dbGetSetting("stox_screener_data"); if (sd) setScreenerData(sd); } catch(e) {}
       try { var ss = await dbGetSetting("stox_screener_snapshots"); if (ss) setScreenerSnapshots(ss); } catch(e) {}
+      try { var nt = await dbGetSetting("stox_notes"); if (nt) setNotes(nt); } catch(e) {}
     })();
   }, []);
 
@@ -243,6 +250,7 @@ function DataBackupSection(props) {
     var esnKB = new Blob([JSON.stringify(entrySnapshots)]).size / 1024;
     var scKB = new Blob([JSON.stringify(screenerData)]).size / 1024;
     var scnKB = new Blob([JSON.stringify(screenerSnapshots)]).size / 1024;
+    var ntKB = new Blob([JSON.stringify(notes)]).size / 1024;
     return {
       holdingsKB: holdingsKB.toFixed(1),
       snapsKB: snapsKB.toFixed(1),
@@ -251,9 +259,10 @@ function DataBackupSection(props) {
       esnKB: esnKB.toFixed(1),
       scKB: scKB.toFixed(1),
       scnKB: scnKB.toFixed(1),
-      totalKB: (holdingsKB + snapsKB + watchKB + esKB + esnKB + scKB + scnKB).toFixed(1)
+      ntKB: ntKB.toFixed(1),
+      totalKB: (holdingsKB + snapsKB + watchKB + esKB + esnKB + scKB + scnKB + ntKB).toFixed(1)
     };
-  }, [holdings, soldShareSnapshots, watchlist, entryScores, entrySnapshots, screenerData, screenerSnapshots]);
+  }, [holdings, soldShareSnapshots, watchlist, entryScores, entrySnapshots, screenerData, screenerSnapshots, notes]);
 
   var pastTradeCount = Object.values(soldShareSnapshots).reduce(function(s, a) { return s + a.length; }, 0);
 
@@ -267,7 +276,7 @@ function DataBackupSection(props) {
 
   async function handleRestore() {
     try {
-      if (!await showConfirm("This will OVERWRITE your current holdings, watchlist, and trade history. Continue?")) return;
+      if (!await showConfirm("This will OVERWRITE your current holdings, watchlist, trade history, and notes. Continue?")) return;
       var text = await loadBackupFile();
       if (!text) return;
       var result = await restoreStoxBackup(text);
@@ -329,7 +338,8 @@ function DataBackupSection(props) {
     { label: "Entry Scores", val: entryScores.length, sub: storageInfo.esKB + " KB", color: "#f97316" },
     { label: "Screener", val: screenerCount, sub: storageInfo.scKB + " KB", color: "#8b5cf6" },
     { label: "Screener Snaps", val: screenerSnapshots.length, sub: storageInfo.scnKB + " KB", color: "#ec4899" },
-    { label: "Total", val: holdings.length + pastTradeCount + watchlist.length + entryScores.length + screenerCount + screenerSnapshots.length, sub: storageInfo.totalKB + " KB", color: "var(--text)" }
+    { label: "Notes", val: notes.length, sub: storageInfo.ntKB + " KB", color: "#f59e0b" },
+    { label: "Total", val: holdings.length + pastTradeCount + watchlist.length + entryScores.length + screenerCount + screenerSnapshots.length + notes.length, sub: storageInfo.totalKB + " KB", color: "var(--text)" }
   ];
 
   var btnBase = {

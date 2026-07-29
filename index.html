@@ -65,12 +65,12 @@
     if(_selfCheckDone||!navigator.onLine)return;
     _selfCheckDone=true;
     var currentVer=(window.__STOX_APP_VERSION||'');
-    fetch(location.href,{cache:'reload',method:'GET'})
+    fetch(location.href,{cache:'no-store',method:'GET'})
       .then(function(r){return r.text();})
       .then(function(html){
-        var m=html.match(/APP_VERSION\s*=\s*"([^"]+)"/);
+        var m=html.match(/STOX_APP_VERSION\s*=\s*"([^"]+)"/);
         if(m&&m[1]&&currentVer&&m[1]!==currentVer){
-          window.dispatchEvent(new CustomEvent('stox:update-ready'));
+          window.location.reload();
         }
       })
       .catch(function(){});
@@ -715,6 +715,7 @@ html,body,.stx-card,.stx-statcard,.stx-btn,.inp,.stx-botnav,.stx-botnav-item,
 <script type="text/babel" src="./backup.js"></script>
 <script type="text/babel" src="./sync.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script type="text/babel" src="./notepad.js"></script>
 <script type="text/babel" src="./app-core.js"></script>
 </body>
 </html>

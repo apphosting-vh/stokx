@@ -118,7 +118,8 @@ var fsaReadFile = async function(handle) {
       entrySnapshots: d.entrySnapshots || [],
       entryPerfPrices: d.entryPerfPrices || {},
       screenerData: d.screenerData || null,
-      screenerSnapshots: d.screenerSnapshots || []
+      screenerSnapshots: d.screenerSnapshots || [],
+      notes: d.notes || []
     };
   } catch (e) {
     console.warn("[FSA] Read failed:", e);
@@ -140,11 +141,13 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
   var screenerData = null;
   var screenerSnapshots = [];
   var entryPerfPrices = {};
+  var notes = [];
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch (e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch (e) {}
   try { screenerData = (await dbGetSetting("stox_screener_data")) || null; } catch (e) {}
   try { screenerSnapshots = (await dbGetSetting("stox_screener_snapshots")) || []; } catch (e) {}
   try { entryPerfPrices = (await dbGetSetting("mm_entry_perf_prices")) || {}; } catch (e) {}
+  try { notes = (await dbGetSetting("stox_notes")) || []; } catch (e) {}
 
   return {
     app: "StoX",
@@ -158,7 +161,8 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       entryScores: entryScores.length,
       entrySnapshots: entrySnapshots.length,
       screenerStocks: screenerData && screenerData.results ? screenerData.results.length : 0,
-      screenerSnapshots: screenerSnapshots.length
+      screenerSnapshots: screenerSnapshots.length,
+      notes: notes.length
     },
     data: {
       holdings: stateData.holdings || [],
@@ -168,7 +172,8 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       entrySnapshots: entrySnapshots,
       entryPerfPrices: entryPerfPrices,
       screenerData: screenerData,
-      screenerSnapshots: screenerSnapshots
+      screenerSnapshots: screenerSnapshots,
+      notes: notes
     }
   };
 };
@@ -214,6 +219,7 @@ window.__stoxRestoreFromPayload = async function(data) {
     }
     if (data.screenerData) await dbSetSetting("stox_screener_data", data.screenerData);
     if (data.screenerSnapshots) await dbSetSetting("stox_screener_snapshots", data.screenerSnapshots);
+    if (data.notes) await dbSetSetting("stox_notes", data.notes);
   } catch (e) {
     console.warn("[Sync] Restore error:", e);
   }
@@ -617,7 +623,8 @@ var gdriveReadSyncFile = async function(silent) {
         entrySnapshots: data.data.entrySnapshots || [],
         entryPerfPrices: data.data.entryPerfPrices || {},
         screenerData: data.data.screenerData || null,
-        screenerSnapshots: data.data.screenerSnapshots || []
+        screenerSnapshots: data.data.screenerSnapshots || [],
+        notes: data.data.notes || []
       },
       modifiedTime: remoteExportedAt
     };
