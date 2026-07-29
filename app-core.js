@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.25";
+window.__STOX_APP_VERSION = "2.4.27";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -485,6 +485,65 @@ async function fetchOHLCV(ticker, timeframe) {
 /* ══════════════════════════════════════════════════════════════════════════
    TECHNICAL INDICATORS ENGINE
    ══════════════════════════════════════════════════════════════════════════ */
+/* ── Global indicator definitions (available to all components) ── */
+var ALL_INDS = [
+  { name: "SMA (20)", key: "sma_20", cat: "Trend", type: "line" },
+  { name: "SMA (50)", key: "sma_50", cat: "Trend", type: "line" },
+  { name: "SMA (200)", key: "sma_200", cat: "Trend", type: "line" },
+  { name: "EMA (9)", key: "ema_9", cat: "Trend", type: "line" },
+  { name: "EMA (21)", key: "ema_21", cat: "Trend", type: "line" },
+  { name: "EMA (50)", key: "ema_50", cat: "Trend", type: "line" },
+  { name: "WMA (20)", key: "wma_20", cat: "Trend", type: "line" },
+  { name: "VWAP", key: "vwap", cat: "Volume", type: "line" },
+  { name: "RSI (14)", key: "rsi_14", cat: "Momentum", type: "oscillator", range: [0, 100] },
+  { name: "MACD", key: "macd", cat: "Momentum", type: "macd" },
+  { name: "ATR (14)", key: "atr_14", cat: "Volatility", type: "line" },
+  { name: "Bollinger Bands", key: "bb", cat: "Volatility", type: "bands" },
+  { name: "ADX (14)", key: "adx_14", cat: "Trend", type: "oscillator", range: [0, 100] },
+  { name: "SuperTrend", key: "supertrend", cat: "Trend", type: "line" },
+  { name: "Ichimoku Cloud", key: "ichimoku", cat: "Trend", type: "ichimoku" },
+  { name: "Donchian Channels", key: "donchian", cat: "Volatility", type: "bands" },
+  { name: "Keltner Channels", key: "keltner", cat: "Volatility", type: "bands" },
+  { name: "OBV", key: "obv", cat: "Volume", type: "volume" },
+  { name: "CMF (20)", key: "cmf_20", cat: "Volume", type: "oscillator", range: [-1, 1] },
+  { name: "Stochastic RSI", key: "stochRSI", cat: "Momentum", type: "stoch" },
+  { name: "CCI (20)", key: "cci_20", cat: "Momentum", type: "oscillator", range: [-200, 200] },
+  { name: "ROC (10)", key: "roc_10", cat: "Momentum", type: "oscillator" },
+  { name: "Momentum (10)", key: "momentum_10", cat: "Momentum", type: "oscillator" },
+  { name: "Parabolic SAR", key: "psar", cat: "Trend", type: "line" },
+  { name: "HMA (20)", key: "hma_20", cat: "Trend", type: "line" },
+  { name: "KAMA (10)", key: "kama_10", cat: "Trend", type: "line" },
+  { name: "TSI", key: "tsi", cat: "Momentum", type: "oscillator" },
+  { name: "STC", key: "stc", cat: "Momentum", type: "oscillator", range: [0, 100] },
+  { name: "MFI (14)", key: "mfi_14", cat: "Volume", type: "oscillator", range: [0, 100] },
+  { name: "PVT", key: "pvt", cat: "Volume", type: "volume" },
+  { name: "KVO", key: "kvo", cat: "Volume", type: "oscillator" },
+  { name: "Anchored VWAP", key: "anchored_vwap", cat: "Volume", type: "line" },
+  { name: "Volume Profile", key: "volumeProfile", cat: "Volume", type: "volumeProfile" },
+  { name: "TTM Squeeze", key: "ttmSqueeze", cat: "Volatility", type: "squeeze" },
+  { name: "Squeeze Momentum", key: "squeezeMomentum", cat: "Momentum", type: "oscillator" },
+  { name: "Darvas Box", key: "darvasBox", cat: "Volatility", type: "darvas" },
+  { name: "Smart Money", key: "smartMoney", cat: "Volume", type: "smartMoney" },
+  { name: "MTF Alignment", key: "mtfAlignment", cat: "Trend", type: "oscillator", range: [0, 100] },
+  { name: "Chandelier Exit", key: "chandelier", cat: "Volatility", type: "chandelier" },
+  { name: "Heikin-Ashi", key: "heikinAshi", cat: "Trend", type: "heikinAshi" },
+  { name: "Choppiness Index", key: "choppiness", cat: "Volatility", type: "oscillator", range: [0, 100] },
+  { name: "Williams %R", key: "williamsR", cat: "Momentum", type: "oscillator", range: [-100, 0] },
+  { name: "Awesome Oscillator", key: "awesomeOsc", cat: "Momentum", type: "oscillator" },
+  { name: "Force Index", key: "forceIndex", cat: "Volume", type: "volume" },
+  { name: "Fibonacci Levels", key: "fibonacci", cat: "Structure", type: "fibonacci" },
+  { name: "Pivot Points", key: "pivotPoints", cat: "Structure", type: "pivotPoints" },
+  { name: "Williams Fractals", key: "fractals", cat: "Structure", type: "fractals" },
+  { name: "Aroon", key: "aroon", cat: "Trend", type: "aroon" },
+  { name: "Zig Zag", key: "zigZag", cat: "Structure", type: "zigZag" },
+  { name: "Vortex Indicator", key: "vortex", cat: "Trend", type: "vortex" },
+  { name: "RS vs Nifty50", key: "rs_vs_nifty", cat: "Trend", type: "rs" },
+  { name: "Beta vs Nifty50", key: "beta_nifty", cat: "Momentum", type: "line" },
+];
+var ALL_CATS = ["Trend", "Momentum", "Volatility", "Volume", "Structure"];
+window.STOX_INDICATORS = ALL_INDS;
+window.STOX_CATEGORIES = ALL_CATS;
+
 const TechIndicators = window.TechIndicators;
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -3281,10 +3340,10 @@ const EntryScorePanel = ({ shares }) => {
         indRow("BB Lower", indData.bb ? indData.bb.lower : null),
         indRow("OBV", indData.obv),
         indRow("VWAP", indData.vwap),
-        indRow("ROC (12)", indData.roc_12, indData.roc_12 > 0 ? "bullish" : "bearish"),
+        indRow("ROC (10)", indData.roc_10, indData.roc_10 > 0 ? "bullish" : "bearish"),
         indRow("PSAR", indData.psar, lc && indData.psar ? lc > indData.psar ? "bullish" : "bearish" : null),
         indRow("WMA 20", indData.wma_20),
-        indRow("HMA 16", indData.hma_16),
+        indRow("HMA (20)", indData.hma_20),
         indRow("KAMA 10", indData.kama_10),
         indRow("CMF (20)", indData.cmf_20, indData.cmf_20 > 0 ? "bullish" : "bearish"),
         indRow("TSI", indData.tsi, indData.tsi > 0 ? "bullish" : "bearish"),
@@ -4685,69 +4744,11 @@ function SingleStockAnalysis() {
   useEffect(function () { fetchData(); }, [refreshTick, fetchData]);
 
   var filteredIndicators = useMemo(function () {
-    var allInds = [
-      { name: "SMA (20)", key: "sma_20", cat: "Trend", type: "line" },
-      { name: "SMA (50)", key: "sma_50", cat: "Trend", type: "line" },
-      { name: "SMA (200)", key: "sma_200", cat: "Trend", type: "line" },
-      { name: "EMA (9)", key: "ema_9", cat: "Trend", type: "line" },
-      { name: "EMA (21)", key: "ema_21", cat: "Trend", type: "line" },
-      { name: "EMA (50)", key: "ema_50", cat: "Trend", type: "line" },
-      { name: "WMA (20)", key: "wma_20", cat: "Trend", type: "line" },
-      { name: "VWAP", key: "vwap", cat: "Volume", type: "line" },
-      { name: "RSI (14)", key: "rsi_14", cat: "Momentum", type: "oscillator", range: [0, 100] },
-      { name: "MACD", key: "macd", cat: "Momentum", type: "macd" },
-      { name: "ATR (14)", key: "atr_14", cat: "Volatility", type: "line" },
-      { name: "Bollinger Bands", key: "bb", cat: "Volatility", type: "bands" },
-      { name: "ADX (14)", key: "adx_14", cat: "Trend", type: "oscillator", range: [0, 100] },
-      { name: "SuperTrend", key: "supertrend", cat: "Trend", type: "line" },
-      { name: "Ichimoku Cloud", key: "ichimoku", cat: "Trend", type: "ichimoku" },
-      { name: "Donchian Channels", key: "donchian", cat: "Volatility", type: "bands" },
-      { name: "Keltner Channels", key: "keltner", cat: "Volatility", type: "bands" },
-      { name: "OBV", key: "obv", cat: "Volume", type: "volume" },
-      { name: "CMF (20)", key: "cmf_20", cat: "Volume", type: "oscillator", range: [-1, 1] },
-      { name: "Stochastic RSI", key: "stochRSI", cat: "Momentum", type: "stoch" },
-      { name: "CCI (20)", key: "cci_20", cat: "Momentum", type: "oscillator", range: [-200, 200] },
-      { name: "ROC (12)", key: "roc_12", cat: "Momentum", type: "oscillator" },
-      { name: "Momentum (10)", key: "momentum_10", cat: "Momentum", type: "oscillator" },
-      { name: "Parabolic SAR", key: "psar", cat: "Trend", type: "line" },
-      { name: "HMA (16)", key: "hma_16", cat: "Trend", type: "line" },
-      { name: "KAMA (10)", key: "kama_10", cat: "Trend", type: "line" },
-      { name: "TSI", key: "tsi", cat: "Momentum", type: "oscillator" },
-      { name: "STC", key: "stc", cat: "Momentum", type: "oscillator", range: [0, 100] },
-      { name: "MFI (14)", key: "mfi_14", cat: "Volume", type: "oscillator", range: [0, 100] },
-      { name: "PVT", key: "pvt", cat: "Volume", type: "volume" },
-      { name: "KVO", key: "kvo", cat: "Volume", type: "oscillator" },
-      { name: "Anchored VWAP", key: "anchored_vwap", cat: "Volume", type: "line" },
-      { name: "Volume Profile", key: "volumeProfile", cat: "Volume", type: "volumeProfile" },
-      { name: "TTM Squeeze", key: "ttmSqueeze", cat: "Volatility", type: "squeeze" },
-      { name: "Squeeze Momentum", key: "squeezeMomentum", cat: "Momentum", type: "oscillator" },
-      { name: "Darvas Box", key: "darvasBox", cat: "Volatility", type: "darvas" },
-      { name: "Smart Money", key: "smartMoney", cat: "Volume", type: "smartMoney" },
-      { name: "MTF Alignment", key: "mtfAlignment", cat: "Trend", type: "oscillator", range: [0, 100] },
-      { name: "Chandelier Exit", key: "chandelier", cat: "Volatility", type: "chandelier" },
-      { name: "Heikin-Ashi", key: "heikinAshi", cat: "Trend", type: "heikinAshi" },
-      { name: "Choppiness Index", key: "choppiness", cat: "Volatility", type: "oscillator", range: [0, 100] },
-      { name: "Williams %R", key: "williamsR", cat: "Momentum", type: "oscillator", range: [-100, 0] },
-      { name: "Awesome Oscillator", key: "awesomeOsc", cat: "Momentum", type: "oscillator" },
-      { name: "Force Index", key: "forceIndex", cat: "Volume", type: "volume" },
-      { name: "Fibonacci Levels", key: "fibonacci", cat: "Structure", type: "fibonacci" },
-      { name: "Pivot Points", key: "pivotPoints", cat: "Structure", type: "pivotPoints" },
-      { name: "Williams Fractals", key: "fractals", cat: "Structure", type: "fractals" },
-      { name: "Aroon", key: "aroon", cat: "Trend", type: "aroon" },
-      { name: "Zig Zag", key: "zigZag", cat: "Structure", type: "zigZag" },
-      { name: "Vortex Indicator", key: "vortex", cat: "Trend", type: "vortex" },
-      { name: "RS vs Nifty50", key: "rs_vs_nifty", cat: "Trend", type: "rs" },
-      { name: "Beta vs Nifty50", key: "beta_nifty", cat: "Momentum", type: "line" },
-    ];
-    var CATS = ["Trend", "Momentum", "Volatility", "Volume", "Structure"];
-    window.STOX_INDICATORS = allInds;
-    window.STOX_CATEGORIES = CATS;
-    if (category === "all") return allInds;
-    return allInds.filter(function (ind) { return ind.cat === category; });
+    if (category === "all") return ALL_INDS;
+    return ALL_INDS.filter(function (ind) { return ind.cat === category; });
   }, [category]);
 
-  var CATS = ["Trend", "Momentum", "Volatility", "Volume", "Structure"];
-  var catKeys = ["all"].concat(CATS);
+  var catKeys = ["all"].concat(ALL_CATS);
 
   var handleSubmit = function () {
     var t = inputVal.trim().toUpperCase().replace(/\.NS$/i, "").replace(/\.BO$/i, "");
