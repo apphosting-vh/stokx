@@ -524,6 +524,30 @@ window.TechnicalIndicatorsPanel = (function () {
         })
       ),
 
+      /* ── Penalties & Bonuses ── */
+      React.createElement("div", {
+        style: { marginTop: 12, padding: "10px 12px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)" }
+      },
+        React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--text3)", fontFamily: "'Sora',sans-serif", marginBottom: 6 } }, "Penalties & Bonuses"),
+        es.penalty_items && es.penalty_items.length > 0
+          ? es.penalty_items.map(function(p, i) {
+              return React.createElement("div", { key: "p-" + i, style: { fontSize: 10, color: "#ef4444", lineHeight: 1.5, padding: "2px 8px", borderRadius: 4, background: "rgba(239,68,68,.06)", marginBottom: 2 } },
+                "\u2193 " + p.reason + " (" + p.amount + ")"
+              );
+            })
+          : null,
+        es.bonus_items && es.bonus_items.length > 0
+          ? es.bonus_items.map(function(b, i) {
+              return React.createElement("div", { key: "b-" + i, style: { fontSize: 10, color: "#16a34a", lineHeight: 1.5, padding: "2px 8px", borderRadius: 4, background: "rgba(22,163,74,.06)", marginBottom: 2 } },
+                "\u2191 " + b.reason + " (+" + b.amount + ")"
+              );
+            })
+          : null,
+        (!es.penalty_items || es.penalty_items.length === 0) && (!es.bonus_items || es.bonus_items.length === 0) && React.createElement("div", {
+          style: { fontSize: 10, color: "var(--text6)", fontStyle: "italic" }
+        }, "No penalties or bonuses active")
+      ),
+
       /* ── Exit Price Recommendations ── */
       exitRecs && React.createElement("div", {
         style: {
