@@ -225,14 +225,18 @@ window.TechIndicators = (function () {
   function calcChandelierExit(candles, period, mult) {
     period = period || 14; mult = mult || 2;
     var hi = highs(candles);
+    var lo = lows(candles);
     var atrArr = calcATR(candles, 14);
     var longArr = [], shortArr = [];
     for (var i = 0; i < candles.length; i++) {
       if (i < period - 1 || atrArr[i] == null) { longArr.push(null); shortArr.push(null); continue; }
-      var hMax = -Infinity;
-      for (var j = i - period + 1; j <= i; j++) { if (hi[j] > hMax) hMax = hi[j]; }
+      var hMax = -Infinity, lMin = Infinity;
+      for (var j = i - period + 1; j <= i; j++) {
+        if (hi[j] > hMax) hMax = hi[j];
+        if (lo[j] < lMin) lMin = lo[j];
+      }
       longArr.push(round(hMax - atrArr[i] * mult, 2));
-      shortArr.push(null);
+      shortArr.push(round(lMin + atrArr[i] * mult, 2));
     }
     return { long: longArr, short: shortArr };
   }
