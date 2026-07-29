@@ -80,6 +80,9 @@ window.NotepadPage = (function () {
   var UNDO = "M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11";
   var REDO = "M15 14l5-5-5-5M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13";
   var PALETTE = "M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c1.38 0 2.5-1.12 2.5-2.5 0-.61-.22-1.16-.58-1.59-.36-.43-.58-.97-.58-1.58 0-1.38 1.12-2.5 2.5-2.5H17c3.31 0 6-2.69 6-6 0-4.96-4.49-9-11-9zM7.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm7 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm-4 10.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z";
+  var CLOSE = "M18 6L6 18M6 6l12 12";
+  var ARROW_LEFT = "M15 18l-6-6 6-6";
+  var NOTE = "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zM14 2v6h6";
 
   function SvgIcon(s, path, vb) {
     return React.createElement("svg", { width: s || 16, height: s || 16, viewBox: vb || "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" },
@@ -113,6 +116,7 @@ window.NotepadPage = (function () {
     var saveTimer = useRef(null);
     var [showColorPicker, setShowColorPicker] = useState(false);
     var [activeFormats, setActiveFormats] = useState({});
+    var [confirmDelete, setConfirmDelete] = useState(false);
 
     useEffect(function () {
       if (titleRef.current) {
@@ -170,10 +174,15 @@ window.NotepadPage = (function () {
     }, [scheduleSave]);
 
     var handleDelete = useCallback(function () {
-      if (window.confirm("Delete note \"" + (note.title || "untitled") + "\"?")) {
-        onDelete(note.id);
-      }
+      setConfirmDelete(true);
+    }, []);
+    var handleDeleteConfirm = useCallback(function () {
+      setConfirmDelete(false);
+      onDelete(note.id);
     }, [note, onDelete]);
+    var handleDeleteCancel = useCallback(function () {
+      setConfirmDelete(false);
+    }, []);
 
     var handleTogglePin = useCallback(function () {
       onSave(Object.assign({}, getNote(), { pinned: !note.pinned }));
@@ -290,30 +299,50 @@ window.NotepadPage = (function () {
       React.createElement("div", {
         style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)" }
       },
-        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
-          React.createElement("button", {
-            title: note.pinned ? "Unpin" : "Pin note",
-            onClick: handleTogglePin,
-            style: {
-              padding: "5px 8px", borderRadius: 6, border: "none", cursor: "pointer",
-              background: note.pinned ? "rgba(251,191,36,.15)" : "transparent",
-              color: note.pinned ? "#fbbf24" : "var(--text5)", fontSize: 12
-            }
-          }, SvgIcon(14, PIN, "0 0 24 24")),
-          React.createElement("div", { style: { display: "flex", gap: 3 } }, colorSwatches)
-        ),
-        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
-          React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, fmtDate(note.updatedAt || note.createdAt)),
-          React.createElement("button", {
-            title: "Delete note",
-            onClick: handleDelete,
-            style: {
-              padding: "5px 10px", borderRadius: 6, border: "1px solid rgba(239,68,68,.25)",
-              cursor: "pointer", background: "rgba(239,68,68,.08)", color: "#ef4444",
-              fontSize: 10, fontWeight: 600, fontFamily: "var(--font-body)"
-            }
-          }, "Delete")
-        )
+        confirmDelete
+          ? React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, width: "100%", justifyContent: "flex-end" } },
+            React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "Delete this note?"),
+            React.createElement("button", {
+              onClick: handleDeleteConfirm,
+              style: {
+                padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer",
+                background: "#ef4444", color: "#fff", fontSize: 10, fontWeight: 600
+              }
+            }, "Yes"),
+            React.createElement("button", {
+              onClick: handleDeleteCancel,
+              style: {
+                padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", cursor: "pointer",
+                background: "var(--bg4)", color: "var(--text5)", fontSize: 10, fontWeight: 600
+              }
+            }, "No")
+          )
+          : React.createElement(React.Fragment, null,
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+              React.createElement("button", {
+                title: note.pinned ? "Unpin" : "Pin note",
+                onClick: handleTogglePin,
+                style: {
+                  padding: "5px 8px", borderRadius: 6, border: "none", cursor: "pointer",
+                  background: note.pinned ? "rgba(251,191,36,.15)" : "transparent",
+                  color: note.pinned ? "#fbbf24" : "var(--text5)", fontSize: 12
+                }
+              }, SvgIcon(14, PIN, "0 0 24 24")),
+              React.createElement("div", { style: { display: "flex", gap: 3 } }, colorSwatches)
+            ),
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+              React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, fmtDate(note.updatedAt || note.createdAt)),
+              React.createElement("button", {
+                title: "Delete note",
+                onClick: handleDelete,
+                style: {
+                  padding: "5px 10px", borderRadius: 6, border: "1px solid rgba(239,68,68,.25)",
+                  cursor: "pointer", background: "rgba(239,68,68,.08)", color: "#ef4444",
+                  fontSize: 10, fontWeight: 600, fontFamily: "var(--font-body)"
+                }
+              }, "Delete")
+            )
+          )
       )
     );
   }
@@ -321,13 +350,44 @@ window.NotepadPage = (function () {
   /* ══════════════════════════════════════════════════════════════════════════
      NoteCard Component
      ══════════════════════════════════════════════════════════════════════════ */
-  var NoteCard = React.memo(function NoteCard(props) {
+  var NoteCard = React.memo(function(props) {
     var note = props.note, onClick = props.onClick, onPin = props.onPin, onDelete = props.onDelete;
+    var [confirmDelete, setConfirmDelete] = useState(false);
 
     var preview = truncate(stripHtml(note.content), 120);
     var title = note.title || "Untitled";
     var bg = noteBg(note.color);
     var borderColor = note.color ? note.color + "33" : "var(--border)";
+
+    if (confirmDelete) {
+      return React.createElement("div", {
+        style: {
+          borderRadius: 10, padding: "14px 16px",
+          background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.25)",
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10
+        }
+      },
+        React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } },
+          "Delete \"" + title + "\"?"
+        ),
+        React.createElement("div", { style: { display: "flex", gap: 6 } },
+          React.createElement("button", {
+            onClick: function (e) { e.stopPropagation(); setConfirmDelete(false); onDelete(note.id); },
+            style: {
+              padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer",
+              background: "#ef4444", color: "#fff", fontSize: 10, fontWeight: 600
+            }
+          }, "Yes"),
+          React.createElement("button", {
+            onClick: function (e) { e.stopPropagation(); setConfirmDelete(false); },
+            style: {
+              padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", cursor: "pointer",
+              background: "var(--bg4)", color: "var(--text5)", fontSize: 10, fontWeight: 600
+            }
+          }, "No")
+        )
+      );
+    }
 
     return React.createElement("div", {
       onClick: function () { onClick(note); },
@@ -358,8 +418,8 @@ window.NotepadPage = (function () {
       }),
       /* Header: title + pin */
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 } },
-        React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "'Sora',sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } },
-          note.pinned ? "\u2b50 " : "",
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "'Sora',sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, display: "flex", alignItems: "center", gap: 4 } },
+          note.pinned ? SvgIcon(13, PIN, "0 0 24 24") : null,
           title
         ),
         React.createElement("div", { style: { display: "flex", gap: 4, flexShrink: 0 } },
@@ -371,16 +431,16 @@ window.NotepadPage = (function () {
               background: "transparent", color: note.pinned ? "#fbbf24" : "var(--text6)",
               display: "flex", alignItems: "center", justifyContent: "center", padding: 0, fontSize: 10
             }
-          }, "\u{1F4CC}"),
+            }, SvgIcon(14, PIN, "0 0 24 24")),
           React.createElement("button", {
             title: "Delete",
-            onClick: function (e) { e.stopPropagation(); if (window.confirm("Delete \"" + title + "\"?")) onDelete(note.id); },
+            onClick: function (e) { e.stopPropagation(); setConfirmDelete(true); },
             style: {
               width: 24, height: 24, borderRadius: 4, border: "none", cursor: "pointer",
               background: "transparent", color: "var(--text6)",
-              display: "flex", alignItems: "center", justifyContent: "center", padding: 0, fontSize: 10
+              display: "flex", alignItems: "center", justifyContent: "center", padding: 0
             }
-          }, "\u2716")
+          }, SvgIcon(14, CLOSE))
         )
       ),
       /* Content preview */
@@ -423,8 +483,9 @@ window.NotepadPage = (function () {
 
     var saveNotes = useCallback(function (arr) {
       setNotes(arr);
-      dbSetSetting(LS_KEY, arr).catch(function () {});
-      window.dispatchEvent(new CustomEvent("stox:data-changed"));
+      dbSetSetting(LS_KEY, arr).then(function () {
+        window.dispatchEvent(new CustomEvent("stox:data-changed"));
+      }).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
     }, []);
 
     var handleCreate = useCallback(function () {
@@ -441,13 +502,15 @@ window.NotepadPage = (function () {
         if (idx >= 0) {
           var copy = prev.slice();
           copy[idx] = updated;
-          dbSetSetting(LS_KEY, copy).catch(function () {});
-          window.dispatchEvent(new CustomEvent("stox:data-changed"));
+          dbSetSetting(LS_KEY, copy).then(function () {
+            window.dispatchEvent(new CustomEvent("stox:data-changed"));
+          }).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
           return copy;
         }
         var all = [updated].concat(prev);
-        dbSetSetting(LS_KEY, all).catch(function () {});
-        window.dispatchEvent(new CustomEvent("stox:data-changed"));
+        dbSetSetting(LS_KEY, all).then(function () {
+          window.dispatchEvent(new CustomEvent("stox:data-changed"));
+        }).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
         return all;
       });
     }, []);
@@ -455,8 +518,9 @@ window.NotepadPage = (function () {
     var handleDelete = useCallback(function (id) {
       setNotes(function (prev) {
         var filtered = prev.filter(function (n) { return n.id !== id; });
-        dbSetSetting(LS_KEY, filtered).catch(function () {});
-        window.dispatchEvent(new CustomEvent("stox:data-changed"));
+        dbSetSetting(LS_KEY, filtered).then(function () {
+          window.dispatchEvent(new CustomEvent("stox:data-changed"));
+        }).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
         return filtered;
       });
       setSelectedId(function (sid) { return sid === id ? null : sid; });
@@ -467,8 +531,9 @@ window.NotepadPage = (function () {
         var updated = prev.map(function (n) {
           return n.id === id ? Object.assign({}, n, { pinned: !n.pinned, updatedAt: new Date().toISOString() }) : n;
         });
-        dbSetSetting(LS_KEY, updated).catch(function () {});
-        window.dispatchEvent(new CustomEvent("stox:data-changed"));
+        dbSetSetting(LS_KEY, updated).then(function () {
+          window.dispatchEvent(new CustomEvent("stox:data-changed"));
+        }).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
         return updated;
       });
     }, []);
@@ -525,7 +590,7 @@ window.NotepadPage = (function () {
                       color: "var(--text2)", outline: "none", fontFamily: "var(--font-body)"
                     }
                   }),
-                  React.createElement("span", { style: { position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text6)", fontSize: 12, pointerEvents: "none" } }, "\u{1F50D}")
+                  React.createElement("span", { style: { position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text6)", display: "flex", pointerEvents: "none" } }, SvgIcon(14, SEARCH))
                 ),
                 React.createElement("button", {
                   onClick: handleCreate,
@@ -534,7 +599,7 @@ window.NotepadPage = (function () {
                     borderRadius: 8, border: "none", cursor: "pointer",
                     background: "var(--accent)", color: "#fff", fontFamily: "var(--font-body)", whiteSpace: "nowrap"
                   }
-                }, "+ New")
+                }, SvgIcon(14, PLUS), " New")
               ),
               /* Notes list */
               React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8, maxHeight: "calc(100vh - 200px)", overflowY: "auto" } },
@@ -565,9 +630,10 @@ window.NotepadPage = (function () {
               onClick: function () { setSelectedId(null); },
               style: {
                 padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer",
-                background: "var(--bg4)", color: "var(--text5)", fontSize: 12, fontFamily: "var(--font-body)"
+                background: "var(--bg4)", color: "var(--text5)", fontSize: 12, fontFamily: "var(--font-body)",
+                display: "inline-flex", alignItems: "center", gap: 4
               }
-            }, "\u2190 Back"),
+            }, SvgIcon(14, ARROW_LEFT), " Back"),
             React.createElement("div", { style: { fontSize: 16, fontWeight: 700, fontFamily: "'Sora',sans-serif", color: "var(--text)" } }, "Edit Note")
           ),
           React.createElement(NoteEditor, { note: selected, onSave: handleSave, onDelete: handleDelete, onBack: function () { setSelectedId(null); } })
@@ -594,7 +660,7 @@ window.NotepadPage = (function () {
               color: "var(--text2)", outline: "none", fontFamily: "var(--font-body)"
             }
           }),
-          React.createElement("span", { style: { position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text6)", fontSize: 12, pointerEvents: "none" } }, "\u{1F50D}")
+          React.createElement("span", { style: { position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text6)", display: "flex", pointerEvents: "none" } }, SvgIcon(14, SEARCH))
         ),
         React.createElement("button", {
           onClick: handleCreate,
@@ -603,7 +669,7 @@ window.NotepadPage = (function () {
             borderRadius: 8, border: "none", cursor: "pointer",
             background: "var(--accent)", color: "#fff", fontFamily: "var(--font-body)", whiteSpace: "nowrap"
           }
-        }, "+ New Note")
+        }, SvgIcon(14, PLUS), " New Note")
       ),
       /* Notes grid */
       displayed.hasPinned && React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--text6)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 } }, "Pinned"),
@@ -619,7 +685,7 @@ window.NotepadPage = (function () {
         })
       ),
       notes.length === 0 && React.createElement("div", { style: { textAlign: "center", padding: 48, color: "var(--text6)", fontSize: 13, fontStyle: "italic" } },
-        React.createElement("div", { style: { fontSize: 40, marginBottom: 12, opacity: 0.3 } }, "\u{1F4DD}"),
+        React.createElement("div", { style: { opacity: 0.3, marginBottom: 12 } }, SvgIcon(48, NOTE)),
         "No notes yet",
         React.createElement("div", { style: { marginTop: 6, fontSize: 11 } }, "Click \"+ New Note\" to create your first note.")
       )

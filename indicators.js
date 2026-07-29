@@ -449,7 +449,7 @@ window.TechIndicators = (function () {
       if (senkouA[i] !== null && i + 26 < n) { senkouAShifted[i + 26] = senkouA[i]; }
       if (senkouB[i] !== null && i + 26 < n) { senkouBShifted[i + 26] = senkouB[i]; }
     }
-    return { tenkan_sen: tenkan, kijun_sen: kijun, senkou_span_a: senkouAShifted, senkou_span_b: senkouBShifted, chikou_span: chikou };
+    return { tenkan: tenkan, kijun: kijun, senkouA: senkouAShifted, senkouB: senkouBShifted, chikou: chikou };
   }
 
   function calcMACD(candles, fast, slow, signal) {
@@ -1353,9 +1353,9 @@ window.TechIndicators = (function () {
     for (var i = accumDist.length - 1; i >= 0; i--) { if (accumDist[i] !== null) { accumDistLabel = accumDist[i]; break; } }
 
     var ichRes = calcIchimoku(candles);
-    var tenkan = gv(ichRes.tenkan_sen), tenkanPrev = pv(ichRes.tenkan_sen);
-    var kijun = gv(ichRes.kijun_sen), kijunPrev = pv(ichRes.kijun_sen);
-    var senkouA = gv(ichRes.senkou_span_a), senkouB = gv(ichRes.senkou_span_b);
+    var tenkan = gv(ichRes.tenkan), tenkanPrev = pv(ichRes.tenkan);
+    var kijun = gv(ichRes.kijun), kijunPrev = pv(ichRes.kijun);
+    var senkouA = gv(ichRes.senkouA), senkouB = gv(ichRes.senkouB);
 
     var fibRes = calcFibonacci(candles);
     var fibLevels = fibRes ? fibRes.retrace : {};
@@ -1825,9 +1825,9 @@ window.TechIndicators = (function () {
     for (var i = accumDist.length - 1; i >= 0; i--) { if (accumDist[i] !== null) { accumDistLabel = accumDist[i]; break; } }
 
     var ichRes = calcIchimoku(candles);
-    var tenkan = gv(ichRes.tenkan_sen), kijun = gv(ichRes.kijun_sen);
-    var senkouA = gv(ichRes.senkou_span_a), senkouB = gv(ichRes.senkou_span_b);
-    var chikou = gv(ichRes.chikou_span);
+    var tenkan = gv(ichRes.tenkan), kijun = gv(ichRes.kijun);
+    var senkouA = gv(ichRes.senkouA), senkouB = gv(ichRes.senkouB);
+    var chikou = gv(ichRes.chikou);
 
     var fibRes = calcFibonacci(candles);
     var fibLevels = fibRes ? fibRes.retrace : null;
@@ -2057,7 +2057,7 @@ window.TechIndicators = (function () {
         if (c > cloudTop) s += 2.0; else if (c > Math.min(senkouA, senkouB)) s += 0.5;
       }
       if (tenkan !== null && kijun !== null && tenkan > kijun) s += 1.0;
-      if (tenkan !== null && kijun !== null && hasCrossedAbove(ichRes.tenkan_sen, ichRes.kijun_sen)) s += 0.5;
+      if (tenkan !== null && kijun !== null && hasCrossedAbove(ichRes.tenkan, ichRes.kijun)) s += 0.5;
       if (senkouA !== null && senkouB !== null && senkouA > senkouB) s += 1.0;
       if (chikou !== null && pc !== null && chikou > pc) s += 0.5;
       if (senkouA !== null && senkouB !== null && tenkan !== null && kijun !== null && chikou !== null && pc !== null &&
