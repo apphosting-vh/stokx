@@ -620,6 +620,7 @@ window.TechnicalIndicatorsPanel = (function () {
     var _j = useState("all"), category = _j[0], setCategory = _j[1];
     var _k = useState(0), refreshTick = _k[0], setRefreshTick = _k[1];
     var _l = useState(null), dataSource = _l[0], setDataSource = _l[1];
+    var _m = useState(false), showGuide = _m[0], setShowGuide = _m[1];
     var timerRef = useRef(null);
 
     var avKey = DF.getAVKey();
@@ -670,6 +671,46 @@ window.TechnicalIndicatorsPanel = (function () {
       if (category === "all") return INDICATORS;
       return INDICATORS.filter(function (ind) { return ind.cat === category; });
     }, [category]);
+
+    var _sc = function(key, bullish) {
+      var map = {
+        sma_20: ["Institutional buy orders step in on tests of the 20/50 SMA.", "Price rallies but rejected at MA from below."],
+        ema_9: ["Short-term trend supported by institutional flow.", "EMA turns into resistance on pullback attempts."],
+        macd: ["Surging institutional momentum; expanding histogram confirms.", "Fading institutional support; histogram shrinking."],
+        adx_14: ["+DI > -DI confirms strong trend.", "-DI > +DI = bearish trend control."],
+        supertrend: ["Institutional uptrend control.", "Institutional support has ended."],
+        psar: ["Price above PSAR = uptrend.", "Price below PSAR = downtrend."],
+        aroon: ["Strong uptrend (Aroon Osc > 50).", "Strong downtrend (Aroon Osc < -50)."],
+        rsi_14: ["RSI 40-80; bounces off 40-50 signal institutional re-entries.", "Bearish divergence or break below 40 = institutional exit."],
+        cci_20: ["CCI rising from oversold = accumulation.", "Extreme CCI > 100 then sharp drop = Smart Money dumping."],
+        roc_10: ["Positive ROC backed by volume = strong buying velocity.", "Negative ROC = selling pressure."],
+        mfi_14: ["MFI rising from < 20 = accumulation.", "MFI > 80 = potential overbought distribution."],
+        vwap: ["Dips to VWAP bought by institutional algorithms.", "Price below VWAP; institutions offload on rallies to VWAP."],
+        obv: ["Rising OBV confirms institutional buying power.", "Bearish divergence: higher price, lower OBV = Smart Money selling."],
+        ttmSqueeze: ["Squeeze release upward = institutional markup.", "Squeeze release downward = institutional distribution."],
+        bb: ["Walking upper band with volume = aggressive institutional expansion.", "Upper band touch + long wick = liquidity sweep, then breakdown."],
+        donchian: ["High-volume breakout above = institutional displacement.", "Fake breakout (stop hunt), reversal back inside."],
+        chandelier: ["Price above exit = safe; trend intact.", "Chandelier triggered = institutional support ended."],
+        ichimoku: ["Price above cloud = bullish; Tenkan/Kijun cross = signal.", "Price below cloud = bearish."],
+        pivotPoints: ["Holding above Pivot = bullish.", "Below Pivot = bearish."],
+        choppiness: ["Trending (< 38.2).", "Ranging/choppy (> 61.8)."],
+        mtfAlignment: ["Complete MTF harmony = alignment across timeframes.", "Degrading MTF = conflicting institutional flows."],
+        volumeProfile: ["POC bounce = institutional defense of value.", "Break below POC = value turned into resistance."],
+        cmf: ["CMF > 0.05 = institutions infusing capital.", "Negative CMF = distribution."],
+        kvo: ["KVO > 0 = bullish volume pressure.", "KVO < 0 = bearish volume."],
+        pvt: ["Rising PVT = accumulation.", "Falling PVT = distribution."],
+        vortex: ["+VI > -VI = institutional trend control.", "-VI > +VI = support ended."],
+        heikinAshi: ["Consecutive green HA = institutional trend control.", "Red HA = bearish pressure."],
+        fractals: ["Dip below fractal low, trigger stops, then surge = liquidity grab.", "Spike above fractal high, trigger breakouts, then dump."],
+        smartMoney: ["BOS up = trend continuation.", "BOS down = reversal."],
+        fibonacci: ["0.618 Fib bounce = institutional buy-wick rejection.", "0.618 failure = structural breakdown."],
+        darvas: ["Breakout above box = bullish.", "Breakdown below box = bearish."],
+        keltner: ["High-volume breakout above = institutional displacement.", "Fakeout above then reversal back inside."]
+      };
+      var entry = map[key];
+      if (!entry) return null;
+      return React.createElement("div", { style: { color: "var(--text6)", lineHeight: 1.3, marginTop: 1 } }, bullish ? entry[0] : entry[1]);
+    };
 
     return React.createElement("div", null,
       /* ── Data source status ── */
@@ -761,7 +802,199 @@ window.TechnicalIndicatorsPanel = (function () {
             color: "var(--text5)", cursor: loading ? "wait" : "pointer",
             opacity: loading ? 0.6 : 1,
           }
-        }, loading ? "Loading..." : "↻ Refresh")
+        }, loading ? "Loading..." : "↻ Refresh"),
+        React.createElement("button", {
+          onClick: function () { setShowGuide(!showGuide); },
+          title: "Indicator guide",
+          style: {
+            padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 700,
+            border: "1px solid " + (showGuide ? "var(--accent)" : "var(--border)"),
+            background: showGuide ? "var(--accentbg)" : "var(--bg4)",
+            color: showGuide ? "var(--accent)" : "var(--text5)", cursor: "pointer",
+          }
+        }, "?")
+      ),
+
+      /* Indicator guide — dynamic (uses actual computed values) */
+      showGuide && React.createElement("div", {
+        style: { marginBottom: 14, borderRadius: 10, border: "1px solid var(--border)", overflow: "hidden", fontSize: 11, lineHeight: 1.6, color: "var(--text4)" }
+      },
+        React.createElement("div", { style: { padding: "8px 14px", background: "var(--bg4)", fontWeight: 700, fontSize: 12, color: "var(--text)", borderBottom: "1px solid var(--border)" } },
+          ticker + " Indicator Analysis (" + timeframe + ")"
+        ),
+        React.createElement("div", { style: { padding: "10px 14px", background: "var(--bg3)", maxHeight: 400, overflowY: "auto" } },
+          !indicators
+            ? React.createElement("div", { style: { color: "var(--text6)", textAlign: "center", padding: 16 } }, "Loading indicators\u2026")
+            : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+                /* Price context */
+                React.createElement("div", { style: { padding: "6px 8px", borderRadius: 6, background: "var(--bg4)" } },
+                  React.createElement("span", { style: { fontWeight: 600, color: "var(--text)" } }, "Price: "),
+                  React.createElement("span", { style: { fontWeight: 700, color: "var(--accent)" } }, fmt(indicators.lastClose)),
+                  " \u00b7 " + candles.length + " candles \u00b7 " + timeframe
+                ),
+
+                /* Trend */
+                React.createElement("div", null,
+                  React.createElement("div", { style: { fontWeight: 600, color: "var(--text)", marginBottom: 3, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 } }, "Trend"),
+                  React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 } },
+                    indicators.sma_20 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "SMA(20): ", React.createElement("span", { style: { fontWeight: 600, color: indicators.lastClose > indicators.sma_20 ? "#16a34a" : "#ef4444" } }, fmt(indicators.sma_20)),
+                      " \u2014 price ", indicators.lastClose > indicators.sma_20 ? "above = bullish" : "below = bearish",
+                      _sc("sma_20", indicators.lastClose > indicators.sma_20)
+                    ),
+                    indicators.ema_9 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "EMA(9): ", React.createElement("span", { style: { fontWeight: 600, color: indicators.lastClose > indicators.ema_9 ? "#16a34a" : "#ef4444" } }, fmt(indicators.ema_9)),
+                      " \u2014 ", indicators.lastClose > indicators.ema_9 ? "price above (bullish)" : "price below (bearish)",
+                      _sc("ema_9", indicators.lastClose > indicators.ema_9)
+                    ),
+                    indicators.macd && indicators.macd.macd != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "MACD: ", React.createElement("span", { style: { fontWeight: 600, color: indicators.macd.histogram >= 0 ? "#16a34a" : "#ef4444" } }, fmt(indicators.macd.macd, 4)),
+                      " Hist: ", React.createElement("span", { style: { fontWeight: 600, color: indicators.macd.histogram >= 0 ? "#16a34a" : "#ef4444" } }, fmt(indicators.macd.histogram, 4)),
+                      " \u2014 ", indicators.macd.histogram >= 0 ? "bullish momentum" : "bearish momentum",
+                      _sc("macd", indicators.macd.histogram >= 0)
+                    ),
+                    indicators.adx_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "ADX: ", React.createElement("span", { style: { fontWeight: 600, color: "#a0522d" } }, fmt(indicators.adx_14)),
+                      " \u2014 ", indicators.adx_14 > 25 ? "trending" : indicators.adx_14 > 20 ? "borderline" : "ranging"
+                    ),
+                    indicators.plusDI != null && indicators.minusDI != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "+DI: ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.plusDI)), " / -DI: ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.minusDI)),
+                      " \u2014 ", indicators.plusDI > indicators.minusDI ? "bullish" : "bearish"
+                    ),
+                    indicators.supertrend != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "SuperTrend: ", React.createElement("span", { style: { fontWeight: 600, color: indicators.lastClose > indicators.supertrend ? "#16a34a" : "#ef4444" } }, fmt(indicators.supertrend)),
+                      " \u2014 ", indicators.lastClose > indicators.supertrend ? "uptrend" : "downtrend",
+                      _sc("supertrend", indicators.lastClose > indicators.supertrend)
+                    ),
+                    indicators.psar != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "PSAR: ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.psar)),
+                      " \u2014 ", indicators.lastClose > indicators.psar ? "price above (bullish)" : "price below (bearish)",
+                      _sc("psar", indicators.lastClose > indicators.psar)
+                    ),
+                    indicators.aroon && indicators.aroon.osc != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "Aroon Osc: ", React.createElement("span", { style: { fontWeight: 600, color: indicators.aroon.osc > 0 ? "#16a34a" : "#ef4444" } }, fmt(indicators.aroon.osc)),
+                      " \u2014 ", indicators.aroon.osc > 50 ? "strong uptrend" : indicators.aroon.osc > 0 ? "uptrend" : indicators.aroon.osc < -50 ? "strong downtrend" : "downtrend",
+                      _sc("aroon", indicators.aroon.osc > 0)
+                    )
+                  )
+                ),
+
+                /* Momentum */
+                React.createElement("div", null,
+                  React.createElement("div", { style: { fontWeight: 600, color: "var(--text)", marginBottom: 3, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 } }, "Momentum"),
+                  React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 } },
+                    indicators.rsi_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "RSI(14): ", React.createElement("span", { style: { fontWeight: 600, color: indicators.rsi_14 > 70 ? "#ef4444" : indicators.rsi_14 < 30 ? "#2563eb" : "#2563eb" } }, fmt(indicators.rsi_14)),
+                      " \u2014 ", indicators.rsi_14 > 70 ? "overbought (reversal risk)" : indicators.rsi_14 < 30 ? "oversold (bounce potential)" : "neutral range",
+                      _sc("rsi_14", indicators.rsi_14 > 50)
+                    ),
+                    indicators.cci_20 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "CCI(20): ", React.createElement("span", { style: { fontWeight: 600, color: indicators.cci_20 > 100 ? "#ef4444" : indicators.cci_20 < -100 ? "#2563eb" : "#2563eb" } }, fmt(indicators.cci_20)),
+                      " \u2014 ", indicators.cci_20 > 100 ? "overbought" : indicators.cci_20 < -100 ? "oversold" : "neutral",
+                      _sc("cci_20", indicators.cci_20 > 0)
+                    ),
+                    indicators.roc_10 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "ROC(10): ", React.createElement("span", { style: { fontWeight: 600, color: indicators.roc_10 > 0 ? "#16a34a" : "#ef4444" } }, fmt(indicators.roc_10, 2) + "%"),
+                      " \u2014 ", indicators.roc_10 > 0 ? "positive momentum" : "negative momentum",
+                      _sc("roc_10", indicators.roc_10 > 0)
+                    ),
+                    indicators.mfi_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "MFI(14): ", React.createElement("span", { style: { fontWeight: 600, color: indicators.mfi_14 > 80 ? "#ef4444" : indicators.mfi_14 < 20 ? "#2563eb" : "#2563eb" } }, fmt(indicators.mfi_14)),
+                      " \u2014 ", indicators.mfi_14 > 80 ? "overbought" : indicators.mfi_14 < 20 ? "oversold" : "neutral",
+                      _sc("mfi_14", indicators.mfi_14 > 50)
+                    )
+                  )
+                ),
+
+                /* Volume */
+                React.createElement("div", null,
+                  React.createElement("div", { style: { fontWeight: 600, color: "var(--text)", marginBottom: 3, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 } }, "Volume"),
+                  React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 } },
+                    indicators.vwap != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "VWAP: ", React.createElement("span", { style: { fontWeight: 600, color: indicators.lastClose > indicators.vwap ? "#16a34a" : "#ef4444" } }, fmt(indicators.vwap)),
+                      " \u2014 price ", indicators.lastClose > indicators.vwap ? "above (bullish)" : "below (bearish)",
+                      _sc("vwap", indicators.lastClose > indicators.vwap)
+                    ),
+                    indicators.volumeProfile && indicators.volumeProfile.poc != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "POC: ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.volumeProfile.poc)),
+                      " \u2014 highest volume price level",
+                      _sc("volumeProfile", indicators.volumeProfile && indicators.lastClose >= indicators.volumeProfile.poc)
+                    ),
+                    indicators.ttmSqueeze != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "TTM Squeeze: ", React.createElement("span", { style: { fontWeight: 600, color: indicators.ttmSqueeze ? "#f59e0b" : "var(--text6)" } }, indicators.ttmSqueeze ? "ON" : "OFF"),
+                      indicators.ttmSqueeze ? " \u2014 coiled for breakout" : " \u2014 no squeeze"
+                    )
+                  )
+                ),
+
+                /* Volatility */
+                React.createElement("div", null,
+                  React.createElement("div", { style: { fontWeight: 600, color: "var(--text)", marginBottom: 3, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 } }, "Volatility"),
+                  React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 } },
+                    indicators.atr_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "ATR(14): ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.atr_14)),
+                      " \u2014 ", indicators.atr_14 > 0 && indicators.lastClose > 0
+                        ? "stop distance ~" + fmt(indicators.atr_14 * 1.5) + " (" + (indicators.atr_14 / indicators.lastClose * 100).toFixed(1) + "% of price)"
+                        : ""
+                    ),
+                    indicators.bb && indicators.bb.upper != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "Bollinger: U:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.bb.upper)), " M:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.bb.middle)), " L:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.bb.lower)),
+                      indicators.lastClose >= indicators.bb.upper * 0.99 ? " \u2014 at upper band (overextended)" : indicators.lastClose <= indicators.bb.lower * 1.01 ? " \u2014 at lower band (oversold)" : " \u2014 inside bands",
+                      _sc("bb", indicators.lastClose > indicators.bb.middle)
+                    ),
+                    indicators.donchian && indicators.donchian.upper != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "Donchian(20): H:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.donchian.upper)), " L:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.donchian.lower)),
+                      indicators.lastClose >= indicators.donchian.upper ? " \u2014 breakout high" : indicators.lastClose <= indicators.donchian.lower ? " \u2014 breakout low" : "",
+                      _sc("donchian", indicators.lastClose > (indicators.donchian.upper + indicators.donchian.lower) / 2)
+                    ),
+                    indicators.chandelier && indicators.chandelier.long != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "Chandelier Long: ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.chandelier.long)),
+                      " \u2014 ", indicators.lastClose > indicators.chandelier.long ? "price above (safe)" : "price below (exit)",
+                      _sc("chandelier", indicators.lastClose > indicators.chandelier.long)
+                    )
+                  )
+                ),
+
+                /* Structure */
+                React.createElement("div", null,
+                  React.createElement("div", { style: { fontWeight: 600, color: "var(--text)", marginBottom: 3, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 } }, "Structure"),
+                  React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 } },
+                    indicators.ichimoku && indicators.ichimoku.senkouA != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "Ichimoku: T:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.ichimoku.tenkan)), " K:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.ichimoku.kijun)),
+                      " SA:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.ichimoku.senkouA)), " SB:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.ichimoku.senkouB)),
+                      " \u2014 price ", indicators.lastClose > Math.max(indicators.ichimoku.senkouA, indicators.ichimoku.senkouB) ? "above cloud (bullish)" : "below cloud (bearish)",
+                      _sc("ichimoku", indicators.lastClose > Math.max(indicators.ichimoku.senkouA, indicators.ichimoku.senkouB))
+                    ),
+                    indicators.pivotPoints && indicators.pivotPoints.classic && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "Pivots: P:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.pivotPoints.classic.P)),
+                      " R1:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.pivotPoints.classic.R1)),
+                      " S1:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.pivotPoints.classic.S1)),
+                      indicators.lastClose >= indicators.pivotPoints.classic.R1 ? " \u2014 above R1 (resistance)" : indicators.lastClose <= indicators.pivotPoints.classic.S1 ? " \u2014 below S1 (support)" : " \u2014 between S1-R1",
+                      _sc("pivotPoints", indicators.lastClose >= indicators.pivotPoints.classic.P)
+                    ),
+                    indicators.choppiness != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "Choppiness: ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, fmt(indicators.choppiness)),
+                      " \u2014 ", indicators.choppiness < 38.2 ? "trending" : indicators.choppiness > 61.8 ? "ranging/choppy" : "neutral",
+                      _sc("choppiness", indicators.choppiness < 38.2)
+                    ),
+                    indicators.mtfAlignment != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "MTF Alignment: ", React.createElement("span", { style: { fontWeight: 600, color: indicators.mtfAlignment >= 70 ? "#16a34a" : indicators.mtfAlignment <= 30 ? "#ef4444" : "#2563eb" } }, fmt(indicators.mtfAlignment)),
+                      indicators.mtfAlignment >= 70 ? " \u2014 bullish across TFs" : indicators.mtfAlignment <= 30 ? " \u2014 bearish across TFs" : " \u2014 mixed",
+                    )
+                  )
+                ),
+
+                /* Summary */
+                React.createElement("div", {
+                  style: { marginTop: 4, padding: "6px 8px", borderRadius: 6, background: "var(--bg4)", fontSize: 10, color: "var(--text5)", lineHeight: 1.5 }
+                },
+                  "Signals are rule-based (price vs indicator). ",
+                  "The blue ", React.createElement("span", { style: { fontWeight: 600, color: "var(--accent)" } }, "ScoreGauge"),
+                  " above aggregates all signals into a Bull/Neutral/Bear count. ",
+                  "Use the timeframe buttons to switch between Daily/Weekly/Hourly views for multi-TF context."
+                )
+              )
+        )
       ),
 
       /* Last updated */

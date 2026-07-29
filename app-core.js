@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.5.3";
+window.__STOX_APP_VERSION = "2.5.4";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -1254,6 +1254,40 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
       )
     ),
 
+    // Indicator Guide (collapsible, shows actual values when available)
+    React.createElement("div", {
+      style: { marginBottom: 16, borderRadius: 10, border: "1px solid var(--border)", overflow: "hidden" }
+    },
+      React.createElement("div", {
+        onClick: function (e) { var n = e.currentTarget.nextElementSibling; if (n) n.style.display = n.style.display === "none" ? "block" : "none"; },
+        style: { padding: "8px 14px", background: "var(--bg4)", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "var(--text)", userSelect: "none" }
+      }, "\u2139\uFE0F " + ticker + " \u2014 " + (price > 0 ? "Price: " + INR(price, 2) : "Indicator Guide")),
+      React.createElement("div", { style: { padding: "10px 14px", fontSize: 11, lineHeight: 1.7, color: "var(--text4)", background: "var(--bg3)", borderTop: "1px solid var(--border)" } },
+        React.createElement("div", { style: { marginBottom: 6 } },
+          React.createElement("span", { style: { fontWeight: 600, color: "var(--text)" } }, "How to use this page: "),
+          "The ", React.createElement("span", { style: { fontWeight: 600, color: "var(--accent)" } }, "Technical Indicators"),
+          " panel below shows computed values for all indicators. Hover over the ", React.createElement("span", { style: { fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "0 4px", borderRadius: 3 } }, "?"),
+          " button in the panel to see a dynamic guide with actual indicator values for " + ticker + "."
+        ),
+        React.createElement("div", { style: { marginBottom: 6 } },
+          React.createElement("span", { style: { fontWeight: 600, color: "var(--text)" } }, "Signals: "),
+          "Each indicator shows a ",
+          React.createElement("span", { style: { color: "#16a34a", fontWeight: 600 } }, "Bullish"),
+          "/", React.createElement("span", { style: { color: "#ef4444", fontWeight: 600 } }, "Bearish"),
+          "/Neutral badge. These are rule-based (e.g., price above MA = bullish)."
+        ),
+        React.createElement("div", { style: { marginBottom: 6 } },
+          React.createElement("span", { style: { fontWeight: 600, color: "var(--text)" } }, "Categories: "),
+          "Trend \u2014 MAs, MACD, ADX, SuperTrend. Momentum \u2014 RSI, CCI, MFI. Volume \u2014 VWAP, OBV, TTM Squeeze. ",
+          "Volatility \u2014 Bollinger, ATR, Donchian. Structure \u2014 Ichimoku, Pivots, Choppiness."
+        ),
+        React.createElement("div", null,
+          React.createElement("span", { style: { fontWeight: 600, color: "var(--text)" } }, "Scoring: "),
+          "The Entry/Exit Score (0\u2013100) aggregates all indicators into four pillars. " + (holding ? "Your holding: entry $" + INR(holding.buyPrice, 2) + " on " + new Date(holding.buyDate).toLocaleDateString() + "." : "")
+        )
+      )
+    ),
+
     // Exit Score Trend (active holdings only)
     ticker && holding && React.createElement(ExitScoreTrend, {
       ticker: ticker,
@@ -1270,6 +1304,7 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
 function EntryScoreAnalysis({ entry, onBack }) {
   const [activeTF, setActiveTF] = useState("daily");
   const [catFilter, setCatFilter] = useState("all");
+  const [showGuide, setShowGuide] = useState(false);
   const r = entry.result || {};
   const ind = entry.indicators || {};
   const price = entry.currentPrice || r.lastClose || 0;
@@ -1344,7 +1379,7 @@ function EntryScoreAnalysis({ entry, onBack }) {
     const catKeys = ["all"].concat(CATS);
 
     return React.createElement("div", null,
-      React.createElement("div", { style: { display: "flex", gap: 3, marginBottom: 10, flexWrap: "wrap" } },
+      React.createElement("div", { style: { display: "flex", gap: 3, marginBottom: 10, flexWrap: "wrap", alignItems: "center" } },
         catKeys.map(function (cat) {
           var label = cat === "all" ? "All" : cat;
           var count = cat === "all" ? INDS.length : INDS.filter(function (i) { return i.cat === cat; }).length;
@@ -1360,7 +1395,17 @@ function EntryScoreAnalysis({ entry, onBack }) {
               transition: "all .15s",
             }
           }, label + " (" + count + ")");
-        })
+        }),
+        React.createElement("button", {
+          onClick: function () { setShowGuide(!showGuide); },
+          title: "Indicator guide",
+          style: {
+            padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+            border: "1px solid " + (showGuide ? "var(--accent)" : "var(--border)"),
+            background: showGuide ? "var(--accentbg)" : "var(--bg4)",
+            color: showGuide ? "var(--accent)" : "var(--text5)", cursor: "pointer",
+          }
+        }, "?")
       ),
       React.createElement("div", {
         style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 6 }
@@ -1475,6 +1520,24 @@ function EntryScoreAnalysis({ entry, onBack }) {
     );
   };
 
+  var _sc = function(key, bullish) {
+    var map = {
+      sma_20: ["Institutional buy orders step in on tests of the 20/50 SMA.", "Price rallies but rejected at MA from below."],
+      ema_9: ["Short-term trend supported by institutional flow.", "EMA turns into resistance on pullback attempts."],
+      macd: ["Surging institutional momentum; expanding histogram confirms.", "Fading institutional support; histogram shrinking."],
+      adx_14: ["+DI > -DI confirms strong trend.", "-DI > +DI = bearish trend control."],
+      supertrend: ["Institutional uptrend control.", "Institutional support has ended."],
+      rsi_14: ["RSI 40-80; bounces off 40-50 signal institutional re-entries.", "Bearish divergence or break below 40 = institutional exit."],
+      atr_14: ["", ""],
+      bb: ["Walking upper band with volume = aggressive institutional expansion.", "Upper band touch + long wick = liquidity sweep, then breakdown."],
+      ichimoku: ["Price above cloud = bullish; Tenkan/Kijun cross = signal.", "Price below cloud = bearish."],
+      vwap: ["Dips to VWAP bought by institutional algorithms.", "Price below VWAP; institutions offload on rallies to VWAP."]
+    };
+    var entry = map[key];
+    if (!entry) return null;
+    return React.createElement("div", { style: { color: "var(--text6)", lineHeight: 1.3, marginTop: 1 } }, bullish ? entry[0] : entry[1]);
+  };
+
   return React.createElement("div", null,
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 } },
       React.createElement("div", null,
@@ -1545,7 +1608,80 @@ function EntryScoreAnalysis({ entry, onBack }) {
         ),
         React.createElement("div", { style: { borderTop: "1px solid var(--border)", paddingTop: 10 } },
           React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text4)", marginBottom: 8 } }, "Technical Indicators"),
-          renderIndicators(activeInd)
+          renderIndicators(activeInd),
+          showGuide && activeInd && React.createElement("div", {
+            style: { marginTop: 10, borderRadius: 6, border: "1px solid var(--border)", overflow: "hidden", fontSize: 10, lineHeight: 1.5, color: "var(--text5)" }
+          },
+            React.createElement("div", { style: { padding: "6px 10px", background: "var(--bg4)", fontWeight: 600, fontSize: 10, color: "var(--text)", borderBottom: "1px solid var(--border)" } },
+              entry.ticker + " Indicators (" + activeTF + ")"
+            ),
+            React.createElement("div", { style: { padding: "8px 10px", background: "var(--bg3)", maxHeight: 300, overflowY: "auto" } },
+              React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+                React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  React.createElement("span", { style: { fontWeight: 600, color: "var(--text)" } }, "Price: "),
+                  React.createElement("span", { style: { fontWeight: 700, color: "var(--accent)" } }, _fmt(price)), " \u00b7 ",
+                  "Score: ", React.createElement("span", { style: { fontWeight: 700 } }, activeScore ? activeScore.total : "\u2014")
+                ),
+                activeInd.sma_20 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "SMA(20): ", React.createElement("span", { style: { fontWeight: 600, color: price > activeInd.sma_20 ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.sma_20)),
+                  " \u2014 price ", price > activeInd.sma_20 ? "above = bullish" : "below = bearish",
+                  _sc("sma_20", price > activeInd.sma_20)
+                ),
+                activeInd.ema_9 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "EMA(9): ", React.createElement("span", { style: { fontWeight: 600, color: price > activeInd.ema_9 ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ema_9)),
+                  " \u2014 ", price > activeInd.ema_9 ? "price above (bullish)" : "price below (bearish)",
+                  _sc("ema_9", price > activeInd.ema_9)
+                ),
+                activeInd.macd && activeInd.macd.macd != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "MACD: ", React.createElement("span", { style: { fontWeight: 600, color: activeInd.macd.histogram >= 0 ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.macd.macd, 4)),
+                  " Hist: ", React.createElement("span", { style: { fontWeight: 600, color: activeInd.macd.histogram >= 0 ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.macd.histogram, 4)),
+                  " \u2014 ", activeInd.macd.histogram >= 0 ? "bullish momentum" : "bearish momentum",
+                  _sc("macd", activeInd.macd.histogram >= 0)
+                ),
+                activeInd.adx_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "ADX: ", React.createElement("span", { style: { fontWeight: 600, color: "#a0522d" } }, _fmt(activeInd.adx_14)),
+                  " \u2014 ", activeInd.adx_14 > 25 ? "trending" : activeInd.adx_14 > 20 ? "borderline" : "ranging"
+                ),
+                activeInd.plusDI != null && activeInd.minusDI != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "+DI: ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.plusDI)), " / -DI: ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.minusDI)),
+                  " \u2014 ", activeInd.plusDI > activeInd.minusDI ? "bullish" : "bearish"
+                ),
+                activeInd.supertrend != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "SuperTrend: ", React.createElement("span", { style: { fontWeight: 600, color: price > activeInd.supertrend ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.supertrend)),
+                  " \u2014 ", price > activeInd.supertrend ? "uptrend" : "downtrend",
+                  _sc("supertrend", price > activeInd.supertrend)
+                ),
+                activeInd.rsi_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "RSI(14): ", React.createElement("span", { style: { fontWeight: 600, color: activeInd.rsi_14 > 70 ? "#ef4444" : activeInd.rsi_14 < 30 ? "#2563eb" : "#2563eb" } }, _fmt(activeInd.rsi_14)),
+                  " \u2014 ", activeInd.rsi_14 > 70 ? "overbought (reversal risk)" : activeInd.rsi_14 < 30 ? "oversold (bounce potential)" : "neutral range",
+                  _sc("rsi_14", activeInd.rsi_14 > 50)
+                ),
+                activeInd.atr_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "ATR(14): ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.atr_14)),
+                  " \u2014 ", activeInd.atr_14 > 0 && price > 0 ? "stop ~" + _fmt(activeInd.atr_14 * 1.5) + " (" + (activeInd.atr_14 / price * 100).toFixed(1) + "% of price)" : ""
+                ),
+                activeInd.bb && activeInd.bb.upper != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "Bollinger: U:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.bb.upper)), " M:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.bb.middle)), " L:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.bb.lower)),
+                  price >= activeInd.bb.upper * 0.99 ? " \u2014 at upper band" : price <= activeInd.bb.lower * 1.01 ? " \u2014 at lower band" : " \u2014 inside bands",
+                  _sc("bb", price > activeInd.bb.middle)
+                ),
+                activeInd.ichimoku && activeInd.ichimoku.senkouA != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "Ichimoku: T:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.ichimoku.tenkan)), " K:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.ichimoku.kijun)),
+                  " SA:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.ichimoku.senkouA)),
+                  " \u2014 price ", price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0) ? "above cloud" : "below cloud",
+                  _sc("ichimoku", price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0))
+                ),
+                activeInd.vwap != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                  "VWAP: ", React.createElement("span", { style: { fontWeight: 600, color: price > activeInd.vwap ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.vwap)),
+                  " \u2014 price ", price > activeInd.vwap ? "above (bullish)" : "below (bearish)",
+                  _sc("vwap", price > activeInd.vwap)
+                ),
+                React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)", fontSize: 9, color: "var(--text6)" } },
+                  "Signals are rule-based (price vs indicator). Scores aggregate across Trend, Momentum, Volume, Structure pillars. Switch timeframes above for multi-TF context."
+                )
+              )
+            )
+          )
         )
       ),
       !activeScore && React.createElement("div", { style: { textAlign: "center", padding: 16, color: "var(--text6)", fontSize: 11 } }, "No score data for " + activeTF)
