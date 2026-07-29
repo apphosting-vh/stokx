@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.29";
+window.__STOX_APP_VERSION = "2.4.30";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -3025,7 +3025,8 @@ const EntryScorePanel = ({ shares }) => {
     if (!entries.length || !TI || !DF) return;
     const OLD_KEYWORDS = /Overbought|price up, volume down|bullish, weekly bearish|within 1% of upper|new 20d high with volume surge|all 3 timeframes bullish|institutional buying|rising OBV|ADX > 20 all|MTF alignment strong|declining on thin volume|within 1.5% of lower|held < 3 days with strong|> 3% below entry|> 1.5% below entry|below EMAs \+ MACD|institutional selling/;
     const stale = entries.filter(e => {
-      if (!e.result || !e.result.hardFilters || !e.result.hardFilters.length) return false;
+      if (!e.result) return false;
+      if (!e.result.hardFilters || !e.result.hardFilters.length) return true;
       return e.result.hardFilters.some(f => OLD_KEYWORDS.test(f));
     });
     if (!stale.length) return;
@@ -3864,8 +3865,9 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
   var out = {
     finalScore: multi.multiTF_score,
     decision: toDec(multi.classification),
-    baseScore: multi.multiTF_score,
-    penalties: 0, bonuses: 0,
+    baseScore: multi.raw_score != null ? multi.raw_score : multi.multiTF_score,
+    penalties: multi.penalties || 0,
+    bonuses: multi.bonuses || 0,
     hardFilters: [],
     lastClose: null,
     weekly: null, daily: null, hourly: null
@@ -3874,18 +3876,26 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
     var scoreObj = {
       total: d.entryScore,
       decision: toDec(d.classification),
-      trendScore: d.trend, trendMax: 25,
+      trendScore: d.trend, trendMax: 30,
       momentumScore: d.momentum, momentumMax: 25,
-      volumeScore: d.volume, volumeMax: 25,
-      structureScore: d.structure, structureMax: 25
+      volumeScore: d.volume, volumeMax: 20,
+      structureScore: d.structure, structureMax: 20,
+      penalties: d.penalties, bonuses: d.bonuses, raw_score: d.raw_score
     };
     if (d.timeframe === 'W' || d.timeframe === 'weekly' || d.timeframe === '1W') out.weekly = scoreObj;
     else if (d.timeframe === 'D' || d.timeframe === 'daily' || d.timeframe === '1D') out.daily = scoreObj;
     else if (d.timeframe === 'H' || d.timeframe === 'hourly' || d.timeframe === '1h') out.hourly = scoreObj;
   });
-  if (multi.penalties != null) out.penalties = multi.penalties;
-  if (multi.bonuses != null) out.bonuses = multi.bonuses;
-  if (multi.raw_score != null) out.baseScore = multi.raw_score;
+  if (multi.penalty_items && multi.penalty_items.length) {
+    multi.penalty_items.forEach(function(it) {
+      out.hardFilters.push(it.reason + " (" + it.amount + ")");
+    });
+  }
+  if (multi.bonus_items && multi.bonus_items.length) {
+    multi.bonus_items.forEach(function(it) {
+      out.hardFilters.push(it.reason + " (+" + it.amount + ")");
+    });
+  }
   return out;
 }
 

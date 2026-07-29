@@ -1598,42 +1598,47 @@ window.TechIndicators = (function () {
     var rawTotal = trendBD + momExh + volDist + strucBD;
 
     /* ── penalties (reduce exit urgency) ── */
-    var penalties = 0;
+    var penaltyItems = [];
     var weeklyEmaAligned = ema9 !== null && ema21 !== null && ema9 > ema21;
     var weeklyMacdBullish = macdL !== null && sigL !== null && macdL > sigL;
-    if (weeklyEmaAligned && weeklyMacdBullish) penalties -= 8;
+    if (weeklyEmaAligned && weeklyMacdBullish) penaltyItems.push({ reason: "Weekly EMA+MACD bullish", amount: -8 });
     var priceDecl3 = true;
     for (var i = L - 3; i < L; i++) { if (i > L - 3 && cl[i] >= cl[i - 1]) { priceDecl3 = false; break; } }
     var avgVol20 = 0;
     for (var i = L - 20; i < L; i++) avgVol20 += vo[i];
     avgVol20 /= 20;
-    if (priceDecl3 && vo[L1] < 0.7 * avgVol20) penalties -= 6;
-    if (pivotS1 !== null && c > 0) { var distToSupport = (c - pivotS1) / c; if (distToSupport < 0.015 && distToSupport >= 0) penalties -= 5; }
-    if (holdingDays < 3 && entryScore > 70) penalties -= 5;
-    if (fibLevels && fibLevels['0.618'] !== null && pivotP !== null && c > fibLevels['0.618'] && c > pivotP) penalties -= 3;
+    if (priceDecl3 && vo[L1] < 0.7 * avgVol20) penaltyItems.push({ reason: "Price decline 3 + low volume", amount: -6 });
+    if (pivotS1 !== null && c > 0) { var distToSupport = (c - pivotS1) / c; if (distToSupport < 0.015 && distToSupport >= 0) penaltyItems.push({ reason: "Near support", amount: -5 }); }
+    if (holdingDays < 3 && entryScore > 70) penaltyItems.push({ reason: "Held <3 days + high entry score", amount: -5 });
+    if (fibLevels && fibLevels['0.618'] !== null && pivotP !== null && c > fibLevels['0.618'] && c > pivotP) penaltyItems.push({ reason: "Above fib 0.618 + pivot", amount: -3 });
 
     /* ── bonuses (increase exit urgency) ── */
-    var bonuses = 0;
+    var bonusItems = [];
     if (indexCandles && indexCandles.length > 10) {
       var idxClose = closes(indexCandles);
       if (idxClose && idxClose.length > 5) {
         var idxInd = computeAll(indexCandles);
-        if (idxInd && idxInd.ema_9 !== null && idxClose[idxClose.length - 1] < idxInd.ema_9 && idxInd.ema_9 < idxInd.ema_21) bonuses += 5;
+        if (idxInd && idxInd.ema_9 !== null && idxClose[idxClose.length - 1] < idxInd.ema_9 && idxInd.ema_9 < idxInd.ema_21) bonusItems.push({ reason: "Index bearish EMA9<21", amount: 5 });
       }
     }
-    if (distDayRatio >= 0.6) bonuses += 5;
-    if (entryPrice !== null && entryPrice > 0) { if (currentPrice < entryPrice * 0.97) bonuses += 5; else if (currentPrice < entryPrice * 0.985) bonuses += 3; }
+    if (distDayRatio >= 0.6) bonusItems.push({ reason: "Distribution days >=60%", amount: 5 });
+    if (entryPrice !== null && entryPrice > 0) { if (currentPrice < entryPrice * 0.97) bonusItems.push({ reason: "Price <97% entry", amount: 5 }); else if (currentPrice < entryPrice * 0.985) bonusItems.push({ reason: "Price <98.5% entry", amount: 3 }); }
     var dailyBearish = hma20 !== null && c < hma20;
     var hourlyBearish = ema9 !== null && c < ema9;
-    if (dailyBearish && hourlyBearish) bonuses += 5;
-    if (accumDistLabel === 'DISTRIBUTION' && mtfAlign !== null && mtfAlign < 40) bonuses += 3;
+    if (dailyBearish && hourlyBearish) bonusItems.push({ reason: "Daily+Hourly bearish", amount: 5 });
+    if (accumDistLabel === 'DISTRIBUTION' && mtfAlign !== null && mtfAlign < 40) bonusItems.push({ reason: "Distribution + MTF<40", amount: 3 });
     var betaVal = null;
     try { if (indexCandles && indexCandles.length > 10) betaVal = calcBeta(candles, indexCandles); } catch(e) {}
     if (betaVal !== null && betaVal > 1.5) { var idxInd2 = null;
       try { if (indexCandles && indexCandles.length > 10) { idxInd2 = computeAll(indexCandles); } } catch(e) {}
-      if (idxInd2 && idxInd2.ema_9 !== null && idxClose && idxClose[idxClose.length - 1] < idxInd2.ema_9) bonuses += 3;
+      if (idxInd2 && idxInd2.ema_9 !== null && idxClose && idxClose[idxClose.length - 1] < idxInd2.ema_9) bonusItems.push({ reason: "High beta + index bearish", amount: 3 });
     }
-    if (c < chandelierLong && pivotS1 !== null && c < pivotS1) bonuses += 3;
+    if (c < chandelierLong && pivotS1 !== null && c < pivotS1) bonusItems.push({ reason: "Below Chandelier + S1", amount: 3 });
+
+    var penalties = 0;
+    penaltyItems.forEach(function(it) { penalties += it.amount; });
+    var bonuses = 0;
+    bonusItems.forEach(function(it) { bonuses += it.amount; });
 
     var finalScore = Math.max(0, Math.min(100, rawTotal + penalties + bonuses));
 
@@ -1652,6 +1657,7 @@ window.TechIndicators = (function () {
       trend_breakdown: round(trendBD, 1), momentum_exhaustion: round(momExh, 1),
       volume_distribution: round(volDist, 1), structure_breakdown: round(strucBD, 1),
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
+      penalty_items: penaltyItems, bonus_items: bonusItems,
       classification: classification, signal: signal, action: action,
       details: {
         maBreakdown: round(scoreMaBreakdown(), 2), macdTsiStcAoExit: round(scoreMacdTsiStcAoExit(), 2), adxStPsarViAroonExit: round(scoreAdxStPsarViAroonExit(), 2),
@@ -2088,46 +2094,51 @@ window.TechIndicators = (function () {
     var rawTotal = trendScore + momentumScore + volumeScore + structureScore;
 
     /* ── penalties ── */
-    var penalties = 0;
-    if (rsi14 !== null && rsi14 > 78) penalties -= 5;
+    var penaltyItems = [];
+    if (rsi14 !== null && rsi14 > 78) penaltyItems.push({ reason: "RSI overbought", amount: -5 });
     var rising5 = true, declining5 = true;
     for (var i = Math.max(0, L - 5); i < L; i++) { if (i > Math.max(0, L - 5) && cl[i] <= cl[i - 1]) rising5 = false; if (i > Math.max(0, L - 5) && vo[i] >= vo[i - 1]) declining5 = false; }
-    if (cl.length >= 5) { if (rising5 && declining5) penalties -= 8; }
+    if (cl.length >= 5) { if (rising5 && declining5) penaltyItems.push({ reason: "Rising price + declining volume 5 days", amount: -8 }); }
     if (cl.length >= 5 && hma20_s && hma20_s.length > 1) {
       var weeklyTrend = 'neutral'; var dailyBullish = false;
       if (hma20 !== null && c > hma20) dailyBullish = true;
-      if (weeklyTrend === 'bearish' && dailyBullish) penalties -= 10;
+      if (weeklyTrend === 'bearish' && dailyBullish) penaltyItems.push({ reason: "Weekly bearish + daily bullish clash", amount: -10 });
     }
-    if (pivotR1 !== null && c !== null && pivotR1 > 0) { var distToRes = (pivotR1 - c) / c; if (distToRes < 0.01 && distToRes >= 0) penalties -= 5; }
+    if (pivotR1 !== null && c !== null && pivotR1 > 0) { var distToRes = (pivotR1 - c) / c; if (distToRes < 0.01 && distToRes >= 0) penaltyItems.push({ reason: "Near resistance", amount: -5 }); }
     if (squeezeOn !== null) { var sqDuration = 0;
       for (var i = sqArr.length - 1; i >= 0; i--) { if (sqArr[i] === true) sqDuration++; else break; }
-      if (squeezeOn && sqDuration > 10) penalties -= 3;
+      if (squeezeOn && sqDuration > 10) penaltyItems.push({ reason: "Squeeze over 10 bars", amount: -3 });
     }
-    if (beta !== null && beta > 1.5 && atr14 !== null && c > 0) { var atrPct = atr14 / c * 100; if (atrPct > 3.0) penalties -= 3; }
+    if (beta !== null && beta > 1.5 && atr14 !== null && c > 0) { var atrPct = atr14 / c * 100; if (atrPct > 3.0) penaltyItems.push({ reason: "High beta + high ATR", amount: -3 }); }
 
     /* ── bonuses ── */
-    var bonuses = 0;
+    var bonusItems = [];
     if (dcUpper !== null) { var prevDcUpper = pv(dcRes && dcRes.upper ? dcRes.upper : null);
       if (c > dcUpper) { var avgVol = 0, avgVolCount = 0;
         for (var i = Math.max(0, L - 20); i < L; i++) { avgVol += vo[i]; avgVolCount++; }
         avgVol = avgVolCount > 0 ? avgVol / avgVolCount : 0;
-        if (vo[L1] > 1.5 * avgVol) bonuses += 5;
+        if (vo[L1] > 1.5 * avgVol) bonusItems.push({ reason: "Donchian breakout + high volume", amount: 5 });
       }
     }
     var hourlyBullish = false, dailyBullish = false, weeklyBullish = false;
     if (c > ema21) dailyBullish = true;
     if (hma20 !== null && c > hma20) hourlyBullish = true;
     if (sma50 !== null && c > sma50) weeklyBullish = true;
-    if (dailyBullish && weeklyBullish && hourlyBullish) bonuses += 5;
+    if (dailyBullish && weeklyBullish && hourlyBullish) bonusItems.push({ reason: "All TFs bullish (D/W/H)", amount: 5 });
     if (indexCandles && indexCandles.length > 10) {
       var idxClose = closes(indexCandles);
       if (idxClose && idxClose.length > 5) { var idxInd = computeAll(indexCandles);
-        if (idxInd && idxInd.ema_9 !== null && idxClose[idxClose.length - 1] > idxInd.ema_9) bonuses += 3; }
+        if (idxInd && idxInd.ema_9 !== null && idxClose[idxClose.length - 1] > idxInd.ema_9) bonusItems.push({ reason: "Index above EMA(9)", amount: 3 }); }
     }
-    if (accumDistLabel === 'ACCUMULATION' && mtfAlign !== null && mtfAlign > 80) bonuses += 3;
-    if (rsMansfield8w !== null && aroonOsc !== null && rsMansfield8w > 5 && aroonOsc > 50) bonuses += 3;
-    if (pivotR1 !== null && fibLevels !== null && fibLevels['0.618'] !== null && c > pivotR1 && c > fibLevels['0.618']) bonuses += 2;
-    if (roc10 !== null && roc21 !== null && roc10 > 3 && roc21 > 5) bonuses += 4;
+    if (accumDistLabel === 'ACCUMULATION' && mtfAlign !== null && mtfAlign > 80) bonusItems.push({ reason: "Accumulation + MTF>80", amount: 3 });
+    if (rsMansfield8w !== null && aroonOsc !== null && rsMansfield8w > 5 && aroonOsc > 50) bonusItems.push({ reason: "RS Mansfield>5 + Aroon>50", amount: 3 });
+    if (pivotR1 !== null && fibLevels !== null && fibLevels['0.618'] !== null && c > pivotR1 && c > fibLevels['0.618']) bonusItems.push({ reason: "Above pivot R1 + fib 0.618", amount: 2 });
+    if (roc10 !== null && roc21 !== null && roc10 > 3 && roc21 > 5) bonusItems.push({ reason: "ROC(10)>3 + ROC(21)>5", amount: 4 });
+
+    var penalties = 0;
+    penaltyItems.forEach(function(it) { penalties += it.amount; });
+    var bonuses = 0;
+    bonusItems.forEach(function(it) { bonuses += it.amount; });
 
     var finalScore = Math.max(0, Math.min(100, rawTotal + penalties + bonuses));
 
@@ -2145,6 +2156,7 @@ window.TechIndicators = (function () {
       trend: round(trendScore, 1), momentum: round(momentumScore, 1),
       volume: round(volumeScore, 1), structure: round(structureScore, 1),
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
+      penalty_items: penaltyItems, bonus_items: bonusItems,
       classification: classification, signal: signal, allocation_pct: allocation,
       details: {
         maStack: round(scoreMaStack(), 2), macdTsiStcAo: round(scoreMacdTsiStcAo(), 2), adxStPsarViAroon: round(scoreAdxStPsarViAroon(), 2),
@@ -2168,6 +2180,9 @@ window.TechIndicators = (function () {
     var activeTFs = 0, tfDetails = [];
     var pillarTotal = { trend: 0, momentum: 0, volume: 0, structure: 0 };
 
+    var totalRaw = 0, totalPenalties = 0, totalBonuses = 0;
+    var allPenaltyItems = [], allBonusItems = [];
+
     tfResults.forEach(function (tf) {
       var w = weights[tf.timeframe] || 0;
       if (w === 0 || !tf.candles) return;
@@ -2182,10 +2197,17 @@ window.TechIndicators = (function () {
       pillarTotal.momentum += (score.momentum || 0) * w;
       pillarTotal.volume += (score.volume || 0) * w;
       pillarTotal.structure += (score.structure || 0) * w;
+      totalRaw += (score.raw_score || 0) * w;
+      totalPenalties += (score.penalties || 0) * w;
+      totalBonuses += (score.bonuses || 0) * w;
+      if (score.penalty_items) { score.penalty_items.forEach(function(it) { allPenaltyItems.push({ reason: it.reason, amount: it.amount, timeframe: tf.timeframe }); }); }
+      if (score.bonus_items) { score.bonus_items.forEach(function(it) { allBonusItems.push({ reason: it.reason, amount: it.amount, timeframe: tf.timeframe }); }); }
       tfDetails.push({
         timeframe: tf.timeframe, weight: round(w * 100, 0) + '%',
         entryScore: score.entry_score, trend: score.trend, momentum: score.momentum,
         volume: score.volume, structure: score.structure,
+        penalties: score.penalties, bonuses: score.bonuses,
+        raw_score: score.raw_score,
         classification: score.classification, allocation_pct: score.allocation_pct
       });
     });
@@ -2206,6 +2228,10 @@ window.TechIndicators = (function () {
       momentum: round(pillarTotal.momentum / totalWeight, 1),
       volume: round(pillarTotal.volume / totalWeight, 1),
       structure: round(pillarTotal.structure / totalWeight, 1),
+      raw_score: round(totalRaw / totalWeight, 1),
+      penalties: round(totalPenalties / totalWeight, 1),
+      bonuses: round(totalBonuses / totalWeight, 1),
+      penalty_items: allPenaltyItems, bonus_items: allBonusItems,
       classification: classification, signal: signal, allocation_pct: allocation,
       timeframesUsed: activeTFs, details: tfDetails
     };
@@ -2223,6 +2249,8 @@ window.TechIndicators = (function () {
     var totalScore = 0, totalWeight = 0;
     var activeTFs = 0, tfDetails = [];
     var pillarTotal = { trend_breakdown: 0, momentum_exhaustion: 0, volume_distribution: 0, structure_breakdown: 0 };
+    var totalRaw = 0, totalPenalties = 0, totalBonuses = 0;
+    var allPenaltyItems = [], allBonusItems = [];
 
     tfResults.forEach(function (tf) {
       var w = weights[tf.timeframe] || 0;
@@ -2237,12 +2265,18 @@ window.TechIndicators = (function () {
       pillarTotal.momentum_exhaustion += (score.momentum_exhaustion || 0) * w;
       pillarTotal.volume_distribution += (score.volume_distribution || 0) * w;
       pillarTotal.structure_breakdown += (score.structure_breakdown || 0) * w;
+      totalRaw += (score.raw_score || 0) * w;
+      totalPenalties += (score.penalties || 0) * w;
+      totalBonuses += (score.bonuses || 0) * w;
+      if (score.penalty_items) { score.penalty_items.forEach(function(it) { allPenaltyItems.push({ reason: it.reason, amount: it.amount, timeframe: tf.timeframe }); }); }
+      if (score.bonus_items) { score.bonus_items.forEach(function(it) { allBonusItems.push({ reason: it.reason, amount: it.amount, timeframe: tf.timeframe }); }); }
       tfDetails.push({
         timeframe: tf.timeframe, weight: round(w * 100, 0) + '%',
         exitScore: score.exit_score, trend_breakdown: score.trend_breakdown,
         momentum_exhaustion: score.momentum_exhaustion,
         volume_distribution: score.volume_distribution,
         structure_breakdown: score.structure_breakdown,
+        penalties: score.penalties, bonuses: score.bonuses, raw_score: score.raw_score,
         classification: score.classification
       });
     });
@@ -2264,6 +2298,10 @@ window.TechIndicators = (function () {
       momentum_exhaustion: round(pillarTotal.momentum_exhaustion / totalWeight, 1),
       volume_distribution: round(pillarTotal.volume_distribution / totalWeight, 1),
       structure_breakdown: round(pillarTotal.structure_breakdown / totalWeight, 1),
+      raw_score: totalWeight > 0 ? round(totalRaw / totalWeight, 1) : null,
+      penalties: totalWeight > 0 ? round(totalPenalties / totalWeight, 1) : 0,
+      bonuses: totalWeight > 0 ? round(totalBonuses / totalWeight, 1) : 0,
+      penalty_items: allPenaltyItems, bonus_items: allBonusItems,
       classification: classification, signal: signal, action: action,
       timeframesUsed: activeTFs, details: tfDetails
     };
