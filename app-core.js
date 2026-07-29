@@ -1073,16 +1073,18 @@ function MarketNewsPanel({ holdings }) {
       var top = unique.slice(0, 15);
       setNews(top);
       if (holdings && holdings.length > 0) {
-        var names = [];
+        var keywords = [];
         for (var j = 0; j < holdings.length; j++) {
-          var n = (holdings[j].name || holdings[j].ticker || "").toLowerCase();
-          if (n) names.push(n);
+          var tk = (holdings[j].ticker || "").toLowerCase();
+          var co = (holdings[j].company || "").toLowerCase();
+          if (co && keywords.indexOf(co) === -1) keywords.push(co);
+          if (tk && keywords.indexOf(tk) === -1) keywords.push(tk);
         }
         var filtered = [];
         for (var k = 0; k < top.length; k++) {
           var text = (top[k].title + " " + top[k].description).toLowerCase();
-          for (var m = 0; m < names.length; m++) {
-            if (text.indexOf(names[m]) !== -1) { filtered.push(top[k]); break; }
+          for (var m = 0; m < keywords.length; m++) {
+            if (text.indexOf(keywords[m]) !== -1) { filtered.push(top[k]); break; }
           }
         }
         setStockNews(filtered.slice(0, 12));
