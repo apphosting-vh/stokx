@@ -1002,15 +1002,18 @@ const MarketTicker = React.memo(function MarketTicker() {
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
-   MARKET NEWS PANEL — Marketaux API
+   MARKET NEWS PANEL — RSS Feeds (ET, Moneycontrol, HinduBL)
    ══════════════════════════════════════════════════════════════════════════ */
-const MARKETAUX_KEY = "2DxOjtOp2p5Nu2hU21aYGPNEIX2dxmOj4oHJta6x";
+const RSS_FEEDS = [
+  { name: "Economic Times", url: "https://economictimes.indiatimes.com/rssfeeds/13357109.cms" },
+  { name: "Moneycontrol", url: "https://www.moneycontrol.com/rss/MCtopnews.xml" },
+  { name: "The Hindu BusinessLine", url: "https://www.thehindubusinessline.com/feeder/default.rss" }
+];
 
 function MarketNewsPanel({ holdings }) {
   const [news, setNews] = React.useState([]);
   const [stockNews, setStockNews] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
-  const [stockLoading, setStockLoading] = React.useState(true);
   const [activeTab, setActiveTab] = React.useState("market");
   const [expanded, setExpanded] = React.useState({});
 
@@ -1032,53 +1035,82 @@ function MarketNewsPanel({ holdings }) {
     return html.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, "\"");
   };
 
-  // Fetch India market news on mount
+  // Fetch all RSS feeds on mount
   React.useEffect(() => {
     let cancelled = false;
-    const url = "https://api.marketaux.com/v1/news/all?api_token=" + MARKETAUX_KEY + "&countries=in&language=en&limit=15&filter_entities=true";
-    fetch(url)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled && data.data) setNews(data.data);
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
-
-  // Fetch news for held tickers
-  React.useEffect(() => {
-    if (!holdings || holdings.length === 0) { setStockLoading(false); return; }
-    let cancelled = false;
-    const tickers = holdings.slice(0, 10).map((h) => h.ticker).join(",");
-    const url = "https://api.marketaux.com/v1/news/all?api_token=" + MARKETAUX_KEY + "&symbols=" + encodeURIComponent(tickers) + "&language=en&limit=12&filter_entities=true";
-    fetch(url)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled && data.data) setStockNews(data.data);
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setStockLoading(false); });
-    return () => { cancelled = true; };
+    setLoading(true);
+    Promise.all(RSS_FEEDS.map(function (feed) {
+      var rssUrl = encodeURIComponent(feed.url);
+      return fetch("https://api.rss2json.com/v1/api.json?rss_url=" + rssUrl)
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.status !== "ok" || !data.items) return [];
+          return data.items.map(function (item) {
+            return {
+              title: item.title || "",
+              description: item.description || "",
+              image_url: item.thumbnail || null,
+              source: feed.name,
+              published_at: item.pubDate || "",
+              url: item.link || "",
+              uuid: item.guid || item.link || Math.random().toString(36)
+            };
+          });
+        })
+        .catch(function () { return []; });
+    })).then(function (results) {
+      if (cancelled) return;
+      var all = results.flat();
+      var seen = {};
+      var unique = [];
+      for (var i = 0; i < all.length; i++) {
+        var key = (all[i].title || "").toLowerCase().slice(0, 60);
+        if (seen[key]) continue;
+        seen[key] = true;
+        unique.push(all[i]);
+      }
+      unique.sort(function (a, b) { return new Date(b.published_at) - new Date(a.published_at); });
+      var top = unique.slice(0, 15);
+      setNews(top);
+      if (holdings && holdings.length > 0) {
+        var names = [];
+        for (var j = 0; j < holdings.length; j++) {
+          var n = (holdings[j].name || holdings[j].ticker || "").toLowerCase();
+          if (n) names.push(n);
+        }
+        var filtered = [];
+        for (var k = 0; k < top.length; k++) {
+          var text = (top[k].title + " " + top[k].description).toLowerCase();
+          for (var m = 0; m < names.length; m++) {
+            if (text.indexOf(names[m]) !== -1) { filtered.push(top[k]); break; }
+          }
+        }
+        setStockNews(filtered.slice(0, 12));
+      } else {
+        setStockNews([]);
+      }
+      setLoading(false);
+    }).catch(function () { if (!cancelled) setLoading(false); });
+    return function () { cancelled = true; };
   }, [holdings]);
 
   const renderNewsCard = (article, idx) => {
-    const isExp = expanded[article.uuid];
-    const desc = stripHtml(article.description || "");
-    const shortDesc = desc.length > 140 ? desc.slice(0, 140) + "..." : desc;
-    const entities = (article.entities || []).slice(0, 4);
+    var isExp = expanded[article.uuid];
+    var desc = stripHtml(article.description || "");
+    var shortDesc = desc.length > 140 ? desc.slice(0, 140) + "..." : desc;
+    var hasImage = !!article.image_url;
 
     return React.createElement("div", {
       key: article.uuid || idx,
       className: "stx-card",
       style: { padding: "14px 16px", marginBottom: 0, animation: "stxFadeIn .35s ease " + (idx * 0.04) + "s both", cursor: "pointer", transition: "border-color .15s, box-shadow .15s" },
-      onClick: () => { if (article.url) window.open(article.url, "_blank", "noopener"); },
-      onMouseEnter: (e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; },
-      onMouseLeave: (e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }
+      onClick: function () { if (article.url) window.open(article.url, "_blank", "noopener"); },
+      onMouseEnter: function (e) { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; },
+      onMouseLeave: function (e) { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }
     },
       React.createElement("div", { style: { display: "flex", gap: 12 } },
-        article.image_url && React.createElement("div", {
-          style: { width: 72, height: 72, borderRadius: 8, backgroundSize: "cover", backgroundPosition: "center", backgroundImage: "url(" + article.image_url + ")", flexShrink: 0, background: article.image_url ? undefined : "var(--bg5)" }
+        hasImage && React.createElement("div", {
+          style: { width: 72, height: 72, borderRadius: 8, backgroundSize: "cover", backgroundPosition: "center", backgroundImage: "url(" + article.image_url + ")", flexShrink: 0 }
         }),
         React.createElement("div", { style: { flex: 1, minWidth: 0 } },
           React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.35, marginBottom: 4, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" } }, article.title),
@@ -1086,16 +1118,7 @@ function MarketNewsPanel({ holdings }) {
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } },
             React.createElement("span", { style: { fontSize: 10, color: "var(--text6)", fontWeight: 600 } }, article.source || "Unknown"),
             React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "\u00b7"),
-            React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, timeAgo(article.published_at)),
-            entities.length > 0 && React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap", marginLeft: 4 } },
-              entities.map((ent, ei) => {
-                const sentColor = ent.sentiment_score > 0.1 ? "#10b981" : ent.sentiment_score < -0.1 ? "#ef4444" : "var(--text6)";
-                return React.createElement("span", {
-                  key: ei,
-                  style: { fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--bg5)", border: "1px solid var(--border2)", color: sentColor, letterSpacing: 0.3 }
-                }, ent.symbol || ent.name);
-              })
-            )
+            React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, timeAgo(article.published_at))
           )
         )
       )
@@ -1103,43 +1126,40 @@ function MarketNewsPanel({ holdings }) {
   };
 
   return React.createElement("div", { style: { marginTop: 24 } },
-    // Tab header
     React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 14 } },
       React.createElement("h2", { style: { fontSize: 15, fontWeight: 700, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Market News"),
       React.createElement("div", { style: { display: "flex", gap: 2, background: "var(--bg5)", borderRadius: 8, padding: 2, border: "1px solid var(--border)" } },
         React.createElement("button", {
-          onClick: () => setActiveTab("market"),
+          onClick: function () { setActiveTab("market"); },
           style: { padding: "4px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", border: "none", background: activeTab === "market" ? "var(--accent)" : "transparent", color: activeTab === "market" ? "#fff" : "var(--text5)", transition: "all .15s", fontFamily: "var(--font-body)" }
         }, "Indian Markets"),
-        holdings.length > 0 && React.createElement("button", {
-          onClick: () => setActiveTab("stock"),
+        holdings && holdings.length > 0 && React.createElement("button", {
+          onClick: function () { setActiveTab("stock"); },
           style: { padding: "4px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", border: "none", background: activeTab === "stock" ? "var(--accent)" : "transparent", color: activeTab === "stock" ? "#fff" : "var(--text5)", transition: "all .15s", fontFamily: "var(--font-body)" }
         }, "My Holdings")
       ),
-      React.createElement("div", { style: { marginLeft: "auto", fontSize: 10, color: "var(--text6)" } }, "Powered by Marketaux")
+      React.createElement("div", { style: { marginLeft: "auto", fontSize: 10, color: "var(--text6)" } }, "RSS Feeds: ET, Moneycontrol, HinduBL")
     ),
 
-    // Market news tab
     activeTab === "market" && React.createElement("div", null,
       loading && React.createElement("div", { style: { textAlign: "center", padding: 40, color: "var(--text5)" } },
         React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite", fontSize: 20 } }, "\u21bb"),
-        React.createElement("div", { style: { marginTop: 8, fontSize: 12 } }, "Fetching market news...")
+        React.createElement("div", { style: { marginTop: 8, fontSize: 12 } }, "Loading market news...")
       ),
       !loading && news.length === 0 && React.createElement("div", { style: { textAlign: "center", padding: 32, color: "var(--text6)", fontSize: 12 } }, "No news available right now."),
       !loading && news.length > 0 && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 } },
-        news.map((a, i) => renderNewsCard(a, i))
+        news.map(function (a, i) { return renderNewsCard(a, i); })
       )
     ),
 
-    // Stock-specific news tab
     activeTab === "stock" && React.createElement("div", null,
-      stockLoading && React.createElement("div", { style: { textAlign: "center", padding: 40, color: "var(--text5)" } },
+      loading && React.createElement("div", { style: { textAlign: "center", padding: 40, color: "var(--text5)" } },
         React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite", fontSize: 20 } }, "\u21bb"),
-        React.createElement("div", { style: { marginTop: 8, fontSize: 12 } }, "Fetching news for your holdings...")
+        React.createElement("div", { style: { marginTop: 8, fontSize: 12 } }, "Loading news for your holdings...")
       ),
-      !stockLoading && stockNews.length === 0 && React.createElement("div", { style: { textAlign: "center", padding: 32, color: "var(--text6)", fontSize: 12 } }, "No news found for your holdings."),
-      !stockLoading && stockNews.length > 0 && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 } },
-        stockNews.map((a, i) => renderNewsCard(a, i))
+      !loading && stockNews.length === 0 && React.createElement("div", { style: { textAlign: "center", padding: 32, color: "var(--text6)", fontSize: 12 } }, "No relevant news found for your holdings."),
+      !loading && stockNews.length > 0 && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 } },
+        stockNews.map(function (a, i) { return renderNewsCard(a, i); })
       )
     )
   );
@@ -5184,7 +5204,7 @@ function InfoPage() {
       React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", lineHeight: 1.7 } },
         React.createElement("p", null, "Stock prices sourced from Yahoo Finance via CORS proxies. Data may be delayed 15+ minutes."),
         React.createElement("p", null, "Market index data from NSE India API. Commodity prices from Stooq."),
-        React.createElement("p", null, "News powered by Marketaux API."),
+        React.createElement("p", null, "News from RSS feeds: Economic Times, Moneycontrol, The Hindu BusinessLine."),
         React.createElement("p", { style: { marginTop: 6, color: "var(--text6)" } }, "This application is for informational purposes only and does not constitute financial advice. Always do your own research before investing.")
       )
     )
