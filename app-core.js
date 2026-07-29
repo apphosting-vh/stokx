@@ -1639,11 +1639,11 @@ function EntryScoreAnalysis({ entry, onBack }) {
                   _sc("macd", activeInd.macd.histogram >= 0)
                 ),
                 activeInd.adx_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                  "ADX: ", React.createElement("span", { style: { fontWeight: 600, color: "#a0522d" } }, _fmt(activeInd.adx_14)),
+                  "ADX: ", React.createElement("span", { style: { fontWeight: 600, color: "#e91e63" } }, _fmt(activeInd.adx_14)),
                   " \u2014 ", activeInd.adx_14 > 25 ? "trending" : activeInd.adx_14 > 20 ? "borderline" : "ranging"
                 ),
                 activeInd.plusDI != null && activeInd.minusDI != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                  "+DI: ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.plusDI)), " / -DI: ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.minusDI)),
+                  "+DI: ", React.createElement("span", { style: { fontWeight: 600, color: activeInd.plusDI > activeInd.minusDI ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.plusDI)), " / -DI: ", React.createElement("span", { style: { fontWeight: 600, color: activeInd.plusDI > activeInd.minusDI ? "#ef4444" : "#16a34a" } }, _fmt(activeInd.minusDI)),
                   " \u2014 ", activeInd.plusDI > activeInd.minusDI ? "bullish" : "bearish"
                 ),
                 activeInd.supertrend != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
@@ -1657,17 +1657,17 @@ function EntryScoreAnalysis({ entry, onBack }) {
                   _sc("rsi_14", activeInd.rsi_14 > 50)
                 ),
                 activeInd.atr_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                  "ATR(14): ", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.atr_14)),
+                  "ATR(14): ", React.createElement("span", { style: { color: "#e91e63", fontWeight: 600 } }, _fmt(activeInd.atr_14)),
                   " \u2014 ", activeInd.atr_14 > 0 && price > 0 ? "stop ~" + _fmt(activeInd.atr_14 * 1.5) + " (" + (activeInd.atr_14 / price * 100).toFixed(1) + "% of price)" : ""
                 ),
                 activeInd.bb && activeInd.bb.upper != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                  "Bollinger: U:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.bb.upper)), " M:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.bb.middle)), " L:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.bb.lower)),
+                  "Bollinger: U:", React.createElement("span", { style: { color: "#e91e63", fontWeight: 600 } }, _fmt(activeInd.bb.upper)), " M:", React.createElement("span", { style: { color: "#e91e63", fontWeight: 600 } }, _fmt(activeInd.bb.middle)), " L:", React.createElement("span", { style: { color: "#e91e63", fontWeight: 600 } }, _fmt(activeInd.bb.lower)),
                   price >= activeInd.bb.upper * 0.99 ? " \u2014 at upper band" : price <= activeInd.bb.lower * 1.01 ? " \u2014 at lower band" : " \u2014 inside bands",
                   _sc("bb", price > activeInd.bb.middle)
                 ),
                 activeInd.ichimoku && activeInd.ichimoku.senkouA != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                  "Ichimoku: T:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.ichimoku.tenkan)), " K:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.ichimoku.kijun)),
-                  " SA:", React.createElement("span", { style: { color: "#a0522d", fontWeight: 600 } }, _fmt(activeInd.ichimoku.senkouA)),
+                  "Ichimoku: T:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.tenkan)), " K:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.kijun)),
+                  " SA:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.senkouA)),
                   " \u2014 price ", price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0) ? "above cloud" : "below cloud",
                   _sc("ichimoku", price > Math.max(activeInd.ichimoku.senkouA, activeInd.ichimoku.senkouB || 0))
                 ),
