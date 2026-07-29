@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.22";
+window.__STOX_APP_VERSION = "2.4.23";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -3642,7 +3642,7 @@ const EntryScorePanel = ({ shares }) => {
             React.createElement("tr", null,
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Stock"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Date Added"),
-              React.createElement("th", { colSpan: 4, style: { padding: "8px 10px", textAlign: "center", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Entry Score"),
+              React.createElement("th", { colSpan: 6, style: { padding: "8px 10px", textAlign: "center", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Entry Score"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Price on Add"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Days"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Current Price"),
@@ -3651,7 +3651,7 @@ const EntryScorePanel = ({ shares }) => {
             React.createElement("tr", null,
               React.createElement("th", { style: { background: "var(--bg3)" } }),
               React.createElement("th", { style: { background: "var(--bg3)" } }),
-              ["Daily", "Weekly", "Hourly", "Final"].map(function(sub) {
+              ["Hourly", "Daily", "Weekly", "Base", "Bonus/Pen", "Final"].map(function(sub) {
                 return React.createElement("th", { key: sub, style: { padding: "4px 10px", textAlign: "center", fontWeight: 600, color: "var(--text5)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, sub);
               }),
               React.createElement("th", { style: { background: "var(--bg3)" } }),
@@ -3686,9 +3686,18 @@ const EntryScorePanel = ({ shares }) => {
               return React.createElement("tr", { key: entry.id, style: { borderBottom: "1px solid var(--border)", background: rowBg } },
                 React.createElement("td", { style: { padding: "8px 10px", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap" } }, entry.ticker),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text3)", whiteSpace: "nowrap" } }, addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })),
+                React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: hourlyColor }) }, hourlyScore !== null ? hourlyScore : "—"),
                 React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: dailyColor }) }, dailyScore !== null ? dailyScore : "—"),
                 React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: weeklyColor }) }, weeklyScore !== null ? weeklyScore : "—"),
-                React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: hourlyColor }) }, hourlyScore !== null ? hourlyScore : "—"),
+                React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: "var(--text4)", fontSize: 10 }) }, fr && fr.baseScore != null ? fr.baseScore : "—"),
+                React.createElement("td", { style: { padding: "8px 10px", textAlign: "left", whiteSpace: "normal", wordBreak: "break-word", maxWidth: 180 } },
+                  fr && fr.hardFilters && fr.hardFilters.length > 0 ? React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 2 } },
+                    fr.hardFilters.map(function(hf, hi) {
+                      var isBonus = hf.indexOf("(+") >= 0;
+                      return React.createElement("span", { key: hi, style: { fontSize: 9, fontWeight: 600, color: isBonus ? "#22c55e" : "#ef4444", background: isBonus ? "rgba(34,197,94,.08)" : "rgba(239,68,68,.08)", padding: "1px 5px", borderRadius: 3, lineHeight: 1.5 } }, hf);
+                    })
+                  ) : "—"
+                ),
                 React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: finalColor, fontWeight: 900 }) }, finalScore !== null ? finalScore : "—"),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text2)", fontFamily: "var(--font-mono)" } }, priceOnAdd > 0 ? INR(priceOnAdd) : "—"),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text4)" } }, daysElapsed),
@@ -3873,7 +3882,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.22",
+      appVersion: window.__STOX_APP_VERSION || "2.4.23",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -4978,7 +4987,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.22"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.23"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -5102,7 +5111,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.22"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.23"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
