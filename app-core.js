@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.27";
+window.__STOX_APP_VERSION = "2.4.29";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -2999,7 +2999,7 @@ const EntryScorePanel = ({ shares }) => {
     entries.forEach(entry => {
       const oldPrice = oldPrices[entry.ticker];
       const newPrice = prices[entry.ticker];
-      const priceOnAdd = entry.currentPrice || (entry.frozenResult || entry.result ? (entry.frozenResult || entry.result).lastClose : 0) || 0;
+      const priceOnAdd = entry.currentPrice || entry.frozenResult?.lastClose || entry.result?.lastClose || 0;
       if (!oldPrice || !newPrice || !priceOnAdd) { noChanges.push(entry.ticker); return; }
       const oldPct = ((oldPrice - priceOnAdd) / priceOnAdd * 100);
       const newPct = ((newPrice - priceOnAdd) / priceOnAdd * 100);
@@ -3219,7 +3219,6 @@ const EntryScorePanel = ({ shares }) => {
 
   const fetchAndScore = async () => {
     if (!addTicker.trim()) { setAddErr("Enter a ticker."); return; }
-    const price = parseFloat(addPrice) || 0;
     setAdding(true); setAddErr("");
     try {
       const tk = addTicker.trim().toUpperCase();
@@ -3230,11 +3229,13 @@ const EntryScorePanel = ({ shares }) => {
       ]);
       if (!resW.data || resW.data.length < 12) { setAddErr("Insufficient weekly data for " + tk); setAdding(false); return; }
       if (!resD.data || resD.data.length < 12) { setAddErr("Insufficient daily data for " + tk); setAdding(false); return; }
+      const lastDailyClose = resD.data[resD.data.length - 1].c;
+      const price = parseFloat(addPrice) || lastDailyClose || 0;
       const indW = TI.computeAll(resW.data);
       const indD = TI.computeAll(resD.data);
       const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
       const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
-      if (result) result.lastClose = resD.data[resD.data.length - 1].c;
+      if (result) result.lastClose = lastDailyClose;
       const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), indicators: { weekly: indW, daily: indD, hourly: indH } };
       saveEntries([entry, ...entries]);
       setAddTicker(""); setAddPrice(""); setShowAdd(false);
@@ -3736,7 +3737,7 @@ const EntryScorePanel = ({ shares }) => {
               var dailyScore = fr && fr.daily ? fr.daily.total : null;
               var weeklyScore = fr && fr.weekly ? fr.weekly.total : null;
               var hourlyScore = fr && fr.hourly ? fr.hourly.total : null;
-              var priceOnAdd = entry.currentPrice || (fr ? fr.lastClose : 0) || 0;
+              var priceOnAdd = entry.currentPrice || entry.frozenResult?.lastClose || entry.result?.lastClose || 0;
               var currentPrice = perfTrackerPrices[entry.ticker] || 0;
               var pctChange = priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100) : null;
               var pctColor = pctChange === null ? "var(--text6)" : pctChange >= 0 ? "#22c55e" : "#ef4444";
@@ -4257,11 +4258,13 @@ function StockScreener() {
         setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
         return;
       }
+      var lc = resD.data[resD.data.length - 1].c;
       var indW = TI.computeAll(resW.data);
       var indD = TI.computeAll(resD.data);
       var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
-      var entry = { id: Date.now(), ticker: tk, currentPrice: 0, addedAt: new Date().toISOString(), result: result, indicators: { weekly: indW, daily: indD, hourly: indH } };
+      if (result) result.lastClose = lc;
+      var entry = { id: Date.now(), ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), indicators: { weekly: indW, daily: indD, hourly: indH } };
       entries.unshift(entry);
       await dbSetSetting("mm_entry_scores", entries);
       window.dispatchEvent(new CustomEvent("stox:data-changed"));
