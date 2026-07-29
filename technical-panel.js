@@ -854,7 +854,7 @@ window.TechnicalIndicatorsPanel = (function () {
                       _sc("macd", indicators.macd.histogram >= 0)
                     ),
                     indicators.adx_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                      "ADX: ", React.createElement("span", { style: { fontWeight: 600, color: "#e91e63" } }, fmt(indicators.adx_14)),
+                      "ADX: ", React.createElement("span", { style: { fontWeight: 600, color: "#eab308" } }, fmt(indicators.adx_14)),
                       " \u2014 ", indicators.adx_14 > 25 ? "trending" : indicators.adx_14 > 20 ? "borderline" : "ranging"
                     ),
                     indicators.plusDI != null && indicators.minusDI != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
@@ -932,18 +932,18 @@ window.TechnicalIndicatorsPanel = (function () {
                   React.createElement("div", { style: { fontWeight: 600, color: "var(--text)", marginBottom: 3, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 } }, "Volatility"),
                   React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 } },
                     indicators.atr_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                      "ATR(14): ", React.createElement("span", { style: { color: "#e91e63", fontWeight: 600 } }, fmt(indicators.atr_14)),
+                      "ATR(14): ", React.createElement("span", { style: { color: "#eab308", fontWeight: 600 } }, fmt(indicators.atr_14)),
                       " \u2014 ", indicators.atr_14 > 0 && indicators.lastClose > 0
                         ? "stop distance ~" + fmt(indicators.atr_14 * 1.5) + " (" + (indicators.atr_14 / indicators.lastClose * 100).toFixed(1) + "% of price)"
                         : ""
                     ),
                     indicators.bb && indicators.bb.upper != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                      "Bollinger: U:", React.createElement("span", { style: { color: "#e91e63", fontWeight: 600 } }, fmt(indicators.bb.upper)), " M:", React.createElement("span", { style: { color: "#e91e63", fontWeight: 600 } }, fmt(indicators.bb.middle)), " L:", React.createElement("span", { style: { color: "#e91e63", fontWeight: 600 } }, fmt(indicators.bb.lower)),
+                      "Bollinger: U:", React.createElement("span", { style: { color: "#eab308", fontWeight: 600 } }, fmt(indicators.bb.upper)), " M:", React.createElement("span", { style: { color: "#eab308", fontWeight: 600 } }, fmt(indicators.bb.middle)), " L:", React.createElement("span", { style: { color: "#eab308", fontWeight: 600 } }, fmt(indicators.bb.lower)),
                       indicators.lastClose >= indicators.bb.upper * 0.99 ? " \u2014 at upper band (overextended)" : indicators.lastClose <= indicators.bb.lower * 1.01 ? " \u2014 at lower band (oversold)" : " \u2014 inside bands",
                       _sc("bb", indicators.lastClose > indicators.bb.middle)
                     ),
                     indicators.donchian && indicators.donchian.upper != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                      "Donchian(20): H:", React.createElement("span", { style: { color: "#e91e63", fontWeight: 600 } }, fmt(indicators.donchian.upper)), " L:", React.createElement("span", { style: { color: "#e91e63", fontWeight: 600 } }, fmt(indicators.donchian.lower)),
+                      "Donchian(20): H:", React.createElement("span", { style: { color: "#eab308", fontWeight: 600 } }, fmt(indicators.donchian.upper)), " L:", React.createElement("span", { style: { color: "#eab308", fontWeight: 600 } }, fmt(indicators.donchian.lower)),
                       indicators.lastClose >= indicators.donchian.upper ? " \u2014 breakout high" : indicators.lastClose <= indicators.donchian.lower ? " \u2014 breakout low" : "",
                       _sc("donchian", indicators.lastClose > (indicators.donchian.upper + indicators.donchian.lower) / 2)
                     ),
@@ -973,7 +973,7 @@ window.TechnicalIndicatorsPanel = (function () {
                       _sc("pivotPoints", indicators.lastClose >= indicators.pivotPoints.classic.P)
                     ),
                     indicators.choppiness != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                      "Choppiness: ", React.createElement("span", { style: { color: "#e91e63", fontWeight: 600 } }, fmt(indicators.choppiness)),
+                      "Choppiness: ", React.createElement("span", { style: { color: "#eab308", fontWeight: 600 } }, fmt(indicators.choppiness)),
                       " \u2014 ", indicators.choppiness < 38.2 ? "trending" : indicators.choppiness > 61.8 ? "ranging/choppy" : "neutral",
                       _sc("choppiness", indicators.choppiness < 38.2)
                     ),
