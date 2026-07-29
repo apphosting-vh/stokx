@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.23";
+window.__STOX_APP_VERSION = "2.4.24";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -3808,6 +3808,10 @@ function StockScreener() {
   var manualTicker = _s14[0], setManualTicker = _s14[1];
   var _s15 = useState(false);
   var manualLoading = _s15[0], setManualLoading = _s15[1];
+  var _s16 = useState(false);
+  var bgRefreshing = _s16[0], setBgRefreshing = _s16[1];
+  var _s17 = useState({ done: 0, total: 0, current: "" });
+  var bgProgress = _s17[0], setBgProgress = _s17[1];
   var _resultsRef = useRef(results);
   _resultsRef.current = results;
 
@@ -3836,6 +3840,23 @@ function StockScreener() {
     }
     window.dispatchEvent(new CustomEvent("stox:data-changed"));
   }, [results, timestamps, scanTime]);
+
+  /* Sync background refresh state on mount and listen for progress */
+  React.useEffect(function() {
+    if (window.__stoxScreenerBg && window.__stoxScreenerBg.active) {
+      setBgRefreshing(true);
+      setBgProgress({ done: window.__stoxScreenerBg.done, total: window.__stoxScreenerBg.total, current: window.__stoxScreenerBg.current || "" });
+    }
+    var handler = function(e) {
+      var d = e.detail;
+      setBgProgress({ done: d.done, total: d.total, current: d.current });
+      if (d.results) setResults(d.results);
+      if (d.timestamps) setTimestamps(d.timestamps);
+      if (!d.active) setBgRefreshing(false);
+    };
+    window.addEventListener("stox:screener-bg-progress", handler);
+    return function() { window.removeEventListener("stox:screener-bg-progress", handler); };
+  }, []);
 
   /* Inject spin keyframes */
   React.useEffect(function() {
@@ -3882,7 +3903,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.23",
+      appVersion: window.__STOX_APP_VERSION || "2.4.24",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -4031,6 +4052,64 @@ function StockScreener() {
       showToast(batch.length + " stock" + (batch.length !== 1 ? "s" : "") + " refreshed \u2014 no score changes", 0);
     }
     setSelected({});
+  };
+
+  var refreshSelectedBackground = async function() {
+    if (!TI || !DF || bgRefreshing) return;
+    var tickers = Object.keys(selected).filter(function(t) { return selected[t]; });
+    if (!tickers.length) return;
+    var batch = results.filter(function(r) { return tickers.indexOf(r.s.t) >= 0; });
+    if (!batch.length) return;
+    var bg = window.__stoxScreenerBg = window.__stoxScreenerBg || {};
+    bg.active = true;
+    bg.results = JSON.parse(JSON.stringify(results));
+    bg.timestamps = Object.assign({}, timestamps);
+    bg.done = 0;
+    bg.total = batch.length;
+    bg.current = "";
+    setBgRefreshing(true);
+    setBgProgress({ done: 0, total: batch.length, current: "" });
+    setSelected({});
+    for (var i = 0; i < batch.length; i++) {
+      if (!bg.active) break;
+      var stk = batch[i].s;
+      var tk = stk.t.replace(".NS", "");
+      bg.current = tk;
+      window.dispatchEvent(new CustomEvent("stox:screener-bg-progress", { detail: { done: i, total: batch.length, current: tk, active: true } }));
+      try {
+        var resW = await DF.fetchOHLCVCached(tk, "weekly");
+        var resD = await DF.fetchOHLCVCached(tk, "daily");
+        var resH = await DF.fetchOHLCVCached(tk, "1h");
+        if (resW.data && resW.data.length >= 12 && resD.data && resD.data.length >= 12) {
+          var indW = TI.computeAll(resW.data);
+          var indD = TI.computeAll(resD.data);
+          var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
+          var lc = indD ? indD.lastClose : 0;
+          var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
+          var dc = resD.data;
+          var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
+          var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
+          var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
+          var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
+          var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
+          var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
+          var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
+          var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
+          var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
+          if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg };
+          bg.timestamps[stk.t] = Date.now();
+        }
+      } catch(e) {}
+      bg.done = i + 1;
+      try { await dbSetSetting("stox_screener_data", { results: bg.results, timestamps: bg.timestamps, scanTime: scanTime }); } catch(e) {}
+      window.dispatchEvent(new CustomEvent("stox:screener-bg-progress", { detail: { done: i + 1, total: batch.length, current: tk, results: bg.results, timestamps: bg.timestamps, active: i + 1 < batch.length } }));
+    }
+    bg.active = false;
+    bg.current = "";
+    setBgRefreshing(false);
+    try { await dbSetSetting("stox_screener_data", { results: bg.results, timestamps: bg.timestamps, scanTime: scanTime }); } catch(e) {}
+    window.dispatchEvent(new CustomEvent("stox:data-changed"));
+    showToast("Background refresh complete: " + batch.length + " stock" + (batch.length !== 1 ? "s" : "") + " updated", 3000);
   };
 
   var toggleSelect = function(ticker) {
@@ -4184,11 +4263,16 @@ function StockScreener() {
         )
       ),
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
-        results.length > 0 && !scanning && selectedCount > 0 ? React.createElement("button", {
+        results.length > 0 && !scanning && !bgRefreshing && selectedCount > 0 ? React.createElement("button", {
           onClick: refreshSelected,
           className: "stx-btn stx-btn-primary",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 700, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", cursor: "pointer" }
         }, "\u21bb Refresh Selected (" + selectedCount + ")") : null,
+        results.length > 0 && !scanning && selectedCount > 0 ? React.createElement("button", {
+          onClick: refreshSelectedBackground,
+          className: "stx-btn",
+          style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid var(--border)", background: bgRefreshing ? "var(--bg5)" : "var(--bg4)", color: bgRefreshing ? "var(--text6)" : "var(--text4)", cursor: bgRefreshing ? "wait" : "pointer" }
+        }, bgRefreshing ? "\u21bb BG (" + bgProgress.done + "/" + bgProgress.total + ")" : "\u21bb Background (" + selectedCount + ")") : null,
         results.length > 0 && !scanning ? React.createElement("button", {
           onClick: saveSnapshot,
           className: "stx-btn",
@@ -4240,6 +4324,16 @@ function StockScreener() {
       )
     ),
     scanErr && React.createElement("div", { style: { marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.15)", fontSize: 11, color: "#ef4444" } }, scanErr),
+    bgRefreshing && React.createElement("div", { style: { marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)" } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 6 } },
+        React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "var(--text3)" } },
+          "Background: " + bgProgress.done + "/" + bgProgress.total + " stocks"),
+        React.createElement("span", { style: { fontSize: 10, color: "var(--text5)" } }, bgProgress.current)
+      ),
+      React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--bg5)", overflow: "hidden" } },
+        React.createElement("div", { style: { height: "100%", borderRadius: 3, background: "var(--accent)", transition: "width .3s", width: (bgProgress.total > 0 ? (bgProgress.done / bgProgress.total * 100) : 0) + "%" } })
+      )
+    ),
     results.length > 0 && React.createElement("div", null,
       React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
         [{ k: "all", l: "All (" + results.length + ")" }, { k: "buy", l: "Buy (" + countBuy + ")" }, { k: "watch", l: "Watch (" + countWatch + ")" }, { k: "avoid", l: "Avoid (" + countAvoid + ")" }].map(function(f) {
@@ -4987,7 +5081,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.23"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.24"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -5111,7 +5205,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.23"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.24"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
