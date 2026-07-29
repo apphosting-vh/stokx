@@ -926,7 +926,7 @@ window.TechIndicators = (function () {
     var boxHigh = round(recentHigh, 2); var boxLow = round(recentLow, 2);
     var boxRange = round(recentHigh - recentLow, 2);
     var breakout = lastC > recentHigh ? "up" : lastC < recentLow ? "down" : "none";
-    return { boxHigh: boxHigh, boxLow: boxLow, top: boxHigh, bottom: boxLow, boxRange: boxRange, position: position, breakout: breakout, pctFromTop: boxRange > 0 ? round((recentHigh - lastC) / boxRange * 100, 1) : 0 };
+    return { boxTop: boxHigh, boxBottom: boxLow, top: boxHigh, bottom: boxLow, boxRange: boxRange, position: position, breakout: breakout, pctFromTop: boxRange > 0 ? round((recentHigh - lastC) / boxRange * 100, 1) : 0 };
   }
 
   function calcFibonacci(candles) {
