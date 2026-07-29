@@ -114,6 +114,7 @@ window.NotepadPage = (function () {
     var titleRef = useRef(null);
     var bodyRef = useRef(null);
     var saveTimer = useRef(null);
+    var savedRange = useRef(null);
     var [showColorPicker, setShowColorPicker] = useState(false);
     var [activeFormats, setActiveFormats] = useState({});
     var [confirmDelete, setConfirmDelete] = useState(false);
@@ -144,20 +145,36 @@ window.NotepadPage = (function () {
       }, 500);
     }, [onSave, getNote]);
 
+    var saveRange = useCallback(function () {
+      var sel = window.getSelection();
+      if (sel.rangeCount > 0 && bodyRef.current && bodyRef.current.contains(sel.anchorNode)) {
+        savedRange.current = sel.getRangeAt(0).cloneRange();
+      }
+    }, []);
+
+    var restoreRange = useCallback(function () {
+      if (!savedRange.current) return;
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedRange.current);
+      savedRange.current = null;
+    }, []);
+
     var handleCmd = useCallback(function (cmd, val) {
       if (bodyRef.current) bodyRef.current.focus();
+      restoreRange();
       document.execCommand(cmd, false, val || null);
       scheduleSave();
-      // Check active formats
       var fmts = { bold: document.queryCommandState("bold"), italic: document.queryCommandState("italic"), underline: document.queryCommandState("underline"), strikethrough: document.queryCommandState("strikeThrough") };
       setActiveFormats(fmts);
-    }, [scheduleSave]);
+    }, [scheduleSave, restoreRange]);
 
     var handleHeading = useCallback(function (tag) {
       if (bodyRef.current) bodyRef.current.focus();
+      restoreRange();
       document.execCommand("formatBlock", false, "<" + tag + ">");
       scheduleSave();
-    }, [scheduleSave]);
+    }, [scheduleSave, restoreRange]);
 
     var handleKeyDown = useCallback(function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
@@ -169,9 +186,10 @@ window.NotepadPage = (function () {
     var handleColorPick = useCallback(function (c) {
       setShowColorPicker(false);
       if (bodyRef.current) bodyRef.current.focus();
+      restoreRange();
       if (c) { document.execCommand("foreColor", false, c); } else { document.execCommand("removeFormat"); }
       scheduleSave();
-    }, [scheduleSave]);
+    }, [scheduleSave, restoreRange]);
 
     var handleDelete = useCallback(function () {
       setConfirmDelete(true);
@@ -188,11 +206,11 @@ window.NotepadPage = (function () {
       onSave(Object.assign({}, getNote(), { pinned: !note.pinned }));
     }, [note, onSave, getNote]);
 
-    /* Detect active format on selection change */
     var checkFormats = useCallback(function () {
+      saveRange();
       var fmts = { bold: document.queryCommandState("bold"), italic: document.queryCommandState("italic"), underline: document.queryCommandState("underline"), strikethrough: document.queryCommandState("strikeThrough") };
       setActiveFormats(fmts);
-    }, []);
+    }, [saveRange]);
 
     var colorSwatches = NOTE_COLORS.map(function (c) {
       var isActive = note.color === c;
