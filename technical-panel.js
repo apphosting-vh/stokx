@@ -380,14 +380,29 @@ window.TechnicalIndicatorsPanel = (function () {
 
   /* ── Exit Score Card ────────────────────────────────────────────────── */
   function ExitScoreCard(candles, ind, buyPrice, buyDate, currentPrice, entryScore) {
-    var es = TI.computeExitScore(candles, ind, {entryPrice: buyPrice, buyDate: buyDate, currentPrice: currentPrice, entryScore: entryScore});
-    if (!es) return null;
+    var position = {
+      entry_price: buyPrice,
+      holding_days: buyDate ? Math.floor((new Date() - new Date(buyDate + "T12:00:00")) / 864e5) : 0,
+      entry_score: entryScore
+    };
+    var es = TI.computeExitScore(candles, position);
+    if (!es || es.exit_score == null) return null;
+
+    var decisionMap = {
+      URGENT_EXIT: { label: "Urgent Exit", color: "#ef4444" },
+      EXIT: { label: "Exit", color: "#f97316" },
+      PARTIAL_EXIT: { label: "Partial Exit", color: "#eab308" },
+      TIGHTEN_STOP: { label: "Tighten Stop", color: "#3b82f6" },
+      MONITOR: { label: "Monitor", color: "#a855f7" },
+      HOLD: { label: "Hold", color: "#16a34a" }
+    };
+    var decision = decisionMap[es.classification] || { label: "N/A", color: "#6b7280" };
 
     var factors = [
-      { label: "Trend Breakdown", val: es.trend, max: es.trendMax, color: "#3b82f6" },
-      { label: "Momentum Exhaustion", val: es.momentum, max: es.momentumMax, color: "#a855f7" },
-      { label: "Volume Distribution", val: es.volume, max: es.volumeMax, color: "#f59e0b" },
-      { label: "Structure Breakdown", val: es.structure, max: es.structureMax, color: "#ec4899" },
+      { label: "Trend Breakdown", val: es.trend_breakdown, max: 25, color: "#3b82f6" },
+      { label: "Momentum Exhaustion", val: es.momentum_exhaustion, max: 25, color: "#a855f7" },
+      { label: "Volume Distribution", val: es.volume_distribution, max: 25, color: "#f59e0b" },
+      { label: "Structure Breakdown", val: es.structure_breakdown, max: 25, color: "#ec4899" },
     ];
 
     /* ── Exit Recommendations ── */
@@ -438,7 +453,7 @@ window.TechnicalIndicatorsPanel = (function () {
     return React.createElement("div", {
       style: {
         padding: "14px 18px", borderRadius: 12, marginBottom: 16,
-        background: "var(--bg3)", border: "2px solid " + es.decision.color + "33",
+        background: "var(--bg3)", border: "2px solid " + decision.color + "33",
       }
     },
       /* Header row */
@@ -458,19 +473,19 @@ window.TechnicalIndicatorsPanel = (function () {
         },
           React.createElement("div", { style: { textAlign: "right" } },
             React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, "Decision"),
-            React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: es.decision.color, fontFamily: "'Sora',sans-serif" } }, es.decision.label)
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: decision.color, fontFamily: "'Sora',sans-serif" } }, decision.label)
           ),
           React.createElement("div", {
             style: {
               width: 56, height: 56, borderRadius: "50%",
               display: "flex", alignItems: "center", justifyContent: "center",
-              background: es.decision.color + "18", border: "2.5px solid " + es.decision.color,
+              background: decision.color + "18", border: "2.5px solid " + decision.color,
               flexShrink: 0,
             }
           },
             React.createElement("span", {
-              style: { fontSize: 20, fontWeight: 900, color: es.decision.color, fontFamily: "'Sora',sans-serif", lineHeight: 1 }
-            }, es.total)
+              style: { fontSize: 20, fontWeight: 900, color: decision.color, fontFamily: "'Sora',sans-serif", lineHeight: 1 }
+            }, es.exit_score)
           )
         )
       ),
@@ -496,35 +511,8 @@ window.TechnicalIndicatorsPanel = (function () {
         })
       ),
 
-      /* Modifier summary (penalties/bonuses) */
-      es.modifiers && (es.modifiers.penalties !== 0 || es.modifiers.bonuses !== 0) && React.createElement("div", {
-        style: {
-          marginTop: 6, padding: "8px 10px", borderRadius: 6,
-          background: "var(--bg4)", border: "1px solid var(--border)",
-        }
-      },
-        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: (es.modifiers.hardFilters && es.modifiers.hardFilters.length > 0) ? 4 : 0, fontSize: 10, color: "var(--text5)" } },
-          React.createElement("span", { style: { fontWeight: 600 } }, "Base: " + es.modifiers.raw),
-          es.modifiers.penalties !== 0 && React.createElement("span", { style: { color: "var(--text3)", fontWeight: 700 } }, "Penalties: " + es.modifiers.penalties),
-          es.modifiers.bonuses !== 0 && React.createElement("span", { style: { color: "var(--text3)", fontWeight: 700 } }, "Bonuses: +" + es.modifiers.bonuses),
-          React.createElement("span", { style: { fontWeight: 700, color: "var(--text3)", marginLeft: "auto" } }, "\u2192 " + es.total)
-        ),
-        es.modifiers.hardFilters && es.modifiers.hardFilters.length > 0 && React.createElement("div", { style: { marginTop: 2 } },
-          es.modifiers.hardFilters.map(function (f, i) {
-            var isBonus = f.indexOf("(+") >= 0;
-            var valMatch = f.match(/\([+\-\u2212]?\d+\)$/);
-            var valStr = valMatch ? valMatch[0] : "";
-            var label = valStr ? f.replace(valStr, "").replace(/\s*—\s*/, " — ").trim() : f;
-            return React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, lineHeight: 1.6, fontSize: 10 } },
-              React.createElement("span", { style: { color: "var(--text3)", flex: 1, minWidth: 0, overflow: "hidden", wordBreak: "break-word" } }, isBonus ? "\u2713 " + label : "\u26a0 " + label),
-              valStr && React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "var(--text3)", background: "var(--bg4)", padding: "1px 6px", borderRadius: 4, fontFamily: "'Sora',sans-serif", flexShrink: 0 } }, valStr)
-            );
-          })
-        )
-      ),
-
       /* Overrides */
-      es.overrides.length > 0 && React.createElement("div", {
+      es.overrides && es.overrides.length > 0 && React.createElement("div", {
         style: {
           marginTop: 10, padding: "8px 12px", borderRadius: 8,
           background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.2)",

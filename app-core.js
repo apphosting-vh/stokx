@@ -1662,8 +1662,8 @@ const ExitScoreTrend = ({ ticker, buyPrice, buyDate, entryScore }) => {
             if (!dateStr) continue;
             try {
               const ind = TI.computeAll(slice);
-              const es = TI.computeExitScore(slice, ind, { entryPrice: buyPrice || 0, buyDate: buyDate || "", currentPrice: histClose, entryScore: entryScore || 0 });
-              if (es) pts.push({ date: dateStr, score: es.total, decision: es.decision, open: lastCandle.o, close: lastCandle.c, prevClose: slice.length >= 2 ? slice[slice.length - 2].c : null });
+              const es = TI.computeExitScore(slice, { entry_price: buyPrice || 0, entry_score: entryScore || 0 });
+              if (es && es.exit_score != null) pts.push({ date: dateStr, score: es.exit_score, decision: es.classification, open: lastCandle.o, close: lastCandle.c, prevClose: slice.length >= 2 ? slice[slice.length - 2].c : null });
             } catch {}
           }
           return pts;
@@ -1827,7 +1827,7 @@ const ExitScoreTrend = ({ ticker, buyPrice, buyDate, entryScore }) => {
       React.createElement("div", { style: { display: "flex", gap: 12, marginTop: 4, fontSize: 9, color: "var(--text6)" } },
         series.map(s => {
           const val = latest[s.key] ? latest[s.key].score : null;
-          const dec = latest[s.key] && latest[s.key].decision ? latest[s.key].decision.label : "";
+          const dec = latest[s.key] && latest[s.key].decision ? latest[s.key].decision : "";
           return React.createElement("span", { key: s.key, style: { color: s.color, fontWeight: 600 } },
             s.label + ": " + (val != null ? val + " " + dec : "\u2014")
           );
@@ -2980,7 +2980,8 @@ const EntryScorePanel = ({ shares }) => {
           const indW = TI.computeAll(resW.data);
           const indD = TI.computeAll(resD.data);
           const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-          const result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, entry.currentPrice || 0);
+          const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
+          if (result) result.lastClose = entry.currentPrice || resD.data[resD.data.length - 1].c;
           const idx = updated.findIndex(e => e.id === entry.id);
           if (idx >= 0) updated[idx] = { ...updated[idx], result, indicators: { weekly: indW, daily: indD, hourly: indH } };
         } catch (e) {}
@@ -3028,7 +3029,8 @@ const EntryScorePanel = ({ shares }) => {
         const indD = TI.computeAll(resD.data);
         const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
         const lastClose = resD.data[resD.data.length - 1]?.close || entry.currentPrice || 0;
-        const result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lastClose);
+        const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
+        if (result) result.lastClose = lastClose;
         updated[i] = { ...updated[i], currentPrice: entry.currentPrice || lastClose, result, indicators: { weekly: indW, daily: indD, hourly: indH } };
       } catch {}
     }
@@ -3172,8 +3174,9 @@ const EntryScorePanel = ({ shares }) => {
       const indW = TI.computeAll(resW.data);
       const indD = TI.computeAll(resD.data);
       const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-      const result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, price);
-      const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result)), indicators: { weekly: indW, daily: indD, hourly: indH } };
+      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
+      if (result) result.lastClose = resD.data[resD.data.length - 1].c;
+      const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), indicators: { weekly: indW, daily: indD, hourly: indH } };
       saveEntries([entry, ...entries]);
       setAddTicker(""); setAddPrice(""); setShowAdd(false);
     } catch (e) { setAddErr("Error: " + (e.message || "Failed")); }
@@ -3775,6 +3778,57 @@ var NIFTY_100_UNIQUE = NIFTY_100.filter(function(s) { if (_nseen.has(s.t)) retur
 /* ══════════════════════════════════════════════════════════════════════════
    STOCK SCREENER (Nifty 200 multi-TF entry score)
    ══════════════════════════════════════════════════════════════════════════ */
+var SCREENER_DECISION_MAP = {
+  STRONG_BUY: { label: 'STRONG_BUY', color: '#22c55e' },
+  BUY:         { label: 'BUY',         color: '#16a34a' },
+  WATCHLIST:   { label: 'WATCHLIST',   color: '#eab308' },
+  NEUTRAL:     { label: 'NEUTRAL',     color: '#a855f7' },
+  AVOID:       { label: 'AVOID',       color: '#ef4444' },
+};
+
+/* Wraps the new computeMultiTFEntryScore + per-timeframe computeEntryScore
+   into the old result shape { finalScore, decision, baseScore, penalties, bonuses, weekly, daily, hourly } */
+function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
+  if (!window.TechIndicators) return null;
+  var TI = window.TechIndicators;
+  var tfResults = [];
+  if (weeklyCandles && weeklyCandles.length >= 50) tfResults.push({ timeframe: 'W', candles: weeklyCandles });
+  if (dailyCandles && dailyCandles.length >= 50) tfResults.push({ timeframe: 'D', candles: dailyCandles });
+  if (hourlyCandles && hourlyCandles.length >= 50) tfResults.push({ timeframe: 'H', candles: hourlyCandles });
+  if (!tfResults.length) return null;
+  var multi = TI.computeMultiTFEntryScore(tfResults);
+  if (!multi || multi.multiTF_score == null) return null;
+  function toDec(cls) {
+    return SCREENER_DECISION_MAP[cls] || { label: cls, color: 'var(--text6)' };
+  }
+  var out = {
+    finalScore: multi.multiTF_score,
+    decision: toDec(multi.classification),
+    baseScore: multi.multiTF_score,
+    penalties: 0, bonuses: 0,
+    hardFilters: [],
+    lastClose: null,
+    weekly: null, daily: null, hourly: null
+  };
+  if (multi.details) multi.details.forEach(function(d) {
+    var scoreObj = {
+      total: d.entryScore,
+      decision: toDec(d.classification),
+      trendScore: d.trend, trendMax: 25,
+      momentumScore: d.momentum, momentumMax: 25,
+      volumeScore: d.volume, volumeMax: 25,
+      structureScore: d.structure, structureMax: 25
+    };
+    if (d.timeframe === 'W' || d.timeframe === 'weekly' || d.timeframe === '1W') out.weekly = scoreObj;
+    else if (d.timeframe === 'D' || d.timeframe === 'daily' || d.timeframe === '1D') out.daily = scoreObj;
+    else if (d.timeframe === 'H' || d.timeframe === 'hourly' || d.timeframe === '1h') out.hourly = scoreObj;
+  });
+  if (multi.penalties != null) out.penalties = multi.penalties;
+  if (multi.bonuses != null) out.bonuses = multi.bonuses;
+  if (multi.raw_score != null) out.baseScore = multi.raw_score;
+  return out;
+}
+
 function StockScreener() {
   var TI = window.TechIndicators;
   var DF = window.OHLCVFetcher;
@@ -3958,11 +4012,8 @@ function StockScreener() {
       if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
         setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = false; return c; }); return;
       }
-      var indW = TI.computeAll(resW.data);
-      var indD = TI.computeAll(resD.data);
-      var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-      var lc = indD ? indD.lastClose : 0;
-      var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
+      var lc = resD.data[resD.data.length - 1].c;
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
       var dc = resD.data;
       var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
       var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
@@ -3998,11 +4049,8 @@ function StockScreener() {
       if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
         setScanErr("Insufficient data for " + tk); setManualLoading(false); setManualTicker(""); return;
       }
-      var indW = TI.computeAll(resW.data);
-      var indD = TI.computeAll(resD.data);
-      var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-      var lc = indD ? indD.lastClose : 0;
-      var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
+      var lc = resD.data[resD.data.length - 1].c;
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
       var dc = resD.data;
       var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
       var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
@@ -4083,11 +4131,8 @@ function StockScreener() {
         var resD = await DF.fetchOHLCVCached(tk, "daily");
         var resH = await DF.fetchOHLCVCached(tk, "1h");
         if (resW.data && resW.data.length >= 12 && resD.data && resD.data.length >= 12) {
-          var indW = TI.computeAll(resW.data);
-          var indD = TI.computeAll(resD.data);
-          var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-          var lc = indD ? indD.lastClose : 0;
-          var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
+          var lc = resD.data[resD.data.length - 1].c;
+          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
           var dc = resD.data;
           var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
           var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
@@ -4156,7 +4201,7 @@ function StockScreener() {
       var indW = TI.computeAll(resW.data);
       var indD = TI.computeAll(resD.data);
       var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-      var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, 0);
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
       var entry = { id: Date.now(), ticker: tk, currentPrice: 0, addedAt: new Date().toISOString(), result: result, indicators: { weekly: indW, daily: indD, hourly: indH } };
       entries.unshift(entry);
       await dbSetSetting("mm_entry_scores", entries);
@@ -4183,11 +4228,8 @@ function StockScreener() {
           var resD = await DF.fetchOHLCVCached(tk, "daily");
           var resH = await DF.fetchOHLCVCached(tk, "1h");
           if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) return null;
-          var indW = TI.computeAll(resW.data);
-          var indD = TI.computeAll(resD.data);
-          var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-          var lc = indD ? indD.lastClose : 0;
-          var result = TI.computeMultiTFEntryScore(resW.data, indW, resD.data, indD, resH.data, indH, lc);
+          var lc = resD.data[resD.data.length - 1].c;
+          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
           var dc = resD.data;
           var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
           var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
