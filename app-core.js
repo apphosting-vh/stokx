@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.4.24";
+window.__STOX_APP_VERSION = "2.4.25";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -2933,6 +2933,7 @@ const EntryScorePanel = ({ shares }) => {
     }
     setPerfTrackerPrices(prices);
     dbSetSetting(LS_ENTRY_PERF_PRICES, prices);
+    try { if (window.__fsa && window.__fsa.writeNow) await window.__fsa.writeNow(); } catch(e) {}
     setPerfTrackerRefreshing(false);
     const changes = [];
     const noChanges = [];
@@ -3002,6 +3003,7 @@ const EntryScorePanel = ({ shares }) => {
       }
       setPerfTrackerPrices(prices);
       dbSetSetting(LS_ENTRY_PERF_PRICES, prices);
+      try { if (window.__fsa && window.__fsa.writeNow) await window.__fsa.writeNow(); } catch(e) {}
       setPerfTrackerRefreshing(false);
     })();
   }, [entriesLoaded]);
@@ -3903,7 +3905,7 @@ function StockScreener() {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "2.4.24",
+      appVersion: window.__STOX_APP_VERSION || "2.4.25",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -4102,12 +4104,14 @@ function StockScreener() {
       } catch(e) {}
       bg.done = i + 1;
       try { await dbSetSetting("stox_screener_data", { results: bg.results, timestamps: bg.timestamps, scanTime: scanTime }); } catch(e) {}
+      try { if (window.__fsa && window.__fsa.writeNow) await window.__fsa.writeNow(); } catch(e) {}
       window.dispatchEvent(new CustomEvent("stox:screener-bg-progress", { detail: { done: i + 1, total: batch.length, current: tk, results: bg.results, timestamps: bg.timestamps, active: i + 1 < batch.length } }));
     }
     bg.active = false;
     bg.current = "";
     setBgRefreshing(false);
     try { await dbSetSetting("stox_screener_data", { results: bg.results, timestamps: bg.timestamps, scanTime: scanTime }); } catch(e) {}
+    try { if (window.__fsa && window.__fsa.writeNow) await window.__fsa.writeNow(); } catch(e) {}
     window.dispatchEvent(new CustomEvent("stox:data-changed"));
     showToast("Background refresh complete: " + batch.length + " stock" + (batch.length !== 1 ? "s" : "") + " updated", 3000);
   };
@@ -5081,7 +5085,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.24"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "2.4.25"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -5205,7 +5209,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.24"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.25"),
         React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
