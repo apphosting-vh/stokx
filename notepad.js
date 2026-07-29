@@ -145,8 +145,8 @@ window.NotepadPage = (function () {
     }, [onSave, getNote]);
 
     var handleCmd = useCallback(function (cmd, val) {
-      document.execCommand(cmd, false, val || null);
       if (bodyRef.current) bodyRef.current.focus();
+      document.execCommand(cmd, false, val || null);
       scheduleSave();
       // Check active formats
       var fmts = { bold: document.queryCommandState("bold"), italic: document.queryCommandState("italic"), underline: document.queryCommandState("underline"), strikethrough: document.queryCommandState("strikeThrough") };
@@ -154,8 +154,8 @@ window.NotepadPage = (function () {
     }, [scheduleSave]);
 
     var handleHeading = useCallback(function (tag) {
-      document.execCommand("formatBlock", false, "<" + tag + ">");
       if (bodyRef.current) bodyRef.current.focus();
+      document.execCommand("formatBlock", false, "<" + tag + ">");
       scheduleSave();
     }, [scheduleSave]);
 
@@ -168,8 +168,8 @@ window.NotepadPage = (function () {
 
     var handleColorPick = useCallback(function (c) {
       setShowColorPicker(false);
-      if (c) { document.execCommand("foreColor", false, c); } else { document.execCommand("removeFormat"); }
       if (bodyRef.current) bodyRef.current.focus();
+      if (c) { document.execCommand("foreColor", false, c); } else { document.execCommand("removeFormat"); }
       scheduleSave();
     }, [scheduleSave]);
 
