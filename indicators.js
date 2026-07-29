@@ -2181,7 +2181,7 @@ window.TechIndicators = (function () {
     var pillarTotal = { trend: 0, momentum: 0, volume: 0, structure: 0 };
 
     var totalRaw = 0, totalPenalties = 0, totalBonuses = 0;
-    var allPenaltyItems = [], allBonusItems = [];
+    var penaltyMap = {}, bonusMap = {};
 
     tfResults.forEach(function (tf) {
       var w = weights[tf.timeframe] || 0;
@@ -2200,8 +2200,8 @@ window.TechIndicators = (function () {
       totalRaw += (score.raw_score || 0) * w;
       totalPenalties += (score.penalties || 0) * w;
       totalBonuses += (score.bonuses || 0) * w;
-      if (score.penalty_items) { score.penalty_items.forEach(function(it) { allPenaltyItems.push({ reason: it.reason, amount: it.amount, timeframe: tf.timeframe }); }); }
-      if (score.bonus_items) { score.bonus_items.forEach(function(it) { allBonusItems.push({ reason: it.reason, amount: it.amount, timeframe: tf.timeframe }); }); }
+      if (score.penalty_items) { score.penalty_items.forEach(function(it) { penaltyMap[it.reason] = (penaltyMap[it.reason] || 0) + it.amount * w; }); }
+      if (score.bonus_items) { score.bonus_items.forEach(function(it) { bonusMap[it.reason] = (bonusMap[it.reason] || 0) + it.amount * w; }); }
       tfDetails.push({
         timeframe: tf.timeframe, weight: round(w * 100, 0) + '%',
         entryScore: score.entry_score, trend: score.trend, momentum: score.momentum,
@@ -2221,6 +2221,10 @@ window.TechIndicators = (function () {
     else if (multiTF >= 50) { classification = 'WATCHLIST'; signal = 'WATCHLIST'; allocation = 40; }
     else if (multiTF >= 35) { classification = 'NEUTRAL'; signal = 'NEUTRAL'; allocation = 0; }
     else { classification = 'AVOID'; signal = 'AVOID'; allocation = 0; }
+
+    var allPenaltyItems = [], allBonusItems = [];
+    Object.keys(penaltyMap).forEach(function(key) { allPenaltyItems.push({ reason: key, amount: round(penaltyMap[key] / totalWeight, 1) }); });
+    Object.keys(bonusMap).forEach(function(key) { allBonusItems.push({ reason: key, amount: round(bonusMap[key] / totalWeight, 1) }); });
 
     return {
       multiTF_score: multiTF,
@@ -2250,7 +2254,7 @@ window.TechIndicators = (function () {
     var activeTFs = 0, tfDetails = [];
     var pillarTotal = { trend_breakdown: 0, momentum_exhaustion: 0, volume_distribution: 0, structure_breakdown: 0 };
     var totalRaw = 0, totalPenalties = 0, totalBonuses = 0;
-    var allPenaltyItems = [], allBonusItems = [];
+    var penaltyMap = {}, bonusMap = {};
 
     tfResults.forEach(function (tf) {
       var w = weights[tf.timeframe] || 0;
@@ -2268,8 +2272,8 @@ window.TechIndicators = (function () {
       totalRaw += (score.raw_score || 0) * w;
       totalPenalties += (score.penalties || 0) * w;
       totalBonuses += (score.bonuses || 0) * w;
-      if (score.penalty_items) { score.penalty_items.forEach(function(it) { allPenaltyItems.push({ reason: it.reason, amount: it.amount, timeframe: tf.timeframe }); }); }
-      if (score.bonus_items) { score.bonus_items.forEach(function(it) { allBonusItems.push({ reason: it.reason, amount: it.amount, timeframe: tf.timeframe }); }); }
+      if (score.penalty_items) { score.penalty_items.forEach(function(it) { penaltyMap[it.reason] = (penaltyMap[it.reason] || 0) + it.amount * w; }); }
+      if (score.bonus_items) { score.bonus_items.forEach(function(it) { bonusMap[it.reason] = (bonusMap[it.reason] || 0) + it.amount * w; }); }
       tfDetails.push({
         timeframe: tf.timeframe, weight: round(w * 100, 0) + '%',
         exitScore: score.exit_score, trend_breakdown: score.trend_breakdown,
@@ -2289,8 +2293,12 @@ window.TechIndicators = (function () {
     else if (multiTF >= 70) { classification = 'EXIT'; signal = 'EXIT'; action = 'Full exit at current price or next bar open'; }
     else if (multiTF >= 55) { classification = 'PARTIAL_EXIT'; signal = 'PARTIAL_EXIT'; action = 'Exit 50%, tighten trailing stop to 1.5x ATR(14)'; }
     else if (multiTF >= 40) { classification = 'TIGHTEN_STOP'; signal = 'TIGHTEN_STOP'; action = 'Move stop to breakeven or 1.3x ATR(14) below current'; }
-    else if (multiTF >= 25) { classification = 'MONITOR'; signal = 'MONITOR'; action = 'No action — watch for escalation'; }
-    else { classification = 'HOLD'; signal = 'HOLD'; action = 'All conditions intact — continue holding'; }
+    else if (multiTF >= 25) { classification = 'MONITOR'; signal = 'MONITOR'; action = 'No action watch for escalation'; }
+    else { classification = 'HOLD'; signal = 'HOLD'; action = 'All conditions intact continue holding'; }
+
+    var allPenaltyItems = [], allBonusItems = [];
+    Object.keys(penaltyMap).forEach(function(key) { allPenaltyItems.push({ reason: key, amount: round(penaltyMap[key] / totalWeight, 1) }); });
+    Object.keys(bonusMap).forEach(function(key) { allBonusItems.push({ reason: key, amount: round(bonusMap[key] / totalWeight, 1) }); });
 
     return {
       multiTF_exit_score: multiTF,
