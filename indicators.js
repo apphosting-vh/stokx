@@ -1177,8 +1177,12 @@ window.TechIndicators = (function () {
     var lc = ind.lastClose;
     signals.sma_20 = lc > ind.sma_20 ? 'bullish' : 'bearish';
     signals.sma_50 = ind.sma_200 ? (lc > ind.sma_50 ? 'bullish' : 'bearish') : null;
+    signals.sma_200 = ind.sma_200 != null ? (lc > ind.sma_200 ? 'bullish' : 'bearish') : null;
     signals.ema_9 = lc > ind.ema_9 ? 'bullish' : 'bearish';
     signals.ema_21 = lc > ind.ema_21 ? 'bullish' : 'bearish';
+    signals.ema_50 = ind.ema_50 != null ? (lc > ind.ema_50 ? 'bullish' : 'bearish') : null;
+    signals.wma_20 = ind.wma_20 != null ? (lc > ind.wma_20 ? 'bullish' : 'bearish') : null;
+    signals.vwap = ind.vwap != null ? (lc > ind.vwap ? 'bullish' : 'bearish') : null;
     signals.rsi_14 = ind.rsi_14 > 70 ? 'overbought' : ind.rsi_14 < 30 ? 'oversold' : 'neutral';
     if (ind.macd && ind.macd.histogram !== null) signals.macd = ind.macd.histogram > 0 ? 'bullish' : 'bearish';
     if (ind.bb && ind.bb.upper && ind.bb.lower) signals.bb = lc > ind.bb.upper ? 'overbought' : lc < ind.bb.lower ? 'oversold' : 'neutral';
@@ -1195,6 +1199,8 @@ window.TechIndicators = (function () {
     if (ind.tsi !== null) signals.tsi = ind.tsi > 0 ? 'bullish' : 'bearish';
     if (ind.stc !== null) signals.stc = ind.stc > 50 ? 'bullish' : 'bearish';
     if (ind.mfi_14 !== null) signals.mfi_14 = ind.mfi_14 > 80 ? 'overbought' : ind.mfi_14 < 20 ? 'oversold' : 'neutral';
+    if (ind.roc_10 !== null) signals.roc_10 = ind.roc_10 > 0 ? 'bullish' : 'bearish';
+    if (ind.momentum_10 !== null) signals.momentum_10 = ind.momentum_10 > 0 ? 'bullish' : 'bearish';
     if (ind.kvo !== null) signals.kvo = ind.kvo > 0 ? 'bullish' : 'bearish';
     if (ind.ttmSqueeze !== null) signals.ttmSqueeze = ind.ttmSqueeze ? 'oversold' : 'neutral';
     if (ind.squeezeMomentum !== null) signals.squeezeMomentum = ind.squeezeMomentum > 0 ? 'bullish' : 'bearish';
@@ -1405,7 +1411,7 @@ window.TechIndicators = (function () {
     var entryPrice = position.entry_price || c;
     var currentPrice = c;
     var holdingDays = position.holding_days || 0;
-    var entryScore = position.entry_score || 50;
+    var entryScore = position.entry_score != null ? position.entry_score : 50;
 
     /* ── 12.1 MA Breakdown (9 pts) ── */
     function scoreMaBreakdown() {
@@ -1618,13 +1624,9 @@ window.TechIndicators = (function () {
 
     /* ── bonuses (increase exit urgency) ── */
     var bonusItems = [];
-    if (indexCandles && indexCandles.length > 10) {
-      var idxClose = closes(indexCandles);
-      if (idxClose && idxClose.length > 5) {
-        var idxInd = computeAll(indexCandles);
-        if (idxInd && idxInd.ema_9 !== null && idxClose[idxClose.length - 1] < idxInd.ema_9 && idxInd.ema_9 < idxInd.ema_21) bonusItems.push({ reason: "Index bearish EMA9<21", amount: 5 });
-      }
-    }
+    var idxEntryScoreVal = null;
+    try { if (indexCandles && indexCandles.length >= 50) { var idxEntryRes = computeEntryScore(indexCandles); if (idxEntryRes && idxEntryRes.entry_score != null) idxEntryScoreVal = idxEntryRes.entry_score; } } catch(e) {}
+    if (idxEntryScoreVal !== null && idxEntryScoreVal < 35) bonusItems.push({ reason: "Index trend score <35", amount: 5 });
     if (distDayRatio >= 0.6) bonusItems.push({ reason: "Distribution days >=60%", amount: 5 });
     if (entryPrice !== null && entryPrice > 0) { if (currentPrice < entryPrice * 0.97) bonusItems.push({ reason: "Price <97% entry", amount: 5 }); else if (currentPrice < entryPrice * 0.985) bonusItems.push({ reason: "Price <98.5% entry", amount: 3 }); }
     var dailyBearish = hma20 !== null && c < hma20;
@@ -1633,10 +1635,7 @@ window.TechIndicators = (function () {
     if (accumDistLabel === 'DISTRIBUTION' && mtfAlign !== null && mtfAlign < 40) bonusItems.push({ reason: "Distribution + MTF<40", amount: 3 });
     var betaVal = null;
     try { if (indexCandles && indexCandles.length > 10) betaVal = calcBeta(candles, indexCandles); } catch(e) {}
-    if (betaVal !== null && betaVal > 1.5) { var idxInd2 = null;
-      try { if (indexCandles && indexCandles.length > 10) { idxInd2 = computeAll(indexCandles); } } catch(e) {}
-      if (idxInd2 && idxInd2.ema_9 !== null && idxClose && idxClose[idxClose.length - 1] < idxInd2.ema_9) bonusItems.push({ reason: "High beta + index bearish", amount: 3 });
-    }
+    if (betaVal !== null && betaVal > 1.5 && idxEntryScoreVal !== null && idxEntryScoreVal < 40) bonusItems.push({ reason: "High beta + index trend <40", amount: 3 });
     if (c < chandelierLong && pivotS1 !== null && c < pivotS1) bonusItems.push({ reason: "Below Chandelier + S1", amount: 3 });
 
     var penalties = 0;
@@ -2104,7 +2103,7 @@ window.TechIndicators = (function () {
     for (var i = Math.max(0, L - 5); i < L; i++) { if (i > Math.max(0, L - 5) && cl[i] <= cl[i - 1]) rising5 = false; if (i > Math.max(0, L - 5) && vo[i] >= vo[i - 1]) declining5 = false; }
     if (cl.length >= 5) { if (rising5 && declining5) penaltyItems.push({ reason: "Rising price + declining volume 5 days", amount: -8 }); }
     if (cl.length >= 5 && hma20_s && hma20_s.length > 1) {
-      var weeklyTrend = 'neutral'; var dailyBullish = false;
+      var weeklyTrend = sma50 !== null ? (c < sma50 ? 'bearish' : 'bullish') : 'neutral'; var dailyBullish = false;
       if (hma20 !== null && c > hma20) dailyBullish = true;
       if (weeklyTrend === 'bearish' && dailyBullish) penaltyItems.push({ reason: "Weekly bearish + daily bullish clash", amount: -10 });
     }
@@ -2319,6 +2318,25 @@ window.TechIndicators = (function () {
     };
   }
 
+  /* ── Compatibility wrapper: uses MTF when multiple timeframes provided, single-TF otherwise ── */
+  function computeCompatExitScore(candles, weeklyCandles, dailyCandles, hourlyCandles, position, indexCandles) {
+    var tfResults = [];
+    if (weeklyCandles && weeklyCandles.length >= 50) tfResults.push({ timeframe: 'W', candles: weeklyCandles });
+    if (dailyCandles && dailyCandles.length >= 50) tfResults.push({ timeframe: 'D', candles: dailyCandles });
+    if (hourlyCandles && hourlyCandles.length >= 50) tfResults.push({ timeframe: 'H', candles: hourlyCandles });
+    if (tfResults.length > 1) {
+      var multi = computeMultiTFExitScore(tfResults, position, indexCandles);
+      if (multi) {
+        multi.exit_score = multi.multiTF_exit_score != null ? multi.multiTF_exit_score : (multi.multiTF_score != null ? multi.multiTF_score : null);
+        multi.compat_mode = 'mtf';
+      }
+      return multi;
+    }
+    var single = computeExitScore(candles, position, indexCandles);
+    if (single) single.compat_mode = 'single';
+    return single;
+  }
+
   /* --------------------------------------------------------------------------
      Public API
      -------------------------------------------------------------------------- */
@@ -2351,6 +2369,7 @@ window.TechIndicators = (function () {
     computeExitScore: computeExitScore,
     computeEntryScore: computeEntryScore,
     computeMultiTFEntryScore: computeMultiTFEntryScore,
-    computeMultiTFExitScore: computeMultiTFExitScore
+    computeMultiTFExitScore: computeMultiTFExitScore,
+    computeCompatExitScore: computeCompatExitScore
   };
 })();

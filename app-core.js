@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.5.5";
+window.__STOX_APP_VERSION = "2.5.6";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -1701,10 +1701,10 @@ function EntryScoreAnalysis({ entry, onBack }) {
                   _sc("bb", price > activeInd.bb.middle)
                 ),
                 activeInd.ichimoku && (activeInd.ichimoku.tenkan ?? activeInd.ichimoku.tenkan_sen) != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                  "Ichimoku: T:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.tenkan ?? activeInd.ichimoku.tenkan_sen)), " K:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.kijun ?? activeInd.ichimoku.kijun_sen)),
-                  " SA:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a)), " SB:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b)),
-                  " \u2014 price ", price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0) ? "above cloud" : "below cloud",
-                  _sc("ichimoku", price > Math.max(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a || 0, activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b || 0))
+                  "Ichimoku: T:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max((activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a) || 0, (activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b) || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.tenkan ?? activeInd.ichimoku.tenkan_sen)), " K:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max((activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a) || 0, (activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b) || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.kijun ?? activeInd.ichimoku.kijun_sen)),
+                  " SA:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max((activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a) || 0, (activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b) || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a)), " SB:", React.createElement("span", { style: { fontWeight: 600, color: price > Math.max((activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a) || 0, (activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b) || 0) ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b)),
+                  " \u2014 price ", price > Math.max((activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a) || 0, (activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b) || 0) ? "above cloud" : "below cloud",
+                  _sc("ichimoku", price > Math.max((activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a) || 0, (activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b) || 0))
                 ),
                 activeInd.vwap != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
                   "VWAP: ", React.createElement("span", { style: { fontWeight: 600, color: price > activeInd.vwap ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.vwap)),

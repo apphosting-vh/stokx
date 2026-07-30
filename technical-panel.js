@@ -379,13 +379,13 @@ window.TechnicalIndicatorsPanel = (function () {
   }
 
   /* ── Exit Score Card ────────────────────────────────────────────────── */
-  function ExitScoreCard(candles, ind, buyPrice, buyDate, currentPrice, entryScore) {
+  function ExitScoreCard(candles, ind, buyPrice, buyDate, currentPrice, entryScore, indexCandles, weeklyCandles, dailyCandles, hourlyCandles) {
     var position = {
       entry_price: buyPrice,
       holding_days: buyDate ? Math.floor((new Date() - new Date(buyDate + "T12:00:00")) / 864e5) : 0,
       entry_score: entryScore
     };
-    var es = TI.computeExitScore(candles, position);
+    var es = TI.computeCompatExitScore(candles, weeklyCandles, dailyCandles, hourlyCandles, position, indexCandles);
     if (!es || es.exit_score == null) return null;
 
     var decisionMap = {
@@ -558,8 +558,8 @@ window.TechnicalIndicatorsPanel = (function () {
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
           React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)", fontFamily: "'Sora',sans-serif" } }, "Exit Price Recommendations"),
           React.createElement("div", { style: { display: "flex", gap: 12, fontSize: 10 } },
-            React.createElement("span", { style: { color: "var(--text5)" } }, "Entry: \u20b9" + INR(ep)),
-            React.createElement("span", { style: { color: "var(--text5)" } }, "Current: \u20b9" + INR(cp)),
+            React.createElement("span", { style: { color: "var(--text5)" } }, "Entry: " + INR(ep)),
+            React.createElement("span", { style: { color: "var(--text5)" } }, "Current: " + INR(cp)),
             React.createElement("span", { style: { color: exitRecs.pnlPct >= 0 ? "#16a34a" : "#ef4444", fontWeight: 700 } }, (exitRecs.pnlPct >= 0 ? "+" : "") + exitRecs.pnlPct.toFixed(1) + "%"),
             React.createElement("span", { style: { color: "var(--text5)" } }, exitRecs.holdingDays + "d held")
           )
@@ -576,7 +576,7 @@ window.TechnicalIndicatorsPanel = (function () {
           ),
           React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text)" } }, exitRecs.activeRule.label),
           exitRecs.activeRule.price !== null && React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } },
-            "At \u20b9" + INR(exitRecs.activeRule.price)
+            "At " + INR(exitRecs.activeRule.price)
           )
         ),
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 6 } },
@@ -591,7 +591,7 @@ window.TechnicalIndicatorsPanel = (function () {
             },
               React.createElement("div", { style: { fontSize: 9, fontWeight: 600, color: r.active ? r.color : "var(--text5)", marginBottom: 3 } }, r.label),
               React.createElement("div", { style: { fontSize: 13, fontWeight: 800, color: r.active ? "var(--text)" : "var(--text5)", fontFamily: "'Sora',sans-serif" } },
-                r.price !== null ? "\u20b9" + INR(r.price) : "\u2014"
+                r.price !== null ? INR(r.price) : "\u2014"
               ),
               React.createElement("div", { style: { fontSize: 9, color: r.active ? r.color : "var(--text6)", marginTop: 2 } },
                 r.active ? "\u25cf ACTIVE" : "Pending"
@@ -621,6 +621,10 @@ window.TechnicalIndicatorsPanel = (function () {
     var _k = useState(0), refreshTick = _k[0], setRefreshTick = _k[1];
     var _l = useState(null), dataSource = _l[0], setDataSource = _l[1];
     var _m = useState(false), showGuide = _m[0], setShowGuide = _m[1];
+    var _n = useState(null), indexCandles = _n[0], setIndexCandles = _n[1];
+    var _o = useState(null), hourlyCandlesMTF = _o[0], setHourlyCandlesMTF = _o[1];
+    var _p = useState(null), dailyCandlesMTF = _p[0], setDailyCandlesMTF = _p[1];
+    var _q = useState(null), weeklyCandlesMTF = _q[0], setWeeklyCandlesMTF = _q[1];
     var timerRef = useRef(null);
 
     var avKey = DF.getAVKey();
@@ -640,7 +644,18 @@ window.TechnicalIndicatorsPanel = (function () {
         }
         setCandles(data);
         setDataSource(source);
-        var ind = TI.computeAll(data);
+        var indexResult = await DF.fetchOHLCVCached("^NSEI", timeframe);
+        var indexData = indexResult ? indexResult.data : null;
+        setIndexCandles(indexData);
+        var mtfResults = await Promise.all([
+          DF.fetchOHLCVCached(ticker, "1h"),
+          DF.fetchOHLCVCached(ticker, "daily"),
+          DF.fetchOHLCVCached(ticker, "weekly")
+        ]);
+        setHourlyCandlesMTF(mtfResults[0] ? mtfResults[0].data : null);
+        setDailyCandlesMTF(mtfResults[1] ? mtfResults[1].data : null);
+        setWeeklyCandlesMTF(mtfResults[2] ? mtfResults[2].data : null);
+        var ind = TI.computeAllWithIndex(data, indexData);
         setIndicators(ind);
         var sig = TI.interpret(ind);
         setSignals(sig);
@@ -951,6 +966,11 @@ window.TechnicalIndicatorsPanel = (function () {
                       "Chandelier Long: ", React.createElement("span", { style: { fontWeight: 600, color: indicators.lastClose > indicators.chandelier.long ? "#16a34a" : "#ef4444" } }, fmt(indicators.chandelier.long)),
                       " \u2014 ", indicators.lastClose > indicators.chandelier.long ? "price above (safe)" : "price below (exit)",
                       _sc("chandelier", indicators.lastClose > indicators.chandelier.long)
+                    ),
+                    indicators.darvasBox && indicators.darvasBox.boxTop != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "Darvas Box: ", React.createElement("span", { style: { fontWeight: 600, color: indicators.lastClose >= indicators.darvasBox.boxTop ? "#16a34a" : indicators.lastClose <= indicators.darvasBox.boxBottom ? "#ef4444" : "#eab308" } }, fmt(indicators.darvasBox.boxTop)), " / ", React.createElement("span", { style: { fontWeight: 600, color: indicators.lastClose >= indicators.darvasBox.boxTop ? "#16a34a" : indicators.lastClose <= indicators.darvasBox.boxBottom ? "#ef4444" : "#eab308" } }, fmt(indicators.darvasBox.boxBottom)),
+                      " \u2014 ", indicators.lastClose >= indicators.darvasBox.boxTop ? "breakout above (bullish)" : indicators.lastClose <= indicators.darvasBox.boxBottom ? "breakdown below (bearish)" : "inside box",
+                      _sc("darvasBox", indicators.lastClose >= indicators.darvasBox.boxTop)
                     )
                   )
                 ),
@@ -1032,7 +1052,7 @@ window.TechnicalIndicatorsPanel = (function () {
       indicators && signals && signals._score && ScoreGauge(signals._score),
 
       /* Exit Score */
-      indicators && candles && ExitScoreCard(candles, indicators),
+      indicators && candles && ExitScoreCard(candles, indicators, null, null, null, null, indexCandles, weeklyCandlesMTF, dailyCandlesMTF, hourlyCandlesMTF),
 
       /* Category tabs */
       React.createElement("div", {
@@ -1120,6 +1140,10 @@ window.TechnicalIndicatorsPanel = (function () {
     var _i = useState(false), autoRefresh = _i[0], setAutoRefresh = _i[1];
     var _j = useState(null), dataSource = _j[0], setDataSource = _j[1];
     var _k = useState(null), candles = _k[0], setCandles = _k[1];
+    var _l = useState(null), indexCandles = _l[0], setIndexCandles = _l[1];
+    var _m = useState(null), hourlyCandlesMTF = _m[0], setHourlyCandlesMTF = _m[1];
+    var _n = useState(null), dailyCandlesMTF = _n[0], setDailyCandlesMTF = _n[1];
+    var _o = useState(null), weeklyCandlesMTF = _o[0], setWeeklyCandlesMTF = _o[1];
     var timerRef = useRef(null);
 
     var fetchData = useCallback(async function () {
@@ -1137,7 +1161,18 @@ window.TechnicalIndicatorsPanel = (function () {
         }
         setDataSource(source);
         setCandles(data);
-        var ind = TI.computeAll(data);
+        var indexResult = await DF.fetchOHLCVCached("^NSEI", timeframe);
+        var indexData = indexResult ? indexResult.data : null;
+        setIndexCandles(indexData);
+        var mtfResults = await Promise.all([
+          DF.fetchOHLCVCached(ticker, "1h"),
+          DF.fetchOHLCVCached(ticker, "daily"),
+          DF.fetchOHLCVCached(ticker, "weekly")
+        ]);
+        setHourlyCandlesMTF(mtfResults[0] ? mtfResults[0].data : null);
+        setDailyCandlesMTF(mtfResults[1] ? mtfResults[1].data : null);
+        setWeeklyCandlesMTF(mtfResults[2] ? mtfResults[2].data : null);
+        var ind = TI.computeAllWithIndex(data, indexData);
         setIndicators(ind);
         var sig = TI.interpret(ind);
         setSignals(sig);
@@ -1289,7 +1324,7 @@ window.TechnicalIndicatorsPanel = (function () {
       })(),
 
       /* Exit Score */
-      showExitScore && indicators && candles && ExitScoreCard(candles, indicators, buyPrice, buyDate, currentPrice, entryScore),
+      showExitScore && indicators && candles && ExitScoreCard(candles, indicators, buyPrice, buyDate, currentPrice, entryScore, indexCandles, weeklyCandlesMTF, dailyCandlesMTF, hourlyCandlesMTF),
 
       /* Category filter pills */
       React.createElement("div", {
