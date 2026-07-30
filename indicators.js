@@ -2344,6 +2344,60 @@ window.TechIndicators = (function () {
     return single;
   }
 
+  /* ══════════════════════════════════════════════════════════════════════════
+     Integrated Exit Decision — Hard Rules + Score + Collapse + Trail + Lock
+     ══════════════════════════════════════════════════════════════════════════ */
+  function integratedExitDecision(position, currentData, indexCandles) {
+    if (!position || !currentData) return { signal: 'HOLD', reason: 'Missing position or data', action: 'Continue holding' };
+    var ep = position.entry_price, cp = position.current_price, days = position.holding_days || 0;
+    var atr = position.current_atr, es = position.entry_score, prevClose = position.prev_close;
+
+    var exitResult = computeExitScore(currentData, { entry_price: ep, holding_days: days, entry_score: es }, indexCandles);
+    var exitScore = exitResult && exitResult.exit_score != null ? exitResult.exit_score : 0;
+    var stopLoss, target;
+
+    if (ep != null && cp != null) {
+      target = ep * 1.04;
+      stopLoss = atr != null ? ep - (atr * 1.5) : null;
+
+      /* Layer 1: Hard Rules */
+      if (cp >= target) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Target hit (+4%)', action: 'Full exit', exit_score: exitScore });
+      if (stopLoss != null && cp <= stopLoss) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Stop loss triggered', action: 'Full exit', exit_score: exitScore });
+      if (days >= 15 && cp < ep * 1.02) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Time stop (15 days, <2%)', action: 'Full exit', exit_score: exitScore });
+    }
+
+    /* Layer 2: Exit Score */
+    if (exitResult && exitResult.exit_score != null) {
+      if (exitScore >= 85) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
+      if (exitScore >= 70) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
+      if (exitScore >= 55) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
+      if (exitScore >= 40 && cp != null && atr != null) {
+        var newStop = Math.max(stopLoss || 0, cp - atr * 1.5);
+        return Object.assign({}, exitResult, { reason: 'Move to ' + round(newStop, 2), action: 'Move stop to ' + round(newStop, 2) });
+      }
+    }
+
+    /* Layer 3: Entry Score Collapse */
+    var curEntryRes = computeEntryScore(currentData, indexCandles);
+    var curEntry = curEntryRes && curEntryRes.entry_score != null ? curEntryRes.entry_score : null;
+    if (days >= 5 && curEntry !== null && curEntry < 40 && es != null && es > 65) {
+      return Object.assign({}, exitResult || {}, { signal: 'EXIT', reason: 'Entry score collapsed', action: 'Full exit at current price or next bar open', exit_score: exitScore });
+    }
+
+    /* Layer 4: Trailing Stop after +2% */
+    if (ep != null && cp != null && atr != null && prevClose != null && cp >= ep * 1.02) {
+      var trailStop = cp - (atr * 2);
+      if (prevClose <= trailStop) return Object.assign({}, exitResult || {}, { signal: 'EXIT', reason: 'Trailing stop after +2%', action: 'Full exit', exit_score: exitScore });
+    }
+
+    /* Layer 5: Partial Profit-Lock */
+    if (ep != null && cp != null && cp >= ep * 1.02 && days >= 3 && exitScore >= 30) {
+      return Object.assign({}, exitResult || {}, { signal: 'PARTIAL_EXIT', reason: 'Lock gains', action: 'Exit 50%', exit_score: exitScore });
+    }
+
+    return Object.assign({}, exitResult || {}, { signal: 'HOLD', reason: 'Exit score ' + exitScore + ' conditions intact', action: 'Continue holding', exit_score: exitScore });
+  }
+
   /* --------------------------------------------------------------------------
      Public API
      -------------------------------------------------------------------------- */
@@ -2377,6 +2431,7 @@ window.TechIndicators = (function () {
     computeEntryScore: computeEntryScore,
     computeMultiTFEntryScore: computeMultiTFEntryScore,
     computeMultiTFExitScore: computeMultiTFExitScore,
-    computeCompatExitScore: computeCompatExitScore
+    computeCompatExitScore: computeCompatExitScore,
+    integratedExitDecision: integratedExitDecision
   };
 })();

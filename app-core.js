@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.0";
+window.__STOX_APP_VERSION = "2.6.1";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -5626,6 +5626,28 @@ function App() {
     return () => clearInterval(timer);
   }, [allTickers.join(",")]);
 
+  // Position monitoring every 15 min during market hours (09:15–15:30 IST)
+  var shownAlertsRef = React.useRef({});
+  useEffect(() => {
+    if (holdings.length === 0) return;
+    var timer = setInterval(async () => {
+      var now = new Date(Date.now() + 5.5 * 3600000);
+      var h = now.getUTCHours(), m = now.getUTCMinutes() + h * 60;
+      if (m < 555 || m > 930) return; // outside 09:15–15:30 IST
+      try {
+        var alerts = await monitorPositions(holdings);
+        alerts.forEach(function(a) {
+          var key = a.symbol + '|' + a.action + '|' + a.reason;
+          if (shownAlertsRef.current[key]) return;
+          shownAlertsRef.current[key] = true;
+          var msg = a.symbol + ': ' + (a.action || a.classification || 'ALERT') + (a.pnl_pct != null ? ' (' + a.pnl_pct + '%)' : '') + ' — ' + a.reason;
+          showToast(msg, 8000);
+        });
+      } catch(e) {}
+    }, 15 * 60 * 1000);
+    return function() { clearInterval(timer); };
+  }, [holdings.length]);
+
   const navigate = (p, param) => { setPage(p); setPageParam(param); window.scrollTo(0, 0); };
 
   const refreshPrices = async () => {
@@ -5812,6 +5834,83 @@ function App() {
     ),
     React.createElement(ToastHost, null)
   );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SCANNING & MONITORING PIPELINE  (Section 19)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* 19.1 Entry Scan — run daily after market close (15:30 IST) */
+async function scanEntries(universe) {
+  if (!universe || !universe.length) return [];
+  var idxD = await DF.fetchOHLCVCached('^NSEI', 'daily');
+  var idxW = await DF.fetchOHLCVCached('^NSEI', 'weekly');
+  var results = [];
+  for (var i = 0; i < universe.length; i++) {
+    var sym = universe[i];
+    try {
+      var h = await DF.fetchOHLCVCached(sym, '1h');
+      var d = await DF.fetchOHLCVCached(sym, 'daily');
+      var w = await DF.fetchOHLCVCached(sym, 'weekly');
+      if (!d || d.length < 50) continue;
+      var tfResults = [
+        { timeframe: 'H', candles: h },
+        { timeframe: 'D', candles: d },
+        { timeframe: 'W', candles: w }
+      ];
+      var score = TI.computeMultiTFEntryScore(tfResults, idxD);
+      var entryScore = score && score.multiTF_score != null ? score.multiTF_score : (score && score.entry_score != null ? score.entry_score : null);
+      if (entryScore != null && entryScore >= 65) {
+        results.push({
+          symbol: sym, score: Math.round(entryScore * 10) / 10,
+          classification: score.classification || (entryScore >= 80 ? 'STRONG_BUY' : 'BUY'),
+          details: score
+        });
+      }
+    } catch(e) { /* skip symbol */ }
+  }
+  results.sort(function(a, b) { return b.score - a.score; });
+  return results;
+}
+
+/* 19.2 Position Monitoring — run every 15–60 min during market hours (09:15–15:30 IST) */
+async function monitorPositions(portfolio) {
+  if (!portfolio || !portfolio.length) return [];
+  var alerts = [];
+  for (var i = 0; i < portfolio.length; i++) {
+    var pos = portfolio[i];
+    try {
+      var d = await DF.fetchOHLCVCached(pos.symbol, 'daily');
+      if (!d || d.length < 50) continue;
+      var idxD = await DF.fetchOHLCVCached('^NSEI', 'daily');
+      var lastCandle = d[d.length - 1];
+      var prevCandle = d.length > 1 ? d[d.length - 2] : null;
+      var posData = {
+        entry_price: pos.entry_price || pos.entry,
+        current_price: pos.current_price || pos.current || (lastCandle ? lastCandle.c : null),
+        holding_days: pos.holding_days || 0,
+        current_atr: pos.current_atr || null,
+        entry_score: pos.entry_score != null ? pos.entry_score : 50,
+        prev_close: pos.prev_close || (prevCandle ? prevCandle.c : null)
+      };
+      var exitRes = TI.computeExitScore(d, { entry_price: posData.entry_price, holding_days: posData.holding_days, entry_score: posData.entry_score }, idxD);
+      var integratedRes = TI.integratedExitDecision(posData, d, idxD);
+      if (exitRes && exitRes.exit_score >= 55) {
+        var pnl = posData.current_price && posData.entry_price ? (posData.current_price - posData.entry_price) / posData.entry_price * 100 : null;
+        alerts.push({
+          symbol: pos.symbol,
+          exit_score: exitRes.exit_score,
+          action: integratedRes ? integratedRes.signal : exitRes.signal,
+          reason: integratedRes ? integratedRes.reason : 'Score threshold',
+          pnl_pct: pnl != null ? Math.round(pnl * 100) / 100 : null,
+          classification: exitRes.classification,
+          details: exitRes
+        });
+      }
+    } catch(e) { /* skip position */ }
+  }
+  alerts.sort(function(a, b) { return b.exit_score - a.exit_score; });
+  return alerts;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
