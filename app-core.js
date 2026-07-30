@@ -5430,6 +5430,15 @@ function InfoPage() {
    PAGE: Settings
    ══════════════════════════════════════════════════════════════════════════ */
 function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareSnapshots, watchlist, setWatchlist, themeId, setTheme, fontId, setFont }) {
+  var _meth = React.useState(null), methOpen = _meth[0], setMethOpen = _meth[1];
+  function toggleMeth(s) { setMethOpen(methOpen === s ? null : s); }
+  var _i = React.useState(null), iOpen = _i[0], setIOpen = _i[1];
+  function toggleI(s) { setIOpen(iOpen === s ? null : s); }
+  var secStyle = { fontSize: 12, color: "var(--text4)", lineHeight: 1.7, padding: "8px 0 0 0" };
+  var headBtn = function(label, isOpen) { return { className: "stx-btn stx-btn-ghost", style: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text)", background: "var(--cardbg2)", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer", marginBottom: 4, textAlign: "left" }, onClick: null }; };
+  var subH = { fontSize: 13, fontWeight: 700, color: "var(--text)", marginTop: 10, marginBottom: 4 };
+  var subSub = { fontSize: 12, fontWeight: 600, color: "var(--text2)", marginTop: 8, marginBottom: 2 };
+
   return React.createElement("div", null,
     React.createElement("div", { style: { marginBottom: 20 } },
       React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--accent)", letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 4 } }, "SETTINGS"),
@@ -5497,14 +5506,175 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       stateData: { holdings, watchlist, soldShareSnapshots }
     }) : null,
 
-    // About
+    // About & Methodology
     React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
       React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 8 } }, "About StoX"),
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
-        React.createElement("p", null, "All data is stored locally on your device. No data is sent to any server."),
+        React.createElement("p", null, "All data is stored locally. No data is sent to any server."),
         React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.25"),
-        React.createElement("p", null, "Data sourced from Yahoo Finance via CORS proxies. Prices may be delayed.")
+        React.createElement("p", null, "Data: Yahoo Finance via CORS proxies. Prices may be delayed.")
+      ),
+
+      // ── Methodology Section ──
+      React.createElement("div", { style: { marginTop: 16, display: "flex", flexDirection: "column", gap: 4 } },
+
+        // ==================== INDICATORS ====================
+        React.createElement("button", {
+          style: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text)", background: "var(--cardbg2)", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" },
+          onClick: function() { toggleMeth('indicators'); }
+        },
+          React.createElement("span", null, "Technical Indicators Used"),
+          React.createElement("span", null, methOpen === 'indicators' ? "\u25BC" : "\u25B6")
+        ),
+        methOpen === 'indicators' ? React.createElement("div", { key: "ind", style: secStyle },
+          React.createElement("div", { style: subSub }, "Trend / MA"),
+          React.createElement("p", null, "SMA(20, 50, 100), EMA(9, 21, 50), WMA(20), HMA(16), KAMA(10), Ichimoku (Tenkan/Kijun/Senkou A/B/Chikou)"),
+          React.createElement("div", { style: subSub }, "Momentum"),
+          React.createElement("p", null, "RSI(14), Stochastic RSI(14,3,3), Williams %R(14), CCI(20), ROC(12), Momentum(10), MACD(12,26,9), TSI(25,13), STC(20,23,10), AO(5,34)"),
+          React.createElement("div", { style: subSub }, "Volume / Flow"),
+          React.createElement("p", null, "OBV, PVT, KVO(34,55,13), Force Index(13), MFI(14), CMF(20), Volume Profile (POC, VAH), OBV/PVT Slope(10)"),
+          React.createElement("div", { style: subSub }, "Volatility / Structure"),
+          React.createElement("p", null, "Bollinger Bands(20,2), Keltner Channels(20,1.5), Donchian Channels(20), Chandelier Exit(22,3), ATR(14), SuperTrend(10,3), PSAR(0.02,0.2), Vortex(14), Aroon(25)"),
+          React.createElement("div", { style: subSub }, "Pattern / Composite"),
+          React.createElement("p", null, "Darvas Box, Fibonacci Retracement, Pivot Points (Classic), ZigZag(5%), Williams Fractals, Choppiness Index(14), MTF Alignment, TTM Squeeze, Accum/Dist Composite, Relative Strength/Mansfield(40w), Beta")
+        ) : null,
+
+        // ==================== ENTRY SCORE ====================
+        React.createElement("button", {
+          style: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text)", background: "var(--cardbg2)", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" },
+          onClick: function() { toggleMeth('entry'); }
+        },
+          React.createElement("span", null, "Entry Score (100 raw pts)"),
+          React.createElement("span", null, methOpen === 'entry' ? "\u25BC" : "\u25B6")
+        ),
+        methOpen === 'entry' ? React.createElement("div", { key: "ent", style: secStyle },
+          React.createElement("p", { style: subH }, "4 Pillars \u2014 Trend(30) | Momentum(30) | Volume(20) | Structure(20)"),
+          React.createElement("p", { style: subSub }, "7.1 MA Stack (10 pts)"),
+          React.createElement("p", null, "Price vs EMA(9,21,50) + SMA(100) stacking, SMA(20,50,100) triple bull, fast MA cluster (HMA, KAMA, WMA) count, HMA rising, RS Mansfield positive & rising."),
+          React.createElement("p", { style: subSub }, "7.2 MACD + TSI + STC + AO (10 pts)"),
+          React.createElement("p", null, "MACD above signal & zero, histogram rising, TSI >0 & rising, TSI zero cross, STC >50 & rising & >75, STC cross above 25, AO >0 & rising & zero cross, 3-of-4 confluence bonus."),
+          React.createElement("p", { style: subSub }, "7.3 ADX + ST + PSAR + VI + Aroon (10 pts)"),
+          React.createElement("p", null, "ADX >=35 strong / >=25 developing, +DI > -DI, ADX rising with +DI lead, price > SuperTrend, ST flip, PSAR bullish, VI+ > VI-, VI+ rising & VI- falling, Aroon >50 / >0 & rising, all-bull confluence."),
+          React.createElement("p", { style: subSub }, "8.1 RSI + StochRSI + WillR (10 pts)"),
+          React.createElement("p", null, "RSI sweet spot 58\u201372 (+2), 55\u201358 (+1), 72\u201378 (+1), 50\u201355 (+0.5). RSI > prev & >50, RSI cross above 50, StochRSI K > D, K 50\u201380, K rising. Williams %R -45 to -15, -80 to -45, rising > -45, > -15."),
+          React.createElement("p", { style: subSub }, "8.2 CCI + ROC + Mom + FI (10 pts)"),
+          React.createElement("p", null, "CCI 80\u2013160 (+1.5), 50\u201380 (+1), 0\u201350 (+0.5). CCI rising >0. ROC(12) >0 & rising, >2%. Mom(10) >0 & rising. FI(13) >0 & rising, zero cross. 4-of-4 confluence."),
+          React.createElement("p", { style: subSub }, "8.3 MFI + CMF (10 pts)"),
+          React.createElement("p", null, "MFI 60\u201380 (+2.5), 50\u201360 (+1.5), 40\u201350 (+1), >80 (+1). MFI > prev & >50, cross above 50. CMF >0.10 (+2), >0.05 (+1.5), >0 (+1). CMF rising >0. MFI+CMF both positive."),
+          React.createElement("p", { style: subSub }, "9.1 OBV + PVT + KVO (8 pts)"),
+          React.createElement("p", null, "OBV > SMA(10), OBV slope >0 & rising. PVT > SMA(10), PVT slope >0 & rising. KVO > signal, >0, > prev, signal cross."),
+          React.createElement("p", { style: subSub }, "9.2 Rolling VWAP + Anchored VWAP (6 pts)"),
+          React.createElement("p", null, "Price > VWAP(10) (+1.5), VWAP pct 0.3\u20132.0% (+0.5), VWAP rising. Price > Anchored VWAP (+1.5), AVWAP rising. Both VWAPs beat (+1)."),
+          React.createElement("p", { style: subSub }, "9.3 VP + Squeeze + Accum/Dist (6 pts)"),
+          React.createElement("p", null, "Price > POC, > VAH (value area high), POC rising. Squeeze release, squeeze momentum positive & rising, squeeze on. Accum/Dist = ACCUMULATION."),
+          React.createElement("p", { style: subSub }, "10.1 BB + KC + DC + Chandelier (8 pts)"),
+          React.createElement("p", null, "BB position 0.5\u20130.8 (+1) / 0.3\u20130.5 (+0.5), BB width expanding. Price > KC mid, > KC upper. DC upper touch, > DC midpoint. Price > Chandelier Long, CL rising. BB inside KC (squeeze). ATR% 1.2\u20132.2%. DC breakout + BB expansion."),
+          React.createElement("p", { style: subSub }, "10.2 Ichimoku (6 pts)"),
+          React.createElement("p", null, "Price above cloud top (+2) / inside cloud (+0.5). Tenkan > Kijun (+1), cross within 3 bars (+0.5). Senkou A > B (+1). Chikou > prev close (+0.5). All-bull confluence (+1)."),
+          React.createElement("p", { style: subSub }, "10.3 Darvas + HMA + KAMA + Fib + Pivot + ZigZag + Chop + MTF (6 pts)"),
+          React.createElement("p", null, "Darvas breakout (+1.5) / above mid (+0.5). Price > HMA(16), HMA rising. Price > KAMA(10), KAMA rising. Fib close to 0.382/0.5/0.618 + rising. Price > Pivot P, > R1. Choppiness <38.2. ZigZag UP. MTF Alignment >=80 / >=60."),
+
+          React.createElement("p", { style: subH }, "Penalties (-max)"),
+          React.createElement("p", null, "RSI >80 (-5). Price rising + volume declining 5d (-8). Weekly bearish + daily bullish clash (-10). Near resistance <1% (-5). Squeeze >10 bars (-3). High beta + high ATR (-3)."),
+          React.createElement("p", { style: subH }, "Bonuses (+max)"),
+          React.createElement("p", null, "Donchian breakout + high volume (+5). All TFs bullish D/W/H (+5). Index trend score >60 (+3). Accumulation + MTF>80 (+3). RS Mansfield>5 + Aroon>50 (+3). Above pivot R1 + fib 0.618 (+2). ROC(12) rising momentum (+3)."),
+
+          React.createElement("p", { style: subH }, "Classification"),
+          React.createElement("p", null, "80+ STRONG_BUY (100% alloc) | 65+ BUY (70%) | 50+ WATCHLIST (40%) | 35+ NEUTRAL (0%) | <35 AVOID (0%)"),
+          React.createElement("p", { style: subH }, "MTF Weights"),
+          React.createElement("p", null, "Daily 50% | Weekly 30% | Hourly 20%")
+        ) : null,
+
+        // ==================== EXIT SCORE ====================
+        React.createElement("button", {
+          style: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text)", background: "var(--cardbg2)", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" },
+          onClick: function() { toggleMeth('exit'); }
+        },
+          React.createElement("span", null, "Exit Score (100 raw pts)"),
+          React.createElement("span", null, methOpen === 'exit' ? "\u25BC" : "\u25B6")
+        ),
+        methOpen === 'exit' ? React.createElement("div", { key: "ext", style: secStyle },
+          React.createElement("p", { style: subH }, "4 Pillars \u2014 Trend BD(25) | Mom Exh(25) | Vol Dist(25) | Struc BD(25)"),
+          React.createElement("p", { style: subSub }, "12.1 MA Breakdown (9 pts)"),
+          React.createElement("p", null, "Price < EMA(9) cross, < EMA(21), < EMA(50), < SMA(200). EMA bearish stacking (9<21, 21<50). HMA(16) declining, KAMA(10) declining, price < WMA(20). SMA(20) < SMA(50). RS Mansfield <0 & declining. HA close < prev + price < SMA(20). Price < Chandelier Long."),
+          React.createElement("p", { style: subSub }, "12.2 MACD + TSI + STC + AO Rollover (8 pts)"),
+          React.createElement("p", null, "MACD cross below signal, MACD <0 cross. Histogram <0 & declining. TSI <0 cross, TSI <0, TSI declining. STC <25, STC declining & <75. AO <0 cross, AO <0, AO declining."),
+          React.createElement("p", { style: subSub }, "12.3 ADX + ST + PSAR + VI + Aroon BD (8 pts)"),
+          React.createElement("p", null, "ADX declining & <25. -DI > +DI cross. Price < SuperTrend, ST flip. Price < PSAR, PSAR flip. VI- > VI+ cross. Aroon < -50 / <0, Aroon declining."),
+          React.createElement("p", { style: subSub }, "13.1 RSI + StochRSI + WillR Exhaustion (9 pts)"),
+          React.createElement("p", null, "RSI >80 (+2) / >70 (+1). RSI declining from >70. RSI <50 cross. StochRSI K < D cross, K <20. Williams %R < -80 (+1), cross below -50, declining & < -50."),
+          React.createElement("p", { style: subSub }, "13.2 CCI + ROC + Mom + FI Reversal (8 pts)"),
+          React.createElement("p", null, "CCI >200 (+1) / >100 (+0.5), declining from >100, <0 cross. ROC(12) <0 cross, ROC <0. Mom(10) <0 cross, Mom <0. FI(13) <0 cross, FI <0, FI declining & <0."),
+          React.createElement("p", { style: subSub }, "13.3 MFI + CMF Outflow (8 pts)"),
+          React.createElement("p", null, "MFI >80 (+2) / >70 (+1). MFI declining from >70. MFI <50 cross, MFI <30. CMF < -0.05 (+2) / <0 (+1). CMF declining & <0."),
+          React.createElement("p", { style: subSub }, "14.1 OBV + PVT + KVO + FI Decline (9 pts)"),
+          React.createElement("p", null, "OBV < SMA(20). OBV slope <0 cross, OBV slope <0. PVT < SMA(20). PVT slope <0. KVO < signal cross, KVO <0, KVO <0. FI(13) <0, FI declining & <0."),
+          React.createElement("p", { style: subSub }, "14.2 VWAP + AVWAP Break (8 pts)"),
+          React.createElement("p", null, "Price < VWAP(10) cross (+2), else pct bands 2.0% / 1.0% / else. VWAP declining. Price < Anchored VWAP (+1.5), AVWAP declining. Both VWAPs broken (+1)."),
+          React.createElement("p", { style: subSub }, "14.3 Squeeze + Distribution (8 pts)"),
+          React.createElement("p", null, "Squeeze momentum <0 cross, <0, declining & <0. Squeeze on + neg momentum. Distribution days >=60% / >=40%. Dist days rising."),
+          React.createElement("p", { style: subSub }, "15.1 BB + KC + DC + Chandelier BD (9 pts)"),
+          React.createElement("p", null, "Price < BB mid cross, < BB lower. BB width expanding + below mid. Price < KC mid cross. Price <= DC lower. Price < Chandelier Long, CL declining. ATR% >5%."),
+          React.createElement("p", { style: subSub }, "15.2 Ichimoku Bearish Flip (6 pts)"),
+          React.createElement("p", null, "Price < cloud bottom (+2) / < cloud max. Tenkan < Kijun cross (+1.5) / Tenkan < Kijun. Senkou A < B. Price declining. All confluence (+0.5)."),
+          React.createElement("p", { style: subSub }, "15.3 Darvas + HMA + KAMA + MTF + Fib + Pivot + Fractals (10 pts)"),
+          React.createElement("p", null, "Darvas bottom break (+2) / below mid. HMA declining, KAMA declining, price below both. MTF <40 / <60 & declining. Fib 0.618, 0.786 broken. Pivot S1/S2 broken. ZigZag DOWN. Choppiness >61.8 & rising. Risk:reward <1.0 / <1.5 or reward <=0."),
+
+          React.createElement("p", { style: subH }, "Penalties (-max)"),
+          React.createElement("p", null, "Weekly EMA+MACD bullish (-8). Price decline 3 + low volume (-6). Near support <1.5% (-5). Held <3d + high entry >70 (-5). Above fib 0.618 + pivot (-3)."),
+          React.createElement("p", { style: subH }, "Bonuses (+max)"),
+          React.createElement("p", null, "Index trend score <35 (+5). Distribution days >=60% (+5). Price <97% entry (+5) / <98.5% (+3). Daily+Hourly bearish (+5). Distribution + MTF<40 (+3). High beta + index <40 (+3). Below Chandelier + S1 (+3)."),
+
+          React.createElement("p", { style: subH }, "Classification"),
+          React.createElement("p", null, "85+ URGENT EXIT | 70+ EXIT | 55+ PARTIAL EXIT | 40+ TIGHTEN STOP | 25+ MONITOR | <25 HOLD"),
+          React.createElement("p", { style: subH }, "MTF Weights"),
+          React.createElement("p", null, "Daily 50% | Weekly 25% | Hourly 25%")
+        ) : null,
+
+        // ==================== INTEGRATED DECISION ====================
+        React.createElement("button", {
+          style: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text)", background: "var(--cardbg2)", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" },
+          onClick: function() { toggleMeth('integrated'); }
+        },
+          React.createElement("span", null, "Integrated Decision Engine"),
+          React.createElement("span", null, methOpen === 'integrated' ? "\u25BC" : "\u25B6")
+        ),
+        methOpen === 'integrated' ? React.createElement("div", { key: "int", style: secStyle },
+          React.createElement("p", { style: subSub }, "Layer 1 \u2014 Hard Rules"),
+          React.createElement("p", null, "Target hit (+4%) \u2192 EXIT. Stop loss (entry - ATR\u00d71.5) \u2192 EXIT. Time stop (15 days, <2%) \u2192 EXIT."),
+          React.createElement("p", { style: subSub }, "Layer 2 \u2014 Exit Score"),
+          React.createElement("p", null, "Delegates to Exit Score classification above. TIGHTEN STOP computes specific price: max(stop_loss, close - ATR\u00d71.5)."),
+          React.createElement("p", { style: subSub }, "Layer 3 \u2014 Entry Score Collapse"),
+          React.createElement("p", null, "If holding >=5 days, current entry score <40, and original entry >65 \u2192 EXIT."),
+          React.createElement("p", { style: subSub }, "Layer 4 \u2014 Trailing Stop"),
+          React.createElement("p", null, "If close >= entry\u00d71.02 and prev_close <= close - ATR\u00d72.0 \u2192 EXIT."),
+          React.createElement("p", { style: subSub }, "Layer 5 \u2014 Partial Profit-Lock"),
+          React.createElement("p", null, "If close >= entry\u00d71.02, holding >=3 days, exit score >=30 \u2192 PARTIAL EXIT."),
+          React.createElement("p", { style: subH }, "Execution Order"),
+          React.createElement("p", null, "Layers evaluated sequentially 1\u21925. First match wins. TIGHTEN STOP from Layer 2 is overridden only by Layer 1 hard rules.")
+        ) : null,
+
+        // ==================== SCORING MECHANICS ====================
+        React.createElement("button", {
+          style: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text)", background: "var(--cardbg2)", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" },
+          onClick: function() { toggleMeth('mechanics'); }
+        },
+          React.createElement("span", null, "Calculation Methodology"),
+          React.createElement("span", null, methOpen === 'mechanics' ? "\u25BC" : "\u25B6")
+        ),
+        methOpen === 'mechanics' ? React.createElement("div", { key: "mech", style: secStyle },
+          React.createElement("p", { style: subSub }, "Data Fetching"),
+          React.createElement("p", null, "All OHLCV data from Yahoo Finance v8 chart endpoint. Daily: 260 bars (252+ for 52W HL). Weekly: 60 bars. Hourly: 100 bars. Index: ^NSEI for RS, Beta, index trend score."),
+          React.createElement("p", { style: subSub }, "Variable Extraction"),
+          React.createElement("p", null, "Each scoring function re-computes all indicators from raw OHLCV using last 2 closing values (gv/pv) for cross-detection. Indicator periods hardcoded per spec."),
+          React.createElement("p", { style: subSub }, "Scoring Formula"),
+          React.createElement("p", null, "Raw score = sum of sub-function scores (capped per section). Final = clamp(raw + penalties + bonuses, 0, 100). Penalties reduce urgency, bonuses increase it."),
+          React.createElement("p", { style: subSub }, "Multi-Timeframe Aggregation"),
+          React.createElement("p", null, "Each timeframe scored independently. Weighted average applied: entry D=50%/W=30%/H=20%, exit D=50%/W=25%/H=25%. Scores, pillars, penalties, bonuses all weighted and normalized."),
+          React.createElement("p", { style: subSub }, "Position Monitoring"),
+          React.createElement("p", null, "Auto-runs every 15 min during market hours (09:15\u201315:30 IST). Fetches daily candles per holding, computes exit score + integrated decision. Toast alert for each new score >=55. Deduplicated per session.")
+        ) : null
       )
     ),
 
