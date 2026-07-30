@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.1";
+window.__STOX_APP_VERSION = "2.6.3";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -5764,14 +5764,25 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [h, w, snaps] = await Promise.all([dbGetAll("holdings"), dbGetAll("watchlist"), loadSnapshots()]);
+        const [h, w, snaps, cachedPrices] = await Promise.all([
+          dbGetAll("holdings"), dbGetAll("watchlist"), loadSnapshots(),
+          dbGetSetting("stox_prices_cache")
+        ]);
         setHoldings(h);
         setWatchlist(w);
         setSoldShareSnapshots(snaps);
+        if (cachedPrices) setPrices(cachedPrices);
       } catch (e) { console.warn("Failed to load data:", e); }
       setLoading(false);
     })();
   }, []);
+
+  // Persist prices to IDB after every successful fetch so stale data never shows
+  useEffect(() => {
+    if (Object.keys(prices).length === 0) return;
+    var timer = setTimeout(function() { dbSetSetting("stox_prices_cache", prices).catch(function() {}); }, 500);
+    return function() { clearTimeout(timer); };
+  }, [prices]);
 
   // Fetch prices for all tracked tickers
   const allTickers = useMemo(() => {
