@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.5";
+window.__STOX_APP_VERSION = "2.6.6";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -4212,6 +4212,8 @@ function StockScreener() {
   var bgRefreshing = _s16[0], setBgRefreshing = _s16[1];
   var _s17 = useState({ done: 0, total: 0, current: "" });
   var bgProgress = _s17[0], setBgProgress = _s17[1];
+  var _s18 = useState({});
+  var bookmarks = _s18[0], setBookmarks = _s18[1];
   var _resultsRef = useRef(results);
   _resultsRef.current = results;
 
@@ -4230,6 +4232,10 @@ function StockScreener() {
         var snaps = await dbGetSetting("stox_screener_snapshots");
         if (Array.isArray(snaps)) setSnapshots(snaps);
       } catch(e) {}
+      try {
+        var bkm = await dbGetSetting("stox_screener_bookmarks");
+        if (bkm && typeof bkm === "object") setBookmarks(bkm);
+      } catch(e) {}
     })();
   }, []);
 
@@ -4240,6 +4246,12 @@ function StockScreener() {
     }
     window.dispatchEvent(new CustomEvent("stox:data-changed"));
   }, [results, timestamps, scanTime]);
+
+  React.useEffect(function() {
+    dbSetSetting("stox_screener_bookmarks", bookmarks).then(function() {
+      window.dispatchEvent(new CustomEvent("stox:data-changed"));
+    });
+  }, [bookmarks]);
 
   /* Sync background refresh state on mount and listen for progress */
   React.useEffect(function() {
@@ -4542,6 +4554,14 @@ function StockScreener() {
     });
   };
 
+  var toggleBookmark = function(ticker) {
+    setBookmarks(function(p) {
+      var c = Object.assign({}, p);
+      if (c[ticker]) { delete c[ticker]; } else { c[ticker] = true; }
+      return c;
+    });
+  };
+
   var selectedCount = Object.keys(selected).filter(function(t) { return selected[t]; }).length;
 
   var addToEntryScore = async function(s) {
@@ -4785,7 +4805,21 @@ function StockScreener() {
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
                   React.createElement("input", { type: "checkbox", checked: !!selected[r.s.t], onChange: function() { toggleSelect(r.s.t); }, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
                 ),
-                React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" }) }, r.s.t.replace(".NS", "")),
+                React.createElement("td", { style: Object.assign({}, tdStyle) },
+                  React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4 } },
+                    React.createElement("button", {
+                      onClick: function(e) { e.stopPropagation(); toggleBookmark(r.s.t); },
+                      title: bookmarks[r.s.t] ? "Remove bookmark" : "Bookmark this stock",
+                      style: {
+                        width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        border: "none", background: "transparent", cursor: "pointer", padding: 0, flexShrink: 0,
+                        color: bookmarks[r.s.t] ? "#fbbf24" : "var(--text6)", opacity: bookmarks[r.s.t] ? 1 : 0.35,
+                        transition: "all .15s"
+                      }
+                    }, Icons.star(14, !!bookmarks[r.s.t])),
+                    React.createElement("span", { style: { fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap" } }, r.s.t.replace(".NS", ""))
+                  )
+                ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { color: "var(--text4)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }, r.s.n),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontSize: 10 }) },
                   r.s.cap ? React.createElement("span", { style: { padding: "2px 7px", borderRadius: 4, background: r.s.cap === "L" ? "rgba(59,130,246,.12)" : "rgba(168,85,247,.12)", color: r.s.cap === "L" ? "#3b82f6" : "#a855f7", border: "1px solid " + (r.s.cap === "L" ? "rgba(59,130,246,.25)" : "rgba(168,85,247,.25)"), fontWeight: 700, letterSpacing: 0.3 } }, r.s.cap === "L" ? "Large" : "Mid") : "\u2014"
