@@ -5746,7 +5746,6 @@ function App() {
   const [fontId, setFontId] = useState(loadFont);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [loading, setLoading] = useState(true);
-  const [pricesReady, setPricesReady] = useState(false);
 
   const setTheme = id => { setThemeId(id); applyTheme(id); saveTheme(id); };
   const setFont = id => { setFontId(id); applyFont(id); saveFont(id); };
@@ -5762,36 +5761,37 @@ function App() {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  // Load data from IDB on mount
+  // Load data from IDB on mount, then fetch prices for all tickers
   useEffect(() => {
     (async () => {
+      var h = [], w = [], snaps = {};
       try {
-        const [h, w, snaps] = await Promise.all([dbGetAll("holdings"), dbGetAll("watchlist"), loadSnapshots()]);
-        setHoldings(h);
-        setWatchlist(w);
-        setSoldShareSnapshots(snaps);
+        var loaded = await Promise.all([dbGetAll("holdings"), dbGetAll("watchlist"), loadSnapshots()]);
+        h = loaded[0]; w = loaded[1]; snaps = loaded[2];
       } catch (e) { console.warn("Failed to load data:", e); }
+      setHoldings(h);
+      setWatchlist(w);
+      setSoldShareSnapshots(snaps);
+      // Fetch prices immediately after IDB data is loaded
+      var tickers = [];
+      var seen = {};
+      h.forEach(function(x) { if (x.ticker && !seen[x.ticker]) { seen[x.ticker] = true; tickers.push(x.ticker); } });
+      w.forEach(function(x) { if (x.ticker && !seen[x.ticker]) { seen[x.ticker] = true; tickers.push(x.ticker); } });
+      if (tickers.length > 0) {
+        var result = await fetchMultiplePrices(tickers);
+        setPrices(function(prev) { return Object.assign({}, prev, result); });
+      }
       setLoading(false);
     })();
   }, []);
 
-  // Fetch prices for all tracked tickers
+  // Memoize all tracked tickers for auto-refresh
   const allTickers = useMemo(() => {
-    const set = new Set();
-    holdings.forEach((h) => set.add(h.ticker));
-    watchlist.forEach((w) => set.add(w.ticker));
-    return [...set];
+    var set = {};
+    holdings.forEach(function(h) { if (h.ticker) set[h.ticker] = true; });
+    watchlist.forEach(function(w) { if (w.ticker) set[w.ticker] = true; });
+    return Object.keys(set);
   }, [holdings, watchlist]);
-
-  useEffect(() => {
-    if (allTickers.length === 0) { setPricesReady(true); return; }
-    let cancelled = false;
-    (async () => {
-      const result = await fetchMultiplePrices(allTickers);
-      if (!cancelled) { setPrices((prev) => ({ ...prev, ...result })); setPricesReady(true); }
-    })();
-    return () => { cancelled = true; };
-  }, [allTickers.join(",")]);
 
   // Auto-write FSA file when any app data changes (debounced 2s)
   const _fsaTimerRef = React.useRef(null);
@@ -5865,16 +5865,15 @@ function App() {
     if (data) setPrices((prev) => ({ ...prev, [ticker.toUpperCase()]: data }));
   };
 
-  // Hide splash once all data is ready
-  var ready = !loading && pricesReady;
+  // Hide splash once initial data is loaded
   useEffect(() => {
-    if (!ready) return;
+    if (loading) return;
     var splash = document.getElementById("stox-splash");
     if (!splash) return;
     splash.style.transition = "opacity .5s ease";
     splash.style.opacity = "0";
     setTimeout(function() { if (splash.parentNode) splash.remove(); }, 500);
-  }, [ready]);
+  }, [loading]);
 
   // Snapshot CRUD helpers
   const saveSnapshot = async (snapshot) => {
@@ -6009,7 +6008,7 @@ function App() {
       ),
       // Content
       React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "24px 24px 40px", background: "var(--bg)" } },
-        !loading && pricesReady ? renderPage() : React.createElement("div", { style: { textAlign: "center", padding: "60px 20px", color: "var(--text5)", fontSize: 13 } }, React.createElement("div", { style: { fontSize: 24, marginBottom: 12 } }, "\u23f3"), "Loading data\u2026")
+        !loading ? renderPage() : React.createElement("div", { style: { textAlign: "center", padding: "60px 20px", color: "var(--text5)", fontSize: 13 } }, React.createElement("div", { style: { fontSize: 24, marginBottom: 12 } }, "\u23f3"), "Loading data\u2026")
       ),
       React.createElement(ToastHost, null)
     );
@@ -6018,7 +6017,7 @@ function App() {
   // Mobile layout
   return React.createElement("div", { className: "stx-has-botnav", style: { padding: "14px 10px 32px" } },
     React.createElement("div", { style: { maxWidth: 600, margin: "0 auto" } },
-      !loading && pricesReady ? renderPage() : React.createElement("div", { style: { textAlign: "center", padding: "60px 20px", color: "var(--text5)", fontSize: 13 } }, React.createElement("div", { style: { fontSize: 24, marginBottom: 12 } }, "\u23f3"), "Loading data\u2026")
+      !loading ? renderPage() : React.createElement("div", { style: { textAlign: "center", padding: "60px 20px", color: "var(--text5)", fontSize: 13 } }, React.createElement("div", { style: { fontSize: 24, marginBottom: 12 } }, "\u23f3"), "Loading data\u2026")
     ),
     // Bottom nav
     React.createElement("div", { className: "stx-botnav" },
