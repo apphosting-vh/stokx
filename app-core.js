@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.5.6";
+window.__STOX_APP_VERSION = "2.5.7";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -4277,20 +4277,23 @@ function StockScreener() {
     setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = true; return c; });
     try {
       var tk = s.t.replace(".NS", "");
+      DF.clearCache();
       var resW = await DF.fetchOHLCVCached(tk, "weekly");
       var resD = await DF.fetchOHLCVCached(tk, "daily");
       var resH = await DF.fetchOHLCVCached(tk, "1h");
       if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
         setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = false; return c; }); return;
       }
-      var lc = resD.data[resD.data.length - 1].c;
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
       var dc = resD.data;
+      var lastDailyClose = dc[dc.length - 1].c;
+      var intradayClose = resH && resH.data && resH.data.length > 0 ? resH.data[resH.data.length - 1].c : null;
+      var lc = intradayClose != null ? intradayClose : lastDailyClose;
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
       var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
       var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
       var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
       var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
-      var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
+      var todayChg = lc > 0 && lastDailyClose > 0 ? Math.round((lc - lastDailyClose) / lastDailyClose * 10000) / 100 : null;
       var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
       var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
       var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
@@ -4320,14 +4323,16 @@ function StockScreener() {
       if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
         setScanErr("Insufficient data for " + tk); setManualLoading(false); setManualTicker(""); return;
       }
-      var lc = resD.data[resD.data.length - 1].c;
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
       var dc = resD.data;
+      var lastDailyClose = dc[dc.length - 1].c;
+      var intradayClose = resH && resH.data && resH.data.length > 0 ? resH.data[resH.data.length - 1].c : null;
+      var lc = intradayClose != null ? intradayClose : lastDailyClose;
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
       var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
       var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
       var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
       var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
-      var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
+      var todayChg = lc > 0 && lastDailyClose > 0 ? Math.round((lc - lastDailyClose) / lastDailyClose * 10000) / 100 : null;
       var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
       var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
       var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
@@ -4398,18 +4403,21 @@ function StockScreener() {
       bg.current = tk;
       window.dispatchEvent(new CustomEvent("stox:screener-bg-progress", { detail: { done: i, total: batch.length, current: tk, active: true } }));
       try {
+        DF.clearCache();
         var resW = await DF.fetchOHLCVCached(tk, "weekly");
         var resD = await DF.fetchOHLCVCached(tk, "daily");
         var resH = await DF.fetchOHLCVCached(tk, "1h");
         if (resW.data && resW.data.length >= 12 && resD.data && resD.data.length >= 12) {
-          var lc = resD.data[resD.data.length - 1].c;
-          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
           var dc = resD.data;
+          var lastDailyClose = dc[dc.length - 1].c;
+          var intradayClose = resH && resH.data && resH.data.length > 0 ? resH.data[resH.data.length - 1].c : null;
+          var lc = intradayClose != null ? intradayClose : lastDailyClose;
+          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
           var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
           var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
           var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
           var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
-          var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
+          var todayChg = lc > 0 && lastDailyClose > 0 ? Math.round((lc - lastDailyClose) / lastDailyClose * 10000) / 100 : null;
           var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
           var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
           var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
@@ -4501,14 +4509,16 @@ function StockScreener() {
           var resD = await DF.fetchOHLCVCached(tk, "daily");
           var resH = await DF.fetchOHLCVCached(tk, "1h");
           if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) return null;
-          var lc = resD.data[resD.data.length - 1].c;
-          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
           var dc = resD.data;
+          var lastDailyClose = dc[dc.length - 1].c;
+          var intradayClose = resH && resH.data && resH.data.length > 0 ? resH.data[resH.data.length - 1].c : null;
+          var lc = intradayClose != null ? intradayClose : lastDailyClose;
+          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
           var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
           var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
           var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
           var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
-          var todayChg = lc > 0 && lc1 != null && lc1 > 0 ? Math.round((lc - lc1) / lc1 * 10000) / 100 : null;
+          var todayChg = lc > 0 && lastDailyClose > 0 ? Math.round((lc - lastDailyClose) / lastDailyClose * 10000) / 100 : null;
           var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
           var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
           var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
