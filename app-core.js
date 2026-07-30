@@ -1172,6 +1172,27 @@ function MarketNewsPanel({ holdings }) {
    ══════════════════════════════════════════════════════════════════════════ */
 function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
   const [loading, setLoading] = useState(false);
+  const [testStatus, setTestStatus] = useState(null); // null | "testing" | { ok, msg }
+
+  const testConnectivity = async function () {
+    setTestStatus("testing");
+    var results = [];
+    for (var pi = 0; pi < PROXY_FNS.length; pi++) {
+      var ok = false, err = null;
+      try {
+        var url = PROXY_FNS[pi]("https://query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS?interval=1d&range=1d&_t=" + Date.now());
+        var r = await _fetchX(url, {}, 6000);
+        if (r.ok) { var txt = await _readBody(r); var j = JSON.parse(_unwrap(txt)); ok = !!(j?.chart?.result?.[0]?.meta?.regularMarketPrice); if (!ok) err = "no price in response"; }
+        else err = "HTTP " + r.status;
+      } catch (e) { err = e.message || "timeout/error"; }
+      results.push({ proxy: "Proxy " + (pi + 1), ok: ok, err: err });
+    }
+    var passed = results.filter(function (r) { return r.ok; }).length;
+    var total = results.length;
+    var lines = results.map(function (r) { return (r.ok ? "\u2705" : "\u274c") + " " + r.proxy + (r.ok ? "" : ": " + r.err); }).join("\n");
+    setTestStatus({ ok: passed > 0, msg: passed + "/" + total + " proxies working\n" + lines });
+    setTimeout(function () { setTestStatus(null); }, 8000);
+  };
 
   const totalInvested = useMemo(() => {
     return holdings.reduce((s, h) => s + ((h.buyPrice || h.avgPrice || 0) * h.qty), 0);
@@ -1196,13 +1217,23 @@ function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
         React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, "Market Overview"),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 4 } }, todayStr + (isTradingWeekday() ? " \u00b7 Market Open" : " \u00b7 Market Closed"))
       ),
-      React.createElement("button", {
-        className: "stx-btn stx-btn-ghost",
-        disabled: loading,
-        onClick: async function() { setLoading(true); try { await refreshPrices(); } catch(e) {} setLoading(false); },
-        style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "6px 14px", borderRadius: 8 }
-      }, React.createElement("span", { style: { display: "inline-block", animation: loading ? "screener-spin .8s linear infinite" : "none" } }, Icons.refresh(14)), loading ? "Refreshing..." : "Refresh")
+      React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+        React.createElement("button", {
+          className: "stx-btn stx-btn-ghost",
+          disabled: loading,
+          onClick: async function() { setLoading(true); try { await refreshPrices(); } catch(e) {} setLoading(false); },
+          style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "6px 14px", borderRadius: 8 }
+        }, React.createElement("span", { style: { display: "inline-block", animation: loading ? "screener-spin .8s linear infinite" : "none" } }, Icons.refresh(14)), loading ? "Refreshing..." : "Refresh"),
+        React.createElement("button", {
+          disabled: testStatus === "testing",
+          onClick: testConnectivity,
+          style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg4)", color: testStatus === "testing" ? "var(--text6)" : "var(--text5)", cursor: testStatus === "testing" ? "wait" : "pointer", fontFamily: "var(--font-body)", whiteSpace: "nowrap" }
+        }, testStatus === "testing" ? "\u23f3 Testing..." : "\u26a1 Test API")
+      )
     ),
+
+    // Test result banner
+    testStatus && testStatus !== "testing" && React.createElement("div", { style: { padding: "8px 14px", borderRadius: 8, marginBottom: 14, background: testStatus.ok ? "rgba(22,163,74,.08)" : "rgba(239,68,68,.08)", border: "1px solid " + (testStatus.ok ? "rgba(22,163,74,.25)" : "rgba(239,68,68,.25)"), fontSize: 11, color: testStatus.ok ? "var(--profit)" : "var(--loss)", whiteSpace: "pre-line", lineHeight: 1.6 } }, testStatus.msg),
 
     // Stats row
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 14, marginBottom: 24 } },
