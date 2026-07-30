@@ -115,9 +115,17 @@ window.NotepadPage = (function () {
     var bodyRef = useRef(null);
     var saveTimer = useRef(null);
     var savedRange = useRef(null);
+    var noteRef = useRef(note);
     var [showColorPicker, setShowColorPicker] = useState(false);
     var [activeFormats, setActiveFormats] = useState({});
     var [confirmDelete, setConfirmDelete] = useState(false);
+
+    useEffect(function () {
+      noteRef.current = note;
+      if (bodyRef.current) {
+        bodyRef.current.innerHTML = note.content || "";
+      }
+    }, [note.id]);
 
     useEffect(function () {
       if (titleRef.current) {
@@ -127,16 +135,17 @@ window.NotepadPage = (function () {
     }, []);
 
     var getNote = useCallback(function () {
+      var n = noteRef.current;
       return {
-        id: note.id,
-        title: titleRef.current ? titleRef.current.value : note.title,
-        content: bodyRef.current ? bodyRef.current.innerHTML : note.content,
-        pinned: note.pinned,
-        color: note.color,
-        createdAt: note.createdAt,
+        id: n.id,
+        title: titleRef.current ? titleRef.current.value : n.title,
+        content: bodyRef.current ? bodyRef.current.innerHTML : n.content,
+        pinned: n.pinned,
+        color: n.color,
+        createdAt: n.createdAt,
         updatedAt: new Date().toISOString()
       };
-    }, [note]);
+    }, []);
 
     var scheduleSave = useCallback(function () {
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -203,8 +212,9 @@ window.NotepadPage = (function () {
     }, []);
 
     var handleTogglePin = useCallback(function () {
-      onSave(Object.assign({}, getNote(), { pinned: !note.pinned }));
-    }, [note, onSave, getNote]);
+      var n = getNote();
+      onSave(Object.assign({}, n, { pinned: !n.pinned }));
+    }, [onSave, getNote]);
 
     var checkFormats = useCallback(function () {
       saveRange();
@@ -304,7 +314,6 @@ window.NotepadPage = (function () {
         onKeyDown: handleKeyDown,
         onMouseUp: checkFormats,
         onKeyUp: checkFormats,
-        dangerouslySetInnerHTML: { __html: note.content || "" },
         style: {
           minHeight: 120, padding: "6px 0", fontSize: 13, lineHeight: 1.7,
           color: "var(--text2)", background: "transparent", outline: "none",

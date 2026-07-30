@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.4";
+window.__STOX_APP_VERSION = "2.6.5";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -5013,6 +5013,7 @@ function SingleStockAnalysis() {
   var _l = useState(null), dataSource = _l[0], setDataSource = _l[1];
   var _m = useState(_saved.ticker || ""), inputVal = _m[0], setInputVal = _m[1];
   var timerRef = useRef(null);
+  var fetchIdRef = useRef(0);
 
   useEffect(function () {
     try { localStorage.setItem(_LS_KEY, JSON.stringify({ ticker: ticker, timeframe: timeframe, category: category, autoRefresh: autoRefresh })); } catch (e) {}
@@ -5029,25 +5030,31 @@ function SingleStockAnalysis() {
 
   var fetchData = useCallback(async function () {
     if (!ticker) return;
+    var fid = Date.now();
+    fetchIdRef.current = fid;
     setLoading(true); setError(null);
     try {
       var result = await DF.fetchOHLCVCached(ticker, timeframe);
+      if (fetchIdRef.current !== fid) return;
       var data = result.data;
       var source = result.source;
       if (!data || data.length < 10) {
-        setError("Insufficient data for " + ticker + ". Try a different timeframe.");
+        setError("Could not fetch data for " + ticker + ". Check the ticker or try a different timeframe.");
         setLoading(false); return;
       }
       setCandles(data); setDataSource(source);
       var ind = TI.computeAll(data);
+      if (fetchIdRef.current !== fid) return;
       setIndicators(ind);
       var sig = TI.interpret(ind);
+      if (fetchIdRef.current !== fid) return;
       setSignals(sig);
       setLastUpdated(new Date());
     } catch (e) {
+      if (fetchIdRef.current !== fid) return;
       setError("Failed to fetch data: " + (e.message || "error"));
     }
-    setLoading(false);
+    if (fetchIdRef.current === fid) setLoading(false);
   }, [ticker, timeframe]);
 
   useEffect(function () { fetchData(); }, [fetchData]);

@@ -51,9 +51,13 @@ window.OHLCVFetcher = (function () {
 
     var symbols = [ticker.toUpperCase() + ".NS", ticker.toUpperCase() + ".BO", ticker.toUpperCase()];
 
+    var startTime = Date.now();
+    var TOTAL_TIMEOUT = 25000;
+
     for (var s = 0; s < symbols.length; s++) {
       for (var h = 0; h < Y_HOSTS.length; h++) {
         for (var p = 0; p < Y_PROXY_FNS.length; p++) {
+          if (Date.now() - startTime > TOTAL_TIMEOUT) return null;
           try {
             var yUrl = "https://" + Y_HOSTS[h] + "/v8/finance/chart/"
               + encodeURIComponent(symbols[s])
