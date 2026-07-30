@@ -5139,6 +5139,21 @@ function SingleStockAnalysis() {
     }
     if (xTicks[xTicks.length - 1] !== data.length - 1) xTicks.push(data.length - 1);
 
+    var daySepEls = [];
+    if (isIntra && data.length > 1) {
+      var isDarkMode = document.documentElement.getAttribute("data-mode") === "dark";
+      var sepColor = isDarkMode ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.25)";
+      var prevDate = String(data[0].t).slice(0, 10);
+      for (var si = 1; si < data.length; si++) {
+        var curDate = String(data[si].t).slice(0, 10);
+        if (curDate !== prevDate) {
+          var sx = padL + si * gap;
+          daySepEls.push(React.createElement("line", { key: "ds" + si, x1: sx, y1: padT, x2: sx, y2: padT + ch, stroke: sepColor, strokeWidth: 1, strokeDasharray: "4,4" }));
+          prevDate = curDate;
+        }
+      }
+    }
+
     var xTickEls = xTicks.map(function (idx) {
       var x = padL + idx * gap + gap / 2;
       var label = formatXLabel(data[idx].t);
@@ -5173,6 +5188,7 @@ function SingleStockAnalysis() {
         React.createElement("text", { x: 8, y: padT + ch / 2, fontSize: 8, fill: "var(--text6)", textAnchor: "middle", fontFamily: "var(--font-mono)", transform: "rotate(-90, 8, " + (padT + ch / 2) + ")" }, yLabel),
         React.createElement("text", { x: padL + cw / 2, y: h - 2, fontSize: 8, fill: "var(--text6)", textAnchor: "middle", fontFamily: "var(--font-mono)" }, xLabel),
         gridLines,
+        daySepEls,
         xTickEls,
         candleEls
       )
