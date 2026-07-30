@@ -5131,6 +5131,20 @@ function SingleStockAnalysis() {
       );
     });
 
+    var daySepEls = [];
+    if (isIntra && data.length > 1) {
+      var mode = (document.documentElement.getAttribute("data-mode") || "dark");
+      var sepColor = mode === "light" ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.35)";
+      for (var si = 1; si < data.length; si++) {
+        var prevDate = String(data[si - 1].t).substring(0, 10);
+        var currDate = String(data[si].t).substring(0, 10);
+        if (currDate !== prevDate) {
+          var sx = padL + si * gap + gap / 2;
+          daySepEls.push(React.createElement("line", { key: "ds" + si, x1: sx, y1: padT, x2: sx, y2: padT + ch, stroke: sepColor, strokeWidth: 0.5, strokeDasharray: "4,4" }));
+        }
+      }
+    }
+
     var xTickCount = Math.min(6, data.length);
     var xTickStep = Math.max(1, Math.floor(data.length / xTickCount));
     var xTicks = [];
@@ -5138,21 +5152,6 @@ function SingleStockAnalysis() {
       xTicks.push(xi);
     }
     if (xTicks[xTicks.length - 1] !== data.length - 1) xTicks.push(data.length - 1);
-
-    var daySepEls = [];
-    if (isIntra && data.length > 1) {
-      var isDarkMode = document.documentElement.getAttribute("data-mode") === "dark";
-      var sepColor = isDarkMode ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.25)";
-      var prevDate = String(data[0].t).slice(0, 10);
-      for (var si = 1; si < data.length; si++) {
-        var curDate = String(data[si].t).slice(0, 10);
-        if (curDate !== prevDate) {
-          var sx = padL + si * gap;
-          daySepEls.push(React.createElement("line", { key: "ds" + si, x1: sx, y1: padT, x2: sx, y2: padT + ch, stroke: sepColor, strokeWidth: 1, strokeDasharray: "4,4" }));
-          prevDate = curDate;
-        }
-      }
-    }
 
     var xTickEls = xTicks.map(function (idx) {
       var x = padL + idx * gap + gap / 2;
@@ -5761,37 +5760,36 @@ function App() {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  // Load data from IDB on mount, then fetch prices for all tickers
+  // Load data from IDB on mount
   useEffect(() => {
     (async () => {
-      var h = [], w = [], snaps = {};
       try {
-        var loaded = await Promise.all([dbGetAll("holdings"), dbGetAll("watchlist"), loadSnapshots()]);
-        h = loaded[0]; w = loaded[1]; snaps = loaded[2];
+        const [h, w, snaps] = await Promise.all([dbGetAll("holdings"), dbGetAll("watchlist"), loadSnapshots()]);
+        setHoldings(h);
+        setWatchlist(w);
+        setSoldShareSnapshots(snaps);
       } catch (e) { console.warn("Failed to load data:", e); }
-      setHoldings(h);
-      setWatchlist(w);
-      setSoldShareSnapshots(snaps);
-      // Fetch prices immediately after IDB data is loaded
-      var tickers = [];
-      var seen = {};
-      h.forEach(function(x) { if (x.ticker && !seen[x.ticker]) { seen[x.ticker] = true; tickers.push(x.ticker); } });
-      w.forEach(function(x) { if (x.ticker && !seen[x.ticker]) { seen[x.ticker] = true; tickers.push(x.ticker); } });
-      if (tickers.length > 0) {
-        var result = await fetchMultiplePrices(tickers);
-        setPrices(function(prev) { return Object.assign({}, prev, result); });
-      }
       setLoading(false);
     })();
   }, []);
 
-  // Memoize all tracked tickers for auto-refresh
+  // Fetch prices for all tracked tickers
   const allTickers = useMemo(() => {
-    var set = {};
-    holdings.forEach(function(h) { if (h.ticker) set[h.ticker] = true; });
-    watchlist.forEach(function(w) { if (w.ticker) set[w.ticker] = true; });
-    return Object.keys(set);
+    const set = new Set();
+    holdings.forEach((h) => set.add(h.ticker));
+    watchlist.forEach((w) => set.add(w.ticker));
+    return [...set];
   }, [holdings, watchlist]);
+
+  useEffect(() => {
+    if (allTickers.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const result = await fetchMultiplePrices(allTickers);
+      if (!cancelled) setPrices((prev) => ({ ...prev, ...result }));
+    })();
+    return () => { cancelled = true; };
+  }, [allTickers.join(",")]);
 
   // Auto-write FSA file when any app data changes (debounced 2s)
   const _fsaTimerRef = React.useRef(null);
@@ -5865,15 +5863,17 @@ function App() {
     if (data) setPrices((prev) => ({ ...prev, [ticker.toUpperCase()]: data }));
   };
 
-  // Hide splash once initial data is loaded
+  // Hide splash
   useEffect(() => {
-    if (loading) return;
-    var splash = document.getElementById("stox-splash");
-    if (!splash) return;
-    splash.style.transition = "opacity .5s ease";
-    splash.style.opacity = "0";
-    setTimeout(function() { if (splash.parentNode) splash.remove(); }, 500);
-  }, [loading]);
+    const splash = document.getElementById("stox-splash");
+    if (splash) {
+      setTimeout(() => {
+        splash.style.transition = "opacity .5s ease";
+        splash.style.opacity = "0";
+        setTimeout(() => splash.remove(), 500);
+      }, 3200);
+    }
+  }, []);
 
   // Snapshot CRUD helpers
   const saveSnapshot = async (snapshot) => {
@@ -6008,7 +6008,7 @@ function App() {
       ),
       // Content
       React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "24px 24px 40px", background: "var(--bg)" } },
-        !loading ? renderPage() : React.createElement("div", { style: { textAlign: "center", padding: "60px 20px", color: "var(--text5)", fontSize: 13 } }, React.createElement("div", { style: { fontSize: 24, marginBottom: 12 } }, "\u23f3"), "Loading data\u2026")
+        renderPage()
       ),
       React.createElement(ToastHost, null)
     );
@@ -6017,7 +6017,7 @@ function App() {
   // Mobile layout
   return React.createElement("div", { className: "stx-has-botnav", style: { padding: "14px 10px 32px" } },
     React.createElement("div", { style: { maxWidth: 600, margin: "0 auto" } },
-      !loading ? renderPage() : React.createElement("div", { style: { textAlign: "center", padding: "60px 20px", color: "var(--text5)", fontSize: 13 } }, React.createElement("div", { style: { fontSize: 24, marginBottom: 12 } }, "\u23f3"), "Loading data\u2026")
+      renderPage()
     ),
     // Bottom nav
     React.createElement("div", { className: "stx-botnav" },
