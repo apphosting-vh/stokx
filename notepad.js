@@ -499,11 +499,14 @@ window.NotepadPage = (function () {
       })();
     }, []);
 
+    var triggerFsa = function () {
+      window.dispatchEvent(new CustomEvent("stox:data-changed"));
+      if (window.__fsa && window.__fsa.writeNow) window.__fsa.writeNow().catch(function () {});
+    };
+
     var saveNotes = useCallback(function (arr) {
       setNotes(arr);
-      dbSetSetting(LS_KEY, arr).then(function () {
-        window.dispatchEvent(new CustomEvent("stox:data-changed"));
-      }).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
+      dbSetSetting(LS_KEY, arr).then(triggerFsa).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
     }, []);
 
     var handleCreate = useCallback(function () {
@@ -520,15 +523,11 @@ window.NotepadPage = (function () {
         if (idx >= 0) {
           var copy = prev.slice();
           copy[idx] = updated;
-          dbSetSetting(LS_KEY, copy).then(function () {
-            window.dispatchEvent(new CustomEvent("stox:data-changed"));
-          }).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
+          dbSetSetting(LS_KEY, copy).then(triggerFsa).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
           return copy;
         }
         var all = [updated].concat(prev);
-        dbSetSetting(LS_KEY, all).then(function () {
-          window.dispatchEvent(new CustomEvent("stox:data-changed"));
-        }).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
+        dbSetSetting(LS_KEY, all).then(triggerFsa).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
         return all;
       });
     }, []);
@@ -536,9 +535,7 @@ window.NotepadPage = (function () {
     var handleDelete = useCallback(function (id) {
       setNotes(function (prev) {
         var filtered = prev.filter(function (n) { return n.id !== id; });
-        dbSetSetting(LS_KEY, filtered).then(function () {
-          window.dispatchEvent(new CustomEvent("stox:data-changed"));
-        }).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
+        dbSetSetting(LS_KEY, filtered).then(triggerFsa).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
         return filtered;
       });
       setSelectedId(function (sid) { return sid === id ? null : sid; });
@@ -549,9 +546,7 @@ window.NotepadPage = (function () {
         var updated = prev.map(function (n) {
           return n.id === id ? Object.assign({}, n, { pinned: !n.pinned, updatedAt: new Date().toISOString() }) : n;
         });
-        dbSetSetting(LS_KEY, updated).then(function () {
-          window.dispatchEvent(new CustomEvent("stox:data-changed"));
-        }).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
+        dbSetSetting(LS_KEY, updated).then(triggerFsa).catch(function (e) { console.error("[Notepad] dbSetSetting failed:", e); });
         return updated;
       });
     }, []);
