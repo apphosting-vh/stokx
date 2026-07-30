@@ -5746,6 +5746,7 @@ function App() {
   const [fontId, setFontId] = useState(loadFont);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [loading, setLoading] = useState(true);
+  const [pricesReady, setPricesReady] = useState(false);
 
   const setTheme = id => { setThemeId(id); applyTheme(id); saveTheme(id); };
   const setFont = id => { setFontId(id); applyFont(id); saveFont(id); };
@@ -5783,11 +5784,11 @@ function App() {
   }, [holdings, watchlist]);
 
   useEffect(() => {
-    if (allTickers.length === 0) return;
+    if (allTickers.length === 0) { setPricesReady(true); return; }
     let cancelled = false;
     (async () => {
       const result = await fetchMultiplePrices(allTickers);
-      if (!cancelled) setPrices((prev) => ({ ...prev, ...result }));
+      if (!cancelled) { setPrices((prev) => ({ ...prev, ...result })); setPricesReady(true); }
     })();
     return () => { cancelled = true; };
   }, [allTickers.join(",")]);
@@ -5864,17 +5865,16 @@ function App() {
     if (data) setPrices((prev) => ({ ...prev, [ticker.toUpperCase()]: data }));
   };
 
-  // Hide splash
+  // Hide splash once all data is ready
+  var ready = !loading && pricesReady;
   useEffect(() => {
-    const splash = document.getElementById("stox-splash");
-    if (splash) {
-      setTimeout(() => {
-        splash.style.transition = "opacity .5s ease";
-        splash.style.opacity = "0";
-        setTimeout(() => splash.remove(), 500);
-      }, 3200);
-    }
-  }, []);
+    if (!ready) return;
+    var splash = document.getElementById("stox-splash");
+    if (!splash) return;
+    splash.style.transition = "opacity .5s ease";
+    splash.style.opacity = "0";
+    setTimeout(function() { if (splash.parentNode) splash.remove(); }, 500);
+  }, [ready]);
 
   // Snapshot CRUD helpers
   const saveSnapshot = async (snapshot) => {
@@ -6009,7 +6009,7 @@ function App() {
       ),
       // Content
       React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "24px 24px 40px", background: "var(--bg)" } },
-        renderPage()
+        !loading && pricesReady ? renderPage() : React.createElement("div", { style: { textAlign: "center", padding: "60px 20px", color: "var(--text5)", fontSize: 13 } }, React.createElement("div", { style: { fontSize: 24, marginBottom: 12 } }, "\u23f3"), "Loading data\u2026")
       ),
       React.createElement(ToastHost, null)
     );
@@ -6018,7 +6018,7 @@ function App() {
   // Mobile layout
   return React.createElement("div", { className: "stx-has-botnav", style: { padding: "14px 10px 32px" } },
     React.createElement("div", { style: { maxWidth: 600, margin: "0 auto" } },
-      renderPage()
+      !loading && pricesReady ? renderPage() : React.createElement("div", { style: { textAlign: "center", padding: "60px 20px", color: "var(--text5)", fontSize: 13 } }, React.createElement("div", { style: { fontSize: 24, marginBottom: 12 } }, "\u23f3"), "Loading data\u2026")
     ),
     // Bottom nav
     React.createElement("div", { className: "stx-botnav" },
