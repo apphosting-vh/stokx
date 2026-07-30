@@ -3336,6 +3336,42 @@ const EntryScorePanel = ({ shares }) => {
     showToast("Exported " + entries.length + " entries" + (snapshots.length ? " + " + snapshots.length + " snapshots" : ""), 3000);
   };
 
+  const exportEntryScoreCSV = () => {
+    var rows = [["Stock","Date Added","Hourly","Daily","Weekly","Base","Bonus/Pen","Final","Price on Add","Days","Current Price","% Change"]];
+    var now = new Date();
+    entries.forEach(function(entry) {
+      var addedDate = new Date(entry.addedAt);
+      var _startMs = Date.UTC(addedDate.getFullYear(), addedDate.getMonth(), addedDate.getDate());
+      var _endMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+      var daysElapsed = 0;
+      for (var _t = _startMs; _t < _endMs; _t += 86400000) { var _day = new Date(_t).getUTCDay(); if (_day !== 0 && _day !== 6) daysElapsed++; }
+      var fr = entry.frozenResult || entry.result;
+      var hourly = fr && fr.hourly ? fr.hourly.total : "";
+      var daily = fr && fr.daily ? fr.daily.total : "";
+      var weekly = fr && fr.weekly ? fr.weekly.total : "";
+      var base = fr && fr.baseScore != null ? fr.baseScore : "";
+      var final = fr ? fr.finalScore : "";
+      var bonus = fr && fr.hardFilters && fr.hardFilters.length > 0 ? fr.hardFilters.join("; ") : "";
+      var priceOnAdd = entry.currentPrice || entry.frozenResult?.lastClose || entry.result?.lastClose || "";
+      var currentPrice = perfTrackerPrices[entry.ticker] || "";
+      var pct = priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100).toFixed(2) : "";
+      var dateStr = addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      function esc(v) { var s = String(v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
+      rows.push([esc(entry.ticker), esc(dateStr), hourly, daily, weekly, base, esc(bonus), final, priceOnAdd, daysElapsed, currentPrice, pct].join(","));
+    });
+    var csv = rows.join("\r\n");
+    var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "stox-entry-scores-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Exported " + entries.length + " entries to CSV", 3000);
+  };
+
   const importEntryScores = () => {
     const input = document.createElement("input");
     input.type = "file";
@@ -3900,6 +3936,7 @@ const EntryScorePanel = ({ shares }) => {
           React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, (perfTrackerExpanded ? "\u25be " : "\u25b8 ") + "Entry Score Performance Tracker")
         ),
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+          perfTrackerExpanded && React.createElement("div", { onClick: function(e) { e.stopPropagation(); exportEntryScoreCSV(); }, style: { fontSize: 10, color: "var(--text6)", cursor: "pointer", fontWeight: 600, padding: "4px 10px", borderRadius: 6, background: "var(--bg4)" } }, "\u2b06 CSV"),
           perfTrackerExpanded && React.createElement("div", { onClick: function(e) { e.stopPropagation(); refreshPerfTracker(); }, style: { fontSize: 10, color: perfTrackerRefreshing ? "var(--text6)" : "var(--accent)", cursor: perfTrackerRefreshing ? "wait" : "pointer", fontWeight: 600, padding: "4px 10px", borderRadius: 6, background: "var(--bg4)" } }, perfTrackerRefreshing ? "Refreshing..." : "\u21bb Refresh Prices")
         )
       ),
