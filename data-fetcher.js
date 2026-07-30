@@ -10,6 +10,8 @@ window.OHLCVFetcher = (function () {
     function (u) { return "https://corsproxy.io/?" + encodeURIComponent(u); },
     function (u) { return "https://cors.eu.org/" + u; },
     function (u) { return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); },
+    function (u) { return "https://api.allorigins.win/raw?url=" + encodeURIComponent(u); },
+    function (u) { return "https://thingproxy.freeboard.io/fetch/" + u; },
   ];
 
   var Y_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];

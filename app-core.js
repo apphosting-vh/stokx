@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.3";
+window.__STOX_APP_VERSION = "2.6.4";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -227,6 +227,8 @@ const PROXY_FNS = [
   (u) => "https://api.cors.lol/?url=" + encodeURIComponent(u),
   (u) => "https://corsproxy.io/?" + encodeURIComponent(u),
   (u) => "https://cors.eu.org/" + u,
+  (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+  (u) => "https://thingproxy.freeboard.io/fetch/" + u,
 ];
 
 async function fetchTickerPrice(rawTicker) {
@@ -279,6 +281,8 @@ const fetchHistoricalPrices = async (rawTicker, fromDate) => {
       u => "https://corsproxy.io/?" + encodeURIComponent(u),
       u => "https://cors.eu.org/" + u,
       u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+      u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+      u => "https://thingproxy.freeboard.io/fetch/" + u,
     ];
     for (const sym of symbols) {
       for (const host of hosts) {
@@ -1185,11 +1189,12 @@ function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
         if (r.ok) { var txt = await _readBody(r); var j = JSON.parse(_unwrap(txt)); ok = !!(j?.chart?.result?.[0]?.meta?.regularMarketPrice); if (!ok) err = "no price in response"; }
         else err = "HTTP " + r.status;
       } catch (e) { err = e.message || "timeout/error"; }
-      results.push({ proxy: "Proxy " + (pi + 1), ok: ok, err: err });
+      var proxyName = "https://" + (url.match(/https?:\/\/([^\/]+)/) || [])[1] || ("Proxy " + (pi + 1));
+      results.push({ proxy: proxyName, ok: ok, err: err });
     }
     var passed = results.filter(function (r) { return r.ok; }).length;
     var total = results.length;
-    var lines = results.map(function (r) { return (r.ok ? "\u2705" : "\u274c") + " " + r.proxy + (r.ok ? "" : ": " + r.err); }).join("\n");
+    var lines = results.map(function (r) { return (r.ok ? "\u2705" : "\u274c") + " " + r.proxy.replace("https://", "") + (r.ok ? "" : ": " + r.err); }).join("\n");
     setTestStatus({ ok: passed > 0, msg: passed + "/" + total + " proxies working\n" + lines });
     setTimeout(function () { setTestStatus(null); }, 8000);
   };
