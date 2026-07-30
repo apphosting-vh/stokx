@@ -627,8 +627,6 @@ window.TechnicalIndicatorsPanel = (function () {
     var _q = useState(null), weeklyCandlesMTF = _q[0], setWeeklyCandlesMTF = _q[1];
     var timerRef = useRef(null);
 
-    var avKey = DF.getAVKey();
-
     var fetchData = useCallback(async function () {
       if (!ticker) return;
       setLoading(true);
@@ -638,7 +636,7 @@ window.TechnicalIndicatorsPanel = (function () {
         var data = result.data;
         var source = result.source;
         if (!data || data.length < 10) {
-          setError("Insufficient data for " + ticker + ". Try a different timeframe or add an Alpha Vantage API key in settings for daily data.");
+          setError("Insufficient data for " + ticker + ". Try a different timeframe.");
           setLoading(false);
           return;
         }
@@ -736,15 +734,8 @@ window.TechnicalIndicatorsPanel = (function () {
           display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text4)",
         }
       },
-        React.createElement("span", {
-          style: {
-            width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-            background: avKey ? "#16a34a" : "var(--text6)",
-          }
-        }),
-        avKey
-          ? React.createElement("span", null, "Alpha Vantage: ", React.createElement("span", { style: { color: "#16a34a", fontWeight: 600 } }, "Connected"))
-          : React.createElement("span", null, "Using Yahoo Finance fallback — set API key in ", React.createElement("span", { style: { fontWeight: 600 } }, "Settings → API Keys"))
+        React.createElement("span", { style: { width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: "#16a34a" } }),
+        React.createElement("span", null, "Data source: ", React.createElement("span", { style: { color: "#16a34a", fontWeight: 600 } }, "Yahoo Finance"))
       ),
 
       /* ── Controls row ── */
@@ -1098,7 +1089,7 @@ window.TechnicalIndicatorsPanel = (function () {
         }
       },
         React.createElement("strong", { style: { color: "var(--text4)" } }, "Data Sources:"),
-        " Daily OHLCV from Alpha Vantage (requires free API key) or Yahoo Finance (fallback).",
+        " Daily OHLCV from Yahoo Finance.",
         " Intraday OHLCV from Yahoo Finance.",
         " Technical indicators calculated locally in-browser.",
         " Data may be delayed 15+ minutes — not suitable for live trading."

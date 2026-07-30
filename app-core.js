@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.5.8";
+window.__STOX_APP_VERSION = "2.5.9";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -245,7 +245,7 @@ async function fetchTickerPrice(rawTicker) {
         if (!result) continue;
         const meta = result.meta;
         if (meta && meta.regularMarketPrice > 0) {
-          return { price: Math.round(meta.regularMarketPrice * 100) / 100, currency: meta.currency || "INR" };
+          return { price: Math.round(meta.regularMarketPrice * 100) / 100, currency: meta.currency || "INR", previousClose: meta.chartPreviousClose || null };
         }
       } catch { continue; }
     }
@@ -4278,28 +4278,30 @@ function StockScreener() {
     try {
       var tk = s.t.replace(".NS", "");
       DF.clearCache();
-      var [resW, resD, resH, quoteRes] = await Promise.all([
+      var [resW, resD, resH] = await Promise.all([
         DF.fetchOHLCVCached(tk, "weekly"),
         DF.fetchOHLCVCached(tk, "daily"),
-        DF.fetchOHLCVCached(tk, "1h"),
-        DF.fetchQuoteCached(tk)
+        DF.fetchOHLCVCached(tk, "1h")
       ]);
       if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
         setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = false; return c; }); return;
       }
+      var livePriceRes = await fetchTickerPrice(tk);
       var dc = resD.data;
-      var lastDailyClose = dc[dc.length - 1].c;
-      var quotePrice = quoteRes && quoteRes.price != null ? quoteRes.price : null;
+      var _dc_d = dc[dc.length - 1].t, _dc_n = new Date(Date.now() + 19800000).toISOString().split("T")[0], _dc_skip = _dc_d && _dc_d.length >= 10 && _dc_d.substring(0, 10) === _dc_n && dc.length >= 2 ? 1 : 0;
+      var _yi = dc.length - 1 - _dc_skip;
+      var lastDailyClose = dc[_yi].c;
+      var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
-      var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
-      var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
-      var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
-      var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
-      var todayChg = quotePrice != null && lc > 0 && lastDailyClose > 0 ? Math.round((lc - lastDailyClose) / lastDailyClose * 10000) / 100 : null;
-      var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
-      var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
-      var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
+      var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
+      var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
+      var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
+      var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
+      var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
+      var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
+      var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
+      var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       setResults(function(p) {
         var idx = p.findIndex(function(r) { return r.s.t === s.t; });
         if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg }; return copy; }
@@ -4320,28 +4322,30 @@ function StockScreener() {
     var found = NIFTY_100_UNIQUE.find(function(s) { return s.t === tk + ".NS"; });
     var stockObj = found ? found : { t: tk + ".NS", n: tk };
     try {
-      var [resW, resD, resH, quoteRes] = await Promise.all([
+      var [resW, resD, resH] = await Promise.all([
         DF.fetchOHLCVCached(tk, "weekly"),
         DF.fetchOHLCVCached(tk, "daily"),
-        DF.fetchOHLCVCached(tk, "1h"),
-        DF.fetchQuoteCached(tk)
+        DF.fetchOHLCVCached(tk, "1h")
       ]);
       if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
         setScanErr("Insufficient data for " + tk); setManualLoading(false); setManualTicker(""); return;
       }
+      var livePriceRes = await fetchTickerPrice(tk);
       var dc = resD.data;
-      var lastDailyClose = dc[dc.length - 1].c;
-      var quotePrice = quoteRes && quoteRes.price != null ? quoteRes.price : null;
+      var _dc_d = dc[dc.length - 1].t, _dc_n = new Date(Date.now() + 19800000).toISOString().split("T")[0], _dc_skip = _dc_d && _dc_d.length >= 10 && _dc_d.substring(0, 10) === _dc_n && dc.length >= 2 ? 1 : 0;
+      var _yi = dc.length - 1 - _dc_skip;
+      var lastDailyClose = dc[_yi].c;
+      var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
-      var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
-      var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
-      var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
-      var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
-      var todayChg = quotePrice != null && lc > 0 && lastDailyClose > 0 ? Math.round((lc - lastDailyClose) / lastDailyClose * 10000) / 100 : null;
-      var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
-      var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
-      var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
+      var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
+      var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
+      var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
+      var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
+      var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
+      var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
+      var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
+      var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg }]); });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[stockObj.t] = Date.now(); return c; });
     } catch(e) { setScanErr("Failed to fetch " + tk); }
@@ -4410,26 +4414,28 @@ function StockScreener() {
       window.dispatchEvent(new CustomEvent("stox:screener-bg-progress", { detail: { done: i, total: batch.length, current: tk, active: true } }));
       try {
         DF.clearCache();
-        var [resW, resD, resH, quoteRes] = await Promise.all([
+        var [resW, resD, resH] = await Promise.all([
           DF.fetchOHLCVCached(tk, "weekly"),
           DF.fetchOHLCVCached(tk, "daily"),
-          DF.fetchOHLCVCached(tk, "1h"),
-          DF.fetchQuoteCached(tk)
+          DF.fetchOHLCVCached(tk, "1h")
         ]);
         if (resW.data && resW.data.length >= 12 && resD.data && resD.data.length >= 12) {
+          var livePriceRes = await fetchTickerPrice(tk);
           var dc = resD.data;
-          var lastDailyClose = dc[dc.length - 1].c;
-          var quotePrice = quoteRes && quoteRes.price != null ? quoteRes.price : null;
+          var _dc_d = dc[dc.length - 1].t, _dc_n = new Date(Date.now() + 19800000).toISOString().split("T")[0], _dc_skip = _dc_d && _dc_d.length >= 10 && _dc_d.substring(0, 10) === _dc_n && dc.length >= 2 ? 1 : 0;
+          var _yi = dc.length - 1 - _dc_skip;
+          var lastDailyClose = dc[_yi].c;
+          var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
-          var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
-          var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
-          var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
-          var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
-          var todayChg = quotePrice != null && lc > 0 && lastDailyClose > 0 ? Math.round((lc - lastDailyClose) / lastDailyClose * 10000) / 100 : null;
-          var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
-          var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
-          var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
+          var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
+          var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
+          var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
+          var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
+          var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
+          var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
+          var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
+          var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
           var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
           if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg };
           bg.timestamps[stk.t] = Date.now();
@@ -4514,26 +4520,28 @@ function StockScreener() {
       var promises = batch.map(async function(s) {
         try {
           var tk = s.t.replace(".NS", "");
-          var [resW, resD, resH, quoteRes] = await Promise.all([
+          var [resW, resD, resH] = await Promise.all([
             DF.fetchOHLCVCached(tk, "weekly"),
             DF.fetchOHLCVCached(tk, "daily"),
-            DF.fetchOHLCVCached(tk, "1h"),
-            DF.fetchQuoteCached(tk)
+            DF.fetchOHLCVCached(tk, "1h")
           ]);
           if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) return null;
+          var livePriceRes = await fetchTickerPrice(tk);
           var dc = resD.data;
-          var lastDailyClose = dc[dc.length - 1].c;
-          var quotePrice = quoteRes && quoteRes.price != null ? quoteRes.price : null;
+          var _dc_d = dc[dc.length - 1].t, _dc_n = new Date(Date.now() + 19800000).toISOString().split("T")[0], _dc_skip = _dc_d && _dc_d.length >= 10 && _dc_d.substring(0, 10) === _dc_n && dc.length >= 2 ? 1 : 0;
+          var _yi = dc.length - 1 - _dc_skip;
+          var lastDailyClose = dc[_yi].c;
+          var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
-          var lc1 = dc.length >= 2 ? dc[dc.length - 2].c : null;
-          var lc2 = dc.length >= 3 ? dc[dc.length - 3].c : null;
-          var lc5 = dc.length >= 6 ? dc[dc.length - 6].c : null;
-          var lc21 = dc.length >= 23 ? dc[dc.length - 23].c : null;
-          var todayChg = quotePrice != null && lc > 0 && lastDailyClose > 0 ? Math.round((lc - lastDailyClose) / lastDailyClose * 10000) / 100 : null;
-          var dayChg = lc1 != null && lc2 != null && lc2 > 0 ? Math.round((lc1 - lc2) / lc2 * 10000) / 100 : null;
-          var weekChg = lc > 0 && lc5 != null && lc5 > 0 ? Math.round((lc - lc5) / lc5 * 10000) / 100 : null;
-          var monthChg = lc > 0 && lc21 != null && lc21 > 0 ? Math.round((lc - lc21) / lc21 * 10000) / 100 : null;
+          var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
+          var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
+          var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
+          var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
+          var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
+          var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
+          var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
+          var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
           return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg };
         } catch(e) { return null; }
       });

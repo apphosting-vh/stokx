@@ -1,18 +1,10 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   OHLCV Data Fetcher — Alpha Vantage (primary) + Yahoo Finance (intraday/fallback)
-   No OAuth tokens required. Alpha Vantage needs a free API key.
-   Yahoo Finance is already integrated via CORS proxies (no key needed).
+   OHLCV Data Fetcher — Yahoo Finance only (no API key required)
+   Uses CORS proxies for browser compatibility.
    ══════════════════════════════════════════════════════════════════════════ */
 window.OHLCVFetcher = (function () {
 
-  /* ── CORS Proxies (same order as existing app) ─────────────────────────── */
-  var AV_PROXY_FNS = [
-    function (u) { return "https://api.cors.lol/?url=" + encodeURIComponent(u); },
-    function (u) { return "https://corsproxy.io/?" + encodeURIComponent(u); },
-    function (u) { return "https://cors.eu.org/" + u; },
-    function (u) { return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); },
-  ];
-
+  /* ── CORS Proxies ─────────────────────────────────────────────────────── */
   var Y_PROXY_FNS = [
     function (u) { return "https://api.cors.lol/?url=" + encodeURIComponent(u); },
     function (u) { return "https://corsproxy.io/?" + encodeURIComponent(u); },
@@ -41,106 +33,12 @@ window.OHLCVFetcher = (function () {
     ]);
   }
 
-  /* ── Get stored Alpha Vantage API key ──────────────────────────────────── */
-  var _cachedAVKey = null;
-  async function getAVKey() {
-    if (_cachedAVKey !== null) return _cachedAVKey;
-    try {
-      if (typeof dbGetSetting === "function") {
-        _cachedAVKey = (await dbGetSetting("mm_av_api_key")) || "";
-      } else {
-        _cachedAVKey = "";
-      }
-    } catch (e) { _cachedAVKey = ""; }
-    return _cachedAVKey;
-  }
-  async function setAVKey(key) {
-    _cachedAVKey = key || "";
-    try {
-      if (typeof dbSetSetting === "function") {
-        await dbSetSetting("mm_av_api_key", key || "");
-      }
-    } catch (e) { }
-  }
-
   /* ═══════════════════════════════════════════════════════════════════════
-     Alpha Vantage — Daily OHLCV
-     Endpoint: https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=RELIANCE.BSE&outputsize=compact&apikey=demo
-     
-     Response format:
-     {
-       "Time Series (Daily)": {
-         "2024-01-15": {
-           "1. open": "2450.00",
-           "2. high": "2480.00",
-           "3. low": "2440.00",
-           "4. close": "2475.00",
-           "5. volume": "12345678"
-         }
-       }
-     }
-     
-     Indian stocks: use .BSE suffix (RELIANCE.BSE)
-     Free tier: 25 requests/day, compact = 100 data points
-     ═══════════════════════════════════════════════════════════════════════ */
-  async function fetchFromAlphaVantage(ticker) {
-    var apiKey = await getAVKey();
-    if (!apiKey) return null;
-
-    var symbol = ticker.toUpperCase() + ".BSE";
-    var url = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY"
-      + "&symbol=" + encodeURIComponent(symbol)
-      + "&outputsize=compact"
-      + "&apikey=" + encodeURIComponent(apiKey);
-
-    for (var i = 0; i < AV_PROXY_FNS.length; i++) {
-      try {
-        var proxyUrl = AV_PROXY_FNS[i](url);
-        var r = await fetchWithTimeout(proxyUrl, {}, 12000);
-        if (!r.ok) continue;
-        var txt = await readBody(r, 10000);
-        var json;
-        try { json = JSON.parse(txt); } catch (e) { continue; }
-        // Handle proxy-wrapped responses
-        if (json && typeof json.contents === "string") {
-          try { json = JSON.parse(json.contents); } catch (e) { }
-        }
-
-        var ts = json && json["Time Series (Daily)"];
-        if (!ts || typeof ts !== "object") {
-          // Check for error messages (rate limit, invalid key, etc.)
-          if (json && json["Error Message"]) return null;
-          if (json && json["Note"]) return null; // rate limit
-          continue;
-        }
-
-        var candles = [];
-        var dates = Object.keys(ts).sort(); // ascending date order
-        for (var d = 0; d < dates.length; d++) {
-          var entry = ts[dates[d]];
-          var o = parseFloat(entry["1. open"]);
-          var h = parseFloat(entry["2. high"]);
-          var l = parseFloat(entry["3. low"]);
-          var c = parseFloat(entry["4. close"]);
-          var v = parseInt(entry["5. volume"], 10);
-          if (isNaN(o) || isNaN(h) || isNaN(l) || isNaN(c)) continue;
-          candles.push({ t: dates[d], o: o, h: h, l: l, c: c, v: isNaN(v) ? 0 : v });
-        }
-        if (candles.length >= 20) return candles;
-      } catch (e) {
-        continue;
-      }
-    }
-    return null;
-  }
-
-  /* ═══════════════════════════════════════════════════════════════════════
-     Yahoo Finance — Intraday OHLCV
+     Yahoo Finance — OHLCV
      Endpoint: https://query1.finance.yahoo.com/v8/finance/chart/{symbol}
      Params: interval={interval}&range={range}
      
-     Supported intervals: 1m, 5m, 15m, 30m, 1h, 1d
-     Supported ranges: 1d, 5d, 1mo, 3mo, 6mo, 1y, 5y, max
+     Supported intervals: 1m, 5m, 15m, 30m, 1h, 1d, 1wk
      
      Response: timestamps[], indicators.quote[0].{open,high,low,close,volume}
      Indian stocks: {ticker}.NS (NSE) or {ticker}.BO (BSE)
@@ -206,7 +104,7 @@ window.OHLCVFetcher = (function () {
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
-     Yahoo Finance — Daily OHLCV (fallback when Alpha Vantage fails)
+     Yahoo Finance — Daily OHLCV
      Uses the same v8 chart endpoint with interval=1d
      ═══════════════════════════════════════════════════════════════════════ */
   async function fetchFromYahooDaily(ticker, range) {
@@ -215,13 +113,66 @@ window.OHLCVFetcher = (function () {
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
+     Yahoo Finance — Real-time Quote
+     Endpoint: https://query1.finance.yahoo.com/v6/finance/quote?symbols={symbol}
+     Returns { price, change, changePercent } or null
+     ═══════════════════════════════════════════════════════════════════════ */
+  async function fetchQuote(ticker) {
+    var symbols = [ticker.toUpperCase() + ".NS", ticker.toUpperCase() + ".BO", ticker.toUpperCase()];
+    for (var s = 0; s < symbols.length; s++) {
+      for (var h = 0; h < Y_HOSTS.length; h++) {
+        for (var p = 0; p < Y_PROXY_FNS.length; p++) {
+          try {
+            var yUrl = "https://" + Y_HOSTS[h] + "/v6/finance/quote?symbols=" + encodeURIComponent(symbols[s]);
+            var proxyUrl = Y_PROXY_FNS[p](yUrl);
+            var r = await fetchWithTimeout(proxyUrl, {}, 10000);
+            if (!r.ok) continue;
+            var txt = await readBody(r, 8000);
+            var json;
+            try { json = JSON.parse(txt); } catch (e) { continue; }
+            var payload = json && json.contents ? (function () { try { return JSON.parse(json.contents); } catch (e) { return json; } })() : json;
+            var result = payload && payload.quoteResponse && payload.quoteResponse.result && payload.quoteResponse.result[0];
+            if (!result || result.regularMarketPrice == null) continue;
+            return {
+              price: result.regularMarketPrice,
+              change: result.regularMarketChange != null ? result.regularMarketChange : null,
+              changePercent: result.regularMarketChangePercent != null ? result.regularMarketChangePercent : null
+            };
+          } catch (e) {
+            continue;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  var _quoteCache = {};
+  var QUOTE_CACHE_TTL = 15 * 1000; // 15 seconds
+
+  async function fetchQuoteCached(ticker) {
+    var key = ticker.toUpperCase();
+    var entry = _quoteCache[key];
+    if (entry && (Date.now() - entry.ts) < QUOTE_CACHE_TTL) {
+      return entry.data;
+    }
+    var result = await Promise.race([
+      fetchQuote(ticker),
+      new Promise(function(r) { setTimeout(function() { r(null); }, 6000); })
+    ]);
+    if (result && result.price != null) {
+      _quoteCache[key] = { data: result, ts: Date.now() };
+      return result;
+    }
+    return null;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
      Unified entry point
      
-     timeframe: "daily" | "1m" | "5m" | "15m" | "30m" | "1h"
+     timeframe: "daily" | "1m" | "5m" | "15m" | "30m" | "1h" | "weekly"
      
-     Strategy:
-       - Daily: Alpha Vantage (primary) → Yahoo Finance (fallback)
-       - Intraday: Yahoo Finance (primary — AV free tier doesn't support Indian intraday)
+     All timeframes use Yahoo Finance.
      
      Returns: Array of { t, o, h, l, c, v } sorted ascending by time
      ═══════════════════════════════════════════════════════════════════════ */
@@ -230,18 +181,9 @@ window.OHLCVFetcher = (function () {
     ticker = (ticker || "").trim().toUpperCase();
     if (!ticker) return null;
 
-    if (timeframe === "daily") {
-      // Try Alpha Vantage first
-      var avData = await fetchFromAlphaVantage(ticker);
-      if (avData && avData.length >= 20) return { candles: avData, source: "Alpha Vantage" };
-      // Fallback to Yahoo Finance daily
-      var yfDaily = await fetchFromYahooDaily(ticker, "2y");
-      return { candles: yfDaily, source: "Yahoo Finance" };
-    }
-
-    // Intraday: use Yahoo Finance directly
     var yfInterval, yfRange;
     switch (timeframe) {
+      case "daily": yfInterval = "1d"; yfRange = "2y"; break;
       case "1m": yfInterval = "1m"; yfRange = "1d"; break;
       case "5m": yfInterval = "5m"; yfRange = "5d"; break;
       case "15m": yfInterval = "15m"; yfRange = "1mo"; break;
@@ -251,8 +193,8 @@ window.OHLCVFetcher = (function () {
       case "weekly": yfInterval = "1wk"; yfRange = "5y"; break;
       default: yfInterval = "5m"; yfRange = "1mo"; break;
     }
-    var yfIntra = await fetchFromYahooIntraday(ticker, yfInterval, yfRange);
-    return { candles: yfIntra, source: "Yahoo Finance" };
+    var yfData = await fetchFromYahooIntraday(ticker, yfInterval, yfRange);
+    return { candles: yfData, source: "Yahoo Finance" };
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -282,11 +224,10 @@ window.OHLCVFetcher = (function () {
   return {
     fetchOHLCV: fetchOHLCV,
     fetchOHLCVCached: fetchOHLCVCached,
-    fetchFromAlphaVantage: fetchFromAlphaVantage,
+    fetchQuote: fetchQuote,
+    fetchQuoteCached: fetchQuoteCached,
     fetchFromYahooIntraday: fetchFromYahooIntraday,
     fetchFromYahooDaily: fetchFromYahooDaily,
     clearCache: clearCache,
-    getAVKey: getAVKey,
-    setAVKey: setAVKey
   };
 })();
