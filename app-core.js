@@ -5076,7 +5076,8 @@ function SingleStockAnalysis() {
              typeof c.l === "number" && !isNaN(c.l) && typeof c.c === "number" && !isNaN(c.c);
     });
     if (data.length < 2) return null;
-    data = data.slice(-80);
+    var maxCandles = timeframe === "5m" ? 390 : timeframe === "15m" ? 300 : timeframe === "1m" ? 200 : timeframe === "1h" ? 200 : 80;
+    data = data.slice(-maxCandles);
     var w = 700, h = 240, padL = 50, padR = 10, padT = 14, padB = 40;
     var cw = w - padL - padR, ch = h - padT - padB;
     var allH = data.map(function (c) { return c.h; });
@@ -5103,13 +5104,13 @@ function SingleStockAnalysis() {
         }
       }
       if (isNaN(d.getTime())) return "";
+      var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       if (isIntra) {
         var h2 = d.getHours(), m = d.getMinutes();
         var ampm = h2 >= 12 ? "PM" : "AM";
         var h12 = h2 % 12 || 12;
-        return h12 + ":" + (m < 10 ? "0" : "") + m + " " + ampm;
+        return months[d.getMonth()] + " " + d.getDate() + " " + h12 + ":" + (m < 10 ? "0" : "") + m + " " + ampm;
       }
-      var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       return months[d.getMonth()] + " " + d.getDate();
     };
 
