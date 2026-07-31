@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.11";
+window.__STOX_APP_VERSION = "2.6.12";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -6109,6 +6109,7 @@ function App() {
     { key: "settings", label: "Settings", icon: Icons.settings },
     { key: "notepad", label: "Notes", icon: Icons.pen },
     { key: "info", label: "Info", icon: Icons.info },
+    { key: "gfinance", label: "Google Finance", icon: Icons.search, external: true, url: "https://www.google.com/finance" },
   ];
 
   const NAV_COLORS = {
@@ -6120,6 +6121,7 @@ function App() {
     settings: "#93c5fd",
     notepad: "#f59e0b",
     info: "#bef264",
+    gfinance: "#fbbc05",
   };
 
   const hexAlpha = (hex, a) => {
@@ -6152,7 +6154,7 @@ function App() {
             const active = page === item.key;
             const col = NAV_COLORS[item.key] || "var(--accent)";
             return React.createElement("button", {
-              key: item.key, onClick: () => navigate(item.key),
+              key: item.key, onClick: () => item.external ? window.open(item.url, "_blank", "noopener") : navigate(item.key),
               style: {
                 display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px",
                 borderRadius: 10, border: "none", cursor: "pointer",
@@ -6198,7 +6200,7 @@ function App() {
         return React.createElement("button", {
           key: item.key,
           className: "stx-botnav-item" + (page === item.key ? " active" : ""),
-          onClick: () => navigate(item.key),
+          onClick: () => item.external ? window.open(item.url, "_blank", "noopener") : navigate(item.key),
           style: page === item.key ? { color: col } : {}
         },
           React.createElement("span", null, item.icon(18)),
