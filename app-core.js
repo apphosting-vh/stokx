@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.6";
+window.__STOX_APP_VERSION = "2.6.7";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -4214,6 +4214,7 @@ function StockScreener() {
   var bgProgress = _s17[0], setBgProgress = _s17[1];
   var _s18 = useState({});
   var bookmarks = _s18[0], setBookmarks = _s18[1];
+  var _bookmarksLoadedRef = useRef(false);
   var _resultsRef = useRef(results);
   _resultsRef.current = results;
 
@@ -4234,8 +4235,9 @@ function StockScreener() {
       } catch(e) {}
       try {
         var bkm = await dbGetSetting("stox_screener_bookmarks");
-        if (bkm && typeof bkm === "object") setBookmarks(bkm);
+        if (bkm && typeof bkm === "object") setBookmarks(function(prev) { return Object.assign({}, bkm, prev); });
       } catch(e) {}
+      _bookmarksLoadedRef.current = true;
     })();
   }, []);
 
@@ -4248,6 +4250,7 @@ function StockScreener() {
   }, [results, timestamps, scanTime]);
 
   React.useEffect(function() {
+    if (!_bookmarksLoadedRef.current) return;
     dbSetSetting("stox_screener_bookmarks", bookmarks).then(function() {
       window.dispatchEvent(new CustomEvent("stox:data-changed"));
     });

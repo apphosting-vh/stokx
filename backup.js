@@ -40,11 +40,13 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   var entrySnapshots = [];
   var screenerResults = [];
   var screenerSnapshots = [];
+  var screenerBookmarks = {};
   var notes = [];
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch(e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch(e) {}
   try { screenerResults = (await dbGetSetting("stox_screener_data")) || { results: [], timestamps: {}, scanTime: 0 }; } catch(e) {}
   try { screenerSnapshots = (await dbGetSetting("stox_screener_snapshots")) || []; } catch(e) {}
+  try { screenerBookmarks = (await dbGetSetting("stox_screener_bookmarks")) || {}; } catch(e) {}
   try { notes = (await dbGetSetting("stox_notes")) || []; } catch(e) {}
   return {
     app: "StoX",
@@ -58,6 +60,7 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       entrySnapshots: entrySnapshots.length,
       screenerStocks: screenerResults.results ? screenerResults.results.length : 0,
       screenerSnapshots: screenerSnapshots.length,
+      screenerBookmarks: Object.keys(screenerBookmarks).length,
       notes: notes.length
     },
     data: {
@@ -68,6 +71,7 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       entrySnapshots: entrySnapshots,
       screenerData: screenerResults,
       screenerSnapshots: screenerSnapshots,
+      screenerBookmarks: screenerBookmarks,
       notes: notes
     }
   };
@@ -124,6 +128,7 @@ async function restoreStoxBackup(fileText) {
   if (d.entryPerfPrices) { try { await dbSetSetting("mm_entry_perf_prices", d.entryPerfPrices); } catch(e) {} }
   if (d.screenerData) { try { await dbSetSetting("stox_screener_data", d.screenerData); } catch(e) {} }
   if (d.screenerSnapshots) { try { await dbSetSetting("stox_screener_snapshots", d.screenerSnapshots); } catch(e) {} }
+  if (d.screenerBookmarks && typeof d.screenerBookmarks === "object") { try { await dbSetSetting("stox_screener_bookmarks", d.screenerBookmarks); } catch(e) {} }
   if (d.notes) { try { await dbSetSetting("stox_notes", d.notes); } catch(e) {} }
   var snaps = d.soldShareSnapshots || {};
   Object.keys(snaps).forEach(function(fyKey) {

@@ -119,6 +119,7 @@ var fsaReadFile = async function(handle) {
       entryPerfPrices: d.entryPerfPrices || {},
       screenerData: d.screenerData || null,
       screenerSnapshots: d.screenerSnapshots || [],
+      screenerBookmarks: d.screenerBookmarks || {},
       notes: d.notes || []
     };
   } catch (e) {
@@ -140,12 +141,14 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
   var entrySnapshots = [];
   var screenerData = null;
   var screenerSnapshots = [];
+  var screenerBookmarks = {};
   var entryPerfPrices = {};
   var notes = [];
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch (e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch (e) {}
   try { screenerData = (await dbGetSetting("stox_screener_data")) || null; } catch (e) {}
   try { screenerSnapshots = (await dbGetSetting("stox_screener_snapshots")) || []; } catch (e) {}
+  try { screenerBookmarks = (await dbGetSetting("stox_screener_bookmarks")) || {}; } catch (e) {}
   try { entryPerfPrices = (await dbGetSetting("mm_entry_perf_prices")) || {}; } catch (e) {}
   try { notes = (await dbGetSetting("stox_notes")) || []; } catch (e) {}
 
@@ -162,6 +165,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       entrySnapshots: entrySnapshots.length,
       screenerStocks: screenerData && screenerData.results ? screenerData.results.length : 0,
       screenerSnapshots: screenerSnapshots.length,
+      screenerBookmarks: Object.keys(screenerBookmarks).length,
       notes: notes.length
     },
     data: {
@@ -173,6 +177,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       entryPerfPrices: entryPerfPrices,
       screenerData: screenerData,
       screenerSnapshots: screenerSnapshots,
+      screenerBookmarks: screenerBookmarks,
       notes: notes
     }
   };
@@ -219,6 +224,7 @@ window.__stoxRestoreFromPayload = async function(data) {
     }
     if (data.screenerData) await dbSetSetting("stox_screener_data", data.screenerData);
     if (data.screenerSnapshots) await dbSetSetting("stox_screener_snapshots", data.screenerSnapshots);
+    if (data.screenerBookmarks && typeof data.screenerBookmarks === "object") await dbSetSetting("stox_screener_bookmarks", data.screenerBookmarks);
     if (data.notes) await dbSetSetting("stox_notes", data.notes);
   } catch (e) {
     console.warn("[Sync] Restore error:", e);
