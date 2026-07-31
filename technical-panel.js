@@ -59,7 +59,7 @@ window.TechnicalIndicatorsPanel = (function () {
     { name: "CMF (20)", key: "cmf_20", cat: "Volume", type: "oscillator", range: [-1, 1] },
     { name: "Stochastic RSI", key: "stochRSI", cat: "Momentum", type: "stoch" },
     { name: "CCI (20)", key: "cci_20", cat: "Momentum", type: "oscillator", range: [-200, 200] },
-    { name: "ROC (10)", key: "roc_10", cat: "Momentum", type: "oscillator" },
+    { name: "ROC (12)", key: "roc_12", cat: "Momentum", type: "oscillator" },
     { name: "Momentum (10)", key: "momentum_10", cat: "Momentum", type: "oscillator" },
     { name: "Parabolic SAR", key: "psar", cat: "Trend", type: "line" },
     { name: "HMA (20)", key: "hma_20", cat: "Trend", type: "line" },
@@ -696,7 +696,7 @@ window.TechnicalIndicatorsPanel = (function () {
         aroon: ["Strong uptrend (Aroon Osc > 50).", "Strong downtrend (Aroon Osc < -50)."],
         rsi_14: ["RSI 40-80; bounces off 40-50 signal institutional re-entries.", "Bearish divergence or break below 40 = institutional exit."],
         cci_20: ["CCI rising from oversold = accumulation.", "Extreme CCI > 100 then sharp drop = Smart Money dumping."],
-        roc_10: ["Positive ROC backed by volume = strong buying velocity.", "Negative ROC = selling pressure."],
+        roc_12: ["Positive ROC backed by volume = strong buying velocity.", "Negative ROC = selling pressure."],
         mfi_14: ["MFI rising from < 20 = accumulation.", "MFI > 80 = potential overbought distribution."],
         vwap: ["Dips to VWAP bought by institutional algorithms.", "Price below VWAP; institutions offload on rallies to VWAP."],
         obv: ["Rising OBV confirms institutional buying power.", "Bearish divergence: higher price, lower OBV = Smart Money selling."],
@@ -899,10 +899,10 @@ window.TechnicalIndicatorsPanel = (function () {
                       " \u2014 ", indicators.cci_20 > 100 ? "overbought" : indicators.cci_20 < -100 ? "oversold" : "neutral",
                       _sc("cci_20", indicators.cci_20 > 0)
                     ),
-                    indicators.roc_10 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                      "ROC(10): ", React.createElement("span", { style: { fontWeight: 600, color: indicators.roc_10 > 0 ? "#16a34a" : "#ef4444" } }, fmt(indicators.roc_10, 2) + "%"),
-                      " \u2014 ", indicators.roc_10 > 0 ? "positive momentum" : "negative momentum",
-                      _sc("roc_10", indicators.roc_10 > 0)
+                    indicators.roc_12 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
+                      "ROC(12): ", React.createElement("span", { style: { fontWeight: 600, color: indicators.roc_12 > 0 ? "#16a34a" : "#ef4444" } }, fmt(indicators.roc_12, 2) + "%"),
+                      " \u2014 ", indicators.roc_12 > 0 ? "positive momentum" : "negative momentum",
+                      _sc("roc_12", indicators.roc_12 > 0)
                     ),
                     indicators.mfi_14 != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
                       "MFI(14): ", React.createElement("span", { style: { fontWeight: 600, color: indicators.mfi_14 > 80 ? "#ef4444" : indicators.mfi_14 < 20 ? "#2563eb" : "#2563eb" } }, fmt(indicators.mfi_14)),

@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.18";
+window.__STOX_APP_VERSION = "2.6.19";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -512,7 +512,7 @@ var ALL_INDS = [
   { name: "CMF (20)", key: "cmf_20", cat: "Volume", type: "oscillator", range: [-1, 1] },
   { name: "Stochastic RSI", key: "stochRSI", cat: "Momentum", type: "stoch" },
   { name: "CCI (20)", key: "cci_20", cat: "Momentum", type: "oscillator", range: [-200, 200] },
-  { name: "ROC (10)", key: "roc_10", cat: "Momentum", type: "oscillator" },
+  { name: "ROC (12)", key: "roc_12", cat: "Momentum", type: "oscillator" },
   { name: "Momentum (10)", key: "momentum_10", cat: "Momentum", type: "oscillator" },
   { name: "Parabolic SAR", key: "psar", cat: "Trend", type: "line" },
   { name: "HMA (20)", key: "hma_20", cat: "Trend", type: "line" },
@@ -3683,7 +3683,7 @@ const EntryScorePanel = ({ shares }) => {
         indRow("BB Lower", indData.bb ? indData.bb.lower : null),
         indRow("OBV", indData.obv),
         indRow("VWAP", indData.vwap),
-        indRow("ROC (10)", indData.roc_10, indData.roc_10 > 0 ? "bullish" : "bearish"),
+        indRow("ROC (12)", indData.roc_12, indData.roc_12 > 0 ? "bullish" : "bearish"),
         indRow("PSAR", indData.psar, lc && indData.psar ? lc > indData.psar ? "bullish" : "bearish" : null),
         indRow("WMA 20", indData.wma_20),
         indRow("HMA (20)", indData.hma_20),
@@ -4257,7 +4257,7 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
       total: d.entryScore,
       decision: toDec(d.classification),
       trendScore: d.trend, trendMax: 30,
-      momentumScore: d.momentum, momentumMax: 25,
+      momentumScore: d.momentum, momentumMax: 30,
       volumeScore: d.volume, volumeMax: 20,
       structureScore: d.structure, structureMax: 20,
       penalties: d.penalties, bonuses: d.bonuses, raw_score: d.raw_score
@@ -6598,7 +6598,7 @@ async function scanEntries(universe) {
         { timeframe: 'D', candles: d },
         { timeframe: 'W', candles: w }
       ];
-      var score = TI.computeMultiTFEntryScore(tfResults, idxD);
+      var score = TI.computeMultiTFEntryScore(tfResults, idxD, idxW);
       var entryScore = score && score.multiTF_score != null ? score.multiTF_score : (score && score.entry_score != null ? score.entry_score : null);
       if (entryScore != null && entryScore >= 65) {
         results.push({
