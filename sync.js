@@ -129,7 +129,7 @@ var fsaReadFile = async function(handle) {
 };
 
 /* ── Global FSA singleton ── */
-window.__fsa = { handle: null, filename: "", lastSaved: null, ready: false, writeNow: null };
+window.__fsa = { handle: null, filename: "", lastSaved: null, ready: false, writeNow: null, state: null };
 
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -226,6 +226,7 @@ window.__stoxRestoreFromPayload = async function(data) {
     if (data.screenerSnapshots) await dbSetSetting("stox_screener_snapshots", data.screenerSnapshots);
     if (data.screenerBookmarks && typeof data.screenerBookmarks === "object") await dbSetSetting("stox_screener_bookmarks", data.screenerBookmarks);
     if (data.notes) await dbSetSetting("stox_notes", data.notes);
+    window.dispatchEvent(new CustomEvent("stox:data-changed"));
   } catch (e) {
     console.warn("[Sync] Restore error:", e);
   }
@@ -630,6 +631,7 @@ var gdriveReadSyncFile = async function(silent) {
         entryPerfPrices: data.data.entryPerfPrices || {},
         screenerData: data.data.screenerData || null,
         screenerSnapshots: data.data.screenerSnapshots || [],
+        screenerBookmarks: data.data.screenerBookmarks || {},
         notes: data.data.notes || []
       },
       modifiedTime: remoteExportedAt
@@ -853,7 +855,7 @@ window.FSAStoragePanel = function(props) {
           window.__fsa.handle = h; window.__fsa.filename = h.name; window.__fsa.ready = true;
           window.__fsa.writeNow = async function() {
             if (!window.__fsa.handle || !window.__fsa.ready) return false;
-            var ok = await fsaWriteFile(window.__fsa.handle, stateDataRef.current);
+            var ok = await fsaWriteFile(window.__fsa.handle, window.__fsa.state || stateDataRef.current);
             if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
             return ok;
           };
@@ -882,12 +884,12 @@ window.FSAStoragePanel = function(props) {
       window.__fsa.handle = handle; window.__fsa.filename = handle.name; window.__fsa.ready = true;
       window.__fsa.writeNow = async function() {
         if (!window.__fsa.handle || !window.__fsa.ready) return false;
-        var ok = await fsaWriteFile(window.__fsa.handle, stateDataRef.current);
+        var ok = await fsaWriteFile(window.__fsa.handle, window.__fsa.state || stateDataRef.current);
         if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
         return ok;
       };
       setConnected(true); setFilename(handle.name); setPermNeeded(false);
-      var ok = await fsaWriteFile(handle, stateDataRef.current);
+      var ok = await fsaWriteFile(handle, window.__fsa.state || stateDataRef.current);
       if (ok) { window.__fsa.lastSaved = new Date(); setLastSaved(window.__fsa.lastSaved); say("Connected! Current data saved to " + handle.name); }
       else say("File connected, but initial write failed. Try 'Save Now'.", false);
     } catch (e) { if (e.name !== "AbortError") say("Could not connect file: " + e.message, false); }
@@ -928,7 +930,7 @@ window.FSAStoragePanel = function(props) {
     var ok = await fsaVerifyPermission(window.__fsa.handle);
     if (!ok) { say("Permission denied. Please click 'Re-grant Permission'.", false); setBusy(false); return; }
     window.__fsa.ready = true;
-    var saved = await fsaWriteFile(window.__fsa.handle, stateData);
+    var saved = await fsaWriteFile(window.__fsa.handle, window.__fsa.state || stateData);
     if (saved) { window.__fsa.lastSaved = new Date(); setLastSaved(window.__fsa.lastSaved); say("Saved to " + window.__fsa.filename); }
     else say("Write failed - the file may have been moved or deleted.", false);
     setBusy(false);
@@ -942,7 +944,7 @@ window.FSAStoragePanel = function(props) {
       window.__fsa.ready = true;
       window.__fsa.writeNow = async function() {
         if (!window.__fsa.handle || !window.__fsa.ready) return false;
-        var ok = await fsaWriteFile(window.__fsa.handle, stateDataRef.current);
+        var ok = await fsaWriteFile(window.__fsa.handle, window.__fsa.state || stateDataRef.current);
         if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
         return ok;
       };

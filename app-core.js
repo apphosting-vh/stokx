@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.9";
+window.__STOX_APP_VERSION = "2.6.10";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -5939,6 +5939,10 @@ function App() {
 
   // Auto-write FSA file when any app data changes (debounced 2s)
   const _fsaTimerRef = React.useRef(null);
+  // Keep a live snapshot of current state so FSA auto-save never writes stale holdings
+  useEffect(() => {
+    if (window.__fsa) window.__fsa.state = { holdings, watchlist, soldShareSnapshots };
+  }, [holdings, watchlist, soldShareSnapshots]);
   useEffect(() => {
     if (_fsaTimerRef.current) clearTimeout(_fsaTimerRef.current);
     _fsaTimerRef.current = setTimeout(() => {

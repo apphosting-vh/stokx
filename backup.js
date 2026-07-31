@@ -210,6 +210,7 @@ async function applyRestoredData(holdings, soldShareSnapshots, watchlist) {
     await dbPut("watchlist", watchlist[j]);
   }
   await persistSnapshots(soldShareSnapshots);
+  window.dispatchEvent(new CustomEvent("stox:data-changed"));
 }
 
 
