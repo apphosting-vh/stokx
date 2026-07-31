@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.10";
+window.__STOX_APP_VERSION = "2.6.11";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -5912,6 +5912,11 @@ function App() {
     })();
   }, []);
 
+  // Restore a previously connected FSA file handle so auto-save works from any page
+  useEffect(() => {
+    if (window.__fsaInit) window.__fsaInit().catch(function() {});
+  }, []);
+
   // Persist prices to IDB after every successful fetch so stale data never shows
   useEffect(() => {
     if (Object.keys(prices).length === 0) return;
@@ -5953,6 +5958,16 @@ function App() {
     return () => { if (_fsaTimerRef.current) clearTimeout(_fsaTimerRef.current); };
   }, [holdings, watchlist, soldShareSnapshots, prices]);
 
+  // Track local data edits so GDrive push/pull compares timestamps correctly.
+  // Skips the initial IDB load (loading flag) so a fresh page load never marks
+  // the app as "newer" than Drive and blocks a pull.
+  const _editBumpInitRef = React.useRef(false);
+  useEffect(() => {
+    if (loading) return;
+    if (!_editBumpInitRef.current) { _editBumpInitRef.current = true; return; }
+    if (window._syncSaveLocalEdit) window._syncSaveLocalEdit(new Date().toISOString());
+  }, [holdings, watchlist, soldShareSnapshots, loading]);
+
   // Auto-write FSA when screener/entry-score data changes (outside main state)
   const _fsaExternalRef = React.useRef(null);
   useEffect(() => {
@@ -5963,6 +5978,7 @@ function App() {
           window.__fsa.writeNow().catch(function() {});
         }
       }, 2000);
+      if (window._syncSaveLocalEdit) window._syncSaveLocalEdit(new Date().toISOString());
     };
     window.addEventListener("stox:data-changed", handler);
     return () => { window.removeEventListener("stox:data-changed", handler); if (_fsaExternalRef.current) clearTimeout(_fsaExternalRef.current); };

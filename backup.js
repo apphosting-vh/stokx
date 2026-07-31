@@ -38,12 +38,14 @@ function readFromFileInput(accept) {
 async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   var entryScores = [];
   var entrySnapshots = [];
+  var entryPerfPrices = {};
   var screenerResults = [];
   var screenerSnapshots = [];
   var screenerBookmarks = {};
   var notes = [];
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch(e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch(e) {}
+  try { entryPerfPrices = (await dbGetSetting("mm_entry_perf_prices")) || {}; } catch(e) {}
   try { screenerResults = (await dbGetSetting("stox_screener_data")) || { results: [], timestamps: {}, scanTime: 0 }; } catch(e) {}
   try { screenerSnapshots = (await dbGetSetting("stox_screener_snapshots")) || []; } catch(e) {}
   try { screenerBookmarks = (await dbGetSetting("stox_screener_bookmarks")) || {}; } catch(e) {}
@@ -58,6 +60,7 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       pastTrades: Object.values(soldShareSnapshots).reduce(function(s, a) { return s + a.length; }, 0),
       entryScores: entryScores.length,
       entrySnapshots: entrySnapshots.length,
+      entryPerfPrices: Object.keys(entryPerfPrices).length,
       screenerStocks: screenerResults.results ? screenerResults.results.length : 0,
       screenerSnapshots: screenerSnapshots.length,
       screenerBookmarks: Object.keys(screenerBookmarks).length,
@@ -69,6 +72,7 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       watchlist: watchlist,
       entryScores: entryScores,
       entrySnapshots: entrySnapshots,
+      entryPerfPrices: entryPerfPrices,
       screenerData: screenerResults,
       screenerSnapshots: screenerSnapshots,
       screenerBookmarks: screenerBookmarks,

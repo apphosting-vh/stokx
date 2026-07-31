@@ -131,6 +131,35 @@ var fsaReadFile = async function(handle) {
 /* ── Global FSA singleton ── */
 window.__fsa = { handle: null, filename: "", lastSaved: null, ready: false, writeNow: null, state: null };
 
+/* ── Shared writeNow factory ── */
+var _fsaMakeWriteNow = function() {
+  return async function() {
+    if (!window.__fsa.handle || !window.__fsa.ready) return false;
+    var st = window.__fsa.state || { holdings: [], watchlist: [], soldShareSnapshots: {} };
+    var ok = await fsaWriteFile(window.__fsa.handle, st);
+    if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
+    return ok;
+  };
+};
+
+/* ── Boot-time connect: restores a previously saved file handle so auto-save
+      works on any page, not only after visiting Settings ── */
+window.__fsaInit = async function() {
+  if (!fsaSupported()) return false;
+  try {
+    var h = await fsaGetHandle();
+    if (!h) return false;
+    var perm = await fsaQueryPermission(h);
+    window.__fsa.handle = h;
+    window.__fsa.filename = h.name;
+    window.__fsa.ready = perm === "granted";
+    window.__fsa.writeNow = _fsaMakeWriteNow();
+    if (perm === "granted") return true;
+    window.dispatchEvent(new CustomEvent("fsa:permission-needed"));
+    return false;
+  } catch (e) { return false; }
+};
+
 
 /* ──────────────────────────────────────────────────────────────────────────
    PART 2 — SHARED SYNC PAYLOAD BUILDER
@@ -226,6 +255,11 @@ window.__stoxRestoreFromPayload = async function(data) {
     if (data.screenerSnapshots) await dbSetSetting("stox_screener_snapshots", data.screenerSnapshots);
     if (data.screenerBookmarks && typeof data.screenerBookmarks === "object") await dbSetSetting("stox_screener_bookmarks", data.screenerBookmarks);
     if (data.notes) await dbSetSetting("stox_notes", data.notes);
+    if (window.__fsa) window.__fsa.state = {
+      holdings: data.holdings || [],
+      watchlist: data.watchlist || [],
+      soldShareSnapshots: data.soldShareSnapshots || {}
+    };
     window.dispatchEvent(new CustomEvent("stox:data-changed"));
   } catch (e) {
     console.warn("[Sync] Restore error:", e);
@@ -523,6 +557,7 @@ var _syncSaveLocalEdit = function(ts) {
     }
   } catch (e) {}
 };
+window._syncSaveLocalEdit = _syncSaveLocalEdit;
 var _syncRemoteTimeFromPayload = function(payload) {
   return (payload && (payload.exportedAt || payload.modifiedTime || (payload.data && payload.data.exportedAt))) || "";
 };
@@ -659,10 +694,11 @@ var gdriveUpsertSyncFile = async function(stateData, manual) {
       var remoteExportedAt = _syncRemoteTimeFromPayload(remotePayload);
       if (remoteExportedAt && localEditAt && remoteExportedAt >= localEditAt) {
         _syncSaveLocal(remoteExportedAt);
+        _syncSaveLocalEdit(remoteExportedAt);
         return true;
       }
     }
-    var exportedAt = localEditAt || new Date().toISOString();
+    var exportedAt = new Date().toISOString();
     if (!localEditAt && manual) _syncSaveLocalEdit(exportedAt);
     var payload = await window.__stoxBuildSyncPayload(stateData, true);
     payload.exportedAt = exportedAt;
@@ -671,14 +707,14 @@ var gdriveUpsertSyncFile = async function(stateData, manual) {
 
     var _writeAndMark = async function(id) {
       var ok = await _gdriveUpdateFile(token, id, content);
-      if (ok) { _gdriveMarkWritten(); _syncSaveLocal(exportedAt); return true; }
+      if (ok) { _gdriveMarkWritten(); _syncSaveLocal(exportedAt); _syncSaveLocalEdit(exportedAt); return true; }
       return false;
     };
     if (fileId && await _writeAndMark(fileId)) return true;
     fileId = await _gdriveFindFile(token);
     if (fileId && await _writeAndMark(fileId)) return true;
     var newId = await _gdriveCreateFile(token, content);
-    if (newId) { _gdriveMarkWritten(); _syncSaveLocal(exportedAt); return true; }
+    if (newId) { _gdriveMarkWritten(); _syncSaveLocal(exportedAt); _syncSaveLocalEdit(exportedAt); return true; }
     return false;
   } catch (e) {
     console.warn("[GDrive] upsert failed:", e);
@@ -797,6 +833,18 @@ var gdriveAutoBackup = async function(stateData) {
 };
 window._gdriveAutoBackup = gdriveAutoBackup;
 
+/* ── Auto-backup runner: fires once per day per device while the app is open ── */
+(function() {
+  var _autoBackupRun = function() {
+    if (!_gdriveGetCid()) return;
+    if (!window.__fsa) return;
+    var st = window.__fsa.state || { holdings: [], watchlist: [], soldShareSnapshots: {} };
+    gdriveAutoBackup(st);
+  };
+  setTimeout(_autoBackupRun, 15000);
+  setInterval(_autoBackupRun, 3600000);
+})();
+
 
 /* ──────────────────────────────────────────────────────────────────────────
    PART 4 — FSA STORAGE PANEL (Settings UI)
@@ -845,28 +893,13 @@ window.FSAStoragePanel = function(props) {
   }, []);
 
   React.useEffect(function() {
-    if (!fsaSupported()) return;
     (async function() {
-      try {
-        var h = await fsaGetHandle();
-        if (!h) return;
-        var perm = await fsaQueryPermission(h);
-        if (perm === "granted") {
-          window.__fsa.handle = h; window.__fsa.filename = h.name; window.__fsa.ready = true;
-          window.__fsa.writeNow = async function() {
-            if (!window.__fsa.handle || !window.__fsa.ready) return false;
-            var ok = await fsaWriteFile(window.__fsa.handle, window.__fsa.state || stateDataRef.current);
-            if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
-            return ok;
-          };
-          setConnected(true); setFilename(h.name);
-          setTimeout(function() { if (window.__fsa.writeNow) window.__fsa.writeNow(); }, 50);
-        } else {
-          window.__fsa.handle = h; window.__fsa.filename = h.name; window.__fsa.ready = false;
-          setFilename(h.name); setPermNeeded(true);
-          window.dispatchEvent(new CustomEvent("fsa:permission-needed"));
-        }
-      } catch (e) {}
+      var ok = await window.__fsaInit();
+      if (!window.__fsa || !window.__fsa.handle) return;
+      setFilename(window.__fsa.filename || "");
+      setConnected(!!window.__fsa.ready);
+      setPermNeeded(!!window.__fsa.handle && !window.__fsa.ready);
+      if (ok) setTimeout(function() { if (window.__fsa.writeNow) window.__fsa.writeNow(); }, 50);
     })();
   }, []);
 
@@ -882,15 +915,10 @@ window.FSAStoragePanel = function(props) {
       if (!perm) { setPermNeeded(true); setBusy(false); say("Write permission was denied. Click 'Re-grant Permission' to enable auto-save.", false); return; }
       await fsaSetHandle(handle);
       window.__fsa.handle = handle; window.__fsa.filename = handle.name; window.__fsa.ready = true;
-      window.__fsa.writeNow = async function() {
-        if (!window.__fsa.handle || !window.__fsa.ready) return false;
-        var ok = await fsaWriteFile(window.__fsa.handle, window.__fsa.state || stateDataRef.current);
-        if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
-        return ok;
-      };
+      window.__fsa.writeNow = _fsaMakeWriteNow();
       setConnected(true); setFilename(handle.name); setPermNeeded(false);
-      var ok = await fsaWriteFile(handle, window.__fsa.state || stateDataRef.current);
-      if (ok) { window.__fsa.lastSaved = new Date(); setLastSaved(window.__fsa.lastSaved); say("Connected! Current data saved to " + handle.name); }
+      var ok = await window.__fsa.writeNow();
+      if (ok) { setLastSaved(window.__fsa.lastSaved); say("Connected! Current data saved to " + handle.name); }
       else say("File connected, but initial write failed. Try 'Save Now'.", false);
     } catch (e) { if (e.name !== "AbortError") say("Could not connect file: " + e.message, false); }
     setBusy(false);
@@ -907,14 +935,19 @@ window.FSAStoragePanel = function(props) {
       var handle = handles[0];
       var data = await fsaReadFile(handle);
       if (!data) { say("Could not read the file or the file is empty.", false); setBusy(false); return; }
+      if (!await window.showConfirm("Load data from \"" + handle.name + "\"?\n\nThis will REPLACE your current holdings, watchlist, trade history, and settings with the contents of this file.")) {
+        setBusy(false); return;
+      }
       await window.__stoxRestoreFromPayload(data);
       var permGranted = await fsaRequestPermission(handle);
       if (permGranted === "granted") {
         window.__fsa.handle = handle; window.__fsa.filename = handle.name; window.__fsa.ready = true;
+        window.__fsa.writeNow = _fsaMakeWriteNow();
         await fsaSetHandle(handle);
         setConnected(true); setFilename(handle.name); setPermNeeded(false);
       } else {
         window.__fsa.handle = handle; window.__fsa.filename = handle.name; window.__fsa.ready = false;
+        window.__fsa.writeNow = _fsaMakeWriteNow();
         await fsaSetHandle(handle);
         setPermNeeded(true); setFilename(handle.name);
       }
@@ -930,8 +963,8 @@ window.FSAStoragePanel = function(props) {
     var ok = await fsaVerifyPermission(window.__fsa.handle);
     if (!ok) { say("Permission denied. Please click 'Re-grant Permission'.", false); setBusy(false); return; }
     window.__fsa.ready = true;
-    var saved = await fsaWriteFile(window.__fsa.handle, window.__fsa.state || stateData);
-    if (saved) { window.__fsa.lastSaved = new Date(); setLastSaved(window.__fsa.lastSaved); say("Saved to " + window.__fsa.filename); }
+    var saved = await window.__fsa.writeNow();
+    if (saved) { setLastSaved(window.__fsa.lastSaved); say("Saved to " + window.__fsa.filename); }
     else say("Write failed - the file may have been moved or deleted.", false);
     setBusy(false);
   };
@@ -942,12 +975,7 @@ window.FSAStoragePanel = function(props) {
     var granted = await fsaVerifyPermission(window.__fsa.handle);
     if (granted) {
       window.__fsa.ready = true;
-      window.__fsa.writeNow = async function() {
-        if (!window.__fsa.handle || !window.__fsa.ready) return false;
-        var ok = await fsaWriteFile(window.__fsa.handle, window.__fsa.state || stateDataRef.current);
-        if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
-        return ok;
-      };
+      window.__fsa.writeNow = _fsaMakeWriteNow();
       var ok = await window.__fsa.writeNow();
       setPermNeeded(false); setConnected(true);
       say(ok ? "Permission granted - data saved to " + window.__fsa.filename : "Permission granted - save queued.");
