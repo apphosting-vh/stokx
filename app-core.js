@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.14";
+window.__STOX_APP_VERSION = "2.6.15";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -5251,8 +5251,9 @@ function SingleStockAnalysis() {
     if (data.length < 2) return null;
     var maxCandles = timeframe === "5m" ? 390 : timeframe === "15m" ? 300 : timeframe === "1m" ? 200 : timeframe === "1h" ? 200 : 80;
     data = data.slice(-maxCandles);
-    var w = 700, h = 240, padL = 50, padR = 10, padT = 14, padB = 40;
+    var w = 700, h = 250, padL = 50, padR = 10, padT = 14, padB = 50;
     var cw = w - padL - padR, ch = h - padT - padB;
+    var volBandH = 22, volTop = padT + ch + 8, volBottom = volTop + volBandH;
     var allH = data.map(function (c) { return c.h; });
     var allL = data.map(function (c) { return c.l; });
     var hi = Math.max.apply(null, allH), lo = Math.min.apply(null, allL);
@@ -5349,6 +5350,16 @@ function SingleStockAnalysis() {
     var firstC = data[0];
     var priceColor = lastC.c >= firstC.c ? "var(--profit)" : "var(--loss)";
 
+    var vMax = Math.max.apply(null, data.map(function (c) { return c.v || 0; })) || 1;
+    var volEls = data.map(function (c, ci) {
+      var x = padL + ci * gap + gap / 2;
+      var v = c.v || 0;
+      var vh = (v / vMax) * volBandH;
+      var isUp = c.c >= c.o;
+      var vcolor = isUp ? "var(--profit)" : "var(--loss)";
+      return React.createElement("rect", { key: "vol" + ci, x: x - barW / 2, y: volBottom - vh, width: barW, height: Math.max(1, vh), fill: vcolor, opacity: 0.55, rx: 0.5 });
+    });
+
     return React.createElement("div", { style: { background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 12, overflow: "hidden" } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
@@ -5361,6 +5372,8 @@ function SingleStockAnalysis() {
         React.createElement("text", { x: padL + cw / 2, y: h - 2, fontSize: 8, fill: "var(--text6)", textAnchor: "middle", fontFamily: "var(--font-mono)" }, xLabel),
         gridLines,
         daySepEls,
+        React.createElement("line", { x1: padL, y1: volTop - 4, x2: w - padR, y2: volTop - 4, stroke: "var(--border)", strokeWidth: 0.5, strokeDasharray: "2,2" }),
+        volEls,
         xTickEls,
         candleEls
       )
