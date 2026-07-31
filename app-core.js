@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.17";
+window.__STOX_APP_VERSION = "2.6.18";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -5754,6 +5754,16 @@ function SingleStockAnalysis() {
               style: { padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: active ? 700 : 500, border: "none", cursor: "pointer", background: active ? "var(--accent)" : "var(--bg4)", color: active ? "#fff" : "var(--text5)", transition: "all .15s" }
             }, od.label);
           }),
+          React.createElement("button", {
+            key: "ovall",
+            onClick: function () { setOverlays({ ma: true, bb: true, vwap: true, st: true, sar: true, lvl: true }); },
+            style: { padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: CHART_OVERLAY_DEFS.every(function (od) { return overlays[od.key]; }) ? 700 : 500, border: "1px solid var(--border)", cursor: "pointer", background: CHART_OVERLAY_DEFS.every(function (od) { return overlays[od.key]; }) ? "var(--accent)" : "var(--bg4)", color: CHART_OVERLAY_DEFS.every(function (od) { return overlays[od.key]; }) ? "#fff" : "var(--text5)", transition: "all .15s" }
+          }, "All"),
+          React.createElement("button", {
+            key: "ovnone",
+            onClick: function () { setOverlays({ ma: false, bb: false, vwap: false, st: false, sar: false, lvl: false }); },
+            style: { padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: CHART_OVERLAY_DEFS.every(function (od) { return !overlays[od.key]; }) ? 700 : 500, border: "1px solid var(--border)", cursor: "pointer", background: CHART_OVERLAY_DEFS.every(function (od) { return !overlays[od.key]; }) ? "var(--accent)" : "var(--bg4)", color: CHART_OVERLAY_DEFS.every(function (od) { return !overlays[od.key]; }) ? "#fff" : "var(--text5)", transition: "all .15s" }
+          }, "None"),
           React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "var(--text6)", marginLeft: 8 } }, "Pane:"),
           CHART_OSC_DEFS.map(function (od) {
             var active = oscPane === od.key;
