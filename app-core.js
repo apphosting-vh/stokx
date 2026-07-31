@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.7";
+window.__STOX_APP_VERSION = "2.6.8";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -2297,14 +2297,69 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
 
   const handleAdd = async () => {
     if (!form.ticker || !form.qty || !form.buyPrice) { showToast("Please fill ticker, quantity and buy price"); return; }
+    const ticker = form.ticker.toUpperCase();
+    const qty = parseFloat(form.qty);
+    const buyPrice = parseFloat(form.buyPrice);
+
+    /* ── Past trade mode: log directly to Trade History snapshots, not holdings ── */
+    if (mode === "past") {
+      if (!form.sellDate) { showToast("Please fill date of selling"); return; }
+      const sellPrice = parseFloat(form.sellPrice) || buyPrice;
+      const costBasis = qty * buyPrice;
+      const currentVal = qty * sellPrice;
+      const pnl = currentVal - costBasis;
+      const snap = {
+        id: uid(),
+        savedAt: form.sellDate,
+        company: form.company || ticker,
+        ticker: ticker,
+        qty: qty,
+        buyPrice: buyPrice,
+        buyDate: form.buyDate || "",
+        sellPrice: sellPrice,
+        currentVal: currentVal,
+        costBasis: costBasis,
+        pnl: pnl,
+        pnlPct: costBasis > 0 ? ((pnl / costBasis) * 100) : 0,
+        brokerage: parseFloat(form.brokerage) || 0,
+        sector: form.sector,
+        entryScore: form.entryScore ? parseFloat(form.entryScore) : null,
+        notes: form.notes || "",
+        priceTs: Date.now(),
+        chartPts: []
+      };
+      await saveSnapshot(snap);
+      if (form.buyDate) {
+        fetchHistoricalPrices(ticker, form.buyDate).then(pts => {
+          if (pts && pts.length >= 2) {
+            const chartData = pts.filter(p => p.date <= form.sellDate).map(p => ({ date: p.date, close: p.close }));
+            if (chartData.length >= 2) {
+              const updatedSnap = { ...snap, chartPts: chartData };
+              const fyKey = getFYKey(snap.savedAt);
+              setSoldShareSnapshots(prev => {
+                const snaps = (prev[fyKey] || []).map(s => s.id === snap.id ? updatedSnap : s);
+                const updated = { ...prev, [fyKey]: snaps };
+                persistSnapshots(updated);
+                return updated;
+              });
+            }
+          }
+        }).catch(() => {});
+      }
+      resetForm();
+      setShowAdd(false);
+      showToast(ticker + " saved to Trade History");
+      return;
+    }
+
     const holding = {
       id: uid(),
-      ticker: form.ticker.toUpperCase(),
-      company: form.company || form.ticker.toUpperCase(),
-      qty: parseFloat(form.qty),
-      buyPrice: parseFloat(form.buyPrice),
-      avgPrice: parseFloat(form.buyPrice),
-      currentPrice: parseFloat(form.currentPrice) || parseFloat(form.buyPrice),
+      ticker: ticker,
+      company: form.company || ticker,
+      qty: qty,
+      buyPrice: buyPrice,
+      avgPrice: buyPrice,
+      currentPrice: parseFloat(form.currentPrice) || buyPrice,
       sector: form.sector,
       buyDate: form.buyDate || TODAY(),
       brokerage: parseFloat(form.brokerage) || 0,
@@ -2317,7 +2372,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
     setHoldings((prev) => [...prev, holding]);
     resetForm();
     setShowAdd(false);
-    showToast(holding.ticker + " added to portfolio");
+    showToast(ticker + " added to portfolio");
   };
 
   const handleEdit = async () => {
@@ -5979,13 +6034,19 @@ function App() {
 
   const editSnapshot = async (fyKey, snapshot) => {
     setSoldShareSnapshots((prev) => {
-      const oldSnaps = (prev[fyKey] || []).filter((s) => s.id !== snapshot.id);
       const newFyKey = getFYKey(snapshot.savedAt || TODAY());
-      const newSnaps = [...(prev[newFyKey] || []), snapshot].sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
       const updated = { ...prev };
-      if (oldSnaps.length > 0) updated[fyKey] = oldSnaps;
-      else delete updated[fyKey];
-      updated[newFyKey] = newSnaps;
+      if (fyKey === newFyKey) {
+        const snaps = (prev[fyKey] || []).map((s) => s.id === snapshot.id ? snapshot : s).sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
+        if (snaps.length > 0) updated[fyKey] = snaps;
+        else delete updated[fyKey];
+      } else {
+        const oldSnaps = (prev[fyKey] || []).filter((s) => s.id !== snapshot.id);
+        const newSnaps = [...(prev[newFyKey] || []), snapshot].sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
+        if (oldSnaps.length > 0) updated[fyKey] = oldSnaps;
+        else delete updated[fyKey];
+        updated[newFyKey] = newSnaps;
+      }
       persistSnapshots(updated);
       return updated;
     });
