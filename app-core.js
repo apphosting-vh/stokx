@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.12";
+window.__STOX_APP_VERSION = "2.6.14";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -3332,7 +3332,7 @@ const EntryScorePanel = ({ shares }) => {
           const indW = TI.computeAll(resW.data);
           const indD = TI.computeAll(resD.data);
           const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-          const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
+          const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
           if (result) result.lastClose = entry.currentPrice || resD.data[resD.data.length - 1].c;
           const idx = updated.findIndex(e => e.id === entry.id);
           if (idx >= 0) updated[idx] = { ...updated[idx], result, indicators: { weekly: indW, daily: indD, hourly: indH } };
@@ -3381,7 +3381,7 @@ const EntryScorePanel = ({ shares }) => {
         const indD = TI.computeAll(resD.data);
         const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
         const lastClose = resD.data[resD.data.length - 1]?.close || entry.currentPrice || 0;
-        const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
+        const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
         if (result) result.lastClose = lastClose;
         updated[i] = { ...updated[i], currentPrice: entry.currentPrice || lastClose, result, indicators: { weekly: indW, daily: indD, hourly: indH } };
       } catch {}
@@ -3563,7 +3563,7 @@ const EntryScorePanel = ({ shares }) => {
       const indW = TI.computeAll(resW.data);
       const indD = TI.computeAll(resD.data);
       const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
+      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
       if (result) result.lastClose = lastDailyClose;
       const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), indicators: { weekly: indW, daily: indD, hourly: indH } };
       saveEntries([entry, ...entries]);
@@ -4176,6 +4176,38 @@ var SCREENER_DECISION_MAP = {
   AVOID:       { label: 'AVOID',       color: '#ef4444' },
 };
 
+/* Hourly bars are in-progress during market hours; drop the last bar if its
+   1h window has not elapsed yet so scores use only completed bars (reduces
+   intraday noise from the partial live candle). Times are IST wall-clock. */
+function _dropInProgressHourly(candles) {
+  if (!candles || candles.length < 2) return candles;
+  var last = candles[candles.length - 1];
+  var t = last && last.t;
+  if (!t || typeof t !== "string") return candles;
+  var m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(t);
+  if (!m) return candles;
+  var barStartUtc = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) - (5.5 * 60 * 60 * 1000);
+  if (Date.now() < barStartUtc + 3600000) return candles.slice(0, -1);
+  return candles;
+}
+
+/* Daily bars are in-progress during market hours; drop today's bar until the
+   NSE close (15:30 IST) so scores use only completed daily bars. */
+function _dropInProgressDaily(candles) {
+  if (!candles || candles.length < 2) return candles;
+  var last = candles[candles.length - 1];
+  var t = last && last.t;
+  if (!t || typeof t !== "string") return candles;
+  var d = /^(\d{4})-(\d{2})-(\d{2}) /.exec(t);
+  if (!d) return candles;
+  var istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  var istDate = istNow.toISOString().split("T")[0];
+  if (istDate !== d[1] + "-" + d[2] + "-" + d[3]) return candles;
+  var istMin = istNow.getUTCHours() * 60 + istNow.getUTCMinutes();
+  if (istMin < 15 * 60 + 30) return candles.slice(0, -1);
+  return candles;
+}
+
 /* Wraps the new computeMultiTFEntryScore + per-timeframe computeEntryScore
    into the old result shape { finalScore, decision, baseScore, penalties, bonuses, weekly, daily, hourly } */
 function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
@@ -4183,8 +4215,14 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
   var TI = window.TechIndicators;
   var tfResults = [];
   if (weeklyCandles && weeklyCandles.length >= 50) tfResults.push({ timeframe: 'W', candles: weeklyCandles });
-  if (dailyCandles && dailyCandles.length >= 50) tfResults.push({ timeframe: 'D', candles: dailyCandles });
-  if (hourlyCandles && hourlyCandles.length >= 50) tfResults.push({ timeframe: 'H', candles: hourlyCandles });
+  if (dailyCandles && dailyCandles.length >= 50) {
+    var dailyTrimmed = _dropInProgressDaily(dailyCandles);
+    if (dailyTrimmed && dailyTrimmed.length >= 50) tfResults.push({ timeframe: 'D', candles: dailyTrimmed });
+  }
+  if (hourlyCandles && hourlyCandles.length >= 50) {
+    var hourlyTrimmed = _dropInProgressHourly(hourlyCandles);
+    if (hourlyTrimmed && hourlyTrimmed.length >= 50) tfResults.push({ timeframe: 'H', candles: hourlyTrimmed });
+  }
   if (!tfResults.length) return null;
   var multi = TI.computeMultiTFEntryScore(tfResults);
   if (!multi || multi.multiTF_score == null) return null;
@@ -4436,7 +4474,7 @@ function StockScreener() {
       var lastDailyClose = dc[_yi].c;
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -4480,7 +4518,7 @@ function StockScreener() {
       var lastDailyClose = dc[_yi].c;
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -4570,7 +4608,7 @@ function StockScreener() {
           var lastDailyClose = dc[_yi].c;
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
-          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
+          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -4647,7 +4685,7 @@ function StockScreener() {
       var indW = TI.computeAll(resW.data);
       var indD = TI.computeAll(resD.data);
       var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
       if (result) result.lastClose = lc;
       var entry = { id: Date.now(), ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), indicators: { weekly: indW, daily: indD, hourly: indH } };
       entries.unshift(entry);
@@ -4684,7 +4722,7 @@ function StockScreener() {
           var lastDailyClose = dc[_yi].c;
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
-          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 12 ? resH.data : null);
+          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
