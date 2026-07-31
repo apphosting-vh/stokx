@@ -142,7 +142,15 @@ window.OHLCVFetcher = (function () {
             return {
               price: result.regularMarketPrice,
               change: result.regularMarketChange != null ? result.regularMarketChange : null,
-              changePercent: result.regularMarketChangePercent != null ? result.regularMarketChangePercent : null
+              changePercent: result.regularMarketChangePercent != null ? result.regularMarketChangePercent : null,
+              dayHigh: result.regularMarketDayHigh != null ? result.regularMarketDayHigh : null,
+              dayLow: result.regularMarketDayLow != null ? result.regularMarketDayLow : null,
+              high52: result.fiftyTwoWeekHigh != null ? result.fiftyTwoWeekHigh : null,
+              low52: result.fiftyTwoWeekLow != null ? result.fiftyTwoWeekLow : null,
+              marketCap: result.marketCap != null ? result.marketCap : null,
+              pe: result.trailingPE != null ? result.trailingPE : null,
+              volume: result.regularMarketVolume != null ? result.regularMarketVolume : null,
+              avgVolume: result.averageDailyVolume10Day != null ? result.averageDailyVolume10Day : (result.averageVolume != null ? result.averageVolume : null)
             };
           } catch (e) {
             continue;
