@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.19";
+window.__STOX_APP_VERSION = "2.6.21";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -4189,38 +4189,6 @@ var SCREENER_DECISION_MAP = {
   AVOID:       { label: 'AVOID',       color: '#ef4444' },
 };
 
-/* Hourly bars are in-progress during market hours; drop the last bar if its
-   1h window has not elapsed yet so scores use only completed bars (reduces
-   intraday noise from the partial live candle). Times are IST wall-clock. */
-function _dropInProgressHourly(candles) {
-  if (!candles || candles.length < 2) return candles;
-  var last = candles[candles.length - 1];
-  var t = last && last.t;
-  if (!t || typeof t !== "string") return candles;
-  var m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(t);
-  if (!m) return candles;
-  var barStartUtc = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) - (5.5 * 60 * 60 * 1000);
-  if (Date.now() < barStartUtc + 3600000) return candles.slice(0, -1);
-  return candles;
-}
-
-/* Daily bars are in-progress during market hours; drop today's bar until the
-   NSE close (15:30 IST) so scores use only completed daily bars. */
-function _dropInProgressDaily(candles) {
-  if (!candles || candles.length < 2) return candles;
-  var last = candles[candles.length - 1];
-  var t = last && last.t;
-  if (!t || typeof t !== "string") return candles;
-  var d = /^(\d{4})-(\d{2})-(\d{2}) /.exec(t);
-  if (!d) return candles;
-  var istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-  var istDate = istNow.toISOString().split("T")[0];
-  if (istDate !== d[1] + "-" + d[2] + "-" + d[3]) return candles;
-  var istMin = istNow.getUTCHours() * 60 + istNow.getUTCMinutes();
-  if (istMin < 15 * 60 + 30) return candles.slice(0, -1);
-  return candles;
-}
-
 /* Wraps the new computeMultiTFEntryScore + per-timeframe computeEntryScore
    into the old result shape { finalScore, decision, baseScore, penalties, bonuses, weekly, daily, hourly } */
 function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
@@ -4228,14 +4196,8 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
   var TI = window.TechIndicators;
   var tfResults = [];
   if (weeklyCandles && weeklyCandles.length >= 50) tfResults.push({ timeframe: 'W', candles: weeklyCandles });
-  if (dailyCandles && dailyCandles.length >= 50) {
-    var dailyTrimmed = _dropInProgressDaily(dailyCandles);
-    if (dailyTrimmed && dailyTrimmed.length >= 50) tfResults.push({ timeframe: 'D', candles: dailyTrimmed });
-  }
-  if (hourlyCandles && hourlyCandles.length >= 50) {
-    var hourlyTrimmed = _dropInProgressHourly(hourlyCandles);
-    if (hourlyTrimmed && hourlyTrimmed.length >= 50) tfResults.push({ timeframe: 'H', candles: hourlyTrimmed });
-  }
+  if (dailyCandles && dailyCandles.length >= 50) tfResults.push({ timeframe: 'D', candles: dailyCandles });
+  if (hourlyCandles && hourlyCandles.length >= 50) tfResults.push({ timeframe: 'H', candles: hourlyCandles });
   if (!tfResults.length) return null;
   var multi = TI.computeMultiTFEntryScore(tfResults);
   if (!multi || multi.multiTF_score == null) return null;
@@ -6024,23 +5986,23 @@ function InfoPage() {
         React.createElement(MethSection, { label: "Exit Score (100 raw pts)", stateKey: "exit" }),
         React.createElement(MethContent, { stateKey: "exit" },
           React.createElement("p", { style: subH }, "4 Pillars \u2014 Trend BD(25) | Mom Exh(25) | Vol Dist(25) | Struc BD(25)"),
-          React.createElement("p", { style: subSub }, "12.1 MA Breakdown (9 pts)"),
-          React.createElement("p", null, "Price < EMA(9) cross, < EMA(21), < EMA(50), < SMA(200). EMA bearish stacking. HMA(16) declining, KAMA(10) declining, price < WMA(20). SMA(20) < SMA(50). RS Mansfield <0 & declining. HA close < prev + price < SMA(20). Price < Chandelier Long."),
-          React.createElement("p", { style: subSub }, "12.2 MACD + TSI + STC + AO Rollover (8 pts)"),
+          React.createElement("p", { style: subSub }, "12.1 MA Breakdown (7 pts)"),
+          React.createElement("p", null, "Price < EMA(9) cross, < EMA(21), < EMA(50), < SMA(200). EMA bearish stacking. HMA(16) declining, KAMA(10) declining, price < WMA(20). SMA(20) < SMA(50). RS Mansfield <0 & declining. HA close < prev + price < SMA(20)."),
+          React.createElement("p", { style: subSub }, "12.2 MACD + TSI + STC + AO Rollover (9 pts)"),
           React.createElement("p", null, "MACD cross below signal, MACD <0 cross. Histogram <0 & declining. TSI <0 cross, TSI <0, TSI declining. STC <25, STC declining & <75. AO <0 cross, AO <0, AO declining."),
-          React.createElement("p", { style: subSub }, "12.3 ADX + ST + PSAR + VI + Aroon BD (8 pts)"),
+          React.createElement("p", { style: subSub }, "12.3 ADX + ST + PSAR + VI + Aroon BD (9 pts)"),
           React.createElement("p", null, "ADX declining & <25. -DI > +DI cross. Price < SuperTrend, ST flip. Price < PSAR, PSAR flip. VI- > VI+ cross. Aroon < -50 / <0, Aroon declining."),
-          React.createElement("p", { style: subSub }, "13.1 RSI + StochRSI + WillR Exhaustion (9 pts)"),
+          React.createElement("p", { style: subSub }, "13.1 RSI + StochRSI + WillR Exhaustion (10 pts)"),
           React.createElement("p", null, "RSI >80 (+2) / >70 (+1). RSI declining from >70. RSI <50 cross. StochRSI K < D cross, K <20. Williams %R < -80 (+1), cross below -50, declining & < -50."),
           React.createElement("p", { style: subSub }, "13.2 CCI + ROC + Mom + FI Reversal (8 pts)"),
           React.createElement("p", null, "CCI >200 (+1) / >100 (+0.5), declining from >100, <0 cross. ROC(12) <0 cross, ROC <0. Mom(10) <0 cross, Mom <0. FI(13) <0 cross, FI <0, FI declining & <0."),
-          React.createElement("p", { style: subSub }, "13.3 MFI + CMF Outflow (8 pts)"),
+          React.createElement("p", { style: subSub }, "13.3 MFI + CMF Outflow (7 pts)"),
           React.createElement("p", null, "MFI >80 (+2) / >70 (+1). MFI declining from >70. MFI <50 cross, MFI <30. CMF < -0.05 (+2) / <0 (+1). CMF declining & <0."),
           React.createElement("p", { style: subSub }, "14.1 OBV + PVT + KVO + FI Decline (9 pts)"),
           React.createElement("p", null, "OBV < SMA(20). OBV slope <0 cross, OBV slope <0. PVT < SMA(20). PVT slope <0. KVO < signal cross, KVO <0. FI(13) <0, FI declining & <0."),
-          React.createElement("p", { style: subSub }, "14.2 VWAP + AVWAP Break (8 pts)"),
+          React.createElement("p", { style: subSub }, "14.2 VWAP + AVWAP Break (7 pts)"),
           React.createElement("p", null, "Price < VWAP(10) cross (+2), else pct bands 2.0% / 1.0% / else. VWAP declining. Price < Anchored VWAP (+1.5), AVWAP declining. Both VWAPs broken (+1)."),
-          React.createElement("p", { style: subSub }, "14.3 Squeeze + Distribution (8 pts)"),
+          React.createElement("p", { style: subSub }, "14.3 Squeeze + Distribution (9 pts)"),
           React.createElement("p", null, "Squeeze momentum <0 cross, <0, declining & <0. Squeeze on + neg momentum. Distribution days >=60% / >=40%. Dist days rising."),
           React.createElement("p", { style: subSub }, "15.1 BB + KC + DC + Chandelier BD (9 pts)"),
           React.createElement("p", null, "Price < BB mid cross, < BB lower. BB width expanding + below mid. Price < KC mid cross. Price <= DC lower. Price < Chandelier Long, CL declining. ATR% >5%."),
@@ -6049,9 +6011,9 @@ function InfoPage() {
           React.createElement("p", { style: subSub }, "15.3 Darvas + HMA + KAMA + MTF + Fib + Pivot + Fractals (10 pts)"),
           React.createElement("p", null, "Darvas bottom break (+2) / below mid. HMA declining, KAMA declining, price below both. MTF <40 / <60 & declining. Fib 0.618/0.786 broken. Pivot S1/S2 broken. ZigZag DOWN. Choppiness >61.8 & rising. Risk:reward <1.0 / <1.5 or reward <=0."),
           React.createElement("p", { style: subH }, "Penalties (-max)"),
-          React.createElement("p", null, "Weekly EMA+MACD bullish (-8). Price decline 3 + low volume (-6). Near support <1.5% (-5). Held <3d + high entry >70 (-5). Above fib 0.618 + pivot (-3)."),
+          React.createElement("p", null, "Index trend score >=65 (-8). EMA9>EMA21 + MACD bullish (-5). Price decline 3 + low volume (-6). Near support <1.5% (-5). Held <3d + high entry >70 (-5). Above fib 0.618 + pivot (-3)."),
           React.createElement("p", { style: subH }, "Bonuses (+max)"),
-          React.createElement("p", null, "Index trend score <35 (+5). Distribution days >=60% (+5). Price <97% entry (+5) / <98.5% (+3). Daily+Hourly bearish (+5). Distribution + MTF<40 (+3). High beta + index <40 (+3). Below Chandelier + S1 (+3)."),
+          React.createElement("p", null, "Index trend score <35 (+5). Distribution days >=60% (+5). Price <97% entry (+5) / <98.5% (+3). Daily+Hourly bearish (+5). Distribution + MTF<40 (+3). High beta + index <40 (+3). Below Chandelier + S1 (+3). KVO bearish cross (+3)."),
           React.createElement("p", { style: subH }, "Classification"),
           React.createElement("p", null, "85+ URGENT EXIT | 70+ EXIT | 55+ PARTIAL EXIT | 40+ TIGHTEN STOP | 25+ MONITOR | <25 HOLD"),
           React.createElement("p", { style: subH }, "MTF Weights"),

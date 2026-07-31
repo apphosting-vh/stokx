@@ -1,6 +1,6 @@
 # StoX — Technical Indicator & Scoring Specification
 
-> **App version:** 2.6.19  
+> **App version:** 2.6.21  
 > **Last updated:** 2026-07-31
 
 ---
@@ -158,29 +158,32 @@ Implements spec Sections 7–11.
 
 ```
 Raw candles (≥50 bars)
+  │  buildTFSnapshot(candles, indexCandles?) → sn   // single-pass indicator snapshot
   │
   ├─ Pillar 1: Trend (30 pts)
-  │    ├─ scoreMaStack()              10 pts   (7.1)
-  │    ├─ scoreMacdTsiStcAo()         10 pts   (7.2)
-  │    └─ scoreAdxStPsarViAroon()     10 pts   (7.3)
+  │    ├─ scoreMaStackForTF(sn)        10 pts   (7.1)
+  │    ├─ scoreMacdTsiStcAo(sn)        10 pts   (7.2)
+  │    └─ scoreAdxStPsarViAroon(sn)    10 pts   (7.3)
   │
   ├─ Pillar 2: Momentum (30 pts)
-  │    ├─ scoreRsiStochRsiWillR()     10 pts   (8.1)
-  │    ├─ scoreCciRocMomFi()          10 pts   (8.2)
-  │    └─ scoreMfiCmf()               10 pts   (8.3)
+  │    ├─ scoreRsiStochRsiWillR(sn)    10 pts   (8.1)
+  │    ├─ scoreCciRocMomFi(sn)         10 pts   (8.2)
+  │    └─ scoreMfiCmf(sn)              10 pts   (8.3)
   │
   ├─ Pillar 3: Volume (20 pts)
-  │    ├─ scoreObvPvtKvo()             8 pts   (9.1)
-  │    ├─ scoreVwapAnchored()          6 pts   (9.2)
-  │    └─ scoreVpSqueezeAd()           6 pts   (9.3)
+  │    ├─ scoreObvPvtKvo(sn)            8 pts   (9.1)
+  │    ├─ scoreVwapAnchored(sn)         6 pts   (9.2)
+  │    └─ scoreVpSqueezeAd(sn)          6 pts   (9.3)
   │
   └─ Pillar 4: Structure (20 pts)
-       ├─ scoreBbKcDcChandelier()      8 pts   (10.1)
-       ├─ scoreIchimoku()              6 pts   (10.2)
-       └─ scoreDarvasStructure()       6 pts   (10.3)
+       ├─ scoreBbKcDcChandelier(sn)     8 pts   (10.1)
+       ├─ scoreIchimoku(sn)             6 pts   (10.2)
+       └─ scoreDarvasStructure(sn)      6 pts   (10.3)
 ```
 
 **Raw total:** 100 points (30 + 30 + 20 + 20)
+
+All 12 sub-scores plus the Section-11 spike/stability sub-scores are produced per timeframe by `scoreEntryComponentsForTF(candles, indexCandles?, stabLookback)`. In the single-TF `computeEntryScore` they are summed into pillars directly; in the multi-TF path each sub-score is aggregated across H/D/W (see 5.1).
 
 ### 3.2 Classification Thresholds
 
@@ -214,10 +217,13 @@ where:
 | 4 | Price within 1% below pivot R1 | −5 |
 | 5 | Squeeze on for more than 10 bars | −3 |
 | 6 | Beta > 1.5 AND ATR% > 3.0% (volatility spike) | −3 |
-| 7 | Latest session is a detected spike (`detect_spike`) | −15 |
-| 8 | Spike detected 2 sessions ago (latest clean) | −8 |
-| 9 | `stability_score` < 0.3 | −10 |
-| 10 | `stability_score` < 0.5 (and ≥ 0.3) | −5 |
+| 7 | Spike sub-score ≥ 7 (weighted, latest session spiked) | −15 |
+| 8 | Spike sub-score ≥ 4 (weighted, spike fading) | −8 |
+| 9 | Spike sub-score ≥ 2 (weighted, minor recent spike) | −4 |
+| 10 | Stability sub-score ≥ 7 (erratic, weighted) | −10 |
+| 11 | Stability sub-score ≥ 5 (moderately erratic, weighted) | −5 |
+
+**Spike sub-score (0–10, higher = worse):** per TF, `calcDetectSpike(candles, 20, 2.5, 2.5)` → latest spike +5, prior-bar spike +3, any spike in the last 20 bars +2 (capped 10). **Stability sub-score (0–10, higher = worse):** `(1 − calcStabilityScore(candles, lookback)) × 10`, lookback 10 for H/D and 6 for W. Both are weighted `H×0.20 + D×0.50 + W×0.30` (renormalized over available TFs) before the thresholds above are applied.
 
 The single-TF function proxies weekly trend with `close < SMA50` and daily bullish with `close > HMA16`; the multi-TF path recomputes rule 3 on real weekly/daily data (close vs own EMA21).
 
@@ -236,25 +242,24 @@ The single-TF function proxies weekly trend with `close < SMA50` and daily bulli
 
 ### 3.6 Component Scoring
 
-**7.1 MA Stack (10 pts)** — `scoreMaStackForTF(candles, indexCandles?)`
+**7.1 MA Stack (10 pts)** — `scoreMaStackForTF(sn)` (consumes a `buildTFSnapshot` snapshot)
 
 | # | Condition | Points |
 |---|-----------|--------|
-| 1 | close > HMA16 | 0.5 |
-| 2 | close > KAMA10 | 0.5 |
-| 3 | close > WMA20 | 0.5 |
-| 4 | EMA9 > EMA21 > EMA50 | 1.5 |
-| 5 | SMA20 > SMA50 | 1.0 |
-| 6 | close > EMA9 | 0.5 |
-| 7 | close > EMA21 | 0.5 |
-| 8 | close > EMA50 | 0.5 |
-| 9 | close > SMA200 | 0.5 |
+| 1 | close > EMA9 | 0.5 |
+| 2 | close > EMA21 | 0.5 |
+| 3 | close > EMA50 | 0.5 |
+| 4 | close > SMA200 | 0.5 |
+| 5 | EMA9 > EMA21 > EMA50 | 2.0 |
+| 6 | EMA9 > EMA21 OR EMA21 > EMA50 (partial) | 1.0 |
+| 7 | SMA20 > SMA50 > SMA200 | 2.0 |
+| 8 | SMA20 > SMA50 (partial) | 1.0 |
+| 9 | Fast MAs bullish (close > HMA16, KAMA10, WMA20) × 0.67 each | cap 2.0 |
 | 10 | HMA16 > prev HMA16 | 0.5 |
 | 11 | RS Mansfield (52) > 0 | 0.5 |
 | 12 | RS Mansfield > prev RS Mansfield | 0.5 |
-| 13 | WMA20 > prev WMA20 | 0.5 |
 
-Capped at 10. In the multi-TF path this score is aggregated as `H×0.20 + D×0.50 + W×0.30` (see 5.1).
+Capped at 10.
 
 **7.2 MACD + TSI + STC + AO (10 pts)** — MACD line > signal (1.0); MACD > 0 (0.5); histogram > 0 and rising (0.5); MACD crossed above signal within 3 bars (0.5); TSI > 0 (0.5); TSI rising while > 0 (0.5); TSI crossed zero within 3 bars (0.5); STC > 50 (0.5); STC rising (0.5); STC > 75 (0.5); STC crossed 25 within 3 bars (0.5); AO > 0 (0.5); AO rising (0.5); AO crossed zero (0.5); confluence ≥ 3 bullish (1.0).
 
@@ -297,8 +302,8 @@ Capped at 10. In the multi-TF path this score is aggregated as `H×0.20 + D×0.5
   allocation_pct: number,        // 100 | 70 | 40 | 0 | 0
   details: {
     maStack: number,             // + 11 other sub-scores (see 3.6)
-    spike: boolean | null,       // latest-session spike flag
-    stability: number | null,    // stability score 0-1
+    spike: number,               // spike sub-score 0-10 (higher = worse)
+    stability: number,           // stability sub-score 0-10 (higher = worse)
     indexTrendScore: number | null
   }
 }
@@ -323,26 +328,34 @@ position: {
 ```
 Raw candles (≥50 bars) + position
   │
+  ├─ buildTFSnapshot(candles, indexCandles?)      ← one-pass indicator snapshot
+  │
   ├─ Pillar 1: Trend Breakdown (25 pts)
-  │    ├─ scoreMaBreakdown()                9 pts
-  │    ├─ scoreMacdTsiStcAoExit()           8 pts
-  │    └─ scoreAdxStPsarViAroonExit()       8 pts
+  │    ├─ scoreExitTrendBreakdown()              7 pts   (12.1a MA crosses + stack collapse)
+  │    ├─ scoreExitMacdTsiStcAo()                9 pts   (12.1b MACD + TSI + STC + AO rollover)
+  │    └─ scoreExitAdxSupertrendPsarViAroon()    9 pts   (12.1c ADX + Supertrend + PSAR + Vortex + Aroon)
   │
   ├─ Pillar 2: Momentum Exhaustion (25 pts)
-  │    ├─ scoreRsiStochRsiWillrExit()       9 pts
-  │    ├─ scoreCciRocMomFiExit()            8 pts
-  │    └─ scoreMfiCmfExit()                 8 pts
+  │    ├─ scoreExitRsiStochRsiWillr()           10 pts   (13.1 RSI + StochRSI + Williams %R)
+  │    ├─ scoreExitCciRocMomFi()                 8 pts   (13.2 CCI + ROC + Momentum + Force Index)
+  │    └─ scoreExitMfiCmf()                      7 pts   (13.3 MFI + CMF outflow)
   │
   ├─ Pillar 3: Volume Distribution (25 pts)
-  │    ├─ scoreObvPvtKvoFiExit()            9 pts
-  │    ├─ scoreVwapAvwapExit()              8 pts
-  │    └─ scoreSqueezeDistExit()            8 pts
+  │    ├─ scoreExitObvPvtKvoFi()                 9 pts   (14.1 OBV + PVT + KVO + Force Index)
+  │    ├─ scoreExitVwapAvwap()                   7 pts   (14.2 VWAP + Anchored VWAP break)
+  │    └─ scoreExitSqueezeDist()                 9 pts   (14.3 TTM Squeeze + distribution confirmation)
   │
   └─ Pillar 4: Structure Breakdown (25 pts)
-       ├─ scoreBbKcDcChandelierExit()       9 pts
-       ├─ scoreIchimokuExit()               6 pts
-       └─ scoreDarvasStructureExit()       10 pts
+       ├─ scoreExitBbKcDcChandelier()           9 pts   (15.1 BB + KC + DC + Chandelier)
+       ├─ scoreExitIchimoku()                   6 pts   (15.2 Ichimoku bearish flip)
+       └─ scoreExitDarvasStructure()           10 pts   (15.3 Darvas + HMA + KAMA + MTF + Fib + Pivot)
+  │
+  └─ Section 16 modifiers on the snapshot:
+       ├─ buildExitPenaltyItems(sn, ctx)        (index_trend_score driven, ≤ 0)
+       └─ buildExitBonusItems(sn, ctx)          (≥ 0)
 ```
+
+All 12 sub-scores are module-level functions taking a `buildTFSnapshot` result; `scoreExitComponentsForTF(sn, position)` returns them as a single object. `computeExitScore` computes the 4 pillar caps, applies Section 16 modifiers, and classifies.
 
 **Raw total:** 100 points (4 pillars × 25 max each)
 
@@ -369,28 +382,33 @@ where:
   bonuses ≥ 0
 ```
 
-### 4.5 Penalty Rules
+### 4.5 Penalty Rules (Section 16 — `buildExitPenaltyItems(sn, ctx)`)
 
 | # | Condition | Penalty |
 |---|-----------|---------|
-| 1 | Weekly EMA9 > EMA21 AND Weekly MACD > signal | −8 |
-| 2 | 3 consecutive price declines AND volume < 70% of avg(20) | −6 |
-| 3 | Price within 1.5% above pivot S1 | −5 |
-| 4 | Held < 3 days AND entry score > 70 | −5 |
-| 5 | Price above pivot P AND above Fib 0.618 | −3 |
+| 1 | `index_trend_score` ≥ 65 | −8 |
+| 2 | EMA9 > EMA21 AND MACD > signal (only when rule 1 does not fire) | −5 |
+| 3 | 3 consecutive price declines AND volume < 70% of avg(20) | −6 |
+| 4 | Price within 1.5% above pivot S1 | −5 |
+| 5 | Held < 3 days AND entry score > 70 | −5 |
+| 6 | Price above pivot P AND above Fib 0.618 | −3 |
 
-### 4.6 Bonus Rules
+`ctx = { indexTrendScore, entryPrice, currentPrice, holdingDays, entryScore }`.
+`index_trend_score` = `computeEntryScore(indexCandles).entry_score` (fallback from the same source as the entry engine's index trend). Rules 1 and 2 are mutually exclusive (rule 2 only fires when the index is not strongly bullish).
+
+### 4.6 Bonus Rules (Section 16 — `buildExitBonusItems(sn, ctx)`)
 
 | # | Condition | Bonus |
 |---|-----------|-------|
-| 1 | Index close < index EMA9 AND EMA9 < EMA21 | +5 |
+| 1 | `index_trend_score` < 35 | +5 |
 | 2 | Distribution day ratio ≥ 0.6 | +5 |
 | 3 | Price < entry price × 0.97 (3%+ loss) | +5 |
 | 4 | Price < entry price × 0.985 (1.5–3% loss) | +3 |
-| 5 | Price < HMA20 (daily) AND < EMA9 (hourly) | +5 |
+| 5 | Price < HMA16 (daily) AND < EMA9 (hourly) | +5 |
 | 6 | Distribution label AND MTF Alignment < 40 | +3 |
-| 7 | Beta > 1.5 AND index close < index EMA9 | +3 |
+| 7 | Beta > 1.5 AND `index_trend_score` < 40 | +3 |
 | 8 | Price < Chandelier long AND < pivot S1 | +3 |
+| 9 | KVO bearish cross (line < signal, prior bar above) | +3 |
 
 Note: bonuses 3 and 4 are mutually exclusive (only the higher applies).
 
@@ -432,9 +450,9 @@ Note: bonuses 3 and 4 are mutually exclusive (only the higher applies).
 
 ### 5.1 Entry — `computeMultiTFEntryScore(tfResults, indexCandles?, indexWeeklyCandles?)`
 
-The spec model computes a **single daily-base score**; only the 7.1 MA-stack component is aggregated across timeframes:
+Every sub-score — all 12 spec components (7.1–10.3) **and** the spike/stability sub-scores — is computed per timeframe and aggregated with the same weights:
 
-**MA-stack weights:**
+**Timeframe weights:**
 
 | Timeframe | Weight |
 |-----------|--------|
@@ -443,16 +461,22 @@ The spec model computes a **single daily-base score**; only the 7.1 MA-stack com
 | Weekly (W) | **30%** |
 
 ```
-baseScore = computeEntryScore(dailyCandles, indexCandles)   // fallback: W → H → first valid TF
-maStackCrossTF = Σ(scoreMaStackForTF(tf, index_tf) × w[tf]) / Σ(w[tf])   // available TFs only
-trendScore = maStackCrossTF + baseScore.details.macdTsiStcAo + baseScore.details.adxStPsarViAroon
-finalScore = clamp(trendScore + momentum + volume + structure + penalties + bonuses, 0, 100)
+comp[tf]   = scoreEntryComponentsForTF(tf.candles, index_tf, stabLookback(tf))
+             // 12 sub-scores + spike + stability; stabLookback = 10 (H/D), 6 (W)
+sub[key]   = Σ(comp[tf][key] × w[tf]) / Σ(w[tf])          // renormalized over available TFs
+trendScore = sub.maStack + sub.macdTsiStcAo + sub.adxStPsarViAroon
+momentumScore = sub.rsiStochRsiWillR + sub.cciRocMomFi + sub.mfiCmf
+volumeScore = sub.obvPvtKvo + sub.vwapAnchored + sub.vpSqueezeAd
+structureScore = sub.bbKcDcChandelier + sub.ichimoku + sub.darvasStructure
+finalScore = clamp(rawTotal + penalties + bonuses, 0, 100)
 ```
 
-- Weekly-trend penalty (rule 3 in 3.4) is recomputed from the **real weekly close vs weekly EMA21**; the daily-proxy version from the base score is removed.
-- The all-TF bullish bonus uses **actual H/D/W closes vs their own EMA21** (replaces the base score's daily-proxy item).
+- The weekly-trend penalty (rule 3 in 3.4) uses the **real weekly close vs weekly EMA21** and **real daily close vs daily EMA21**.
+- The all-TF bullish bonus uses **actual H/D/W closes vs their own EMA21**.
+- Spike/stability penalty thresholds (rules 7–11 in 3.4) consume the **weighted** sub-scores.
+- The per-TF snapshot's RS contribution uses the matching index timeframe where available (daily index for D, weekly index for W, none for H).
 - `index_trend_score` is computed from the daily **and** weekly index (`indexWeeklyCandles`).
-- MA-stack RS contribution uses the matching index timeframe where available (daily index for D, weekly index for W, none for H).
+- When only some timeframes are available, the weights are renormalized over those present (e.g. D-only → 100% D).
 
 **Return shape:**
 
@@ -490,27 +514,41 @@ finalScore = clamp(trendScore + momentum + volume + structure + penalties + bonu
 
 | Timeframe | Weight |
 |-----------|--------|
-| Hourly (H) | **30%** |
+| Hourly (H) | **25%** |
 | Daily (D) | **50%** |
-| Weekly (W) | **20%** |
+| Weekly (W) | **25%** |
 
 **Formula:**
 
 ```
-multiTF_exit_score = Σ(exitScore[tf] × weight[tf]) / Σ(weight[tf])
+For each timeframe (H/D/W with weight w):
+  sn[tf]    = buildTFSnapshot(tf.candles, indexCandles)
+  comps[tf] = scoreExitComponentsForTF(sn[tf], position)   // same 12 sub-scores as single-TF
+  score[tf] = min(12.1a+12.1b+12.1c, 25) + min(13.1+13.2+13.3, 25)
+            + min(14.1+14.2+14.3, 25) + min(15.1+15.2+15.3, 25)
+
+multiTF_raw = Σ(score[tf] × w[tf]) / Σ(w[tf])              // renormalized over available TFs
+
+Section 16 modifiers are applied ONCE on the primary (Daily) snapshot:
+  finalScore = clamp(multiTF_raw + penalties + bonuses, 0, 100)
 ```
 
-Each pillar score is also weighted and normalized by total weight. Classification thresholds are the same as single-TF exit (≥85 / ≥70 / ≥55 / ≥40 / ≥25).
+Each pillar is the weighted average of its three sub-scores (also renormalized, capped at 25). Classification thresholds are the same as single-TF exit (≥85 / ≥70 / ≥55 / ≥40 / ≥25). When only some timeframes are available the weights renormalize over those present (e.g. D-only → 100% D).
 
 **Return shape:**
 
 ```typescript
 {
-  multiTF_exit_score: number,           // weighted average 0-100
-  trend_breakdown: number,              // weighted avg pillar
+  multiTF_exit_score: number,           // final 0-100 (raw + one modifier pass)
+  trend_breakdown: number,              // weighted avg pillar (0-25)
   momentum_exhaustion: number,
   volume_distribution: number,
   structure_breakdown: number,
+  raw_score: number,                    // weighted raw before modifiers
+  penalties: number,                    // net penalty (≤ 0)
+  bonuses: number,                      // net bonus (≥ 0)
+  penalty_items: [{ reason, amount }],
+  bonus_items: [{ reason, amount }],
   classification: string,
   signal: string,
   action: string,

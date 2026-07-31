@@ -1349,426 +1349,28 @@ window.TechIndicators = (function () {
     if (!candles || candles.length < 50) return { exit_score: null, reason: 'insufficient_data' };
     position = position || {};
 
-    /* ── extract all indicator values from raw candles ── */
-    var cl = closes(candles), hi = highs(candles), lo = lows(candles), vo = volumes(candles);
-    var L = cl.length, L1 = L - 1, L2 = L - 2;
+    var sn = buildTFSnapshot(candles, indexCandles);
+    if (!sn || sn.c === null) return { exit_score: null, reason: 'insufficient_data' };
 
-    function gv(arr) { return arr !== null && arr !== undefined && arr.length > L1 ? arr[L1] : null; }
-    function pv(arr) { return arr !== null && arr !== undefined && arr.length > L2 ? arr[L2] : null; }
-
-    var c = cl[L1], pc = cl[L2];
-
-    var sma20_s = calcSMA(candles, 20), sma20 = gv(sma20_s);
-    var sma50_s = calcSMA(candles, 50), sma50 = gv(sma50_s);
-    var sma200_s = candles.length >= 200 ? calcSMA(candles, 200) : null;
-    var sma200 = sma200_s ? gv(sma200_s) : null;
-    var ema9_s = calcEMA(candles, 9), ema9 = gv(ema9_s), ema9Prev = pv(ema9_s);
-    var ema21_s = calcEMA(candles, 21), ema21 = gv(ema21_s);
-    var ema50_s = calcEMA(candles, 50), ema50 = gv(ema50_s);
-    var wma20_s = calcWMA(candles, 20), wma20 = gv(wma20_s);
-    var hma16_s = calcHMA(candles, 16), hma16 = gv(hma16_s), prevHma16 = pv(hma16_s);
-    var kama10_s = calcKAMA(candles, 10), kama10 = gv(kama10_s), prevKama10 = pv(kama10_s);
-
-    var vwap10_s = calcRollingVWAP(candles, 10), vwap10 = gv(vwap10_s), prevVwap10 = pv(vwap10_s);
-    var anchoredVwap_s = calcAnchoredVWAP(candles), anchoredVwap = gv(anchoredVwap_s), prevAnchoredVwap = pv(anchoredVwap_s);
-    var haRes = calcHeikinAshi(candles), haClose = gv(haRes.close), prevHaClose = pv(haRes.close);
-
-    var macdRes = calcMACD(candles);
-    var macd_s = macdRes.macd, macdL = gv(macd_s), macdPrev = pv(macd_s);
-    var sig_s = macdRes.signal, sigL = gv(sig_s), sigPrev = pv(sig_s);
-    var hist_s = macdRes.histogram, histL = gv(hist_s), histPrev = pv(hist_s);
-
-    var tsi_s = calcTSI(candles), tsiL = gv(tsi_s), tsiPrev = pv(tsi_s);
-    var stc_s = calcSTC(candles), stcL = gv(stc_s), stcPrev = pv(stc_s);
-    var ao_s = calcAwesomeOscillator(candles), aoL = gv(ao_s), aoPrev = pv(ao_s);
-
-    var adxRes = calcADX(candles);
-    var adx_s = adxRes.adx, adxL = gv(adx_s), adxPrev = pv(adx_s);
-    var plusDI_s = adxRes.plusDI, plusDI = gv(plusDI_s), plusDIPrev = pv(plusDI_s);
-    var minusDI_s = adxRes.minusDI, minusDI = gv(minusDI_s), minusDIPrev = pv(minusDI_s);
-
-    var st_s = calcSuperTrend(candles), stL = gv(st_s), stPrev = pv(st_s);
-    var psar_s = calcParabolicSAR(candles), psar = gv(psar_s), psarPrev = pv(psar_s);
-
-    var vxRes = calcVortex(candles);
-    var viPlus_s = vxRes.plus, viPlus = gv(viPlus_s), viPlusPrev = pv(viPlus_s);
-    var viMinus_s = vxRes.minus, viMinus = gv(viMinus_s), viMinusPrev = pv(viMinus_s);
-
-    var arRes = calcAroon(candles);
-    var aroonOsc_s = arRes.osc, aroonOsc = gv(aroonOsc_s), aroonOscPrev = pv(aroonOsc_s);
-
-    var bbRes = calcBollingerBands(candles);
-    var bbUpper = gv(bbRes.upper), bbMid = gv(bbRes.middle), bbLower = gv(bbRes.lower);
-    var bbMidPrev = pv(bbRes.middle), bbLowerPrev = pv(bbRes.lower);
-    var bbWidth = bbMid > 0 && bbUpper !== null && bbLower !== null ? round((bbUpper - bbLower) / bbMid, 4) : null;
-    var prevBbWidth_s = [];
-    for (var i = 0; i < bbRes.upper.length; i++) {
-      if (bbRes.middle[i] !== null && bbRes.middle[i] > 0 && bbRes.upper[i] !== null && bbRes.lower[i] !== null) {
-        prevBbWidth_s.push(round((bbRes.upper[i] - bbRes.lower[i]) / bbRes.middle[i], 4));
-      } else { prevBbWidth_s.push(null); }
-    }
-    var bbWidthPrev = pv(prevBbWidth_s);
-
-    var kcRes = calcKeltnerChannels(candles);
-    var kcMid = gv(kcRes.middle), kcMidPrev = pv(kcRes.middle);
-    var dcRes = calcDonchianChannels(candles);
-    var dcUpper = gv(dcRes.upper), dcLower = gv(dcRes.lower);
-    var chandelierRes = calcChandelierExit(candles);
-    var chandelierLong = gv(chandelierRes.long), chandelierLongPrev = pv(chandelierRes.long);
-
-    var atr14_s = calcATR(candles, 14), atr14 = gv(atr14_s);
-
-    var rsi14_s = calcRSI(candles, 14), rsi14 = gv(rsi14_s), rsi14Prev = pv(rsi14_s);
-    var stochRsiRes = calcStochasticRSI(candles);
-    var stochRsiK = gv(stochRsiRes.k), stochRsiKPrev = pv(stochRsiRes.k);
-    var stochRsiD = gv(stochRsiRes.d), stochRsiDPrev = pv(stochRsiRes.d);
-    var willr_s = calcWilliamsR(candles), willr = gv(willr_s), willrPrev = pv(willr_s);
-
-    var cci20_s = calcCCI(candles, 20), cci20 = gv(cci20_s), cci20Prev = pv(cci20_s);
-    var roc12_s = calcROC(candles, 12), roc12 = gv(roc12_s), roc12Prev = pv(roc12_s);
-    var mom10_s = calcMomentum(candles, 10), mom10 = gv(mom10_s), mom10Prev = pv(mom10_s);
-    var fi13_s = calcForceIndex(candles, 13), fi13 = gv(fi13_s), fi13Prev = pv(fi13_s);
-
-    var mfi14_s = calcMFI(candles, 14), mfi14 = gv(mfi14_s), mfi14Prev = pv(mfi14_s);
-    var cmf20_s = calcCMF(candles, 20), cmf20 = gv(cmf20_s), cmf20Prev = pv(cmf20_s);
-
-    var obv_s = calcOBV(candles), obv = gv(obv_s);
-    var obvSma20 = gv(sma(obv_s, 20));
-    var obvSlopeVal = slope(obv_s, 10), obvSlopePrev = slope(obv_s.slice(0, -1), 10);
-    var pvt_s = calcPVT(candles), pvt = gv(pvt_s);
-    var pvtSma20 = gv(sma(pvt_s, 20));
-    var pvtSlopeVal = slope(pvt_s, 10);
-    var kvoRes = calcKVO(candles);
-    var kvoL = gv(kvoRes.line), kvoPrev = pv(kvoRes.line);
-    var kvoSig = gv(kvoRes.signal), kvoSigPrev = pv(kvoRes.signal);
-
-    /* ── distribution day ratio (5 of last 5) ── */
-    function distributionDayRatio() {
-      var period = 5, volLookback = 20;
-      if (L < period) return 0;
-      var sumVol = 0;
-      for (var i = L - volLookback; i < L; i++) sumVol += vo[i];
-      var avgVol = sumVol / volLookback;
-      var distDays = 0;
-      for (var i = L - period; i < L; i++) { if (i > 0 && cl[i] < cl[i - 1] && vo[i] > avgVol) distDays++; }
-      return distDays / period;
-    }
-    var distDayRatio = distributionDayRatio();
-    var prevDistDayRatio = (function () {
-      if (L < 6) return 0;
-      var period = 5, volLookback = 20;
-      var sumVol = 0;
-      for (var i = L - 1 - volLookback; i < L - 1; i++) sumVol += vo[i];
-      var avgVol = sumVol / volLookback;
-      var distDays = 0;
-      for (var i = L - 1 - period; i < L - 1; i++) { if (i > 0 && cl[i] < cl[i - 1] && vo[i] > avgVol) distDays++; }
-      return distDays / period;
-    })();
-
-    var smRes = calcSqueezeMomentum(candles);
-    var squeezeOn = null, squeezeMomVal = null, squeezeMomPrev = null;
-    var sqArr = smRes.squeeze;
-    for (var i = sqArr.length - 1; i >= 0; i--) { if (sqArr[i] !== null) { squeezeOn = sqArr[i]; break; } }
-    var sqMomArr = smRes.values;
-    for (var i = sqMomArr.length - 1; i >= 0; i--) { if (sqMomArr[i] !== null) { squeezeMomVal = sqMomArr[i]; break; } }
-    for (var i = sqMomArr.length - 2; i >= 0; i--) { if (sqMomArr[i] !== null) { squeezeMomPrev = sqMomArr[i]; break; } }
-
-    var accumDist = calcAccumDistComposite(candles);
-    var accumDistLabel = null;
-    for (var i = accumDist.length - 1; i >= 0; i--) { if (accumDist[i] !== null) { accumDistLabel = accumDist[i]; break; } }
-
-    var ichRes = calcIchimoku(candles);
-    var tenkan = gv(ichRes.tenkan), tenkanPrev = pv(ichRes.tenkan);
-    var kijun = gv(ichRes.kijun), kijunPrev = pv(ichRes.kijun);
-    var senkouA = gv(ichRes.senkouA), senkouB = gv(ichRes.senkouB);
-
-    var fibRes = calcFibonacci(candles);
-    var fibLevels = fibRes ? fibRes.retrace : {};
-    var pivotRes = calcPivotPoints(candles);
-    var pivotP = pivotRes ? pivotRes.classic.P : null;
-    var pivotS1 = pivotRes ? pivotRes.classic.S1 : null;
-    var pivotS2 = pivotRes ? pivotRes.classic.S2 : null;
-    var darvasRes = calcDarvasBox(candles);
-    var darvasTop = darvasRes ? darvasRes.top : null;
-    var darvasBottom = darvasRes ? darvasRes.bottom : null;
-
-    var zigzagArr = calcZigZag(candles);
-    var zigzagDirection = null;
-    if (zigzagArr && zigzagArr.length >= 2) {
-      var lastPivot = zigzagArr[zigzagArr.length - 1], prevPivot = zigzagArr[zigzagArr.length - 2];
-      zigzagDirection = cl[lastPivot] > cl[prevPivot] ? 'UP' : 'DOWN';
-    }
-    var chopIndex = gv(calcChoppinessIndex(candles)), prevChopIndex = pv(calcChoppinessIndex(candles));
-    var mtfAlign = gv(calcMTFAlignment(candles));
-    var mtfAllArr = calcMTFAlignment(candles), mtfAlignPrev = pv(mtfAllArr);
-
-    var rsMansfield8w = null, rsMansfield8wPrev = null;
-    if (indexCandles && indexCandles.length > 10) {
-      try {
-        var rsRes = calcRelativeStrength(candles, indexCandles);
-        if (rsRes && rsRes.mansfield != null) rsMansfield8w = rsRes.mansfield;
-        if (rsRes && rsRes.rs != null) {
-          var indexCl = closes(indexCandles);
-          var rsArr = [];
-          for (var i = 0; i < indexCandles.length; i++) { if (cl[i] != null && indexCl[i] > 0) rsArr.push(cl[i] / indexCl[i]); }
-          if (rsArr.length > 40) {
-            var sum8w = 0;
-            for (var j = rsArr.length - 40; j < rsArr.length - 1; j++) sum8w += rsArr[j];
-            var prevAvg = sum8w / 40;
-            var prevRs = rsArr.length > 1 ? rsArr[rsArr.length - 2] : null;
-            rsMansfield8wPrev = prevAvg > 0 && prevRs !== null ? round((prevRs / prevAvg - 1) * 100, 2) : null;
-          }
-        }
-      } catch(e) {}
-    }
-
-    /* ── position context ── */
-    var entryPrice = position.entry_price || c;
-    var currentPrice = c;
-    var holdingDays = position.holding_days || 0;
-    var entryScore = position.entry_score != null ? position.entry_score : 50;
-
-    /* ── 12.1 MA Breakdown (9 pts) ── */
-    function scoreMaBreakdown() {
-      var s = 0;
-      if (c < ema9 && pc >= ema9Prev) s += 1.5; else if (c < ema9) s += 0.5;
-      if (c < ema21) s += 0.5;
-      if (c < ema50) s += 0.5;
-      if (sma200 !== null && c < sma200) s += 0.5;
-      if (ema9 < ema21) s += 0.5;
-      if (ema21 < ema50) s += 0.5;
-      if (hma16 < prevHma16) s += 0.5;
-      if (kama10 < prevKama10) s += 0.5;
-      if (c < wma20) s += 0.5;
-      if (sma20 < sma50) s += 0.5;
-      if (rsMansfield8w !== null && rsMansfield8wPrev !== null && rsMansfield8w < 0 && rsMansfield8w < rsMansfield8wPrev) s += 1.0;
-      if (haClose < prevHaClose && c < sma20) s += 0.5;
-      if (c < chandelierLong) s += 0.5;
-      return Math.min(s, 9);
-    }
-
-    /* ── 12.2 MACD + TSI + STC + AO Rollover (8 pts) ── */
-    function scoreMacdTsiStcAoExit() {
-      var s = 0;
-      if (macdL !== null && sigL !== null && macdPrev !== null && sigPrev !== null) {
-        if (macdL < sigL && macdPrev >= sigPrev) s += 2.0; else if (macdL < sigL) s += 1.0;
-      }
-      if (macdL !== null && macdPrev !== null && macdL < 0 && macdPrev >= 0) s += 1.0;
-      if (histL !== null && histPrev !== null && histL < 0 && histL < histPrev) s += 0.5;
-      if (tsiL !== null && tsiPrev !== null && tsiL < 0 && tsiPrev >= 0) s += 1.0; else if (tsiL !== null && tsiL < 0) s += 0.5;
-      if (tsiL !== null && tsiPrev !== null && tsiL < tsiPrev) s += 0.5;
-      if (stcL !== null && stcL < 25) s += 0.5;
-      if (stcL !== null && stcPrev !== null && stcL < stcPrev && stcL < 75) s += 0.5;
-      if (aoL !== null && aoPrev !== null && aoL < 0 && aoPrev >= 0) s += 1.0; else if (aoL !== null && aoL < 0) s += 0.5;
-      if (aoL !== null && aoPrev !== null && aoL < aoPrev) s += 0.5;
-      return Math.min(s, 8);
-    }
-
-    /* ── 12.3 ADX + Supertrend + PSAR + Vortex + Aroon Breakdown (8 pts) ── */
-    function scoreAdxStPsarViAroonExit() {
-      var s = 0;
-      if (adxL !== null && adxPrev !== null) { if (adxL < adxPrev && adxL < 25) s += 1.5; else if (adxL < adxPrev) s += 0.5; }
-      if (minusDI !== null && plusDI !== null && minusDIPrev !== null && plusDIPrev !== null && minusDI > plusDI && minusDIPrev <= plusDIPrev) s += 1.5;
-      if (stL !== null && c < stL) s += 1.0;
-      if (stL !== null && stPrev !== null && pc !== null && pc >= stPrev && c < stL) s += 0.5;
-      if (psar !== null && c < psar) s += 0.5;
-      if (psar !== null && psarPrev !== null && pc !== null && pc >= psarPrev && c < psar) s += 0.5;
-      if (viMinus !== null && viPlus !== null && viMinusPrev !== null && viPlusPrev !== null && viMinus > viPlus && viMinusPrev <= viPlusPrev) s += 1.0;
-      else if (viMinus !== null && viPlus !== null && viMinus > viPlus) s += 0.5;
-      if (aroonOsc !== null) { if (aroonOsc < -50) s += 1.0; else if (aroonOsc < 0) s += 0.5; }
-      if (aroonOsc !== null && aroonOscPrev !== null && aroonOsc < aroonOscPrev) s += 0.5;
-      return Math.min(s, 8);
-    }
-
-    /* ── 13.1 RSI + StochRSI + Williams %R Exhaustion (9 pts) ── */
-    function scoreRsiStochRsiWillrExit() {
-      var s = 0;
-      if (rsi14 !== null) { if (rsi14 > 80) s += 2.0; else if (rsi14 > 70) s += 1.0; }
-      if (rsi14 !== null && rsi14Prev !== null && rsi14 < rsi14Prev && rsi14Prev > 70) s += 1.0;
-      if (rsi14 !== null && rsi14Prev !== null && rsi14 < 50 && rsi14Prev >= 50) s += 0.5;
-      if (stochRsiK !== null && stochRsiD !== null && stochRsiKPrev !== null && stochRsiDPrev !== null && stochRsiK < stochRsiD && stochRsiKPrev >= stochRsiDPrev) s += 1.5;
-      else if (stochRsiK !== null && stochRsiD !== null && stochRsiK < stochRsiD) s += 0.5;
-      if (stochRsiK !== null && stochRsiK < 20) s += 0.5;
-      if (willr !== null && willr < -80) s += 1.0;
-      if (willr !== null && willrPrev !== null && willr < -50 && willrPrev >= -50) s += 1.0;
-      if (willr !== null && willrPrev !== null && willr < willrPrev && willr < -50) s += 0.5;
-      return Math.min(s, 9);
-    }
-
-    /* ── 13.2 CCI + ROC + Momentum + Force Index Reversal (8 pts) ── */
-    function scoreCciRocMomFiExit() {
-      var s = 0;
-      if (cci20 !== null) { if (cci20 > 200) s += 1.0; else if (cci20 > 100) s += 0.5; }
-      if (cci20 !== null && cci20Prev !== null && cci20 < cci20Prev && cci20Prev > 100) s += 1.0;
-      if (cci20 !== null && cci20Prev !== null && cci20 < 0 && cci20Prev >= 0) s += 0.5;
-      if (roc12 !== null && roc12Prev !== null && roc12 < 0 && roc12Prev >= 0) s += 1.0; else if (roc12 !== null && roc12 < 0) s += 0.5;
-      if (mom10 !== null && mom10Prev !== null && mom10 < 0 && mom10Prev >= 0) s += 1.0; else if (mom10 !== null && mom10 < 0) s += 0.5;
-      if (fi13 !== null && fi13Prev !== null && fi13 < 0 && fi13Prev >= 0) s += 1.0; else if (fi13 !== null && fi13 < 0) s += 0.5;
-      if (fi13 !== null && fi13Prev !== null && fi13 < fi13Prev && fi13 < 0) s += 0.5;
-      return Math.min(s, 8);
-    }
-
-    /* ── 13.3 MFI + CMF Outflow (8 pts) ── */
-    function scoreMfiCmfExit() {
-      var s = 0;
-      if (mfi14 !== null) { if (mfi14 > 80) s += 2.0; else if (mfi14 > 70) s += 1.0; }
-      if (mfi14 !== null && mfi14Prev !== null && mfi14 < mfi14Prev && mfi14Prev > 70) s += 1.0;
-      if (mfi14 !== null && mfi14Prev !== null && mfi14 < 50 && mfi14Prev >= 50) s += 0.5;
-      if (mfi14 !== null && mfi14 < 30) s += 0.5;
-      if (cmf20 !== null) { if (cmf20 < -0.05) s += 2.0; else if (cmf20 < 0) s += 1.0; }
-      if (cmf20 !== null && cmf20Prev !== null && cmf20 < cmf20Prev && cmf20 < 0) s += 0.5;
-      return Math.min(s, 8);
-    }
-
-    /* ── 14.1 OBV + PVT + KVO + Force Index Decline (9 pts) ── */
-    function scoreObvPvtKvoFiExit() {
-      var s = 0;
-      if (obv !== null && obvSma20 !== null && obv < obvSma20) s += 1.0;
-      if (obvSlopeVal !== null && obvSlopePrev !== null && obvSlopeVal < 0 && obvSlopePrev > 0) s += 0.5;
-      else if (obvSlopeVal !== null && obvSlopeVal < 0) s += 0.5;
-      if (pvt !== null && pvtSma20 !== null && pvt < pvtSma20) s += 1.0;
-      if (pvtSlopeVal !== null && pvtSlopeVal < 0) s += 0.5;
-      if (kvoL !== null && kvoSig !== null && kvoPrev !== null && kvoSigPrev !== null && kvoL < kvoSig && kvoPrev >= kvoSigPrev) s += 1.5;
-      else if (kvoL !== null && kvoSig !== null && kvoL < kvoSig) s += 0.5;
-      if (kvoL !== null && kvoL < 0) s += 0.5;
-      if (fi13 !== null && fi13 < 0) s += 1.0;
-      if (fi13 !== null && fi13Prev !== null && fi13 < fi13Prev && fi13 < 0) s += 0.5;
-      return Math.min(s, 9);
-    }
-
-    /* ── 14.2 VWAP + Anchored VWAP Break (8 pts) ── */
-    function scoreVwapAvwapExit() {
-      var s = 0;
-      if (c < vwap10 && pc >= prevVwap10) s += 2.0;
-      else if (c < vwap10) { var pct = (vwap10 - c) / vwap10 * 100; if (pct > 2.0) s += 1.5; else if (pct > 1.0) s += 1.0; else s += 0.5; }
-      if (vwap10 < prevVwap10) s += 0.5;
-      if (c < anchoredVwap) s += 1.5;
-      if (anchoredVwap < prevAnchoredVwap) s += 0.5;
-      if (c < vwap10 && c < anchoredVwap) s += 1.0;
-      return Math.min(s, 8);
-    }
-
-    /* ── 14.3 TTM Squeeze + Distribution Confirmation (8 pts) ── */
-    function scoreSqueezeDistExit() {
-      var s = 0;
-      if (squeezeMomVal !== null && squeezeMomPrev !== null && squeezeMomVal < 0 && squeezeMomPrev >= 0) s += 2.5;
-      else if (squeezeMomVal !== null && squeezeMomVal < 0) s += 1.5;
-      if (squeezeMomVal !== null && squeezeMomPrev !== null && squeezeMomVal < squeezeMomPrev && squeezeMomVal < 0) s += 1.0;
-      if (squeezeOn && squeezeMomVal < 0) s += 1.0;
-      if (distDayRatio >= 0.6) s += 2.5; else if (distDayRatio >= 0.4) s += 1.5;
-      if (distDayRatio > prevDistDayRatio) s += 1.0;
-      return Math.min(s, 8);
-    }
-
-    /* ── 15.1 BB + KC + DC + Chandelier Breakdown (9 pts) ── */
-    function scoreBbKcDcChandelierExit() {
-      var s = 0;
-      if (c < bbMid && pc >= bbMidPrev) s += 2.0; else if (c < bbMid) s += 0.5;
-      if (c < bbLower) s += 1.0;
-      if (bbWidth > bbWidthPrev && c < bbMid) s += 0.5;
-      if (c < kcMid && pc >= kcMidPrev) s += 1.0; else if (c < kcMid) s += 0.5;
-      if (c <= dcLower * 1.01) s += 1.0;
-      if (c < chandelierLong) s += 1.0;
-      if (chandelierLong < chandelierLongPrev) s += 0.5;
-      if (atr14 !== null && c > 0) { var atrPct = atr14 / c * 100; if (atrPct > 5.0) s += 0.5; }
-      return Math.min(s, 9);
-    }
-
-    /* ── 15.2 Ichimoku Bearish Flip (6 pts) ── */
-    function scoreIchimokuExit() {
-      var s = 0;
-      if (senkouA !== null && senkouB !== null) {
-        var cloudBottom = Math.min(senkouA, senkouB);
-        if (c < cloudBottom) s += 2.0; else if (c < Math.max(senkouA, senkouB)) s += 0.5;
-      }
-      if (tenkan !== null && kijun !== null && tenkanPrev !== null && kijunPrev !== null && tenkan < kijun && tenkanPrev >= kijunPrev) s += 1.5;
-      else if (tenkan !== null && kijun !== null && tenkan < kijun) s += 0.5;
-      if (senkouA !== null && senkouB !== null && senkouA < senkouB) s += 0.5;
-      if (c < pc) s += 0.5;
-      if (senkouA !== null && senkouB !== null && tenkan !== null && kijun !== null && c < Math.min(senkouA, senkouB) && tenkan < kijun && senkouA < senkouB) s += 0.5;
-      return Math.min(s, 6);
-    }
-
-    /* ── 15.3 Darvas + HMA + KAMA + MTF + Fib + Pivot + Fractals Breakdown (10 pts) ── */
-    function scoreDarvasStructureExit() {
-      var s = 0;
-      if (darvasBottom !== null) { if (c <= darvasBottom) s += 2.0; else if (darvasTop !== null && c < (darvasTop + darvasBottom) / 2) s += 0.5; }
-      if (hma16 < prevHma16) s += 0.5;
-      if (kama10 < prevKama10) s += 0.5;
-      if (c < hma16 && c < kama10) s += 0.5;
-      if (mtfAlign !== null) { if (mtfAlign < 40) s += 1.5; else if (mtfAlign < 60) s += 0.5; }
-      if (mtfAlign !== null && mtfAlignPrev !== null && mtfAlign < mtfAlignPrev) s += 0.5;
-      if (fibLevels && fibLevels['0.618'] !== null && c < fibLevels['0.618']) s += 1.0;
-      if (fibLevels && fibLevels['0.786'] !== null && c < fibLevels['0.786']) s += 0.5;
-      if (pivotS1 !== null && c < pivotS1) s += 0.5;
-      if (pivotS2 !== null && c < pivotS2) s += 0.5;
-      if (zigzagDirection === 'DOWN') s += 0.5;
-      if (chopIndex !== null && prevChopIndex !== null && chopIndex > prevChopIndex && chopIndex > 61.8) s += 0.5;
-      if (atr14 !== null && entryPrice !== null && entryPrice > 0) {
-        var stopLoss = entryPrice - atr14 * 1.5;
-        var target = entryPrice * 1.04;
-        var risk = currentPrice - stopLoss;
-        var reward = target - currentPrice;
-        if (risk > 0 && reward > 0) { var rr = reward / risk; if (rr < 1.0) s += 1.5; else if (rr < 1.5) s += 0.5; }
-        else if (reward <= 0) s += 1.0;
-      }
-      return Math.min(s, 10);
-    }
-
-    /* ── compute pillar scores ── */
-    var trendBD = scoreMaBreakdown() + scoreMacdTsiStcAoExit() + scoreAdxStPsarViAroonExit();
-    var momExh = scoreRsiStochRsiWillrExit() + scoreCciRocMomFiExit() + scoreMfiCmfExit();
-    var volDist = scoreObvPvtKvoFiExit() + scoreVwapAvwapExit() + scoreSqueezeDistExit();
-    var strucBD = scoreBbKcDcChandelierExit() + scoreIchimokuExit() + scoreDarvasStructureExit();
+    var comps = scoreExitComponentsForTF(sn, position);
+    var trendBD = Math.min(comps.tf1a + comps.tf1b + comps.tf1c, 25);
+    var momExh = Math.min(comps.tf2a + comps.tf2b + comps.tf2c, 25);
+    var volDist = Math.min(comps.tf3a + comps.tf3b + comps.tf3c, 25);
+    var strucBD = Math.min(comps.tf4a + comps.tf4b + comps.tf4c, 25);
     var rawTotal = trendBD + momExh + volDist + strucBD;
 
-    /* ── penalties (reduce exit urgency) ── */
-    var penaltyItems = [];
-    var weeklyEmaAligned = ema9 !== null && ema21 !== null && ema9 > ema21;
-    var weeklyMacdBullish = macdL !== null && sigL !== null && macdL > sigL;
-    if (weeklyEmaAligned && weeklyMacdBullish) penaltyItems.push({ reason: "Weekly EMA+MACD bullish", amount: -8 });
-    var priceDecl3 = true;
-    for (var i = L - 3; i < L; i++) { if (i > L - 3 && cl[i] >= cl[i - 1]) { priceDecl3 = false; break; } }
-    var avgVol20 = 0;
-    for (var i = L - 20; i < L; i++) avgVol20 += vo[i];
-    avgVol20 /= 20;
-    if (priceDecl3 && vo[L1] < 0.7 * avgVol20) penaltyItems.push({ reason: "Price decline 3 + low volume", amount: -6 });
-    if (pivotS1 !== null && c > 0) { var distToSupport = (c - pivotS1) / c; if (distToSupport < 0.015 && distToSupport >= 0) penaltyItems.push({ reason: "Near support", amount: -5 }); }
-    if (holdingDays < 3 && entryScore > 70) penaltyItems.push({ reason: "Held <3 days + high entry score", amount: -5 });
-    if (fibLevels && fibLevels['0.618'] !== null && pivotP !== null && c > fibLevels['0.618'] && c > pivotP) penaltyItems.push({ reason: "Above fib 0.618 + pivot", amount: -3 });
-
-    /* ── bonuses (increase exit urgency) ── */
-    var bonusItems = [];
     var idxEntryScoreVal = null;
     try { if (indexCandles && indexCandles.length >= 50) { var idxEntryRes = computeEntryScore(indexCandles); if (idxEntryRes && idxEntryRes.entry_score != null) idxEntryScoreVal = idxEntryRes.entry_score; } } catch(e) {}
-    if (idxEntryScoreVal !== null && idxEntryScoreVal < 35) bonusItems.push({ reason: "Index trend score <35", amount: 5 });
-    if (distDayRatio >= 0.6) bonusItems.push({ reason: "Distribution days >=60%", amount: 5 });
-    if (entryPrice !== null && entryPrice > 0) { if (currentPrice < entryPrice * 0.97) bonusItems.push({ reason: "Price <97% entry", amount: 5 }); else if (currentPrice < entryPrice * 0.985) bonusItems.push({ reason: "Price <98.5% entry", amount: 3 }); }
-    var dailyBearish = hma16 !== null && c < hma16;
-    var hourlyBearish = ema9 !== null && c < ema9;
-    if (dailyBearish && hourlyBearish) bonusItems.push({ reason: "Daily+Hourly bearish", amount: 5 });
-    if (accumDistLabel === 'DISTRIBUTION' && mtfAlign !== null && mtfAlign < 40) bonusItems.push({ reason: "Distribution + MTF<40", amount: 3 });
-    var betaVal = null;
-    try { if (indexCandles && indexCandles.length > 10) betaVal = calcBeta(candles, indexCandles); } catch(e) {}
-    if (betaVal !== null && betaVal > 1.5 && idxEntryScoreVal !== null && idxEntryScoreVal < 40) bonusItems.push({ reason: "High beta + index trend <40", amount: 3 });
-    if (c < chandelierLong && pivotS1 !== null && c < pivotS1) bonusItems.push({ reason: "Below Chandelier + S1", amount: 3 });
+    var ctx = { indexTrendScore: idxEntryScoreVal, entryPrice: position.entry_price || sn.c, currentPrice: sn.c, holdingDays: position.holding_days || 0, entryScore: position.entry_score != null ? position.entry_score : 50 };
 
-    var penalties = 0;
+    var penaltyItems = buildExitPenaltyItems(sn, ctx);
+    var bonusItems = buildExitBonusItems(sn, ctx);
+    var penalties = 0, bonuses = 0;
     penaltyItems.forEach(function(it) { penalties += it.amount; });
-    var bonuses = 0;
     bonusItems.forEach(function(it) { bonuses += it.amount; });
-
     var finalScore = Math.max(0, Math.min(100, rawTotal + penalties + bonuses));
 
-    /* ── classification ── */
-    var classification, signal, action;
-    if (finalScore >= 85) { classification = 'URGENT_EXIT'; signal = 'URGENT_EXIT'; action = 'Full exit immediately'; }
-    else if (finalScore >= 70) { classification = 'EXIT'; signal = 'EXIT'; action = 'Full exit at current price or next bar open'; }
-    else if (finalScore >= 55) { classification = 'PARTIAL_EXIT'; signal = 'PARTIAL_EXIT'; action = 'Exit 50%, tighten trailing stop to 1.5x ATR'; }
-    else if (finalScore >= 40) { classification = 'TIGHTEN_STOP'; signal = 'TIGHTEN_STOP'; action = 'Move stop to breakeven or 1x ATR below current'; }
-    else if (finalScore >= 25) { classification = 'MONITOR'; signal = 'MONITOR'; action = 'No action — watch for escalation next bar'; }
-    else { classification = 'HOLD'; signal = 'HOLD'; action = 'All conditions intact — continue holding'; }
-
+    var cls = classifyExitScore(finalScore);
     return {
       exit_score: round(finalScore, 1),
       raw_score: round(rawTotal, 1),
@@ -1776,14 +1378,260 @@ window.TechIndicators = (function () {
       volume_distribution: round(volDist, 1), structure_breakdown: round(strucBD, 1),
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
       penalty_items: penaltyItems, bonus_items: bonusItems,
-      classification: classification, signal: signal, action: action,
+      classification: cls.classification, signal: cls.signal, action: cls.action,
       details: {
-        maBreakdown: round(scoreMaBreakdown(), 2), macdTsiStcAoExit: round(scoreMacdTsiStcAoExit(), 2), adxStPsarViAroonExit: round(scoreAdxStPsarViAroonExit(), 2),
-        rsiStochRsiWillrExit: round(scoreRsiStochRsiWillrExit(), 2), cciRocMomFiExit: round(scoreCciRocMomFiExit(), 2), mfiCmfExit: round(scoreMfiCmfExit(), 2),
-        obvPvtKvoFiExit: round(scoreObvPvtKvoFiExit(), 2), vwapAvwapExit: round(scoreVwapAvwapExit(), 2), squeezeDistExit: round(scoreSqueezeDistExit(), 2),
-        bbKcDcChandelierExit: round(scoreBbKcDcChandelierExit(), 2), ichimokuExit: round(scoreIchimokuExit(), 2), darvasStructureExit: round(scoreDarvasStructureExit(), 2)
+        maBreakdown: round(comps.tf1a, 2), macdTsiStcAoExit: round(comps.tf1b, 2), adxStPsarViAroonExit: round(comps.tf1c, 2),
+        rsiStochRsiWillrExit: round(comps.tf2a, 2), cciRocMomFiExit: round(comps.tf2b, 2), mfiCmfExit: round(comps.tf2c, 2),
+        obvPvtKvoFiExit: round(comps.tf3a, 2), vwapAvwapExit: round(comps.tf3b, 2), squeezeDistExit: round(comps.tf3c, 2),
+        bbKcDcChandelierExit: round(comps.tf4a, 2), ichimokuExit: round(comps.tf4b, 2), darvasStructureExit: round(comps.tf4c, 2)
       }
     };
+  }
+
+  function classifyExitScore(s) {
+    if (s >= 85) return { classification: 'URGENT_EXIT', signal: 'URGENT_EXIT', action: 'Full exit immediately' };
+    if (s >= 70) return { classification: 'EXIT', signal: 'EXIT', action: 'Full exit at current price or next bar open' };
+    if (s >= 55) return { classification: 'PARTIAL_EXIT', signal: 'PARTIAL_EXIT', action: 'Exit 50%, tighten trailing stop to 1.5x ATR' };
+    if (s >= 40) return { classification: 'TIGHTEN_STOP', signal: 'TIGHTEN_STOP', action: 'Move stop to breakeven or 1x ATR below current' };
+    if (s >= 25) return { classification: 'MONITOR', signal: 'MONITOR', action: 'No action — watch for escalation next bar' };
+    return { classification: 'HOLD', signal: 'HOLD', action: 'All conditions intact — continue holding' };
+  }
+
+  /* ── 12.1a Trend Breakdown (7 pts) — MA crosses + stack collapse ── */
+  function scoreExitTrendBreakdown(sn) {
+    var s = 0, c = sn.c, pc = sn.pc;
+    if (c < sn.ema9 && pc >= sn.ema9Prev) s += 1.5; else if (c < sn.ema9) s += 0.5;
+    if (c < sn.ema21) s += 0.5;
+    if (c < sn.ema50) s += 0.5;
+    if (sn.sma200 !== null && c < sn.sma200) s += 0.5;
+    if (sn.ema9 < sn.ema21) s += 0.5;
+    if (sn.ema21 < sn.ema50) s += 0.5;
+    if (sn.hma16 < sn.prevHma16) s += 0.5;
+    if (sn.kama10 < sn.prevKama10) s += 0.5;
+    if (c < sn.wma20) s += 0.5;
+    if (sn.sma20 < sn.sma50) s += 0.5;
+    if (sn.rsMansfield !== null && sn.rsMansfieldPrev !== null && sn.rsMansfield < 0 && sn.rsMansfield < sn.rsMansfieldPrev) s += 1.0;
+    if (sn.haClose < sn.prevHaClose && c < sn.sma20) s += 0.5;
+    return Math.min(s, 7);
+  }
+
+  /* ── 12.1b MACD + TSI + STC + AO Rollover (9 pts) ── */
+  function scoreExitMacdTsiStcAo(sn) {
+    var s = 0;
+    if (sn.macdL !== null && sn.sigL !== null && sn.macdPrev !== null && sn.sigPrev !== null) {
+      if (sn.macdL < sn.sigL && sn.macdPrev >= sn.sigPrev) s += 2.0; else if (sn.macdL < sn.sigL) s += 1.0;
+    }
+    if (sn.macdL !== null && sn.macdPrev !== null && sn.macdL < 0 && sn.macdPrev >= 0) s += 1.0;
+    if (sn.histL !== null && sn.histPrev !== null && sn.histL < 0 && sn.histL < sn.histPrev) s += 0.5;
+    if (sn.tsiL !== null && sn.tsiPrev !== null && sn.tsiL < 0 && sn.tsiPrev >= 0) s += 1.0; else if (sn.tsiL !== null && sn.tsiL < 0) s += 0.5;
+    if (sn.tsiL !== null && sn.tsiPrev !== null && sn.tsiL < sn.tsiPrev) s += 0.5;
+    if (sn.stcL !== null && sn.stcL < 25) s += 0.5;
+    if (sn.stcL !== null && sn.stcPrev !== null && sn.stcL < sn.stcPrev && sn.stcL < 75) s += 0.5;
+    if (sn.aoL !== null && sn.aoPrev !== null && sn.aoL < 0 && sn.aoPrev >= 0) s += 1.0; else if (sn.aoL !== null && sn.aoL < 0) s += 0.5;
+    if (sn.aoL !== null && sn.aoPrev !== null && sn.aoL < sn.aoPrev) s += 0.5;
+    return Math.min(s, 9);
+  }
+
+  /* ── 12.1c ADX + Supertrend + PSAR + Vortex + Aroon Breakdown (9 pts) ── */
+  function scoreExitAdxSupertrendPsarViAroon(sn) {
+    var s = 0;
+    if (sn.adxL !== null && sn.adxPrev !== null) { if (sn.adxL < sn.adxPrev && sn.adxL < 25) s += 1.5; else if (sn.adxL < sn.adxPrev) s += 0.5; }
+    if (sn.minusDI !== null && sn.plusDI !== null && sn.minusDIPrev !== null && sn.plusDIPrev !== null && sn.minusDI > sn.plusDI && sn.minusDIPrev <= sn.plusDIPrev) s += 1.5;
+    if (sn.stL !== null && sn.c < sn.stL) s += 1.0;
+    if (sn.stL !== null && sn.stPrev !== null && sn.pc !== null && sn.pc >= sn.stPrev && sn.c < sn.stL) s += 0.5;
+    if (sn.psar !== null && sn.c < sn.psar) s += 0.5;
+    if (sn.psar !== null && sn.psarPrev !== null && sn.pc !== null && sn.pc >= sn.psarPrev && sn.c < sn.psar) s += 0.5;
+    if (sn.viMinus !== null && sn.viPlus !== null && sn.viMinusPrev !== null && sn.viPlusPrev !== null && sn.viMinus > sn.viPlus && sn.viMinusPrev <= sn.viPlusPrev) s += 1.0;
+    else if (sn.viMinus !== null && sn.viPlus !== null && sn.viMinus > sn.viPlus) s += 0.5;
+    if (sn.aroonOsc !== null) { if (sn.aroonOsc < -50) s += 1.0; else if (sn.aroonOsc < 0) s += 0.5; }
+    if (sn.aroonOsc !== null && sn.aroonOscPrev !== null && sn.aroonOsc < sn.aroonOscPrev) s += 0.5;
+    return Math.min(s, 9);
+  }
+
+  /* ── 13.1 RSI + StochRSI + Williams %R Exhaustion (10 pts) ── */
+  function scoreExitRsiStochRsiWillr(sn) {
+    var s = 0;
+    if (sn.rsi14 !== null) { if (sn.rsi14 > 80) s += 2.0; else if (sn.rsi14 > 70) s += 1.0; }
+    if (sn.rsi14 !== null && sn.rsi14Prev !== null && sn.rsi14 < sn.rsi14Prev && sn.rsi14Prev > 70) s += 1.0;
+    if (sn.rsi14 !== null && sn.rsi14Prev !== null && sn.rsi14 < 50 && sn.rsi14Prev >= 50) s += 0.5;
+    if (sn.stochRsiK !== null && sn.stochRsiD !== null && sn.stochRsiKPrev !== null && sn.stochRsiDPrev !== null && sn.stochRsiK < sn.stochRsiD && sn.stochRsiKPrev >= sn.stochRsiDPrev) s += 1.5;
+    else if (sn.stochRsiK !== null && sn.stochRsiD !== null && sn.stochRsiK < sn.stochRsiD) s += 0.5;
+    if (sn.stochRsiK !== null && sn.stochRsiK < 20) s += 0.5;
+    if (sn.willr !== null && sn.willr < -80) s += 1.0;
+    if (sn.willr !== null && sn.willrPrev !== null && sn.willr < -50 && sn.willrPrev >= -50) s += 1.0;
+    if (sn.willr !== null && sn.willrPrev !== null && sn.willr < sn.willrPrev && sn.willr < -50) s += 0.5;
+    return Math.min(s, 10);
+  }
+
+  /* ── 13.2 CCI + ROC + Momentum + Force Index Reversal (8 pts) ── */
+  function scoreExitCciRocMomFi(sn) {
+    var s = 0;
+    if (sn.cci20 !== null) { if (sn.cci20 > 200) s += 1.0; else if (sn.cci20 > 100) s += 0.5; }
+    if (sn.cci20 !== null && sn.cci20Prev !== null && sn.cci20 < sn.cci20Prev && sn.cci20Prev > 100) s += 1.0;
+    if (sn.cci20 !== null && sn.cci20Prev !== null && sn.cci20 < 0 && sn.cci20Prev >= 0) s += 0.5;
+    if (sn.roc12 !== null && sn.roc12Prev !== null && sn.roc12 < 0 && sn.roc12Prev >= 0) s += 1.0; else if (sn.roc12 !== null && sn.roc12 < 0) s += 0.5;
+    if (sn.mom10 !== null && sn.mom10Prev !== null && sn.mom10 < 0 && sn.mom10Prev >= 0) s += 1.0; else if (sn.mom10 !== null && sn.mom10 < 0) s += 0.5;
+    if (sn.fi13 !== null && sn.fi13Prev !== null && sn.fi13 < 0 && sn.fi13Prev >= 0) s += 1.0; else if (sn.fi13 !== null && sn.fi13 < 0) s += 0.5;
+    if (sn.fi13 !== null && sn.fi13Prev !== null && sn.fi13 < sn.fi13Prev && sn.fi13 < 0) s += 0.5;
+    return Math.min(s, 8);
+  }
+
+  /* ── 13.3 MFI + CMF Outflow (7 pts) ── */
+  function scoreExitMfiCmf(sn) {
+    var s = 0;
+    if (sn.mfi14 !== null) { if (sn.mfi14 > 80) s += 2.0; else if (sn.mfi14 > 70) s += 1.0; }
+    if (sn.mfi14 !== null && sn.mfi14Prev !== null && sn.mfi14 < sn.mfi14Prev && sn.mfi14Prev > 70) s += 1.0;
+    if (sn.mfi14 !== null && sn.mfi14Prev !== null && sn.mfi14 < 50 && sn.mfi14Prev >= 50) s += 0.5;
+    if (sn.mfi14 !== null && sn.mfi14 < 30) s += 0.5;
+    if (sn.cmf20 !== null) { if (sn.cmf20 < -0.05) s += 2.0; else if (sn.cmf20 < 0) s += 1.0; }
+    if (sn.cmf20 !== null && sn.cmf20Prev !== null && sn.cmf20 < sn.cmf20Prev && sn.cmf20 < 0) s += 0.5;
+    return Math.min(s, 7);
+  }
+
+  /* ── 14.1 OBV + PVT + KVO + Force Index Decline (9 pts) ── */
+  function scoreExitObvPvtKvoFi(sn) {
+    var s = 0;
+    if (sn.obv !== null && sn.obvSma20 !== null && sn.obv < sn.obvSma20) s += 1.0;
+    if (sn.obvSlopeVal !== null && sn.obvSlopePrev !== null && sn.obvSlopeVal < 0 && sn.obvSlopePrev > 0) s += 0.5;
+    else if (sn.obvSlopeVal !== null && sn.obvSlopeVal < 0) s += 0.5;
+    if (sn.pvt !== null && sn.pvtSma20 !== null && sn.pvt < sn.pvtSma20) s += 1.0;
+    if (sn.pvtSlopeVal !== null && sn.pvtSlopeVal < 0) s += 0.5;
+    if (sn.kvoL !== null && sn.kvoSig !== null && sn.kvoPrev !== null && sn.kvoSigPrev !== null && sn.kvoL < sn.kvoSig && sn.kvoPrev >= sn.kvoSigPrev) s += 1.5;
+    else if (sn.kvoL !== null && sn.kvoSig !== null && sn.kvoL < sn.kvoSig) s += 0.5;
+    if (sn.kvoL !== null && sn.kvoL < 0) s += 0.5;
+    if (sn.fi13 !== null && sn.fi13 < 0) s += 1.0;
+    if (sn.fi13 !== null && sn.fi13Prev !== null && sn.fi13 < sn.fi13Prev && sn.fi13 < 0) s += 0.5;
+    return Math.min(s, 9);
+  }
+
+  /* ── 14.2 VWAP + Anchored VWAP Break (7 pts) ── */
+  function scoreExitVwapAvwap(sn) {
+    var s = 0;
+    if (sn.c < sn.vwap10 && sn.pc >= sn.prevVwap10) s += 2.0;
+    else if (sn.c < sn.vwap10) { var pct = (sn.vwap10 - sn.c) / sn.vwap10 * 100; if (pct > 2.0) s += 1.5; else if (pct > 1.0) s += 1.0; else s += 0.5; }
+    if (sn.vwap10 < sn.prevVwap10) s += 0.5;
+    if (sn.c < sn.anchoredVwap) s += 1.5;
+    if (sn.anchoredVwap < sn.prevAnchoredVwap) s += 0.5;
+    if (sn.c < sn.vwap10 && sn.c < sn.anchoredVwap) s += 1.0;
+    return Math.min(s, 7);
+  }
+
+  /* ── 14.3 TTM Squeeze + Distribution Confirmation (9 pts) ── */
+  function scoreExitSqueezeDist(sn) {
+    var s = 0;
+    if (sn.squeezeMomVal !== null && sn.squeezeMomPrev !== null && sn.squeezeMomVal < 0 && sn.squeezeMomPrev >= 0) s += 2.5;
+    else if (sn.squeezeMomVal !== null && sn.squeezeMomVal < 0) s += 1.5;
+    if (sn.squeezeMomVal !== null && sn.squeezeMomPrev !== null && sn.squeezeMomVal < sn.squeezeMomPrev && sn.squeezeMomVal < 0) s += 1.0;
+    if (sn.squeezeOn && sn.squeezeMomVal < 0) s += 1.0;
+    if (sn.distDayRatio >= 0.6) s += 2.5; else if (sn.distDayRatio >= 0.4) s += 1.5;
+    if (sn.distDayRatio > sn.prevDistDayRatio) s += 1.0;
+    return Math.min(s, 9);
+  }
+
+  /* ── 15.1 BB + KC + DC + Chandelier Breakdown (9 pts) ── */
+  function scoreExitBbKcDcChandelier(sn) {
+    var s = 0;
+    if (sn.c < sn.bbMid && sn.pc >= sn.bbMidPrev) s += 2.0; else if (sn.c < sn.bbMid) s += 0.5;
+    if (sn.c < sn.bbLower) s += 1.0;
+    if (sn.bbWidth > sn.bbWidthPrev && sn.c < sn.bbMid) s += 0.5;
+    if (sn.c < sn.kcMid && sn.pc >= sn.kcMidPrev) s += 1.0; else if (sn.c < sn.kcMid) s += 0.5;
+    if (sn.c <= sn.dcLower * 1.01) s += 1.0;
+    if (sn.c < sn.chandelierLong) s += 1.0;
+    if (sn.chandelierLong < sn.chandelierLongPrev) s += 0.5;
+    if (sn.atr14 !== null && sn.c > 0) { var atrPct = sn.atr14 / sn.c * 100; if (atrPct > 5.0) s += 0.5; }
+    return Math.min(s, 9);
+  }
+
+  /* ── 15.2 Ichimoku Bearish Flip (6 pts) ── */
+  function scoreExitIchimoku(sn) {
+    var s = 0;
+    if (sn.senkouA !== null && sn.senkouB !== null) {
+      var cloudBottom = Math.min(sn.senkouA, sn.senkouB);
+      if (sn.c < cloudBottom) s += 2.0; else if (sn.c < Math.max(sn.senkouA, sn.senkouB)) s += 0.5;
+    }
+    if (sn.tenkan !== null && sn.kijun !== null && sn.tenkanPrev !== null && sn.kijunPrev !== null && sn.tenkan < sn.kijun && sn.tenkanPrev >= sn.kijunPrev) s += 1.5;
+    else if (sn.tenkan !== null && sn.kijun !== null && sn.tenkan < sn.kijun) s += 0.5;
+    if (sn.senkouA !== null && sn.senkouB !== null && sn.senkouA < sn.senkouB) s += 0.5;
+    if (sn.c < sn.pc) s += 0.5;
+    if (sn.senkouA !== null && sn.senkouB !== null && sn.tenkan !== null && sn.kijun !== null && sn.c < Math.min(sn.senkouA, sn.senkouB) && sn.tenkan < sn.kijun && sn.senkouA < sn.senkouB) s += 0.5;
+    return Math.min(s, 6);
+  }
+
+  /* ── 15.3 Darvas + HMA + KAMA + MTF + Fib + Pivot + Fractals Breakdown (10 pts) ── */
+  function scoreExitDarvasStructure(sn, position) {
+    var s = 0;
+    var entryPrice = (position && position.entry_price) || sn.c;
+    var currentPrice = sn.c;
+    if (sn.darvasBottom !== null) { if (sn.c <= sn.darvasBottom) s += 2.0; else if (sn.darvasTop !== null && sn.c < (sn.darvasTop + sn.darvasBottom) / 2) s += 0.5; }
+    if (sn.hma16 < sn.prevHma16) s += 0.5;
+    if (sn.kama10 < sn.prevKama10) s += 0.5;
+    if (sn.c < sn.hma16 && sn.c < sn.kama10) s += 0.5;
+    if (sn.mtfAlign !== null) { if (sn.mtfAlign < 40) s += 1.5; else if (sn.mtfAlign < 60) s += 0.5; }
+    if (sn.mtfAlign !== null && sn.mtfAlignPrev !== null && sn.mtfAlign < sn.mtfAlignPrev) s += 0.5;
+    if (sn.fibLevels && sn.fibLevels['0.618'] !== null && sn.c < sn.fibLevels['0.618']) s += 1.0;
+    if (sn.fibLevels && sn.fibLevels['0.786'] !== null && sn.c < sn.fibLevels['0.786']) s += 0.5;
+    if (sn.pivotS1 !== null && sn.c < sn.pivotS1) s += 0.5;
+    if (sn.pivotS2 !== null && sn.c < sn.pivotS2) s += 0.5;
+    if (sn.zigzagDirection === 'DOWN') s += 0.5;
+    if (sn.chopIndex !== null && sn.prevChopIndex !== null && sn.chopIndex > sn.prevChopIndex && sn.chopIndex > 61.8) s += 0.5;
+    if (sn.atr14 !== null && entryPrice > 0) {
+      var stopLoss = entryPrice - sn.atr14 * 1.5;
+      var target = entryPrice * 1.04;
+      var risk = currentPrice - stopLoss;
+      var reward = target - currentPrice;
+      if (risk > 0 && reward > 0) { var rr = reward / risk; if (rr < 1.0) s += 1.5; else if (rr < 1.5) s += 0.5; }
+      else if (reward <= 0) s += 1.0;
+    }
+    return Math.min(s, 10);
+  }
+
+  function scoreExitComponentsForTF(sn, position) {
+    return {
+      tf1a: scoreExitTrendBreakdown(sn),
+      tf1b: scoreExitMacdTsiStcAo(sn),
+      tf1c: scoreExitAdxSupertrendPsarViAroon(sn),
+      tf2a: scoreExitRsiStochRsiWillr(sn),
+      tf2b: scoreExitCciRocMomFi(sn),
+      tf2c: scoreExitMfiCmf(sn),
+      tf3a: scoreExitObvPvtKvoFi(sn),
+      tf3b: scoreExitVwapAvwap(sn),
+      tf3c: scoreExitSqueezeDist(sn),
+      tf4a: scoreExitBbKcDcChandelier(sn),
+      tf4b: scoreExitIchimoku(sn),
+      tf4c: scoreExitDarvasStructure(sn, position)
+    };
+  }
+
+  /* ── Section 16 exit modifiers (index_trend_score driven) ── */
+  function buildExitPenaltyItems(sn, ctx) {
+    var items = [];
+    var c = sn.c, pc = sn.pc, cl = sn.cl, vo = sn.vo, L = cl.length, L1 = L - 1;
+    if (ctx.indexTrendScore !== null && ctx.indexTrendScore >= 65) items.push({ reason: "Index trend score >=65", amount: -8 });
+    else if (sn.ema9 !== null && sn.ema21 !== null && sn.macdL !== null && sn.sigL !== null && sn.ema9 > sn.ema21 && sn.macdL > sn.sigL) items.push({ reason: "EMA9>EMA21 + MACD bullish", amount: -5 });
+    var priceDecl3 = true;
+    for (var i = L - 3; i < L; i++) { if (i > L - 3 && cl[i] >= cl[i - 1]) { priceDecl3 = false; break; } }
+    var avgVol20 = 0;
+    for (var i = L - 20; i < L; i++) avgVol20 += vo[i];
+    avgVol20 /= 20;
+    if (priceDecl3 && vo[L1] < 0.7 * avgVol20) items.push({ reason: "Price decline 3 + low volume", amount: -6 });
+    if (sn.pivotS1 !== null && c > 0) { var distToSupport = (c - sn.pivotS1) / c; if (distToSupport < 0.015 && distToSupport >= 0) items.push({ reason: "Near support", amount: -5 }); }
+    if (ctx.holdingDays < 3 && ctx.entryScore > 70) items.push({ reason: "Held <3 days + high entry score", amount: -5 });
+    if (sn.fibLevels && sn.fibLevels['0.618'] !== null && sn.pivotP !== null && c > sn.fibLevels['0.618'] && c > sn.pivotP) items.push({ reason: "Above fib 0.618 + pivot", amount: -3 });
+    return items;
+  }
+
+  function buildExitBonusItems(sn, ctx) {
+    var items = [];
+    var c = sn.c;
+    if (ctx.indexTrendScore !== null && ctx.indexTrendScore < 35) items.push({ reason: "Index trend score <35", amount: 5 });
+    if (sn.distDayRatio >= 0.6) items.push({ reason: "Distribution days >=60%", amount: 5 });
+    if (ctx.entryPrice !== null && ctx.entryPrice > 0) { if (c < ctx.entryPrice * 0.97) items.push({ reason: "Price <97% entry", amount: 5 }); else if (c < ctx.entryPrice * 0.985) items.push({ reason: "Price <98.5% entry", amount: 3 }); }
+    if (c < sn.hma16 && c < sn.ema9) items.push({ reason: "Daily+Hourly bearish", amount: 5 });
+    if (sn.accumDistLabel === 'DISTRIBUTION' && sn.mtfAlign !== null && sn.mtfAlign < 40) items.push({ reason: "Distribution + MTF<40", amount: 3 });
+    if (sn.beta !== null && sn.beta > 1.5 && ctx.indexTrendScore !== null && ctx.indexTrendScore < 40) items.push({ reason: "High beta + index trend <40", amount: 3 });
+    if (c < sn.chandelierLong && sn.pivotS1 !== null && c < sn.pivotS1) items.push({ reason: "Below Chandelier + S1", amount: 3 });
+    if (sn.kvoL !== null && sn.kvoSig !== null && sn.kvoPrev !== null && sn.kvoSigPrev !== null && sn.kvoL < sn.kvoSig && sn.kvoPrev >= sn.kvoSigPrev) items.push({ reason: "KVO bearish cross", amount: 3 });
+    return items;
   }
 
   /* ── helpers used by scoring ── */
@@ -1862,66 +1710,20 @@ window.TechIndicators = (function () {
       return conditions > 0 ? round(met / conditions * 100, 1) : null;
     } catch (e) { return null; }
   }
-  function scoreMaStackForTF(candles, indexCandles) {
-    if (!candles || candles.length < 50) return null;
-    var cl = closes(candles);
-    var c = cl[cl.length - 1];
-    var ema9v = lastVals(calcEMA(candles, 9), 1), ema9 = ema9v.length ? ema9v[0] : null;
-    var ema21v = lastVals(calcEMA(candles, 21), 1), ema21 = ema21v.length ? ema21v[0] : null;
-    var ema50v = lastVals(calcEMA(candles, 50), 1), ema50 = ema50v.length ? ema50v[0] : null;
-    var sma20v = lastVals(sma(cl, 20), 1), sma20 = sma20v.length ? sma20v[0] : null;
-    var sma50v = lastVals(sma(cl, 50), 1), sma50 = sma50v.length ? sma50v[0] : null;
-    var sma200v = candles.length >= 200 ? lastVals(sma(cl, 200), 1) : [], sma200 = sma200v.length ? sma200v[0] : null;
-    var hma16v = lastVals(calcHMA(candles, 16), 2), hma16 = hma16v.length > 0 ? hma16v[0] : null, prevHma16 = hma16v.length > 1 ? hma16v[1] : null;
-    var kama10v = lastVals(calcKAMA(candles, 10), 1), kama10 = kama10v.length ? kama10v[0] : null;
-    var wma20v = lastVals(calcWMA(candles, 20), 2), wma20 = wma20v.length > 0 ? wma20v[0] : null, prevWma20 = wma20v.length > 1 ? wma20v[1] : null;
-    var rsM = null, rsMPrev = null;
-    if (indexCandles) {
-      try {
-        var rsSeries = calcMansfieldRS(candles, indexCandles, 52);
-        if (rsSeries) {
-          var rv = lastVals(rsSeries, 2);
-          if (rv.length > 0) rsM = rv[0];
-          if (rv.length > 1) rsMPrev = rv[1];
-        }
-      } catch (e) {}
-    }
-    var s = 0;
-    if (hma16 !== null && c > hma16) s += 0.5;
-    if (kama10 !== null && c > kama10) s += 0.5;
-    if (wma20 !== null && c > wma20) s += 0.5;
-    if (ema9 !== null && ema21 !== null && ema50 !== null && ema9 > ema21 && ema21 > ema50) s += 1.5;
-    if (sma20 !== null && sma50 !== null && sma20 > sma50) s += 1.0;
-    if (ema9 !== null && c > ema9) s += 0.5;
-    if (ema21 !== null && c > ema21) s += 0.5;
-    if (ema50 !== null && c > ema50) s += 0.5;
-    if (sma200 !== null && c > sma200) s += 0.5;
-    if (hma16 !== null && prevHma16 !== null && hma16 > prevHma16) s += 0.5;
-    if (rsM !== null && rsM > 0) s += 0.5;
-    if (rsM !== null && rsMPrev !== null && rsM > rsMPrev) s += 0.5;
-    if (wma20 !== null && prevWma20 !== null && wma20 > prevWma20) s += 0.5;
-    return Math.min(s, 10);
-  }
-
-  /* ══════════════════════════════════════════════════════════════════════════
-     Entry Score (single timeframe) — Full spec Sections 7-11
-     ══════════════════════════════════════════════════════════════════════════ */
-  function computeEntryScore(candles, indexCandles) {
-    if (!candles || candles.length < 50) return { entry_score: null, reason: 'insufficient_data', need: 50, got: candles ? candles.length : 0 };
-
-    /* ── extract all indicator values from raw candles ── */
+  /* Builds all indicator values for one timeframe in a single pass. Every
+     score_* component and the Section-11 modifiers consume this snapshot. */
+  function buildTFSnapshot(candles, indexCandles) {
     var cl = closes(candles), hi = highs(candles), lo = lows(candles), vo = volumes(candles);
     var L = cl.length, L1 = L - 1, L2 = L - 2;
 
     function gv(arr) { return arr !== null && arr !== undefined && arr.length > L1 ? arr[L1] : null; }
     function pv(arr) { return arr !== null && arr !== undefined && arr.length > L2 ? arr[L2] : null; }
-    function gva(arr, idx) { return arr !== null && arr !== undefined && arr.length > idx ? arr[idx] : null; }
 
     var c = cl[L1], pc = cl[L2];
 
     var sma20_s = calcSMA(candles, 20), sma20 = gv(sma20_s);
     var sma50_s = calcSMA(candles, 50), sma50 = gv(sma50_s);
-    var ema9_s = calcEMA(candles, 9), ema9 = gv(ema9_s);
+    var ema9_s = calcEMA(candles, 9), ema9 = gv(ema9_s), ema9Prev = pv(ema9_s);
     var ema21_s = calcEMA(candles, 21), ema21 = gv(ema21_s);
     var ema50_s = calcEMA(candles, 50), ema50 = gv(ema50_s);
     var wma20_s = calcWMA(candles, 20), wma20 = gv(wma20_s);
@@ -1929,6 +1731,7 @@ window.TechIndicators = (function () {
     var kama10_s = calcKAMA(candles, 10), kama10 = gv(kama10_s), prevKama10 = pv(kama10_s);
     var sma200_s = candles.length >= 200 ? calcSMA(candles, 200) : null;
     var sma200 = sma200_s ? gv(sma200_s) : null;
+    var haRes = calcHeikinAshi(candles), haClose = gv(haRes.close), prevHaClose = pv(haRes.close);
 
     var vwap10_s = calcRollingVWAP(candles, 10), vwap10 = gv(vwap10_s), prevVwap10 = pv(vwap10_s);
     var anchoredVwap_s = calcAnchoredVWAP(candles), anchoredVwap = gv(anchoredVwap_s), prevAnchoredVwap = pv(anchoredVwap_s);
@@ -1944,20 +1747,21 @@ window.TechIndicators = (function () {
 
     var adxRes = calcADX(candles);
     var adx_s = adxRes.adx, adxL = gv(adx_s), adxPrev = pv(adx_s);
-    var plusDI_s = adxRes.plusDI, plusDI = gv(plusDI_s), minusDI = gv(adxRes.minusDI);
+    var plusDI = gv(adxRes.plusDI), plusDIPrev = pv(adxRes.plusDI);
+    var minusDI = gv(adxRes.minusDI), minusDIPrev = pv(adxRes.minusDI);
 
     var st_s = calcSuperTrend(candles), stL = gv(st_s), stPrev = pv(st_s);
     var psar_s = calcParabolicSAR(candles), psar = gv(psar_s), psarPrev = pv(psar_s);
 
     var vxRes = calcVortex(candles);
-    var viPlus_s = vxRes.plus, viPlus = gv(viPlus_s), viPlusPrev = pv(viPlus_s);
-    var viMinus_s = vxRes.minus, viMinus = gv(viMinus_s), viMinusPrev = pv(viMinus_s);
+    var viPlus = gv(vxRes.plus), viPlusPrev = pv(vxRes.plus);
+    var viMinus = gv(vxRes.minus), viMinusPrev = pv(vxRes.minus);
 
     var arRes = calcAroon(candles);
-    var aroonOsc_s = arRes.osc, aroonOsc = gv(aroonOsc_s), aroonOscPrev = pv(aroonOsc_s);
+    var aroonOsc = gv(arRes.osc), aroonOscPrev = pv(arRes.osc);
 
     var bbRes = calcBollingerBands(candles);
-    var bbUpper = gv(bbRes.upper), bbMid = gv(bbRes.middle), bbLower = gv(bbRes.lower);
+    var bbUpper = gv(bbRes.upper), bbMid = gv(bbRes.middle), bbLower = gv(bbRes.lower), bbMidPrev = pv(bbRes.middle);
     var bbWidth = bbMid > 0 && bbUpper !== null && bbLower !== null ? round((bbUpper - bbLower) / bbMid, 4) : null;
     var prevBbWidth_s = [];
     for (var i = 0; i < bbRes.upper.length; i++) {
@@ -1968,9 +1772,10 @@ window.TechIndicators = (function () {
     var bbWidthPrev = pv(prevBbWidth_s);
 
     var kcRes = calcKeltnerChannels(candles);
-    var kcUpper = gv(kcRes.upper), kcMid = gv(kcRes.middle), kcLower = gv(kcRes.lower);
+    var kcUpper = gv(kcRes.upper), kcMid = gv(kcRes.middle), kcLower = gv(kcRes.lower), kcMidPrev = pv(kcRes.middle);
     var dcRes = calcDonchianChannels(candles);
     var dcUpper = gv(dcRes.upper), dcLower = gv(dcRes.lower);
+    var prevDcUpper = pv(dcRes.upper);
     var chandelierRes = calcChandelierExit(candles);
     var chandelierLong = gv(chandelierRes.long), chandelierLongPrev = pv(chandelierRes.long);
 
@@ -1979,7 +1784,7 @@ window.TechIndicators = (function () {
     var rsi14_s = calcRSI(candles, 14), rsi14 = gv(rsi14_s), rsi14Prev = pv(rsi14_s);
     var stochRsiRes = calcStochasticRSI(candles);
     var stochRsiK = gv(stochRsiRes.k), stochRsiKPrev = pv(stochRsiRes.k);
-    var stochRsiD = gv(stochRsiRes.d);
+    var stochRsiD = gv(stochRsiRes.d), stochRsiDPrev = pv(stochRsiRes.d);
     var willr_s = calcWilliamsR(candles), willr = gv(willr_s), willrPrev = pv(willr_s);
 
     var cci20_s = calcCCI(candles, 20), cci20 = gv(cci20_s), cci20Prev = pv(cci20_s);
@@ -1998,7 +1803,7 @@ window.TechIndicators = (function () {
     var pvtSlopeVal = slope(pvt_s, 10), pvtSlopePrev = slope(pvt_s.slice(0, -1), 10);
     var kvoRes = calcKVO(candles);
     var kvoL = gv(kvoRes.line), kvoPrev = pv(kvoRes.line);
-    var kvoSig = gv(kvoRes.signal);
+    var kvoSig = gv(kvoRes.signal), kvoSigPrev = pv(kvoRes.signal);
 
     var vpRes = calcVolumeProfile(candles);
     var poc = vpRes ? vpRes.poc : null, prevPoc = null;
@@ -2021,7 +1826,8 @@ window.TechIndicators = (function () {
     for (var i = accumDist.length - 1; i >= 0; i--) { if (accumDist[i] !== null) { accumDistLabel = accumDist[i]; break; } }
 
     var ichRes = calcIchimoku(candles);
-    var tenkan = gv(ichRes.tenkan), kijun = gv(ichRes.kijun);
+    var tenkan = gv(ichRes.tenkan), tenkanPrev = pv(ichRes.tenkan);
+    var kijun = gv(ichRes.kijun), kijunPrev = pv(ichRes.kijun);
     var senkouA = gv(ichRes.senkouA), senkouB = gv(ichRes.senkouB);
     var chikou = gv(ichRes.chikou);
 
@@ -2030,6 +1836,8 @@ window.TechIndicators = (function () {
     var pivotRes = calcPivotPoints(candles);
     var pivotP = pivotRes ? pivotRes.classic.P : null;
     var pivotR1 = pivotRes ? pivotRes.classic.R1 : null;
+    var pivotS1 = pivotRes ? pivotRes.classic.S1 : null;
+    var pivotS2 = pivotRes ? pivotRes.classic.S2 : null;
     var darvasRes = calcDarvasBox(candles);
     var darvasTop = darvasRes ? darvasRes.top : null;
     var darvasBottom = darvasRes ? darvasRes.bottom : null;
@@ -2040,8 +1848,9 @@ window.TechIndicators = (function () {
       var lastPivot = zigzagArr[zigzagArr.length - 1], prevPivot = zigzagArr[zigzagArr.length - 2];
       zigzagDirection = cl[lastPivot] > cl[prevPivot] ? 'UP' : 'DOWN';
     }
-    var chopIndex = gv(calcChoppinessIndex(candles));
-    var mtfAlign = gv(calcMTFAlignment(candles));
+    var chopArr = calcChoppinessIndex(candles);
+    var chopIndex = gv(chopArr), prevChopIndex = pv(chopArr);
+    var mtfAllArr = calcMTFAlignment(candles), mtfAlign = gv(mtfAllArr), mtfAlignPrev = pv(mtfAllArr);
 
     var beta = null;
     var rsMansfield = null, rsMansfieldPrev = null;
@@ -2057,265 +1866,418 @@ window.TechIndicators = (function () {
       } catch(e) {}
     }
 
-    /* ── 7.1 MA Stack (10 pts) — cross-TF aggregation H*0.20 + D*0.50 + W*0.30 applied in the multi-TF path ── */
-    function scoreMaStack() {
-      return scoreMaStackForTF(candles, indexCandles);
-    }
-
-    /* ── 7.2 MACD + TSI + STC + AO (10 pts) ── */
-    function scoreMacdTsiStcAo() {
-      var s = 0;
-      if (macdL !== null && sigL !== null && macdL > sigL) s += 1.0;
-      if (macdL !== null && macdL > 0) s += 0.5;
-      if (histL !== null && histPrev !== null && histL > 0 && histL > histPrev) s += 0.5;
-      if (macdL !== null && sigL !== null && justCrossedAbove(macd_s, sig_s, 3)) s += 0.5;
-      if (tsiL !== null && tsiL > 0) s += 0.5;
-      if (tsiL !== null && tsiPrev !== null && tsiL > tsiPrev && tsiL > 0) s += 0.5;
-      if (tsiL !== null && justCrossedAbove(tsi_s, cl.map(function(){return 0;}), 3)) s += 0.5;
-      if (stcL !== null && stcL > 50) s += 0.5;
-      if (stcL !== null && stcPrev !== null && stcL > stcPrev) s += 0.5;
-      if (stcL !== null && stcL > 75) s += 0.5;
-      if (stcL !== null && justCrossedAbove(stc_s, cl.map(function(){return 25;}), 3)) s += 0.5;
-      if (aoL !== null && aoL > 0) s += 0.5;
-      if (aoL !== null && aoPrev !== null && aoL > aoPrev) s += 0.5;
-      if (aoL !== null && aoPrev !== null && aoL > 0 && aoPrev <= 0) s += 0.5;
-      var confluence = 0;
-      if (macdL !== null && sigL !== null && macdL > sigL) confluence++; if (tsiL !== null && tsiL > 0) confluence++;
-      if (stcL !== null && stcL > 50) confluence++; if (aoL !== null && aoL > 0) confluence++;
-      if (confluence >= 3) s += 1.0;
-      return Math.min(s, 10);
-    }
-
-    /* ── 7.3 ADX + Supertrend + PSAR + Vortex + Aroon (10 pts) ── */
-    function scoreAdxStPsarViAroon() {
-      var s = 0;
-      if (adxL !== null) { if (adxL >= 40) s += 1.0; else if (adxL >= 25) s += 0.5; }
-      if (plusDI !== null && minusDI !== null && plusDI > minusDI) s += 0.5;
-      if (adxL !== null && adxPrev !== null && plusDI !== null && minusDI !== null && adxL > adxPrev && plusDI > minusDI) s += 0.5;
-      if (stL !== null && c > stL) s += 1.0;
-      if (stL !== null && stPrev !== null && pc !== null && pc <= stPrev && c > stL) s += 0.5;
-      if (psar !== null && c > psar) s += 0.5;
-      if (psar !== null && psarPrev !== null && pc !== null && pc <= psarPrev && c > psar) s += 0.5;
-      if (viPlus !== null && viMinus !== null && viPlus > viMinus) s += 1.0;
-      if (viPlus !== null && viMinus !== null && viPlusPrev !== null && viMinusPrev !== null && viPlus > viPlusPrev && viMinus < viMinusPrev) s += 0.5;
-      if (aroonOsc !== null) { if (aroonOsc > 50) s += 1.0; else if (aroonOsc > 0) s += 0.5; }
-      if (aroonOsc !== null && aroonOscPrev !== null && aroonOsc > aroonOscPrev && aroonOsc > 0) s += 0.5;
-      var allBull = (stL !== null && c > stL) && (psar !== null && c > psar) && (plusDI !== null && minusDI !== null && plusDI > minusDI) &&
-                    (viPlus !== null && viMinus !== null && viPlus > viMinus) && (aroonOsc !== null && aroonOsc > 0);
-      if (allBull) s += 1.0;
-      return Math.min(s, 10);
-    }
-
-    /* ── 8.1 RSI + StochRSI + Williams %R (10 pts) ── */
-    function scoreRsiStochRsiWillR() {
-      var s = 0;
-      if (rsi14 !== null) {
-        if (rsi14 >= 60 && rsi14 <= 75) s += 2.0; else if (rsi14 >= 55 && rsi14 < 60) s += 1.0; else if (rsi14 > 75 && rsi14 <= 80) s += 1.0; else if (rsi14 >= 50 && rsi14 < 55) s += 0.5;
-      }
-      if (rsi14 !== null && rsi14Prev !== null && rsi14 > rsi14Prev && rsi14 > 50) s += 1.0;
-      if (rsi14 !== null && rsi14Prev !== null && rsi14Prev <= 50 && rsi14 > 50) s += 0.5;
-      if (stochRsiK !== null && stochRsiD !== null && stochRsiK > stochRsiD) s += 1.0;
-      if (stochRsiK !== null && stochRsiK >= 50 && stochRsiK <= 80) s += 0.5;
-      if (stochRsiK !== null && stochRsiKPrev !== null && stochRsiK > stochRsiKPrev) s += 0.5;
-      if (willr !== null) {
-        if (willr >= -50 && willr <= -20) s += 1.0; else if (willr >= -80 && willr < -50) s += 0.5;
-      }
-      if (willr !== null && willrPrev !== null && willr > willrPrev && willr > -50) s += 0.5;
-      if (willr !== null && willr > -20) s += 0.5;
-      if (rsi14 !== null && stochRsiK !== null && stochRsiD !== null && willr !== null && rsi14 > 55 && stochRsiK > stochRsiD && willr > -50) s += 0.5;
-      return Math.min(s, 10);
-    }
-
-    /* ── 8.2 CCI + ROC + Momentum + Force Index (10 pts) ── */
-    function scoreCciRocMomFi() {
-      var s = 0;
-      if (cci20 !== null) {
-        if (cci20 >= 100 && cci20 <= 200) s += 1.5; else if (cci20 >= 50 && cci20 < 100) s += 1.0; else if (cci20 >= 0 && cci20 < 50) s += 0.5;
-      }
-      if (cci20 !== null && cci20Prev !== null && cci20 > cci20Prev && cci20 > 0) s += 0.5;
-      if (roc12 !== null && roc12Prev !== null && roc12 > 0 && roc12 > roc12Prev) s += 1.5;
-      else if (roc12 !== null && roc12 > 0) s += 0.5;
-      if (roc12 !== null && roc12 > 2) s += 0.5;
-      if (mom10 !== null && mom10Prev !== null && mom10 > 0 && mom10 > mom10Prev) s += 1.5;
-      else if (mom10 !== null && mom10 > 0) s += 0.5;
-      if (fi13 !== null && fi13Prev !== null && fi13 > 0 && fi13 > fi13Prev) s += 1.5;
-      else if (fi13 !== null && fi13 > 0) s += 0.5;
-      if (fi13 !== null && fi13Prev !== null && fi13 > 0 && fi13Prev <= 0) s += 0.5;
-      if (cci20 !== null && roc12 !== null && mom10 !== null && fi13 !== null && cci20 > 0 && roc12 > 0 && mom10 > 0 && fi13 > 0) s += 1.0;
-      return Math.min(s, 10);
-    }
-
-    /* ── 8.3 MFI + CMF (10 pts) ── */
-    function scoreMfiCmf() {
-      var s = 0;
-      if (mfi14 !== null) {
-        if (mfi14 >= 60 && mfi14 <= 80) s += 2.5; else if (mfi14 >= 50 && mfi14 < 60) s += 1.5; else if (mfi14 >= 40 && mfi14 < 50) s += 1.0; else if (mfi14 > 80) s += 1.0;
-      }
-      if (mfi14 !== null && mfi14Prev !== null && mfi14 > mfi14Prev && mfi14 > 50) s += 1.5;
-      if (mfi14 !== null && mfi14Prev !== null && mfi14Prev <= 50 && mfi14 > 50) s += 1.0;
-      if (cmf20 !== null) { if (cmf20 > 0.10) s += 2.0; else if (cmf20 > 0.05) s += 1.5; else if (cmf20 > 0) s += 1.0; }
-      if (cmf20 !== null && cmf20Prev !== null && cmf20 > cmf20Prev && cmf20 > 0) s += 1.0;
-      if (mfi14 !== null && cmf20 !== null && mfi14 > 50 && cmf20 > 0) s += 0.5;
-      return Math.min(s, 10);
-    }
-
-    /* ── 9.1 OBV + PVT + KVO (8 pts) ── */
-    function scoreObvPvtKvo() {
-      var s = 0;
-      if (obv !== null && obvSma20 !== null && obv > obvSma20) s += 1.0;
-      if (obvSlopeVal !== null && obvSlopeVal > 0) s += 0.5;
-      if (obvSlopeVal !== null && obvSlopePrev !== null && obvSlopeVal > obvSlopePrev) s += 0.5;
-      if (pvt !== null && pvtSma20 !== null && pvt > pvtSma20) s += 1.0;
-      if (pvtSlopeVal !== null && pvtSlopeVal > 0) s += 1.0;
-      if (pvtSlopeVal !== null && pvtSlopePrev !== null && pvtSlopeVal > pvtSlopePrev) s += 0.5;
-      if (kvoL !== null && kvoSig !== null && kvoL > kvoSig) s += 1.5;
-      if (kvoL !== null && kvoL > 0) s += 0.5;
-      if (kvoL !== null && kvoPrev !== null && kvoL > kvoPrev) s += 0.5;
-      if (kvoL !== null && kvoSig !== null && justCrossedAbove(kvoRes.line, kvoRes.signal, 3)) s += 1.0;
-      return Math.min(s, 8);
-    }
-
-    /* ── 9.2 Rolling VWAP + Anchored VWAP (6 pts) ── */
-    function scoreVwapAnchored() {
-      var s = 0;
-      if (c !== null && vwap10 !== null && c > vwap10) {
-        s += 1.5;
-        var pct = (c - vwap10) / vwap10 * 100;
-        if (pct >= 0.5 && pct <= 3.0) s += 0.5;
-      }
-      if (vwap10 !== null && prevVwap10 !== null && vwap10 > prevVwap10) s += 0.5;
-      if (c !== null && anchoredVwap !== null && c > anchoredVwap) s += 1.5;
-      if (anchoredVwap !== null && prevAnchoredVwap !== null && anchoredVwap > prevAnchoredVwap) s += 0.5;
-      if (c !== null && vwap10 !== null && anchoredVwap !== null && c > vwap10 && c > anchoredVwap) s += 1.0;
-      return Math.min(s, 6);
-    }
-
-    /* ── 9.3 VP + TTM Squeeze + Accum/Dist (6 pts) ── */
-    function scoreVpSqueezeAd() {
-      var s = 0;
-      if (c !== null && poc !== null && c > poc) s += 1.0;
-      if (c !== null && vah !== null && c > vah) s += 0.5;
-      if (poc !== null && prevPoc !== null && poc > prevPoc) s += 0.5;
-      if (squeezeOn !== null && squeezeOnPrev !== null) { if (!squeezeOn && squeezeOnPrev) s += 1.0; else if (squeezeOn) s += 0.5; }
-      if (squeezeMomVal !== null && squeezeMomPrev !== null && squeezeMomVal > 0 && squeezeMomVal > squeezeMomPrev) s += 1.5;
-      else if (squeezeMomVal !== null && squeezeMomVal > 0) s += 0.5;
-      if (accumDistLabel === 'ACCUMULATION') s += 1.5;
-      return Math.min(s, 6);
-    }
-
-    /* ── 10.1 BB + KC + DC + Chandelier (8 pts) ── */
-    function scoreBbKcDcChandelier() {
-      var s = 0;
-      if (bbUpper !== null && bbLower !== null) {
-        var bbPos = (c - bbLower) / (bbUpper - bbLower);
-        if (bbPos >= 0.5 && bbPos <= 0.8) s += 1.0; else if (bbPos >= 0.3 && bbPos < 0.5) s += 0.5;
-      }
-      if (bbWidth !== null && bbWidthPrev !== null && bbWidth > bbWidthPrev) s += 0.5;
-      if (kcMid !== null && c > kcMid) s += 0.5;
-      if (kcUpper !== null && c > kcUpper) s += 0.5;
-      if (dcUpper !== null && dcLower !== null) { if (c >= dcUpper * 0.99) s += 1.0; else if (c > (dcUpper + dcLower) / 2) s += 0.5; }
-      if (chandelierLong !== null && c > chandelierLong) s += 1.0;
-      if (chandelierLong !== null && chandelierLongPrev !== null && chandelierLong > chandelierLongPrev) s += 0.5;
-      if (bbUpper !== null && kcUpper !== null && bbLower !== null && kcLower !== null && bbUpper < kcUpper && bbLower > kcLower) s += 0.5;
-      if (atr14 !== null && c !== null && c > 0) { var atrPct = atr14 / c * 100; if (atrPct >= 2.0 && atrPct <= 4.0) s += 0.5; }
-      if (dcUpper !== null && c > dcUpper && bbWidth !== null && bbWidthPrev !== null && bbWidth > bbWidthPrev) s += 1.0;
-      return Math.min(s, 8);
-    }
-
-    /* ── 10.2 Ichimoku (6 pts) ── */
-    function scoreIchimoku() {
-      var s = 0;
-      if (senkouA !== null && senkouB !== null) {
-        var cloudTop = Math.max(senkouA, senkouB);
-        if (c > cloudTop) s += 2.0; else if (c > Math.min(senkouA, senkouB)) s += 0.5;
-      }
-      if (tenkan !== null && kijun !== null && tenkan > kijun) s += 1.0;
-      if (tenkan !== null && kijun !== null && justCrossedAbove(ichRes.tenkan, ichRes.kijun, 3)) s += 0.5;
-      if (senkouA !== null && senkouB !== null && senkouA > senkouB) s += 1.0;
-      if (chikou !== null && pc !== null && chikou > pc) s += 0.5;
-      if (senkouA !== null && senkouB !== null && tenkan !== null && kijun !== null && chikou !== null && pc !== null &&
-          c > Math.max(senkouA, senkouB) && tenkan > kijun && senkouA > senkouB && chikou > pc) s += 1.0;
-      return Math.min(s, 6);
-    }
-
-    /* ── 10.3 Darvas + HMA + KAMA + Fib + Pivot + ZigZag + Choppiness + MTF (6 pts) ── */
-    function scoreDarvasStructure() {
-      var s = 0;
-      if (darvasTop !== null && darvasBottom !== null) {
-        if (c >= darvasTop) s += 1.5; else if (c > (darvasTop + darvasBottom) / 2) s += 0.5;
-      }
-      if (hma16 !== null && c > hma16) s += 0.25;
-      if (hma16 !== null && prevHma16 !== null && hma16 > prevHma16) s += 0.25;
-      if (kama10 !== null && c > kama10) s += 0.25;
-      if (kama10 !== null && prevKama10 !== null && kama10 > prevKama10) s += 0.25;
-      if (fibLevels !== null && pc !== null) {
-        for (var key in fibLevels) { if (key === '0.382' || key === '0.5' || key === '0.618') { if (Math.abs(c - fibLevels[key]) / c < 0.005 && c > pc) { s += 0.5; break; } } }
-      }
-      if (pivotP !== null && c > pivotP) s += 0.25;
-      if (pivotR1 !== null && c > pivotR1) s += 0.25;
-      if (chopIndex !== null && chopIndex < 38.2) s += 0.5; else if (chopIndex !== null && chopIndex < 50) s += 0.25;
-      if (zigzagDirection === 'UP') s += 0.5;
-      if (mtfAlign !== null) { if (mtfAlign >= 80) s += 1.0; else if (mtfAlign >= 60) s += 0.5; }
-      return Math.min(s, 6);
-    }
-
-    /* ── compute pillar scores ── */
-    var trendScore = scoreMaStack() + scoreMacdTsiStcAo() + scoreAdxStPsarViAroon();
-    var momentumScore = scoreRsiStochRsiWillR() + scoreCciRocMomFi() + scoreMfiCmf();
-    var volumeScore = scoreObvPvtKvo() + scoreVwapAnchored() + scoreVpSqueezeAd();
-    var structureScore = scoreBbKcDcChandelier() + scoreIchimoku() + scoreDarvasStructure();
-    var rawTotal = trendScore + momentumScore + volumeScore + structureScore;
-
-    /* ── penalties ── */
-    var penaltyItems = [];
-    if (rsi14 !== null && rsi14 > 80) penaltyItems.push({ reason: "RSI overbought", amount: -5 });
-    var rising5 = true, declining5 = true;
-    for (var i = Math.max(0, L - 5); i < L; i++) { if (i > Math.max(0, L - 5) && cl[i] <= cl[i - 1]) rising5 = false; if (i > Math.max(0, L - 5) && vo[i] >= vo[i - 1]) declining5 = false; }
-    if (cl.length >= 5) { if (rising5 && declining5) penaltyItems.push({ reason: "Rising price + declining volume 5 days", amount: -8 }); }
-    if (cl.length >= 5 && hma16_s && hma16_s.length > 1) {
-      var weeklyTrend = sma50 !== null ? (c < sma50 ? 'bearish' : 'bullish') : 'neutral'; var dailyBullish = false;
-      if (hma16 !== null && c > hma16) dailyBullish = true;
-      if (weeklyTrend === 'bearish' && dailyBullish) penaltyItems.push({ reason: "Weekly bearish + daily bullish clash", amount: -10 });
-    }
-    if (pivotR1 !== null && c !== null && pivotR1 > 0) { var distToRes = (pivotR1 - c) / c; if (distToRes < 0.01 && distToRes >= 0) penaltyItems.push({ reason: "Near resistance", amount: -5 }); }
-    if (squeezeOn !== null) { var sqDuration = 0;
-      for (var i = sqArr.length - 1; i >= 0; i--) { if (sqArr[i] === true) sqDuration++; else break; }
-      if (squeezeOn && sqDuration > 10) penaltyItems.push({ reason: "Squeeze over 10 bars", amount: -3 });
-    }
-    if (beta !== null && beta > 1.5 && atr14 !== null && c > 0) { var atrPct = atr14 / c * 100; if (atrPct > 3.0) penaltyItems.push({ reason: "High beta + high ATR", amount: -3 }); }
-
-    /* ── spike & stability filters (Section 11) ── */
-    var spikeArr = calcDetectSpike(candles);
-    var spikeLast = null, spikeBefore = null;
+    var stabilityScore = calcStabilityScore(candles, 10);
+    var spikeArr = calcDetectSpike(candles, 20, 2.5, 2.5);
+    var spikeLast = null;
     if (spikeArr && spikeArr.length) {
       for (var i = spikeArr.length - 1; i >= 0; i--) { if (spikeArr[i] === true || spikeArr[i] === false) { spikeLast = spikeArr[i]; break; } }
-      for (var i = spikeArr.length - 2; i >= 0; i--) { if (spikeArr[i] === true || spikeArr[i] === false) { spikeBefore = spikeArr[i]; break; } }
     }
-    if (spikeLast === true) penaltyItems.push({ reason: "Abnormal single-session spike (latest session)", amount: -15 });
-    else if (spikeBefore === true) penaltyItems.push({ reason: "Abnormal spike 2 sessions ago (fading)", amount: -8 });
-    var stability = calcStabilityScore(candles);
-    if (stability !== null && stability < 0.3) penaltyItems.push({ reason: "Erratic price action (stability < 0.3)", amount: -10 });
-    else if (stability !== null && stability < 0.5) penaltyItems.push({ reason: "Erratic price action (stability < 0.5)", amount: -5 });
 
-    /* ── bonuses ── */
-    var bonusItems = [];
-    if (dcUpper !== null) { var prevDcUpper = pv(dcRes && dcRes.upper ? dcRes.upper : null);
-      if (c > dcUpper) { var avgVol = 0, avgVolCount = 0;
-        for (var i = Math.max(0, L - 20); i < L; i++) { avgVol += vo[i]; avgVolCount++; }
-        avgVol = avgVolCount > 0 ? avgVol / avgVolCount : 0;
-        if (vo[L1] > 1.5 * avgVol) bonusItems.push({ reason: "Donchian breakout + high volume", amount: 5 });
+    /* ── distribution-day ratio: share of last 5 sessions closing down on above-average volume ── */
+    var distDayRatio = 0, prevDistDayRatio = 0;
+    if (L >= 5) {
+      var dVolLookback = 20, dSumVol = 0, dCnt = 0;
+      for (var v = Math.max(0, L - dVolLookback); v < L; v++) { dSumVol += vo[v]; dCnt++; }
+      var dAvgVol = dCnt > 0 ? dSumVol / dCnt : 0;
+      var dDist = 0;
+      for (var v = L - 5; v < L; v++) { if (v > 0 && cl[v] < cl[v - 1] && vo[v] > dAvgVol) dDist++; }
+      distDayRatio = round(dDist / 5, 2);
+      if (L >= 6) {
+        var dSumVolPrev = 0, dCntPrev = 0;
+        for (var v = Math.max(0, L - 1 - dVolLookback); v < L - 1; v++) { dSumVolPrev += vo[v]; dCntPrev++; }
+        var dAvgVolPrev = dCntPrev > 0 ? dSumVolPrev / dCntPrev : 0;
+        var dDistPrev = 0;
+        for (var v = L - 6; v < L - 1; v++) { if (v > 0 && cl[v] < cl[v - 1] && vo[v] > dAvgVolPrev) dDistPrev++; }
+        prevDistDayRatio = round(dDistPrev / 5, 2);
       }
     }
-    var hourlyBullish = false, dailyBullish = false, weeklyBullish = false;
-    if (c > ema21) dailyBullish = true;
-    if (hma16 !== null && c > hma16) hourlyBullish = true;
-    if (sma50 !== null && c > sma50) weeklyBullish = true;
-    if (dailyBullish && weeklyBullish && hourlyBullish) bonusItems.push({ reason: "All TFs bullish (D/W/H)", amount: 5 });
+
+    return {
+      cl: cl, vo: vo, c: c, pc: pc,
+      sma20: sma20, sma50: sma50, ema9: ema9, ema9Prev: ema9Prev, ema21: ema21, ema50: ema50, wma20: wma20,
+      hma16: hma16, prevHma16: prevHma16, kama10: kama10, prevKama10: prevKama10, sma200: sma200,
+      vwap10: vwap10, prevVwap10: prevVwap10, anchoredVwap: anchoredVwap, prevAnchoredVwap: prevAnchoredVwap,
+      macdL: macdL, macdPrev: macdPrev, sigL: sigL, sigPrev: sigPrev, histL: histL, histPrev: histPrev,
+      macd_s: macd_s, sig_s: sig_s, tsi_s: tsi_s, stc_s: stc_s,
+      tsiL: tsiL, tsiPrev: tsiPrev, stcL: stcL, stcPrev: stcPrev, aoL: aoL, aoPrev: aoPrev,
+      haClose: haClose, prevHaClose: prevHaClose,
+      adxL: adxL, adxPrev: adxPrev, plusDI: plusDI, minusDI: minusDI, plusDIPrev: plusDIPrev, minusDIPrev: minusDIPrev,
+      stL: stL, stPrev: stPrev, psar: psar, psarPrev: psarPrev,
+      viPlus: viPlus, viMinus: viMinus, viPlusPrev: viPlusPrev, viMinusPrev: viMinusPrev,
+      aroonOsc: aroonOsc, aroonOscPrev: aroonOscPrev,
+      bbUpper: bbUpper, bbMid: bbMid, bbLower: bbLower, bbWidth: bbWidth, bbWidthPrev: bbWidthPrev, bbMidPrev: bbMidPrev,
+      kcUpper: kcUpper, kcMid: kcMid, kcLower: kcLower, kcMidPrev: kcMidPrev,
+      dcUpper: dcUpper, dcLower: dcLower, dcRes: dcRes, prevDcUpper: prevDcUpper,
+      chandelierLong: chandelierLong, chandelierLongPrev: chandelierLongPrev, atr14: atr14,
+      rsi14: rsi14, rsi14Prev: rsi14Prev, stochRsiK: stochRsiK, stochRsiKPrev: stochRsiKPrev, stochRsiD: stochRsiD, stochRsiDPrev: stochRsiDPrev,
+      willr: willr, willrPrev: willrPrev,
+      cci20: cci20, cci20Prev: cci20Prev, roc12: roc12, roc12Prev: roc12Prev,
+      mom10: mom10, mom10Prev: mom10Prev, fi13: fi13, fi13Prev: fi13Prev,
+      mfi14: mfi14, mfi14Prev: mfi14Prev, cmf20: cmf20, cmf20Prev: cmf20Prev,
+      obv: obv, obvSma20: obvSma20, obvSlopeVal: obvSlopeVal, obvSlopePrev: obvSlopePrev,
+      pvt: pvt, pvtSma20: pvtSma20, pvtSlopeVal: pvtSlopeVal, pvtSlopePrev: pvtSlopePrev,
+      kvoL: kvoL, kvoPrev: kvoPrev, kvoSig: kvoSig, kvoSigPrev: kvoSigPrev, kvoRes: kvoRes,
+      poc: poc, prevPoc: prevPoc, vah: vah,
+      squeezeOn: squeezeOn, squeezeOnPrev: squeezeOnPrev, squeezeMomVal: squeezeMomVal, squeezeMomPrev: squeezeMomPrev, sqArr: sqArr,
+      accumDistLabel: accumDistLabel,
+      tenkan: tenkan, kijun: kijun, senkouA: senkouA, senkouB: senkouB, chikou: chikou, ichRes: ichRes, tenkanPrev: tenkanPrev, kijunPrev: kijunPrev,
+      fibLevels: fibLevels, pivotP: pivotP, pivotR1: pivotR1, pivotS1: pivotS1, pivotS2: pivotS2,
+      darvasTop: darvasTop, darvasBottom: darvasBottom,
+      zigzagDirection: zigzagDirection, chopIndex: chopIndex, prevChopIndex: prevChopIndex, mtfAlign: mtfAlign, mtfAlignPrev: mtfAlignPrev,
+      beta: beta, rsMansfield: rsMansfield, rsMansfieldPrev: rsMansfieldPrev,
+      stabilityScore: stabilityScore, spikeLast: spikeLast,
+      distDayRatio: distDayRatio, prevDistDayRatio: prevDistDayRatio
+    };
+  }
+
+  /* ── 7.1 Moving Average Stack (0-10), spec literals ── */
+  function scoreMaStackForTF(sn) {
+    var s = 0;
+    if (sn.ema9 !== null && sn.c > sn.ema9) s += 0.5;
+    if (sn.ema21 !== null && sn.c > sn.ema21) s += 0.5;
+    if (sn.ema50 !== null && sn.c > sn.ema50) s += 0.5;
+    if (sn.sma200 !== null && sn.c > sn.sma200) s += 0.5;
+    if (sn.ema9 !== null && sn.ema21 !== null && sn.ema50 !== null) {
+      if (sn.ema9 > sn.ema21 && sn.ema21 > sn.ema50) s += 2.0;
+      else if (sn.ema9 > sn.ema21 || sn.ema21 > sn.ema50) s += 1.0;
+    }
+    if (sn.sma20 !== null && sn.sma50 !== null && sn.sma200 !== null) {
+      if (sn.sma20 > sn.sma50 && sn.sma50 > sn.sma200) s += 2.0;
+      else if (sn.sma20 > sn.sma50) s += 1.0;
+    } else if (sn.sma20 !== null && sn.sma50 !== null && sn.sma20 > sn.sma50) s += 1.0;
+    var fastBull = 0;
+    if (sn.hma16 !== null && sn.c > sn.hma16) fastBull++;
+    if (sn.kama10 !== null && sn.c > sn.kama10) fastBull++;
+    if (sn.wma20 !== null && sn.c > sn.wma20) fastBull++;
+    s += Math.min(fastBull * 0.67, 2.0);
+    if (sn.hma16 !== null && sn.prevHma16 !== null && sn.hma16 > sn.prevHma16) s += 0.5;
+    if (sn.rsMansfield !== null && sn.rsMansfield > 0) s += 0.5;
+    if (sn.rsMansfield !== null && sn.rsMansfieldPrev !== null && sn.rsMansfield > sn.rsMansfieldPrev) s += 0.5;
+    return Math.min(s, 10);
+  }
+
+  /* ── 7.2 MACD + TSI + STC + Awesome Oscillator (0-10) ── */
+  function scoreMacdTsiStcAo(sn) {
+    var s = 0;
+    if (sn.macdL !== null && sn.sigL !== null && sn.macdL > sn.sigL) s += 1.0;
+    if (sn.macdL !== null && sn.macdL > 0) s += 0.5;
+    if (sn.histL !== null && sn.histPrev !== null && sn.histL > 0 && sn.histL > sn.histPrev) s += 0.5;
+    if (sn.macdL !== null && sn.sigL !== null && justCrossedAbove(sn.macd_s, sn.sig_s, 3)) s += 0.5;
+    if (sn.tsiL !== null && sn.tsiL > 0) s += 0.5;
+    if (sn.tsiL !== null && sn.tsiPrev !== null && sn.tsiL > sn.tsiPrev && sn.tsiL > 0) s += 0.5;
+    if (sn.tsiL !== null && justCrossedAbove(sn.tsi_s, sn.cl.map(function(){return 0;}), 3)) s += 0.5;
+    if (sn.stcL !== null && sn.stcL > 50) s += 0.5;
+    if (sn.stcL !== null && sn.stcPrev !== null && sn.stcL > sn.stcPrev) s += 0.5;
+    if (sn.stcL !== null && sn.stcL > 75) s += 0.5;
+    if (sn.stcL !== null && justCrossedAbove(sn.stc_s, sn.cl.map(function(){return 25;}), 3)) s += 0.5;
+    if (sn.aoL !== null && sn.aoL > 0) s += 0.5;
+    if (sn.aoL !== null && sn.aoPrev !== null && sn.aoL > sn.aoPrev) s += 0.5;
+    if (sn.aoL !== null && sn.aoPrev !== null && sn.aoL > 0 && sn.aoPrev <= 0) s += 0.5;
+    var confluence = 0;
+    if (sn.macdL !== null && sn.sigL !== null && sn.macdL > sn.sigL) confluence++;
+    if (sn.tsiL !== null && sn.tsiL > 0) confluence++;
+    if (sn.stcL !== null && sn.stcL > 50) confluence++;
+    if (sn.aoL !== null && sn.aoL > 0) confluence++;
+    if (confluence >= 3) s += 1.0;
+    return Math.min(s, 10);
+  }
+
+  /* ── 7.3 ADX + Supertrend + PSAR + Vortex + Aroon (0-10) ── */
+  function scoreAdxStPsarViAroon(sn) {
+    var s = 0;
+    if (sn.adxL !== null) { if (sn.adxL >= 40) s += 1.0; else if (sn.adxL >= 25) s += 0.5; }
+    if (sn.plusDI !== null && sn.minusDI !== null && sn.plusDI > sn.minusDI) s += 0.5;
+    if (sn.adxL !== null && sn.adxPrev !== null && sn.plusDI !== null && sn.minusDI !== null && sn.adxL > sn.adxPrev && sn.plusDI > sn.minusDI) s += 0.5;
+    if (sn.stL !== null && sn.c > sn.stL) s += 1.0;
+    if (sn.stL !== null && sn.stPrev !== null && sn.pc !== null && sn.pc <= sn.stPrev && sn.c > sn.stL) s += 0.5;
+    if (sn.psar !== null && sn.c > sn.psar) s += 0.5;
+    if (sn.psar !== null && sn.psarPrev !== null && sn.pc !== null && sn.pc <= sn.psarPrev && sn.c > sn.psar) s += 0.5;
+    if (sn.viPlus !== null && sn.viMinus !== null && sn.viPlus > sn.viMinus) s += 1.0;
+    if (sn.viPlus !== null && sn.viMinus !== null && sn.viPlusPrev !== null && sn.viMinusPrev !== null && sn.viPlus > sn.viPlusPrev && sn.viMinus < sn.viMinusPrev) s += 0.5;
+    if (sn.aroonOsc !== null) { if (sn.aroonOsc > 50) s += 1.0; else if (sn.aroonOsc > 0) s += 0.5; }
+    if (sn.aroonOsc !== null && sn.aroonOscPrev !== null && sn.aroonOsc > sn.aroonOscPrev && sn.aroonOsc > 0) s += 0.5;
+    var allBull = (sn.stL !== null && sn.c > sn.stL) && (sn.psar !== null && sn.c > sn.psar) && (sn.plusDI !== null && sn.minusDI !== null && sn.plusDI > sn.minusDI) &&
+                  (sn.viPlus !== null && sn.viMinus !== null && sn.viPlus > sn.viMinus) && (sn.aroonOsc !== null && sn.aroonOsc > 0);
+    if (allBull) s += 1.0;
+    return Math.min(s, 10);
+  }
+
+  /* ── 8.1 RSI + StochRSI + Williams %R (0-10) ── */
+  function scoreRsiStochRsiWillR(sn) {
+    var s = 0;
+    if (sn.rsi14 !== null) {
+      if (sn.rsi14 >= 60 && sn.rsi14 <= 75) s += 2.0; else if (sn.rsi14 >= 55 && sn.rsi14 < 60) s += 1.0; else if (sn.rsi14 > 75 && sn.rsi14 <= 80) s += 1.0; else if (sn.rsi14 >= 50 && sn.rsi14 < 55) s += 0.5;
+    }
+    if (sn.rsi14 !== null && sn.rsi14Prev !== null && sn.rsi14 > sn.rsi14Prev && sn.rsi14 > 50) s += 1.0;
+    if (sn.rsi14 !== null && sn.rsi14Prev !== null && sn.rsi14Prev <= 50 && sn.rsi14 > 50) s += 0.5;
+    if (sn.stochRsiK !== null && sn.stochRsiD !== null && sn.stochRsiK > sn.stochRsiD) s += 1.0;
+    if (sn.stochRsiK !== null && sn.stochRsiK >= 50 && sn.stochRsiK <= 80) s += 0.5;
+    if (sn.stochRsiK !== null && sn.stochRsiKPrev !== null && sn.stochRsiK > sn.stochRsiKPrev) s += 0.5;
+    if (sn.willr !== null) {
+      if (sn.willr >= -50 && sn.willr <= -20) s += 1.0; else if (sn.willr >= -80 && sn.willr < -50) s += 0.5;
+    }
+    if (sn.willr !== null && sn.willrPrev !== null && sn.willr > sn.willrPrev && sn.willr > -50) s += 0.5;
+    if (sn.willr !== null && sn.willr > -20) s += 0.5;
+    if (sn.rsi14 !== null && sn.stochRsiK !== null && sn.stochRsiD !== null && sn.willr !== null && sn.rsi14 > 55 && sn.stochRsiK > sn.stochRsiD && sn.willr > -50) s += 0.5;
+    return Math.min(s, 10);
+  }
+
+  /* ── 8.2 CCI + ROC + Momentum + Force Index (0-10) ── */
+  function scoreCciRocMomFi(sn) {
+    var s = 0;
+    if (sn.cci20 !== null) {
+      if (sn.cci20 >= 100 && sn.cci20 <= 200) s += 1.5; else if (sn.cci20 >= 50 && sn.cci20 < 100) s += 1.0; else if (sn.cci20 >= 0 && sn.cci20 < 50) s += 0.5;
+    }
+    if (sn.cci20 !== null && sn.cci20Prev !== null && sn.cci20 > sn.cci20Prev && sn.cci20 > 0) s += 0.5;
+    if (sn.roc12 !== null && sn.roc12Prev !== null && sn.roc12 > 0 && sn.roc12 > sn.roc12Prev) s += 1.5;
+    else if (sn.roc12 !== null && sn.roc12 > 0) s += 0.5;
+    if (sn.roc12 !== null && sn.roc12 > 2) s += 0.5;
+    if (sn.mom10 !== null && sn.mom10Prev !== null && sn.mom10 > 0 && sn.mom10 > sn.mom10Prev) s += 1.5;
+    else if (sn.mom10 !== null && sn.mom10 > 0) s += 0.5;
+    if (sn.fi13 !== null && sn.fi13Prev !== null && sn.fi13 > 0 && sn.fi13 > sn.fi13Prev) s += 1.5;
+    else if (sn.fi13 !== null && sn.fi13 > 0) s += 0.5;
+    if (sn.fi13 !== null && sn.fi13Prev !== null && sn.fi13 > 0 && sn.fi13Prev <= 0) s += 0.5;
+    if (sn.cci20 !== null && sn.roc12 !== null && sn.mom10 !== null && sn.fi13 !== null && sn.cci20 > 0 && sn.roc12 > 0 && sn.mom10 > 0 && sn.fi13 > 0) s += 1.0;
+    return Math.min(s, 10);
+  }
+
+  /* ── 8.3 MFI + CMF (0-10) ── */
+  function scoreMfiCmf(sn) {
+    var s = 0;
+    if (sn.mfi14 !== null) {
+      if (sn.mfi14 >= 60 && sn.mfi14 <= 80) s += 2.5; else if (sn.mfi14 >= 50 && sn.mfi14 < 60) s += 1.5; else if (sn.mfi14 >= 40 && sn.mfi14 < 50) s += 1.0; else if (sn.mfi14 > 80) s += 1.0;
+    }
+    if (sn.mfi14 !== null && sn.mfi14Prev !== null && sn.mfi14 > sn.mfi14Prev && sn.mfi14 > 50) s += 1.5;
+    if (sn.mfi14 !== null && sn.mfi14Prev !== null && sn.mfi14Prev <= 50 && sn.mfi14 > 50) s += 1.0;
+    if (sn.cmf20 !== null) { if (sn.cmf20 > 0.10) s += 2.0; else if (sn.cmf20 > 0.05) s += 1.5; else if (sn.cmf20 > 0) s += 1.0; }
+    if (sn.cmf20 !== null && sn.cmf20Prev !== null && sn.cmf20 > sn.cmf20Prev && sn.cmf20 > 0) s += 1.0;
+    if (sn.mfi14 !== null && sn.cmf20 !== null && sn.mfi14 > 50 && sn.cmf20 > 0) s += 0.5;
+    return Math.min(s, 10);
+  }
+
+  /* ── 9.1 OBV + PVT + KVO (0-8) ── */
+  function scoreObvPvtKvo(sn) {
+    var s = 0;
+    if (sn.obv !== null && sn.obvSma20 !== null && sn.obv > sn.obvSma20) s += 1.0;
+    if (sn.obvSlopeVal !== null && sn.obvSlopeVal > 0) s += 0.5;
+    if (sn.obvSlopeVal !== null && sn.obvSlopePrev !== null && sn.obvSlopeVal > sn.obvSlopePrev) s += 0.5;
+    if (sn.pvt !== null && sn.pvtSma20 !== null && sn.pvt > sn.pvtSma20) s += 1.0;
+    if (sn.pvtSlopeVal !== null && sn.pvtSlopeVal > 0) s += 1.0;
+    if (sn.pvtSlopeVal !== null && sn.pvtSlopePrev !== null && sn.pvtSlopeVal > sn.pvtSlopePrev) s += 0.5;
+    if (sn.kvoL !== null && sn.kvoSig !== null && sn.kvoL > sn.kvoSig) s += 1.5;
+    if (sn.kvoL !== null && sn.kvoL > 0) s += 0.5;
+    if (sn.kvoL !== null && sn.kvoPrev !== null && sn.kvoL > sn.kvoPrev) s += 0.5;
+    if (sn.kvoL !== null && sn.kvoSig !== null && justCrossedAbove(sn.kvoRes.line, sn.kvoRes.signal, 3)) s += 1.0;
+    return Math.min(s, 8);
+  }
+
+  /* ── 9.2 VWAP + Anchored VWAP (0-6) ── */
+  function scoreVwapAnchored(sn) {
+    var s = 0;
+    if (sn.c !== null && sn.vwap10 !== null && sn.c > sn.vwap10) {
+      s += 1.5;
+      var pct = (sn.c - sn.vwap10) / sn.vwap10 * 100;
+      if (pct >= 0.5 && pct <= 3.0) s += 0.5;
+    }
+    if (sn.vwap10 !== null && sn.prevVwap10 !== null && sn.vwap10 > sn.prevVwap10) s += 0.5;
+    if (sn.c !== null && sn.anchoredVwap !== null && sn.c > sn.anchoredVwap) s += 1.5;
+    if (sn.anchoredVwap !== null && sn.prevAnchoredVwap !== null && sn.anchoredVwap > sn.prevAnchoredVwap) s += 0.5;
+    if (sn.c !== null && sn.vwap10 !== null && sn.anchoredVwap !== null && sn.c > sn.vwap10 && sn.c > sn.anchoredVwap) s += 1.0;
+    return Math.min(s, 6);
+  }
+
+  /* ── 9.3 VP + TTM Squeeze + Accum/Dist (0-6) ── */
+  function scoreVpSqueezeAd(sn) {
+    var s = 0;
+    if (sn.c !== null && sn.poc !== null && sn.c > sn.poc) s += 1.0;
+    if (sn.c !== null && sn.vah !== null && sn.c > sn.vah) s += 0.5;
+    if (sn.poc !== null && sn.prevPoc !== null && sn.poc > sn.prevPoc) s += 0.5;
+    if (sn.squeezeOn !== null && sn.squeezeOnPrev !== null) { if (!sn.squeezeOn && sn.squeezeOnPrev) s += 1.0; else if (sn.squeezeOn) s += 0.5; }
+    if (sn.squeezeMomVal !== null && sn.squeezeMomPrev !== null && sn.squeezeMomVal > 0 && sn.squeezeMomVal > sn.squeezeMomPrev) s += 1.5;
+    else if (sn.squeezeMomVal !== null && sn.squeezeMomVal > 0) s += 0.5;
+    if (sn.accumDistLabel === 'ACCUMULATION') s += 1.5;
+    return Math.min(s, 6);
+  }
+
+  /* ── 10.1 BB + KC + DC + Chandelier (0-8) ── */
+  function scoreBbKcDcChandelier(sn) {
+    var s = 0;
+    if (sn.bbUpper !== null && sn.bbLower !== null) {
+      var bbPos = (sn.c - sn.bbLower) / (sn.bbUpper - sn.bbLower);
+      if (bbPos >= 0.5 && bbPos <= 0.8) s += 1.0; else if (bbPos >= 0.3 && bbPos < 0.5) s += 0.5;
+    }
+    if (sn.bbWidth !== null && sn.bbWidthPrev !== null && sn.bbWidth > sn.bbWidthPrev) s += 0.5;
+    if (sn.kcMid !== null && sn.c > sn.kcMid) s += 0.5;
+    if (sn.kcUpper !== null && sn.c > sn.kcUpper) s += 0.5;
+    if (sn.dcUpper !== null && sn.dcLower !== null) { if (sn.c >= sn.dcUpper * 0.99) s += 1.0; else if (sn.c > (sn.dcUpper + sn.dcLower) / 2) s += 0.5; }
+    if (sn.chandelierLong !== null && sn.c > sn.chandelierLong) s += 1.0;
+    if (sn.chandelierLong !== null && sn.chandelierLongPrev !== null && sn.chandelierLong > sn.chandelierLongPrev) s += 0.5;
+    if (sn.bbUpper !== null && sn.kcUpper !== null && sn.bbLower !== null && sn.kcLower !== null && sn.bbUpper < sn.kcUpper && sn.bbLower > sn.kcLower) s += 0.5;
+    if (sn.atr14 !== null && sn.c !== null && sn.c > 0) { var atrPct = sn.atr14 / sn.c * 100; if (atrPct >= 2.0 && atrPct <= 4.0) s += 0.5; }
+    if (sn.dcUpper !== null && sn.c > sn.dcUpper && sn.bbWidth !== null && sn.bbWidthPrev !== null && sn.bbWidth > sn.bbWidthPrev) s += 1.0;
+    return Math.min(s, 8);
+  }
+
+  /* ── 10.2 Ichimoku (0-6) ── */
+  function scoreIchimoku(sn) {
+    var s = 0;
+    if (sn.senkouA !== null && sn.senkouB !== null) {
+      var cloudTop = Math.max(sn.senkouA, sn.senkouB);
+      if (sn.c > cloudTop) s += 2.0; else if (sn.c > Math.min(sn.senkouA, sn.senkouB)) s += 0.5;
+    }
+    if (sn.tenkan !== null && sn.kijun !== null && sn.tenkan > sn.kijun) s += 1.0;
+    if (sn.tenkan !== null && sn.kijun !== null && justCrossedAbove(sn.ichRes.tenkan, sn.ichRes.kijun, 3)) s += 0.5;
+    if (sn.senkouA !== null && sn.senkouB !== null && sn.senkouA > sn.senkouB) s += 1.0;
+    if (sn.chikou !== null && sn.pc !== null && sn.chikou > sn.pc) s += 0.5;
+    if (sn.senkouA !== null && sn.senkouB !== null && sn.tenkan !== null && sn.kijun !== null && sn.chikou !== null && sn.pc !== null &&
+        sn.c > Math.max(sn.senkouA, sn.senkouB) && sn.tenkan > sn.kijun && sn.senkouA > sn.senkouB && sn.chikou > sn.pc) s += 1.0;
+    return Math.min(s, 6);
+  }
+
+  /* ── 10.3 Darvas + HMA + KAMA + Fib + Pivot + ZigZag + Choppiness + MTF (0-6) ── */
+  function scoreDarvasStructure(sn) {
+    var s = 0;
+    if (sn.darvasTop !== null && sn.darvasBottom !== null) {
+      if (sn.c >= sn.darvasTop) s += 1.5; else if (sn.c > (sn.darvasTop + sn.darvasBottom) / 2) s += 0.5;
+    }
+    if (sn.hma16 !== null && sn.c > sn.hma16) s += 0.25;
+    if (sn.hma16 !== null && sn.prevHma16 !== null && sn.hma16 > sn.prevHma16) s += 0.25;
+    if (sn.kama10 !== null && sn.c > sn.kama10) s += 0.25;
+    if (sn.kama10 !== null && sn.prevKama10 !== null && sn.kama10 > sn.prevKama10) s += 0.25;
+    if (sn.fibLevels !== null && sn.pc !== null) {
+      for (var key in sn.fibLevels) { if (key === '0.382' || key === '0.5' || key === '0.618') { if (Math.abs(sn.c - sn.fibLevels[key]) / sn.c < 0.005 && sn.c > sn.pc) { s += 0.5; break; } } }
+    }
+    if (sn.pivotP !== null && sn.c > sn.pivotP) s += 0.25;
+    if (sn.pivotR1 !== null && sn.c > sn.pivotR1) s += 0.25;
+    if (sn.chopIndex !== null && sn.chopIndex < 38.2) s += 0.5; else if (sn.chopIndex !== null && sn.chopIndex < 50) s += 0.25;
+    if (sn.zigzagDirection === 'UP') s += 0.5;
+    if (sn.mtfAlign !== null) { if (sn.mtfAlign >= 80) s += 1.0; else if (sn.mtfAlign >= 60) s += 0.5; }
+    return Math.min(s, 6);
+  }
+
+  /* ── Section 11 spike & stability sub-scores (0-10 per TF, higher = worse) ── */
+  function scoreSpikeForTF(candles) {
+    try {
+      var arr = calcDetectSpike(candles, 20, 2.5, 2.5);
+      if (!arr || !arr.length) return 0;
+      var latest = null, prior = null;
+      for (var i = arr.length - 1; i >= 0; i--) { if (arr[i] === true || arr[i] === false) { latest = arr[i]; break; } }
+      for (var i = arr.length - 2; i >= 0; i--) { if (arr[i] === true || arr[i] === false) { prior = arr[i]; break; } }
+      var count = 0;
+      for (var i = Math.max(0, arr.length - 20); i < arr.length; i++) { if (arr[i] === true) count++; }
+      var s = 0;
+      if (latest === true) s += 5;
+      if (prior === true) s += 3;
+      if (count > 0) s += 2;
+      return Math.min(s, 10);
+    } catch (e) { return 0; }
+  }
+  function scoreStabilityPenaltyForTF(candles, lookback) {
+    try {
+      var st = calcStabilityScore(candles, lookback || 10);
+      if (st === null || st === undefined) return 0;
+      return round(Math.max(0, Math.min(10, (1 - st) * 10)), 1);
+    } catch (e) { return 0; }
+  }
+
+  /* Runs all 12 spec sub-scores (plus spike/stability) for one timeframe. */
+  function scoreEntryComponentsForTF(candles, indexCandles, stabLookback) {
+    var sn = buildTFSnapshot(candles, indexCandles);
+    return {
+      maStack: scoreMaStackForTF(sn),
+      macdTsiStcAo: scoreMacdTsiStcAo(sn),
+      adxStPsarViAroon: scoreAdxStPsarViAroon(sn),
+      rsiStochRsiWillR: scoreRsiStochRsiWillR(sn),
+      cciRocMomFi: scoreCciRocMomFi(sn),
+      mfiCmf: scoreMfiCmf(sn),
+      obvPvtKvo: scoreObvPvtKvo(sn),
+      vwapAnchored: scoreVwapAnchored(sn),
+      vpSqueezeAd: scoreVpSqueezeAd(sn),
+      bbKcDcChandelier: scoreBbKcDcChandelier(sn),
+      ichimoku: scoreIchimoku(sn),
+      darvasStructure: scoreDarvasStructure(sn),
+      spike: scoreSpikeForTF(candles),
+      stability: scoreStabilityPenaltyForTF(candles, stabLookback || 10),
+      sn: sn
+    };
+  }
+
+  /* Section 11 penalty modifiers (single-pass on the base/daily snapshot). */
+  function buildEntryPenaltyItems(sn, opts) {
+    var items = [];
+    if (sn.rsi14 !== null && sn.rsi14 > 80) items.push({ reason: "RSI overbought", amount: -5 });
+    var rising5 = true, declining5 = true;
+    var cl = sn.cl, vo = sn.vo;
+    var L = cl.length;
+    for (var i = Math.max(0, L - 5); i < L; i++) { if (i > Math.max(0, L - 5) && cl[i] <= cl[i - 1]) rising5 = false; if (i > Math.max(0, L - 5) && vo[i] >= vo[i - 1]) declining5 = false; }
+    if (cl.length >= 5) { if (rising5 && declining5) items.push({ reason: "Rising price + declining volume 5 days", amount: -8 }); }
+    if (opts.weeklyTrend === 'bearish' && opts.dailyBullish) items.push({ reason: "Weekly bearish + daily bullish clash", amount: -10 });
+    if (sn.pivotR1 !== null && sn.c !== null && sn.pivotR1 > 0) { var distToRes = (sn.pivotR1 - sn.c) / sn.c; if (distToRes < 0.01 && distToRes >= 0) items.push({ reason: "Near resistance", amount: -5 }); }
+    if (sn.squeezeOn !== null && sn.sqArr) { var sqDuration = 0;
+      for (var i = sn.sqArr.length - 1; i >= 0; i--) { if (sn.sqArr[i] === true) sqDuration++; else break; }
+      if (sn.squeezeOn && sqDuration > 10) items.push({ reason: "Squeeze over 10 bars", amount: -3 });
+    }
+    if (sn.beta !== null && sn.beta > 1.5 && sn.atr14 !== null && sn.c > 0) { var atrPct = sn.atr14 / sn.c * 100; if (atrPct > 3.0) items.push({ reason: "High beta + high ATR", amount: -3 }); }
+    var spikeSub = opts.spikeSub != null ? opts.spikeSub : 0;
+    if (spikeSub >= 7) items.push({ reason: "Abnormal single-session spike (latest session)", amount: -15 });
+    else if (spikeSub >= 4) items.push({ reason: "Abnormal spike (fading)", amount: -8 });
+    else if (spikeSub >= 2) items.push({ reason: "Minor spike recent bars", amount: -4 });
+    var stabSub = opts.stabSub != null ? opts.stabSub : 0;
+    if (stabSub >= 7) items.push({ reason: "Erratic price action (stability)", amount: -10 });
+    else if (stabSub >= 5) items.push({ reason: "Moderately erratic price action (stability)", amount: -5 });
+    return items;
+  }
+
+  /* Section 11 bonus modifiers (single-pass on the base/daily snapshot). */
+  function buildEntryBonusItems(sn, opts) {
+    var items = [];
+    if (sn.dcUpper !== null) {
+      if (sn.c > sn.dcUpper) {
+        var avgVol = 0, avgVolCount = 0;
+        for (var i = Math.max(0, sn.cl.length - 20); i < sn.cl.length; i++) { avgVol += sn.vo[i]; avgVolCount++; }
+        avgVol = avgVolCount > 0 ? avgVol / avgVolCount : 0;
+        if (sn.vo[sn.cl.length - 1] > 1.5 * avgVol) items.push({ reason: "Donchian breakout + high volume", amount: 5 });
+      }
+    }
+    if (opts.hourlyBullish && opts.dailyBullish && opts.weeklyBullish) items.push({ reason: "All TFs bullish (D/W/H)", amount: 5 });
+    if (opts.idxTrendScore !== null && opts.idxTrendScore > 60) items.push({ reason: "Index trend score >60", amount: 3 });
+    if (sn.accumDistLabel === 'ACCUMULATION' && sn.mtfAlign !== null && sn.mtfAlign > 80) items.push({ reason: "Accumulation + MTF>80", amount: 3 });
+    if (sn.rsMansfield !== null && sn.aroonOsc !== null && sn.rsMansfield > 5 && sn.aroonOsc > 50) items.push({ reason: "RS Mansfield>5 + Aroon>50", amount: 3 });
+    if (sn.pivotR1 !== null && sn.fibLevels !== null && sn.fibLevels['0.618'] !== null && sn.c > sn.pivotR1 && sn.c > sn.fibLevels['0.618']) items.push({ reason: "Above pivot R1 + fib 0.618", amount: 2 });
+    return items;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     Entry Score (single timeframe) — Full spec Sections 7-11
+     ══════════════════════════════════════════════════════════════════════════ */
+  function computeEntryScore(candles, indexCandles) {
+    if (!candles || candles.length < 50) return { entry_score: null, reason: 'insufficient_data', need: 50, got: candles ? candles.length : 0 };
+    var comps = scoreEntryComponentsForTF(candles, indexCandles);
+    var sn = comps.sn;
+
+    /* ── compute pillar scores from the 12 sub-scores ── */
+    var trendScore = comps.maStack + comps.macdTsiStcAo + comps.adxStPsarViAroon;
+    var momentumScore = comps.rsiStochRsiWillR + comps.cciRocMomFi + comps.mfiCmf;
+    var volumeScore = comps.obvPvtKvo + comps.vwapAnchored + comps.vpSqueezeAd;
+    var structureScore = comps.bbKcDcChandelier + comps.ichimoku + comps.darvasStructure;
+    var rawTotal = trendScore + momentumScore + volumeScore + structureScore;
+
+    /* ── penalties (Section 11) ── */
+    var penaltyItems = buildEntryPenaltyItems(sn, {
+      weeklyTrend: sn.sma50 !== null ? (sn.c < sn.sma50 ? 'bearish' : 'bullish') : 'neutral',
+      dailyBullish: sn.hma16 !== null && sn.c > sn.hma16,
+      spikeSub: comps.spike,
+      stabSub: comps.stability
+    });
+
+    /* ── bonuses (Section 11) ── */
     var idxTrendScore = computeIndexTrendScore(indexCandles);
-    if (idxTrendScore !== null && idxTrendScore > 60) bonusItems.push({ reason: "Index trend score >60", amount: 3 });
-    if (accumDistLabel === 'ACCUMULATION' && mtfAlign !== null && mtfAlign > 80) bonusItems.push({ reason: "Accumulation + MTF>80", amount: 3 });
-    if (rsMansfield !== null && aroonOsc !== null && rsMansfield > 5 && aroonOsc > 50) bonusItems.push({ reason: "RS Mansfield>5 + Aroon>50", amount: 3 });
-    if (pivotR1 !== null && fibLevels !== null && fibLevels['0.618'] !== null && c > pivotR1 && c > fibLevels['0.618']) bonusItems.push({ reason: "Above pivot R1 + fib 0.618", amount: 2 });
+    var bonusItems = buildEntryBonusItems(sn, {
+      hourlyBullish: sn.c > sn.hma16,
+      dailyBullish: sn.c > sn.ema21,
+      weeklyBullish: sn.sma50 !== null && sn.c > sn.sma50,
+      idxTrendScore: idxTrendScore
+    });
 
     var penalties = 0;
     penaltyItems.forEach(function(it) { penalties += it.amount; });
@@ -2336,20 +2298,20 @@ window.TechIndicators = (function () {
       penalty_items: penaltyItems, bonus_items: bonusItems,
       classification: cls.classification, signal: cls.signal, allocation_pct: cls.allocation_pct,
       details: {
-        maStack: round(scoreMaStack(), 2), macdTsiStcAo: round(scoreMacdTsiStcAo(), 2), adxStPsarViAroon: round(scoreAdxStPsarViAroon(), 2),
-        rsiStochRsiWillR: round(scoreRsiStochRsiWillR(), 2), cciRocMomFi: round(scoreCciRocMomFi(), 2), mfiCmf: round(scoreMfiCmf(), 2),
-        obvPvtKvo: round(scoreObvPvtKvo(), 2), vwapAnchored: round(scoreVwapAnchored(), 2), vpSqueezeAd: round(scoreVpSqueezeAd(), 2),
-        bbKcDcChandelier: round(scoreBbKcDcChandelier(), 2), ichimoku: round(scoreIchimoku(), 2), darvasStructure: round(scoreDarvasStructure(), 2),
-        spike: spikeLast, stability: stability, indexTrendScore: idxTrendScore
+        maStack: round(comps.maStack, 2), macdTsiStcAo: round(comps.macdTsiStcAo, 2), adxStPsarViAroon: round(comps.adxStPsarViAroon, 2),
+        rsiStochRsiWillR: round(comps.rsiStochRsiWillR, 2), cciRocMomFi: round(comps.cciRocMomFi, 2), mfiCmf: round(comps.mfiCmf, 2),
+        obvPvtKvo: round(comps.obvPvtKvo, 2), vwapAnchored: round(comps.vwapAnchored, 2), vpSqueezeAd: round(comps.vpSqueezeAd, 2),
+        bbKcDcChandelier: round(comps.bbKcDcChandelier, 2), ichimoku: round(comps.ichimoku, 2), darvasStructure: round(comps.darvasStructure, 2),
+        spike: comps.spike, stability: comps.stability, indexTrendScore: idxTrendScore
       }
     };
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
      Multi-timeframe Entry Score — spec Sections 7-11 model:
-     single daily-base score; only 7.1 MA-stack is aggregated across
-     H*0.20 + D*0.50 + W*0.30. All-TF bullish bonus and weekly-trend penalty
-     use actual H/D/W closes vs their own EMA21.
+     ALL 12 sub-scores (7.1-10.3) plus spike/stability are computed per
+     timeframe and aggregated H*0.20 + D*0.50 + W*0.30, renormalized over the
+     available timeframes. Section 11 penalties/bonuses use real H/D/W data.
      ══════════════════════════════════════════════════════════════════════════ */
   function computeMultiTFEntryScore(tfResults, indexCandles, indexWeeklyCandles) {
     if (!tfResults || tfResults.length === 0) return { multiTF_score: null, reason: 'no_timeframes' };
@@ -2372,66 +2334,73 @@ window.TechIndicators = (function () {
       var v = lastVals(calcEMA(cands, 21), 1);
       return v.length ? v[0] : null;
     }
+    function stabLookbackFor(label) {
+      return label === 'W' ? 6 : 10;
+    }
 
     var hTF = findTF('H'), dTF = findTF('D'), wTF = findTF('W');
     var baseTF = dTF || wTF || hTF || tfResults[0];
     if (!baseTF || !baseTF.candles || baseTF.candles.length < 50) return { multiTF_score: null, reason: 'no_valid_scores' };
 
-    var baseScore = computeEntryScore(baseTF.candles, indexCandles);
-    if (!baseScore || baseScore.entry_score == null) return { multiTF_score: null, reason: 'no_valid_scores' };
+    /* ── per-timeframe component snapshots (12 sub-scores + spike/stability) ── */
+    var perTF = {};
+    perTF.H = (hTF && hTF.candles && hTF.candles.length >= 50) ? scoreEntryComponentsForTF(hTF.candles, indexCandles, stabLookbackFor('H')) : null;
+    perTF.D = (dTF && dTF.candles && dTF.candles.length >= 50) ? scoreEntryComponentsForTF(dTF.candles, indexCandles, stabLookbackFor('D')) : null;
+    perTF.W = (wTF && wTF.candles && wTF.candles.length >= 50) ? scoreEntryComponentsForTF(wTF.candles, indexWeeklyCandles || indexCandles, stabLookbackFor('W')) : null;
+    if (!perTF.H && !perTF.D && !perTF.W) return { multiTF_score: null, reason: 'no_valid_scores' };
 
-    /* ── 7.1 MA stack cross-TF aggregation (spec H*0.20 + D*0.50 + W*0.30) ── */
-    var maWeight = 0, maAgg = 0;
-    var maTFs = [[hTF, 0.20, null], [dTF, 0.50, indexCandles], [wTF, 0.30, indexWeeklyCandles || indexCandles]];
-    maTFs.forEach(function (pair) {
-      var tf = pair[0], w = pair[1], idx = pair[2];
-      if (tf && tf.candles && tf.candles.length >= 50) {
-        var s = scoreMaStackForTF(tf.candles, idx);
-        if (s !== null && s !== undefined) { maAgg += w * s; maWeight += w; }
-      }
+    var SUBKEYS = ['maStack', 'macdTsiStcAo', 'adxStPsarViAroon', 'rsiStochRsiWillR', 'cciRocMomFi', 'mfiCmf',
+                   'obvPvtKvo', 'vwapAnchored', 'vpSqueezeAd', 'bbKcDcChandelier', 'ichimoku', 'darvasStructure',
+                   'spike', 'stability'];
+    var weights = { H: 0.20, D: 0.50, W: 0.30 };
+
+    /* ── weighted aggregation H*0.20 + D*0.50 + W*0.30 (renormalized) ── */
+    var comps = {};
+    SUBKEYS.forEach(function (key) {
+      var wSum = 0, acc = 0;
+      ['H', 'D', 'W'].forEach(function (label) {
+        var c = perTF[label];
+        if (c && c[key] !== null && c[key] !== undefined) { var w = weights[label]; acc += w * c[key]; wSum += w; }
+      });
+      comps[key] = wSum > 0 ? acc / wSum : 0;
     });
-    var maStackScore = maWeight > 0 ? maAgg / maWeight : (baseScore.details ? baseScore.details.maStack : 0);
 
-    var trendScore = maStackScore + (baseScore.details ? baseScore.details.macdTsiStcAo : 0) + (baseScore.details ? baseScore.details.adxStPsarViAroon : 0);
-    var momentumScore = baseScore.momentum || 0;
-    var volumeScore = baseScore.volume || 0;
-    var structureScore = baseScore.structure || 0;
+    var trendScore = comps.maStack + comps.macdTsiStcAo + comps.adxStPsarViAroon;
+    var momentumScore = comps.rsiStochRsiWillR + comps.cciRocMomFi + comps.mfiCmf;
+    var volumeScore = comps.obvPvtKvo + comps.vwapAnchored + comps.vpSqueezeAd;
+    var structureScore = comps.bbKcDcChandelier + comps.ichimoku + comps.darvasStructure;
     var rawTotal = trendScore + momentumScore + volumeScore + structureScore;
 
-    /* ── penalties: daily base, with weekly-trend clash recomputed on real weekly data ── */
+    /* ── Section 11 penalties (real H/D/W bullishness + weighted spike/stability) ── */
     var weeklyCl = lastCloseOf(wTF ? wTF.candles : null);
     var weeklyEma21 = lastEma21Of(wTF ? wTF.candles : null);
-    var dailyCl = lastCloseOf(baseTF.candles);
-    var dailyEma21 = lastEma21Of(baseTF.candles);
+    var dailyCl = lastCloseOf(dTF ? dTF.candles : baseTF.candles);
+    var dailyEma21 = lastEma21Of(dTF ? dTF.candles : baseTF.candles);
     var weeklyBearish = weeklyCl !== null && weeklyEma21 !== null && weeklyCl < weeklyEma21;
     var dailyBullish = dailyCl !== null && dailyEma21 !== null && dailyCl > dailyEma21;
+    var baseSn = (perTF.D || perTF.H || perTF.W).sn;
+    var penaltyItems = buildEntryPenaltyItems(baseSn, {
+      weeklyTrend: weeklyBearish ? 'bearish' : 'bullish',
+      dailyBullish: dailyBullish,
+      spikeSub: comps.spike,
+      stabSub: comps.stability
+    });
 
-    var penaltyItems = (baseScore.penalty_items || []).slice();
-    for (var i = penaltyItems.length - 1; i >= 0; i--) {
-      if (penaltyItems[i].reason.indexOf('Weekly bearish') === 0) penaltyItems.splice(i, 1);
-    }
-    if (weeklyBearish && dailyBullish) penaltyItems.push({ reason: "Weekly bearish + daily bullish clash", amount: -10 });
+    /* ── Section 11 bonuses (real H/D/W bullishness + index D+W trend score) ── */
+    var hourlyBullish = false, weeklyBullish = false;
+    var hCl = lastCloseOf(hTF ? hTF.candles : null), hEma21 = lastEma21Of(hTF ? hTF.candles : null);
+    if (hCl !== null && hEma21 !== null && hCl > hEma21) hourlyBullish = true;
+    if (weeklyCl !== null && weeklyEma21 !== null && weeklyCl > weeklyEma21) weeklyBullish = true;
+    var idxTrendScore = computeIndexTrendScore(indexCandles, indexWeeklyCandles);
+    var bonusItems = buildEntryBonusItems(baseSn, {
+      hourlyBullish: hourlyBullish,
+      dailyBullish: dailyBullish,
+      weeklyBullish: weeklyBullish,
+      idxTrendScore: idxTrendScore
+    });
+
     var penalties = 0;
     penaltyItems.forEach(function (it) { penalties += it.amount; });
-
-    /* ── bonuses: actual H/D/W bullish + index D+W trend score ── */
-    var hourlyBullish = false, weeklyBullish = false;
-    if (hTF && hTF.candles) {
-      var hCl = lastCloseOf(hTF.candles), hEma21 = lastEma21Of(hTF.candles);
-      if (hCl !== null && hEma21 !== null && hCl > hEma21) hourlyBullish = true;
-    }
-    if (weeklyCl !== null && weeklyEma21 !== null && weeklyCl > weeklyEma21) weeklyBullish = true;
-
-    var bonusItems = (baseScore.bonus_items || []).slice();
-    for (var i = bonusItems.length - 1; i >= 0; i--) {
-      if (bonusItems[i].reason.indexOf('All TFs bullish') === 0) bonusItems.splice(i, 1);
-    }
-    if (dailyBullish && weeklyBullish && hourlyBullish) bonusItems.push({ reason: "All TFs bullish (D/W/H)", amount: 5 });
-    for (var i = bonusItems.length - 1; i >= 0; i--) {
-      if (bonusItems[i].reason.indexOf('Index trend score') === 0) bonusItems.splice(i, 1);
-    }
-    var idxTrendScore = computeIndexTrendScore(indexCandles, indexWeeklyCandles);
-    if (idxTrendScore !== null && idxTrendScore > 60) bonusItems.push({ reason: "Index trend score >60", amount: 3 });
     var bonuses = 0;
     bonusItems.forEach(function (it) { bonuses += it.amount; });
 
@@ -2440,19 +2409,27 @@ window.TechIndicators = (function () {
 
     /* ── per-TF detail rows for the UI / compat shim ── */
     var tfDetails = [];
-    [hTF, dTF, wTF].forEach(function (tf) {
-      if (tf && tf.candles && tf.candles.length >= 50) {
+    ['H', 'D', 'W'].forEach(function (label) {
+      var tf = findTF(label);
+      var c = perTF[label];
+      if (tf && c) {
+        var tTrend = c.maStack + c.macdTsiStcAo + c.adxStPsarViAroon;
+        var tMom = c.rsiStochRsiWillR + c.cciRocMomFi + c.mfiCmf;
+        var tVol = c.obvPvtKvo + c.vwapAnchored + c.vpSqueezeAd;
+        var tStruct = c.bbKcDcChandelier + c.ichimoku + c.darvasStructure;
+        var tRaw = tTrend + tMom + tVol + tStruct;
         var s = computeEntryScore(tf.candles, indexCandles);
-        if (s && s.entry_score != null) {
-          tfDetails.push({
-            timeframe: tf.timeframe, weight: '—',
-            entryScore: s.entry_score, trend: s.trend, momentum: s.momentum,
-            volume: s.volume, structure: s.structure,
-            penalties: s.penalties, bonuses: s.bonuses,
-            raw_score: s.raw_score,
-            classification: s.classification, allocation_pct: s.allocation_pct
-          });
-        }
+        tfDetails.push({
+          timeframe: tf.timeframe,
+          weight: String(Math.round(weights[label] * 100)) + '%',
+          entryScore: s && s.entry_score != null ? s.entry_score : round(tRaw, 1),
+          trend: round(tTrend, 1), momentum: round(tMom, 1),
+          volume: round(tVol, 1), structure: round(tStruct, 1),
+          penalties: s ? s.penalties : 0, bonuses: s ? s.bonuses : 0,
+          raw_score: round(tRaw, 1),
+          classification: s ? s.classification : cls.classification,
+          allocation_pct: s ? s.allocation_pct : cls.allocation_pct
+        });
       }
     });
 
@@ -2461,7 +2438,7 @@ window.TechIndicators = (function () {
       raw_score: round(rawTotal, 1),
       trend: round(trendScore, 1), momentum: round(momentumScore, 1),
       volume: round(volumeScore, 1), structure: round(structureScore, 1),
-      maStackCrossTF: round(maStackScore, 2),
+      maStackCrossTF: round(comps.maStack, 2),
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
       penalty_items: penaltyItems, bonus_items: bonusItems,
       classification: cls.classification, signal: cls.signal, allocation_pct: cls.allocation_pct,
@@ -2471,75 +2448,88 @@ window.TechIndicators = (function () {
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
-     Multi-timeframe Exit Score — weights: H=30%, D=50%, W=20%
+     Multi-timeframe Exit Score — weights: H=25%, D=50%, W=25%
      ══════════════════════════════════════════════════════════════════════════ */
   function computeMultiTFExitScore(tfResults, position, indexCandles) {
     if (!tfResults || tfResults.length === 0) return { multiTF_exit_score: null, reason: 'no_timeframes' };
+    position = position || {};
 
     var weights = { H: 0.25, h: 0.25, '1h': 0.25, hourly: 0.25, '1H': 0.25,
                     D: 0.50, d: 0.50, day: 0.50, daily: 0.50, '1D': 0.50,
                     W: 0.25, w: 0.25, week: 0.25, weekly: 0.25, '1W': 0.25 };
     var totalScore = 0, totalWeight = 0;
     var activeTFs = 0, tfDetails = [];
-    var pillarTotal = { trend_breakdown: 0, momentum_exhaustion: 0, volume_distribution: 0, structure_breakdown: 0 };
-    var totalRaw = 0, totalPenalties = 0, totalBonuses = 0;
-    var penaltyMap = {}, bonusMap = {};
+    var compTotal = { tf1a: 0, tf1b: 0, tf1c: 0, tf2a: 0, tf2b: 0, tf2c: 0, tf3a: 0, tf3b: 0, tf3c: 0, tf4a: 0, tf4b: 0, tf4c: 0 };
+    var primarySn = null;
 
     tfResults.forEach(function (tf) {
       var w = weights[tf.timeframe] || 0;
-      if (w === 0 || !tf.candles) return;
-      var score = computeExitScore(tf.candles, position, indexCandles);
-      if (!score || score.exit_score == null) return;
+      if (w === 0 || !tf.candles || tf.candles.length < 50) return;
+      var sn = null;
+      try { sn = buildTFSnapshot(tf.candles, indexCandles); } catch(e) {}
+      if (!sn || sn.c === null) return;
+      var comps = scoreExitComponentsForTF(sn, position);
 
-      totalScore += score.exit_score * w;
+      var trendBD = Math.min(comps.tf1a + comps.tf1b + comps.tf1c, 25);
+      var momExh = Math.min(comps.tf2a + comps.tf2b + comps.tf2c, 25);
+      var volDist = Math.min(comps.tf3a + comps.tf3b + comps.tf3c, 25);
+      var strucBD = Math.min(comps.tf4a + comps.tf4b + comps.tf4c, 25);
+      var tfScore = trendBD + momExh + volDist + strucBD;
+
+      totalScore += tfScore * w;
       totalWeight += w;
       activeTFs++;
-      pillarTotal.trend_breakdown += (score.trend_breakdown || 0) * w;
-      pillarTotal.momentum_exhaustion += (score.momentum_exhaustion || 0) * w;
-      pillarTotal.volume_distribution += (score.volume_distribution || 0) * w;
-      pillarTotal.structure_breakdown += (score.structure_breakdown || 0) * w;
-      totalRaw += (score.raw_score || 0) * w;
-      totalPenalties += (score.penalties || 0) * w;
-      totalBonuses += (score.bonuses || 0) * w;
-      if (score.penalty_items) { score.penalty_items.forEach(function(it) { penaltyMap[it.reason] = (penaltyMap[it.reason] || 0) + it.amount * w; }); }
-      if (score.bonus_items) { score.bonus_items.forEach(function(it) { bonusMap[it.reason] = (bonusMap[it.reason] || 0) + it.amount * w; }); }
+      compTotal.tf1a += comps.tf1a * w; compTotal.tf1b += comps.tf1b * w; compTotal.tf1c += comps.tf1c * w;
+      compTotal.tf2a += comps.tf2a * w; compTotal.tf2b += comps.tf2b * w; compTotal.tf2c += comps.tf2c * w;
+      compTotal.tf3a += comps.tf3a * w; compTotal.tf3b += comps.tf3b * w; compTotal.tf3c += comps.tf3c * w;
+      compTotal.tf4a += comps.tf4a * w; compTotal.tf4b += comps.tf4b * w; compTotal.tf4c += comps.tf4c * w;
+      if (primarySn === null && w === 0.50) primarySn = sn;
+
       tfDetails.push({
         timeframe: tf.timeframe, weight: round(w * 100, 0) + '%',
-        exitScore: score.exit_score, trend_breakdown: score.trend_breakdown,
-        momentum_exhaustion: score.momentum_exhaustion,
-        volume_distribution: score.volume_distribution,
-        structure_breakdown: score.structure_breakdown,
-        penalties: score.penalties, bonuses: score.bonuses, raw_score: score.raw_score,
-        classification: score.classification
+        exitScore: round(tfScore, 1), trend_breakdown: round(trendBD, 1),
+        momentum_exhaustion: round(momExh, 1),
+        volume_distribution: round(volDist, 1),
+        structure_breakdown: round(strucBD, 1),
+        penalties: 0, bonuses: 0, raw_score: round(tfScore, 1),
+        classification: classifyExitScore(tfScore).classification
       });
     });
 
     if (totalWeight === 0) return { multiTF_exit_score: null, reason: 'no_valid_scores', details: tfDetails };
 
     var multiTF = round(totalScore / totalWeight, 1);
-    var classification, signal, action;
-    if (multiTF >= 85) { classification = 'URGENT_EXIT'; signal = 'URGENT_EXIT'; action = 'Full exit immediately'; }
-    else if (multiTF >= 70) { classification = 'EXIT'; signal = 'EXIT'; action = 'Full exit at current price or next bar open'; }
-    else if (multiTF >= 55) { classification = 'PARTIAL_EXIT'; signal = 'PARTIAL_EXIT'; action = 'Exit 50%, tighten trailing stop to 1.5x ATR'; }
-    else if (multiTF >= 40) { classification = 'TIGHTEN_STOP'; signal = 'TIGHTEN_STOP'; action = 'Move stop to breakeven or 1x ATR below current'; }
-    else if (multiTF >= 25) { classification = 'MONITOR'; signal = 'MONITOR'; action = 'No action — watch for escalation next bar'; }
-    else { classification = 'HOLD'; signal = 'HOLD'; action = 'All conditions intact — continue holding'; }
 
-    var allPenaltyItems = [], allBonusItems = [];
-    Object.keys(penaltyMap).forEach(function(key) { allPenaltyItems.push({ reason: key, amount: round(penaltyMap[key] / totalWeight, 1) }); });
-    Object.keys(bonusMap).forEach(function(key) { allBonusItems.push({ reason: key, amount: round(bonusMap[key] / totalWeight, 1) }); });
+    /* ── single modifier pass on the primary (D) timeframe ── */
+    var idxEntryScoreVal = null;
+    try { if (indexCandles && indexCandles.length >= 50) { var idxEntryRes = computeEntryScore(indexCandles); if (idxEntryRes && idxEntryRes.entry_score != null) idxEntryScoreVal = idxEntryRes.entry_score; } } catch(e) {}
+    if (primarySn === null) {
+      var primary = tfResults.filter(function(tf) { return weights[tf.timeframe] === 0.50; })[0] || tfResults[0];
+      try { if (primary && primary.candles) primarySn = buildTFSnapshot(primary.candles, indexCandles); } catch(e) {}
+    }
+    var penaltyItems = [], bonusItems = [];
+    if (primarySn) {
+      var ctx = { indexTrendScore: idxEntryScoreVal, entryPrice: position.entry_price || primarySn.c, currentPrice: primarySn.c, holdingDays: position.holding_days || 0, entryScore: position.entry_score != null ? position.entry_score : 50 };
+      penaltyItems = buildExitPenaltyItems(primarySn, ctx);
+      bonusItems = buildExitBonusItems(primarySn, ctx);
+    }
+    var penalties = 0, bonuses = 0;
+    penaltyItems.forEach(function(it) { penalties += it.amount; });
+    bonusItems.forEach(function(it) { bonuses += it.amount; });
+    var finalScore = Math.max(0, Math.min(100, multiTF + penalties + bonuses));
 
+    var cls = classifyExitScore(finalScore);
+    var avgC = function(k) { return totalWeight > 0 ? compTotal[k] / totalWeight : 0; };
     return {
-      multiTF_exit_score: multiTF,
-      trend_breakdown: round(pillarTotal.trend_breakdown / totalWeight, 1),
-      momentum_exhaustion: round(pillarTotal.momentum_exhaustion / totalWeight, 1),
-      volume_distribution: round(pillarTotal.volume_distribution / totalWeight, 1),
-      structure_breakdown: round(pillarTotal.structure_breakdown / totalWeight, 1),
-      raw_score: totalWeight > 0 ? round(totalRaw / totalWeight, 1) : null,
-      penalties: totalWeight > 0 ? round(totalPenalties / totalWeight, 1) : 0,
-      bonuses: totalWeight > 0 ? round(totalBonuses / totalWeight, 1) : 0,
-      penalty_items: allPenaltyItems, bonus_items: allBonusItems,
-      classification: classification, signal: signal, action: action,
+      multiTF_exit_score: finalScore,
+      trend_breakdown: round(Math.min(avgC('tf1a') + avgC('tf1b') + avgC('tf1c'), 25), 1),
+      momentum_exhaustion: round(Math.min(avgC('tf2a') + avgC('tf2b') + avgC('tf2c'), 25), 1),
+      volume_distribution: round(Math.min(avgC('tf3a') + avgC('tf3b') + avgC('tf3c'), 25), 1),
+      structure_breakdown: round(Math.min(avgC('tf4a') + avgC('tf4b') + avgC('tf4c'), 25), 1),
+      raw_score: multiTF,
+      penalties: penalties, bonuses: bonuses,
+      penalty_items: penaltyItems, bonus_items: bonusItems,
+      classification: cls.classification, signal: cls.signal, action: cls.action,
       timeframesUsed: activeTFs, details: tfDetails
     };
   }
