@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.21";
+window.__STOX_APP_VERSION = "2.6.25";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -1350,6 +1350,52 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
   );
 }
 
+function scoreMathBlock(r) {
+  if (!r || r.finalScore == null) return null;
+  var f1 = function (v) { return v != null ? Number(v).toFixed(1) : "\u2014"; };
+  var f2 = function (v) { return v != null ? Number(v).toFixed(2) : "\u2014"; };
+  var order = [
+    { key: "weekly", label: "Weekly", nominal: 0.30 },
+    { key: "daily", label: "Daily", nominal: 0.50 },
+    { key: "hourly", label: "Hourly", nominal: 0.20 }
+  ];
+  var present = order.filter(function (t) { var s = r[t.key]; return s && s.total != null; });
+  var wSum = present.reduce(function (a, t) { return a + t.nominal; }, 0);
+  var pct = function (v) {
+    var x = v * 100;
+    return (Math.abs(x - Math.round(x)) < 0.05 ? String(Math.round(x)) : x.toFixed(1)) + "%";
+  };
+  return React.createElement("div", { style: { marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)", fontSize: 10, color: "var(--text5)", lineHeight: 1.7, fontFamily: "var(--font-mono)" } },
+    React.createElement("div", { style: { fontWeight: 700, color: "var(--text6)", fontFamily: "var(--font-heading)", marginBottom: 3 } }, "How the score is calculated"),
+    present.length > 0 && wSum > 0 && present.map(function (t) {
+      var s = r[t.key];
+      var eff = t.nominal / wSum;
+      return React.createElement("div", { key: t.key, style: { display: "flex", alignItems: "center", gap: 6 } },
+        React.createElement("span", { style: { color: s.decision ? s.decision.color : "var(--text3)", fontWeight: 700, width: 52 } }, t.label),
+        React.createElement("span", { style: { color: "var(--text3)", fontWeight: 700 } }, f1(s.total)),
+        React.createElement("span", { style: { color: "var(--text6)" } }, " \u00d7 " + pct(eff) + " = "),
+        React.createElement("span", { style: { color: "var(--text3)", fontWeight: 700 } }, f2(s.total * eff))
+      );
+    }),
+    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginTop: 2, paddingTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 } },
+      React.createElement("span", { style: { color: "var(--text6)" } }, "= Raw"),
+      React.createElement("span", { style: { color: "var(--text3)" } }, r.baseScore != null ? f1(r.baseScore) : "\u2014")
+    ),
+    React.createElement("div", { style: { marginTop: 2 } },
+      React.createElement("span", { style: { color: "var(--text6)" } }, "Raw "),
+      React.createElement("span", { style: { fontWeight: 800, color: "var(--text3)" } }, r.baseScore != null ? f1(r.baseScore) : "\u2014"),
+      (r.penalties || 0) < 0
+        ? React.createElement("span", { style: { color: "#f0473f", fontWeight: 700 } }, " \u2212 " + f1(-(r.penalties || 0)) + " penalties")
+        : React.createElement("span", { style: { color: "var(--text6)" } }, " + " + f1(r.penalties || 0) + " penalties"),
+      (r.bonuses || 0) > 0
+        ? React.createElement("span", { style: { color: "#20c46a", fontWeight: 700 } }, " + " + f1(r.bonuses || 0) + " bonuses")
+        : React.createElement("span", { style: { color: "var(--text6)" } }, " + 0 bonuses"),
+      React.createElement("span", { style: { color: "var(--text6)" } }, " = Final "),
+      React.createElement("span", { style: { fontWeight: 900, color: r.decision ? r.decision.color : "var(--text6)" } }, r.finalScore)
+    )
+  );
+}
+
 function EntryScoreAnalysis({ entry, onBack }) {
   const [activeTF, setActiveTF] = useState("daily");
   const [catFilter, setCatFilter] = useState("all");
@@ -1636,15 +1682,18 @@ function EntryScoreAnalysis({ entry, onBack }) {
         React.createElement("h1", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)", letterSpacing: -0.5 } }, entry.ticker)
       )
     ),
-    React.createElement("div", { className: "stx-card", style: { marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" } },
-      React.createElement("div", null,
-        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 2 } }, "Current Price"),
-        React.createElement("div", { style: { fontSize: 28, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--accent)" } }, price > 0 ? INR(price, 2) : "\u2014")
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 2 } }, "Current Price"),
+          React.createElement("div", { style: { fontSize: 28, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--accent)" } }, price > 0 ? INR(price, 2) : "\u2014")
+        ),
+        React.createElement("div", { style: { textAlign: "right" } },
+          React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600, marginBottom: 2 } }, "Final Score"),
+          React.createElement("div", { style: { fontSize: 36, fontWeight: 900, color: r.decision ? r.decision.color : "var(--text6)", fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore != null ? r.finalScore : "\u2014")
+        )
       ),
-      React.createElement("div", { style: { textAlign: "right" } },
-        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600, marginBottom: 2 } }, "Final Score"),
-        React.createElement("div", { style: { fontSize: 36, fontWeight: 900, color: r.decision ? r.decision.color : "var(--text6)", fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore != null ? r.finalScore : "\u2014")
-      )
+      scoreMathBlock(r),
     ),
     r.decision && React.createElement("div", { className: "stx-card", style: { marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
@@ -3332,7 +3381,16 @@ const EntryScorePanel = ({ shares }) => {
     const stale = entries.filter(e => {
       if (!e.result) return false;
       if (!e.result.hardFilters || !e.result.hardFilters.length) return true;
-      return e.result.hardFilters.some(f => OLD_KEYWORDS.test(f));
+      if (e.result.hardFilters.some(f => OLD_KEYWORDS.test(f))) return true;
+      const tfKeys = ['weekly', 'daily', 'hourly'];
+      for (let k = 0; k < tfKeys.length; k++) {
+        const t = e.result[tfKeys[k]];
+        if (t && t.total != null && t.trendScore != null) {
+          const pillarSum = (t.trendScore || 0) + (t.momentumScore || 0) + (t.volumeScore || 0) + (t.structureScore || 0);
+          if (Math.abs(pillarSum - t.total) > 0.5) return true;
+        }
+      }
+      return false;
     });
     if (!stale.length) return;
     (async () => {
@@ -3741,6 +3799,7 @@ const EntryScorePanel = ({ shares }) => {
           );
         })
       ),
+      scoreMathBlock(r),
       React.createElement("div", { style: { display: "flex", justifyContent: "center", gap: 12, marginTop: 8 } },
         React.createElement("div", { onClick: () => setSnapExpanded(p => ({ ...p, [snap.id]: !p[snap.id] })), style: { fontSize: 9, color: "var(--accent)", cursor: "pointer", fontWeight: 600 } },
           isExp ? "\u25b2 Hide Details" : "\u25bc Show Details"
@@ -3956,6 +4015,7 @@ const EntryScorePanel = ({ shares }) => {
               );
             })
           ),
+          scoreMathBlock(r),
           React.createElement("div", { style: { display: "flex", justifyContent: "center", gap: 12, marginBottom: 6 } },
             React.createElement("div", { onClick: function() { setExpandedIds(function(prev) { var next = Object.assign({}, prev); next[entry.id] = !next[entry.id]; return next; }); }, style: { fontSize: 10, color: "var(--accent)", cursor: "pointer", fontWeight: 600 } },
               isExpanded ? "\u25b2 Hide Details" : "\u25bc Show Details"

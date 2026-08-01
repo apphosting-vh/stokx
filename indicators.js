@@ -2418,17 +2418,17 @@ window.TechIndicators = (function () {
         var tVol = c.obvPvtKvo + c.vwapAnchored + c.vpSqueezeAd;
         var tStruct = c.bbKcDcChandelier + c.ichimoku + c.darvasStructure;
         var tRaw = tTrend + tMom + tVol + tStruct;
-        var s = computeEntryScore(tf.candles, indexCandles);
+        var tCls = classifyScore(tRaw);
         tfDetails.push({
           timeframe: tf.timeframe,
           weight: String(Math.round(weights[label] * 100)) + '%',
-          entryScore: s && s.entry_score != null ? s.entry_score : round(tRaw, 1),
+          entryScore: round(tRaw, 1),
           trend: round(tTrend, 1), momentum: round(tMom, 1),
           volume: round(tVol, 1), structure: round(tStruct, 1),
-          penalties: s ? s.penalties : 0, bonuses: s ? s.bonuses : 0,
+          penalties: 0, bonuses: 0,
           raw_score: round(tRaw, 1),
-          classification: s ? s.classification : cls.classification,
-          allocation_pct: s ? s.allocation_pct : cls.allocation_pct
+          classification: tCls.classification,
+          allocation_pct: tCls.allocation_pct
         });
       }
     });
