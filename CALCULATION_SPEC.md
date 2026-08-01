@@ -1,6 +1,6 @@
 # StoX — Detailed Calculation Specification
 
-**App version:** 2.6.28 · **Cache:** stox-v78 · **Last updated:** 2026-08-01
+**App version:** 2.6.29 · **Cache:** stox-v79 · **Last updated:** 2026-08-01
 
 This is the companion deep-dive to `SPEC.md`. `SPEC.md` summarises the API and
 the rules; this document explains exactly how every number is produced, down to

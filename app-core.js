@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.28";
+window.__STOX_APP_VERSION = "2.6.29";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -3661,8 +3661,21 @@ const EntryScorePanel = ({ shares }) => {
     );
   };
 
-  const tfSection = (label, score) => {
+  const entryStabVal = (score, ind) => {
+    if (score && score.stability != null) return score.stability;
+    if (ind && ind.stabilityScore != null) return Math.round(Math.max(0, Math.min(10, (1 - ind.stabilityScore) * 10)) * 10) / 10;
+    return null;
+  };
+  const entrySpikeVal = (score, ind) => {
+    if (score && score.spike != null) return score.spike;
+    if (ind && ind.spike != null) return ind.spike === true ? 5 : 0;
+    return null;
+  };
+
+  const tfSection = (label, score, ind) => {
     if (!score) return React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", padding: "4px 0" } }, label + ": No data");
+    const sv = entryStabVal(score, ind);
+    const pv = entrySpikeVal(score, ind);
     return React.createElement("div", { style: { marginBottom: 8 } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
         React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "var(--text3)" } }, label),
@@ -3675,8 +3688,8 @@ const EntryScorePanel = ({ shares }) => {
         factorBar("Momentum", score.momentumScore, score.momentumMax, "#a855f7", false),
         factorBar("Volume", score.volumeScore, score.volumeMax, "#06b6d4", false),
         factorBar("Structure", score.structureScore, score.structureMax, "#ec4899", false),
-        score.stability != null && factorBar("Stability", -score.stability, 10, "#22c55e", false),
-        score.spike != null && factorBar("Spike", -score.spike, 10, "#f97316", false)
+        sv != null && factorBar("Stability", -sv, 10, "#22c55e", false),
+        pv != null && factorBar("Spike", -pv, 10, "#f97316", false)
       )
     );
   };
@@ -3703,6 +3716,8 @@ const EntryScorePanel = ({ shares }) => {
     };
     const snapTfSection = (label, score) => {
       if (!score) return null;
+      const sv = entryStabVal(score, ind);
+      const pv = entrySpikeVal(score, ind);
       return React.createElement("div", { style: { marginBottom: 6 } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 } },
           React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: "var(--text3)" } }, label),
@@ -3713,8 +3728,8 @@ const EntryScorePanel = ({ shares }) => {
           snapFactorBar("Momentum", score.momentumScore, score.momentumMax, "#a855f7"),
           snapFactorBar("Volume", score.volumeScore, score.volumeMax, "#06b6d4"),
           snapFactorBar("Structure", score.structureScore, score.structureMax, "#ec4899"),
-          score.stability != null && snapFactorBar("Stability", -score.stability, 10, "#22c55e"),
-          score.spike != null && snapFactorBar("Spike", -score.spike, 10, "#f97316")
+          sv != null && snapFactorBar("Stability", -sv, 10, "#22c55e"),
+          pv != null && snapFactorBar("Spike", -pv, 10, "#f97316")
         )
       );
     };
@@ -4035,9 +4050,9 @@ const EntryScorePanel = ({ shares }) => {
             )
           ),
           isExpanded && React.createElement("div", { style: { marginTop: 8 } },
-            r.daily && tfSection("Daily Breakdown", r.daily),
-            r.weekly && tfSection("Weekly Breakdown", r.weekly),
-            r.hourly && tfSection("Hourly Breakdown", r.hourly),
+            r.daily && tfSection("Daily Breakdown", r.daily, entry.indicators),
+            r.weekly && tfSection("Weekly Breakdown", r.weekly, entry.indicators),
+            r.hourly && tfSection("Hourly Breakdown", r.hourly, entry.indicators),
             r.hardFilters && r.hardFilters.length > 0 && React.createElement("div", { style: { marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.15)" } },
               React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "var(--text3)", marginBottom: 4 } }, "Penalties & Bonuses"),
               r.hardFilters.map(function(f, i) {
