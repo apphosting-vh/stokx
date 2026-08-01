@@ -6090,13 +6090,29 @@ function InfoPage() {
           React.createElement("p", { style: subSub }, "10.3 Darvas + HMA + KAMA + Fib + Pivot + ZigZag + Chop + MTF (6 pts)"),
           React.createElement("p", null, "Darvas breakout (+1.5) / above mid (+0.5). Price > HMA(16), HMA rising. Price > KAMA(10), KAMA rising. Fib close to 0.382/0.5/0.618 + rising. Price > Pivot P, > R1. Choppiness <38.2. ZigZag UP. MTF Alignment >=80 / >=60."),
           React.createElement("p", { style: subH }, "Penalties (-max)"),
-          React.createElement("p", null, "RSI >80 (-5). Price rising + volume declining 5d (-8). Weekly bearish + daily bullish clash (-10). Near resistance <1% (-5). Squeeze >10 bars (-3). High beta + high ATR (-3)."),
+          React.createElement("p", null, "RSI >80 (-5). Price rising + volume declining 5d (-8). Weekly bearish + daily bullish clash (-10). Near resistance <1% (-5). Squeeze >10 bars (-3). High beta + high ATR (-3). Spike sub-score >=7 / >=4 / >=2 (-15 / -8 / -4). Stability sub-score >=7 / >=5 (-10 / -5). Dominance >0.6 (-12, suppressed when spike sub-score >=4)."),
           React.createElement("p", { style: subH }, "Bonuses (+max)"),
-          React.createElement("p", null, "Donchian breakout + high volume (+5). All TFs bullish D/W/H (+5). Index trend score >60 (+3). Accumulation + MTF>80 (+3). RS Mansfield>5 + Aroon>50 (+3). Above pivot R1 + fib 0.618 (+2). ROC(12) rising momentum (+3)."),
+          React.createElement("p", null, "Donchian breakout + high volume (+5, not on spike day). All TFs bullish D/W/H (+5). Index trend score >60 (+3). Accumulation + MTF>80 (+3). RS Mansfield>5 + Aroon>50 (+3). Above pivot R1 + fib 0.618 (+2). ROC(12) rising momentum (+3). Smooth steady climb (efficiency >0.6, not spike day, +3)."),
           React.createElement("p", { style: subH }, "Classification"),
           React.createElement("p", null, "80+ STRONG_BUY (100% alloc) | 65+ BUY (70%) | 50+ WATCHLIST (40%) | 35+ NEUTRAL (0%) | <35 AVOID (0%)"),
           React.createElement("p", { style: subH }, "MTF Weights"),
           React.createElement("p", null, "Daily 50% | Weekly 30% | Hourly 20%")
+        ),
+
+        // SPIKE / STABILITY GUARD
+        React.createElement(MethSection, { label: "Spike & Stability Guard", stateKey: "spike" }),
+        React.createElement(MethContent, { stateKey: "spike" },
+          React.createElement("p", { style: subH }, "Daily anti-chase filter (computed once per session, on top of the per-TF sub-scores)"),
+          React.createElement("p", { style: subSub }, "Spike sub-score (per TF)"),
+          React.createElement("p", null, "Volatility-adaptive spike detection (calcDetectSpike): latest-bar spike +5, prior-bar spike +3, any spike in the last 20 bars +2 (cap 10). Penalty -15 / -8 / -4 at sub-score >=7 / >=4 / >=2."),
+          React.createElement("p", { style: subSub }, "Stability sub-score (per TF)"),
+          React.createElement("p", null, "(1 - stability score) x 10. Penalty -10 / -5 at >=7 / >=5. A smooth steady climb has zero variance and is scored as fully stable - no penalty."),
+          React.createElement("p", { style: subSub }, "Hard Gate \u2014 todaySpike"),
+          React.createElement("p", null, "Latest daily bar is a volatility-adaptive spike (|move| > 2.5x rolling std(20) AND > 2.5x ATR14%) or an open gap > max(3.5%, 1.5x ATR%). Caps the final score at 49 (NEUTRAL) after all penalties/bonuses - never chase an abnormal single-session print."),
+          React.createElement("p", { style: subSub }, "Dominance Ratio"),
+          React.createElement("p", null, "Largest single-day |move| / |net 5-day move| (1.0 if |net| < 0.5%). Penalty -12 when > 0.6. Suppressed when the spike sub-score is >=4: the latest/prior-bar spike tiers already penalize that session, so one abnormal session is never double-penalized."),
+          React.createElement("p", { style: subSub }, "Efficiency Bonus"),
+          React.createElement("p", null, "Efficiency ratio 10 = |close - close[10]| / sum|daily diffs| (the KAMA ratio). Bonus +3 when > 0.6 and not a spike day (smooth steady climb). Choppy paths are covered by the stability sub-score, so there is no separate ER penalty.")
         ),
 
         // EXIT SCORE
@@ -6284,6 +6300,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally. No data is sent to any server."),
         React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.25"),
+        React.createElement("p", { style: { marginTop: 4, color: "var(--text5)" } }, "Latest: Spike & Stability Guard \u2014 todaySpike hard gate (cap 49), dominance penalty, and smooth-climb efficiency bonus with no double-counted penalties."),
         React.createElement("p", null, "Data: Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),
