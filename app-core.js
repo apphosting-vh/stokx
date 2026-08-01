@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.29";
+window.__STOX_APP_VERSION = "2.7.1";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -1829,6 +1829,27 @@ function EntryScoreAnalysis({ entry, onBack }) {
         )
       ),
       !activeScore && React.createElement("div", { style: { textAlign: "center", padding: 16, color: "var(--text6)", fontSize: 11 } }, "No score data for " + activeTF)
+    ),
+    (r.todaySpike || r.dominanceRatio != null || r.efficiencyRatio10 != null) && React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
+      React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text3)", marginBottom: 8 } }, "Spike / Stability Guard"),
+      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text5)" } },
+          React.createElement("span", null, "Today spike (session \u00b7 gap)"),
+          React.createElement("span", { style: { fontWeight: 700, color: r.todaySpike ? "#f97316" : "#22c55e" } }, r.todaySpike ? "\u2717 Capped at Neutral" : "\u2713 Clear")
+        ),
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text5)" } },
+          React.createElement("span", null, "Session return / Gap %"),
+          React.createElement("span", { style: { fontWeight: 600, color: "var(--text3)", fontFamily: "var(--font-mono)" } }, _fmt(r.sessionReturnPct) + "% / " + _fmt(r.gapPct) + "%")
+        ),
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text5)" } },
+          React.createElement("span", null, "Dominance ratio (5d)"),
+          React.createElement("span", { style: { fontWeight: 700, color: r.dominanceRatio != null && r.dominanceRatio > 0.6 ? "#f0473f" : "var(--text3)", fontFamily: "var(--font-mono)" } }, _fmt(r.dominanceRatio))
+        ),
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text5)" } },
+          React.createElement("span", null, "Efficiency ratio (10d)"),
+          React.createElement("span", { style: { fontWeight: 700, color: r.efficiencyRatio10 != null && r.efficiencyRatio10 > 0.6 ? "#20c46a" : "var(--text3)", fontFamily: "var(--font-mono)" } }, _fmt(r.efficiencyRatio10))
+        )
+      )
     ),
     r.hardFilters && r.hardFilters.length > 0 && React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
       React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text3)", marginBottom: 8 } }, "Penalties & Bonuses"),
@@ -4009,10 +4030,14 @@ const EntryScorePanel = ({ shares }) => {
       var renderEntryCard = function(entry) {
         var r = entry.result;
         var isExpanded = !!expandedIds[entry.id];
+        var capStock = NIFTY_100_UNIQUE.find(function(s) { return s.t === entry.ticker.replace(/\.NS$|\.BO$/, "") + ".NS"; });
         return React.createElement("div", { key: entry.id, className: "stx-card", style: { border: "2px solid " + r.decision.color + "33" } },
           React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 } },
             React.createElement("div", null,
-              React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, entry.ticker),
+              React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+                React.createElement("span", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, entry.ticker),
+                capStock && capStock.cap ? React.createElement("span", { style: { padding: "2px 7px", borderRadius: 4, background: capStock.cap === "L" ? "rgba(59,130,246,.12)" : "rgba(168,85,247,.12)", color: capStock.cap === "L" ? "#3b82f6" : "#a855f7", border: "1px solid " + (capStock.cap === "L" ? "rgba(59,130,246,.25)" : "rgba(168,85,247,.25)"), fontWeight: 700, fontSize: 9, letterSpacing: 0.3 } }, capStock.cap === "L" ? "Large" : "Mid") : null
+              ),
               React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 2 } }, "Added " + new Date(entry.addedAt).toLocaleDateString() + " \u00b7 " + (entry.currentPrice > 0 ? INR(entry.currentPrice) : (r.lastClose ? INR(r.lastClose) + " (Last Close)" : "Last Close")))
             ),
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
@@ -4027,6 +4052,7 @@ const EntryScorePanel = ({ shares }) => {
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "6px 10px", borderRadius: 8, background: r.decision.color + "12" } },
             React.createElement("span", { style: { fontSize: 12, fontWeight: 800, color: r.decision.color, fontFamily: "var(--font-heading)" } }, r.decision.label),
             React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--text5)", fontStyle: "italic" } }, r.decision.position),
+            r.todaySpike && React.createElement("span", { title: "Abnormal single-session spike or gap \u2014 score capped at Neutral", style: { fontSize: 8, fontWeight: 700, color: "#f97316", padding: "2px 5px", borderRadius: 3, background: "rgba(249,115,22,.12)", border: "1px solid rgba(249,115,22,.25)" } }, "\u26a0 Spike Day"),
             r.hardFilters && r.hardFilters.length > 0 && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: "#ef4444", padding: "2px 5px", borderRadius: 3, background: "rgba(239,68,68,.1)" } }, r.hardFilters.length + " filter" + (r.hardFilters.length > 1 ? "s" : ""))
           ),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 } },
@@ -4297,6 +4323,11 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
     bonuses: multi.bonuses || 0,
     hardFilters: [],
     lastClose: null,
+    todaySpike: !!multi.todaySpike,
+    sessionReturnPct: multi.sessionReturnPct != null ? multi.sessionReturnPct : null,
+    gapPct: multi.gapPct != null ? multi.gapPct : null,
+    dominanceRatio: multi.dominanceRatio != null ? multi.dominanceRatio : null,
+    efficiencyRatio10: multi.efficiencyRatio10 != null ? multi.efficiencyRatio10 : null,
     weekly: null, daily: null, hourly: null
   };
   if (multi.details) multi.details.forEach(function(d) {

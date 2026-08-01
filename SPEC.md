@@ -1,6 +1,6 @@
 # StoX — Technical Indicator & Scoring Specification
 
-> **App version:** 2.6.29  
+> **App version:** 2.7.0  
 > **Last updated:** 2026-08-01
 
 ---
@@ -222,8 +222,14 @@ where:
 | 9 | Spike sub-score ≥ 2 (weighted, minor recent spike) | −4 |
 | 10 | Stability sub-score ≥ 7 (erratic, weighted) | −10 |
 | 11 | Stability sub-score ≥ 5 (moderately erratic, weighted) | −5 |
+| 12 | `dominance_ratio` > 0.6 **and spike sub-score < 4** (one session = >60% of the net 5-day move) | −12 |
 
 **Spike sub-score (0–10, higher = worse):** per TF, `calcDetectSpike(candles, 20, 2.5, 2.5)` → latest spike +5, prior-bar spike +3, any spike in the last 20 bars +2 (capped 10). **Stability sub-score (0–10, higher = worse):** `(1 − calcStabilityScore(candles, lookback)) × 10`, lookback 10 for H/D and 6 for W. Both are weighted `H×0.20 + D×0.50 + W×0.30` (renormalized over available TFs) before the thresholds above are applied.
+
+**Spike/Stability Guard (daily, once per session):** `computeSpikeGuard(dailyCandles)` returns `todaySpike`, `dominance_ratio`, `efficiency_ratio_10`.
+- `todaySpike` = latest-bar spike (volatility-adaptive, see above) **or** open-gap trigger `|gap%| > max(3.5, 1.5·ATR%)`. When true, a **hard gate** caps the final score at **49 (NEUTRAL)** after all penalties/bonuses — never chase an abnormal single-session print.
+- `dominance_ratio` = largest single-day `|move%|` ÷ `|net 5-day move%|` (1.0 if `|net| < 0.5%`); penalty −12 when > 0.6. Suppressed when the spike sub-score ≥ 4 (latest/prior-bar spike tiers already penalize the same session — no double-count); it fires only when the dominant session is *not* the latest/prior bar.
+- `efficiency_ratio_10` = `|close − close[10]|` ÷ Σ`|diffs|` over 10 (the KAMA ER); bonus **+3** when > 0.6 and `not todaySpike` (smooth steady climb). Choppy paths are covered by the stability sub-score, so no separate ER penalty.
 
 The single-TF function proxies weekly trend with `close < SMA50` and daily bullish with `close > HMA16`; the multi-TF path recomputes rule 3 on real weekly/daily data (close vs own EMA21).
 
@@ -231,12 +237,13 @@ The single-TF function proxies weekly trend with `close < SMA50` and daily bulli
 
 | # | Condition | Bonus |
 |---|-----------|-------|
-| 1 | Price > Donchian (20) upper AND volume > 1.5× avg(20) (20-day-high breakout on volume) | +5 |
+| 1 | Price > Donchian (20) upper AND volume > 1.5× avg(20) (20-day-high breakout on volume) — only when `today_spike` is false | +5 |
 | 2 | All timeframes bullish (H/D/W close > own EMA21) | +5 |
 | 3 | `index_trend_score` > 60 | +3 |
 | 4 | Accumulation label AND MTF Alignment > 80 | +3 |
 | 5 | RS Mansfield > 5 AND Aroon Osc > 50 | +3 |
 | 6 | Price > Pivot R1 AND > Fib 0.618 | +2 |
+| 7 | `efficiency_ratio_10` > 0.6 AND not `today_spike` (smooth, steady, low-noise climb) | +3 |
 
 `index_trend_score` (0–100) = % of: EMA9 > EMA21 > EMA50 on the daily index, MACD > signal on the daily index, and price > EMA21 on the weekly index. The earnings-clarity bonus from the original draft is dropped entirely.
 

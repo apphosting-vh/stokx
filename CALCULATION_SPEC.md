@@ -1,6 +1,6 @@
 # StoX — Detailed Calculation Specification
 
-**App version:** 2.6.29 · **Cache:** stox-v79 · **Last updated:** 2026-08-01
+**App version:** 2.7.0 · **Cache:** stox-v81 · **Last updated:** 2026-08-01
 
 This is the companion deep-dive to `SPEC.md`. `SPEC.md` summarises the API and
 the rules; this document explains exactly how every number is produced, down to
@@ -487,17 +487,36 @@ raw scale.
 | 6 | `beta > 1.5` and `ATR% = atr14/c > 3%` | −3 |
 | 7 | spike sub-score ≥ 7 / ≥ 4 / ≥ 2 | −15 / −8 / −4 |
 | 8 | stability sub-score ≥ 7 / ≥ 5 | −10 / −5 |
+| 9 | `dominanceRatio > 0.6` and spike sub-score < 4 (see §6.5) | −12 |
 
 **Bonuses (`buildEntryBonusItems`):**
 
 | # | Condition | Pts |
 |---|---|---|
-| 1 | `c > dcUpper` and last-bar volume > 1.5 × 20-bar average | +5 |
+| 1 | `c > dcUpper` and last-bar volume > 1.5 × 20-bar average (only when `todaySpike` is false) | +5 |
 | 2 | all three TFs bullish (single-TF proxies: H = `c>hma16`, D = `c>ema21`, W = `c>sma50`) | +5 |
 | 3 | `indexTrendScore > 60` | +3 |
 | 4 | `accumDistLabel == 'ACCUMULATION'` and `mtfAlign > 80` | +3 |
 | 5 | `rsMansfield > 5` and `aroonOsc > 50` | +3 |
 | 6 | `c > pivotR1` and `c > fib 0.618` | +2 |
+| 7 | `efficiencyRatio10 > 0.6` and `not todaySpike` (smooth steady climb) | +3 |
+
+### 6.5 Spike / Stability Guard (hybrid anti-chase filter)
+
+Computed once per session on the **daily** candles by `computeSpikeGuard(candles)`:
+
+| Metric | Formula | Use |
+|---|---|---|
+| `todaySpike` | latest-bar detection (`calcDetectSpike`: `|ret| > 2.5·rollingStd(20)` **and** `> 2.5·ATR14%`) **or** open-gap trigger `|gap%| > max(3.5, 1.5·ATR%)` | **hard gate**: `final = min(final, 49)` → never above NEUTRAL on the day of an abnormal print |
+| `dominanceRatio` | largest single-day `|move%|` ÷ `|net 5-day move%|` (1.0 if `|net| < 0.5%`) | penalty **−12** when `> 0.6` **and spike sub-score < 4** |
+| `efficiencyRatio10` | `|close − close[10]|` ÷ Σ`|diffs|` over 10 (identical to the KAMA efficiency ratio) | bonus **+3** when `> 0.6` and `not todaySpike` |
+
+The gate is applied after all penalties/bonuses in both `computeEntryScore` and `computeMultiTFEntryScore`; classification is re-derived from the capped score. The graded spike/stability sub-scores (6.3) remain per-timeframe and weighted across H/D/W; dominance/ER/gate are daily-only.
+
+**No-overlap rules (anti-double-count):**
+- The dominance penalty **does not fire** when the spike sub-score is ≥ 4: in that case the dominant session is the latest or prior bar, which the spike tiers (−15/−8) already penalize. Dominance fires only for a dominant session that is *not* the latest/prior bar (spike sub-score < 4), so one abnormal session is never penalized twice.
+- The gate (hard cap) and the spike penalty are complementary: the cap stops BUY on a strong-pillar spike day; the −15 tier keeps a moderate spike day at ≈ 45 (NEUTRAL or below) even when pillars are weak. Both rely on the same `todaySpike` detection, so they never conflict.
+- `calcStabilityScore`: a zero-variance path (`stdRet === 0`, e.g. perfectly smooth climb) returns **1** (most stable → no stability penalty). A non-positive mean still returns 0.
 
 ---
 

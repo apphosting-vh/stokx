@@ -1186,7 +1186,8 @@ window.TechIndicators = (function () {
     var stdRet = 0;
     for (var i = 0; i < rets.length; i++) stdRet += Math.pow(rets[i] - meanRet, 2);
     stdRet = Math.sqrt(stdRet / (rets.length - 1));
-    if (meanRet <= 0 || stdRet === 0) return 0;
+    if (stdRet === 0) return 1;
+    if (meanRet <= 0) return 0;
     var posFrac = 0;
     for (var i = 0; i < rets.length; i++) if (rets[i] > 0) posFrac++;
     posFrac /= rets.length;
@@ -1194,6 +1195,59 @@ window.TechIndicators = (function () {
     var cvScore = Math.max(0, 1 - cv / 2);
     var score = 0.6 * posFrac + 0.4 * cvScore;
     return round(Math.max(0, Math.min(1, score)), 2);
+  }
+
+  /* ── Spike/Stability Guard (hybrid of our volatility-adaptive detection + spec 11.1) ──
+     Daily-only, once per session. todaySpike = our latest-bar spike (2.5x rolling-std
+     AND 2.5x ATR%) OR the spec's open-gap trigger (|gap| > max(3.5, 1.5 x ATR%)).
+     dominanceRatio = largest single-day |move| / |net 5-day move| (1.0 if net < 0.5%).
+     efficiencyRatio10 = KAMA efficiency ratio, n=10 (net move / total path length). */
+  function computeSpikeGuard(candles) {
+    var guard = { todaySpike: false, sessionReturnPct: null, gapPct: null, dominanceRatio: null, efficiencyRatio10: null };
+    try {
+      if (!candles || candles.length < 12) return guard;
+      var cl = closes(candles);
+      var L = cl.length;
+      var cLast = cl[L - 1], cPrev = cl[L - 2];
+      if (cPrev === 0) return guard;
+      var atr14 = calcATR(candles, 14);
+      var atrVal = atr14 && atr14[atr14.length - 1] != null ? atr14[atr14.length - 1] : 0;
+      var atrPct = atrVal > 0 ? atrVal / cPrev * 100 : 0;
+
+      var sessionReturnPct = (cLast - cPrev) / cPrev * 100;
+      var openLast = opens(candles)[L - 1];
+      var gapPct = openLast != null ? (openLast - cPrev) / cPrev * 100 : 0;
+      guard.sessionReturnPct = round(sessionReturnPct, 2);
+      guard.gapPct = round(gapPct, 2);
+
+      var spikeArr = calcDetectSpike(candles, 20, 2.5, 2.5);
+      var latestSpike = false;
+      if (spikeArr && spikeArr.length) {
+        for (var i = spikeArr.length - 1; i >= 0; i--) { if (spikeArr[i] === true || spikeArr[i] === false) { latestSpike = spikeArr[i] === true; break; } }
+      }
+      var gapSpike = Math.abs(gapPct) > Math.max(3.5, 1.5 * atrPct);
+      guard.todaySpike = latestSpike || gapSpike;
+
+      var nWindow = 5;
+      if (L >= nWindow + 1) {
+        var largest = 0, pctCh;
+        for (var i = L - nWindow; i < L; i++) {
+          pctCh = cl[i - 1] !== 0 ? (cl[i] - cl[i - 1]) / cl[i - 1] * 100 : 0;
+          if (Math.abs(pctCh) > largest) largest = Math.abs(pctCh);
+        }
+        var net5 = cl[L - 1 - nWindow] !== 0 ? (cLast - cl[L - 1 - nWindow]) / cl[L - 1 - nWindow] * 100 : 0;
+        guard.dominanceRatio = Math.abs(net5) < 0.5 ? 1 : round(largest / Math.abs(net5), 2);
+      }
+
+      var erN = 10;
+      if (L >= erN + 1) {
+        var direction = Math.abs(cLast - cl[L - 1 - erN]);
+        var volat = 0;
+        for (var i = L - erN; i < L; i++) volat += Math.abs(cl[i] - cl[i - 1]);
+        guard.efficiencyRatio10 = volat > 0 ? round(direction / volat, 3) : 0;
+      }
+    } catch (e) {}
+    return guard;
   }
   /* --------------------------------------------------------------------------
      Compute all indicators at once
@@ -2225,6 +2279,7 @@ window.TechIndicators = (function () {
     var stabSub = opts.stabSub != null ? opts.stabSub : 0;
     if (stabSub >= 7) items.push({ reason: "Erratic price action (stability)", amount: -10 });
     else if (stabSub >= 5) items.push({ reason: "Moderately erratic price action (stability)", amount: -5 });
+    if (opts.dominanceRatio != null && opts.dominanceRatio > 0.6 && spikeSub < 4) items.push({ reason: "One session dominates the 5-day move (dominance)", amount: -12 });
     return items;
   }
 
@@ -2236,7 +2291,7 @@ window.TechIndicators = (function () {
         var avgVol = 0, avgVolCount = 0;
         for (var i = Math.max(0, sn.cl.length - 20); i < sn.cl.length; i++) { avgVol += sn.vo[i]; avgVolCount++; }
         avgVol = avgVolCount > 0 ? avgVol / avgVolCount : 0;
-        if (sn.vo[sn.cl.length - 1] > 1.5 * avgVol) items.push({ reason: "Donchian breakout + high volume", amount: 5 });
+        if (sn.vo[sn.cl.length - 1] > 1.5 * avgVol && !opts.todaySpike) items.push({ reason: "Donchian breakout + high volume", amount: 5 });
       }
     }
     if (opts.hourlyBullish && opts.dailyBullish && opts.weeklyBullish) items.push({ reason: "All TFs bullish (D/W/H)", amount: 5 });
@@ -2244,6 +2299,7 @@ window.TechIndicators = (function () {
     if (sn.accumDistLabel === 'ACCUMULATION' && sn.mtfAlign !== null && sn.mtfAlign > 80) items.push({ reason: "Accumulation + MTF>80", amount: 3 });
     if (sn.rsMansfield !== null && sn.aroonOsc !== null && sn.rsMansfield > 5 && sn.aroonOsc > 50) items.push({ reason: "RS Mansfield>5 + Aroon>50", amount: 3 });
     if (sn.pivotR1 !== null && sn.fibLevels !== null && sn.fibLevels['0.618'] !== null && sn.c > sn.pivotR1 && sn.c > sn.fibLevels['0.618']) items.push({ reason: "Above pivot R1 + fib 0.618", amount: 2 });
+    if (opts.efficiencyRatio10 != null && opts.efficiencyRatio10 > 0.6 && !opts.todaySpike) items.push({ reason: "Smooth steady climb (efficiency)", amount: 3 });
     return items;
   }
 
@@ -2254,6 +2310,7 @@ window.TechIndicators = (function () {
     if (!candles || candles.length < 50) return { entry_score: null, reason: 'insufficient_data', need: 50, got: candles ? candles.length : 0 };
     var comps = scoreEntryComponentsForTF(candles, indexCandles);
     var sn = comps.sn;
+    var guard = computeSpikeGuard(candles);
 
     /* ── compute pillar scores from the 12 sub-scores ── */
     var trendScore = comps.maStack + comps.macdTsiStcAo + comps.adxStPsarViAroon;
@@ -2267,7 +2324,8 @@ window.TechIndicators = (function () {
       weeklyTrend: sn.sma50 !== null ? (sn.c < sn.sma50 ? 'bearish' : 'bullish') : 'neutral',
       dailyBullish: sn.hma16 !== null && sn.c > sn.hma16,
       spikeSub: comps.spike,
-      stabSub: comps.stability
+      stabSub: comps.stability,
+      dominanceRatio: guard.dominanceRatio
     });
 
     /* ── bonuses (Section 11) ── */
@@ -2276,7 +2334,9 @@ window.TechIndicators = (function () {
       hourlyBullish: sn.c > sn.hma16,
       dailyBullish: sn.c > sn.ema21,
       weeklyBullish: sn.sma50 !== null && sn.c > sn.sma50,
-      idxTrendScore: idxTrendScore
+      idxTrendScore: idxTrendScore,
+      efficiencyRatio10: guard.efficiencyRatio10,
+      todaySpike: guard.todaySpike
     });
 
     var penalties = 0;
@@ -2285,6 +2345,9 @@ window.TechIndicators = (function () {
     bonusItems.forEach(function(it) { bonuses += it.amount; });
 
     var finalScore = Math.max(0, Math.min(100, rawTotal + penalties + bonuses));
+
+    /* ── Spike gate (hard override): never score above NEUTRAL on the day of an abnormal print ── */
+    if (guard.todaySpike) finalScore = Math.min(finalScore, 49);
 
     /* ── classification ── */
     var cls = classifyScore(finalScore);
@@ -2297,6 +2360,7 @@ window.TechIndicators = (function () {
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
       penalty_items: penaltyItems, bonus_items: bonusItems,
       classification: cls.classification, signal: cls.signal, allocation_pct: cls.allocation_pct,
+      todaySpike: guard.todaySpike, dominanceRatio: guard.dominanceRatio, efficiencyRatio10: guard.efficiencyRatio10,
       details: {
         maStack: round(comps.maStack, 2), macdTsiStcAo: round(comps.macdTsiStcAo, 2), adxStPsarViAroon: round(comps.adxStPsarViAroon, 2),
         rsiStochRsiWillR: round(comps.rsiStochRsiWillR, 2), cciRocMomFi: round(comps.cciRocMomFi, 2), mfiCmf: round(comps.mfiCmf, 2),
@@ -2379,11 +2443,13 @@ window.TechIndicators = (function () {
     var weeklyBearish = weeklyCl !== null && weeklyEma21 !== null && weeklyCl < weeklyEma21;
     var dailyBullish = dailyCl !== null && dailyEma21 !== null && dailyCl > dailyEma21;
     var baseSn = (perTF.D || perTF.H || perTF.W).sn;
+    var guard = computeSpikeGuard((dTF && dTF.candles) || (baseTF && baseTF.candles) || null);
     var penaltyItems = buildEntryPenaltyItems(baseSn, {
       weeklyTrend: weeklyBearish ? 'bearish' : 'bullish',
       dailyBullish: dailyBullish,
       spikeSub: comps.spike,
-      stabSub: comps.stability
+      stabSub: comps.stability,
+      dominanceRatio: guard.dominanceRatio
     });
 
     /* ── Section 11 bonuses (real H/D/W bullishness + index D+W trend score) ── */
@@ -2396,7 +2462,9 @@ window.TechIndicators = (function () {
       hourlyBullish: hourlyBullish,
       dailyBullish: dailyBullish,
       weeklyBullish: weeklyBullish,
-      idxTrendScore: idxTrendScore
+      idxTrendScore: idxTrendScore,
+      efficiencyRatio10: guard.efficiencyRatio10,
+      todaySpike: guard.todaySpike
     });
 
     var penalties = 0;
@@ -2405,6 +2473,10 @@ window.TechIndicators = (function () {
     bonusItems.forEach(function (it) { bonuses += it.amount; });
 
     var finalScore = Math.max(0, Math.min(100, rawTotal + penalties + bonuses));
+
+    /* ── Spike gate (hard override): never score above NEUTRAL on the day of an abnormal print ── */
+    if (guard.todaySpike) finalScore = Math.min(finalScore, 49);
+
     var cls = classifyScore(finalScore);
 
     /* ── per-TF detail rows for the UI / compat shim ── */
@@ -2445,6 +2517,8 @@ window.TechIndicators = (function () {
       classification: cls.classification, signal: cls.signal, allocation_pct: cls.allocation_pct,
       indexTrendScore: idxTrendScore,
       spike: round(comps.spike, 1), stability: round(comps.stability, 1),
+      todaySpike: guard.todaySpike, sessionReturnPct: guard.sessionReturnPct, gapPct: guard.gapPct,
+      dominanceRatio: guard.dominanceRatio, efficiencyRatio10: guard.efficiencyRatio10,
       timeframesUsed: tfDetails.length, details: tfDetails
     };
   }
