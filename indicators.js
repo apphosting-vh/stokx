@@ -2427,6 +2427,7 @@ window.TechIndicators = (function () {
           volume: round(tVol, 1), structure: round(tStruct, 1),
           penalties: 0, bonuses: 0,
           raw_score: round(tRaw, 1),
+          spike: round(c.spike, 1), stability: round(c.stability, 1),
           classification: tCls.classification,
           allocation_pct: tCls.allocation_pct
         });
@@ -2443,6 +2444,7 @@ window.TechIndicators = (function () {
       penalty_items: penaltyItems, bonus_items: bonusItems,
       classification: cls.classification, signal: cls.signal, allocation_pct: cls.allocation_pct,
       indexTrendScore: idxTrendScore,
+      spike: round(comps.spike, 1), stability: round(comps.stability, 1),
       timeframesUsed: tfDetails.length, details: tfDetails
     };
   }

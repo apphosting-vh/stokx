@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.6.26";
+window.__STOX_APP_VERSION = "2.6.28";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -1478,6 +1478,10 @@ function EntryScoreAnalysis({ entry, onBack }) {
 
   const activeScore = r[activeTF] || null;
   const activeInd = computedInd[activeTF] || null;
+  const stabVal = activeScore && activeScore.stability != null ? activeScore.stability
+    : (activeInd && activeInd.stabilityScore != null ? Math.round(Math.max(0, Math.min(10, (1 - activeInd.stabilityScore) * 10)) * 10) / 10 : null);
+  const spikeVal = activeScore && activeScore.spike != null ? activeScore.spike
+    : (activeInd && activeInd.spike != null ? (activeInd.spike === true ? 5 : 0) : null);
 
   const factorBar = (label, val, max, color) => {
     if (val == null || max == null) return null;
@@ -1737,7 +1741,9 @@ function EntryScoreAnalysis({ entry, onBack }) {
           factorBar("Trend", activeScore.trendScore, activeScore.trendMax, "#4a8fe0"),
           factorBar("Momentum", activeScore.momentumScore, activeScore.momentumMax, "#a855f7"),
           factorBar("Volume", activeScore.volumeScore, activeScore.volumeMax, "#06b6d4"),
-          factorBar("Structure", activeScore.structureScore, activeScore.structureMax, "#ec4899")
+          factorBar("Structure", activeScore.structureScore, activeScore.structureMax, "#ec4899"),
+          stabVal != null && factorBar("Stability", -stabVal, 10, "#22c55e"),
+          spikeVal != null && factorBar("Spike", -spikeVal, 10, "#f97316")
         ),
         React.createElement("div", { style: { borderTop: "1px solid var(--border)", paddingTop: 10 } },
           React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text4)", marginBottom: 8 } }, "Technical Indicators"),
@@ -3668,7 +3674,9 @@ const EntryScorePanel = ({ shares }) => {
         factorBar("Trend", score.trendScore, score.trendMax, "#3b82f6", false),
         factorBar("Momentum", score.momentumScore, score.momentumMax, "#a855f7", false),
         factorBar("Volume", score.volumeScore, score.volumeMax, "#06b6d4", false),
-        factorBar("Structure", score.structureScore, score.structureMax, "#ec4899", false)
+        factorBar("Structure", score.structureScore, score.structureMax, "#ec4899", false),
+        score.stability != null && factorBar("Stability", -score.stability, 10, "#22c55e", false),
+        score.spike != null && factorBar("Spike", -score.spike, 10, "#f97316", false)
       )
     );
   };
@@ -3704,7 +3712,9 @@ const EntryScorePanel = ({ shares }) => {
           snapFactorBar("Trend", score.trendScore, score.trendMax, "#3b82f6"),
           snapFactorBar("Momentum", score.momentumScore, score.momentumMax, "#a855f7"),
           snapFactorBar("Volume", score.volumeScore, score.volumeMax, "#06b6d4"),
-          snapFactorBar("Structure", score.structureScore, score.structureMax, "#ec4899")
+          snapFactorBar("Structure", score.structureScore, score.structureMax, "#ec4899"),
+          score.stability != null && snapFactorBar("Stability", -score.stability, 10, "#22c55e"),
+          score.spike != null && snapFactorBar("Spike", -score.spike, 10, "#f97316")
         )
       );
     };
@@ -4282,7 +4292,8 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
       momentumScore: d.momentum, momentumMax: 30,
       volumeScore: d.volume, volumeMax: 20,
       structureScore: d.structure, structureMax: 20,
-      penalties: d.penalties, bonuses: d.bonuses, raw_score: d.raw_score
+      penalties: d.penalties, bonuses: d.bonuses, raw_score: d.raw_score,
+      spike: d.spike != null ? d.spike : null, stability: d.stability != null ? d.stability : null
     };
     if (d.timeframe === 'W' || d.timeframe === 'weekly' || d.timeframe === '1W') out.weekly = scoreObj;
     else if (d.timeframe === 'D' || d.timeframe === 'daily' || d.timeframe === '1D') out.daily = scoreObj;
