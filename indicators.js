@@ -1415,7 +1415,8 @@ window.TechIndicators = (function () {
 
     var idxEntryScoreVal = null;
     try { if (indexCandles && indexCandles.length >= 50) { var idxEntryRes = computeEntryScore(indexCandles); if (idxEntryRes && idxEntryRes.entry_score != null) idxEntryScoreVal = idxEntryRes.entry_score; } } catch(e) {}
-    var ctx = { indexTrendScore: idxEntryScoreVal, entryPrice: position.entry_price || sn.c, currentPrice: sn.c, holdingDays: position.holding_days || 0, entryScore: position.entry_score != null ? position.entry_score : 50 };
+    var guard = computeSpikeGuard(candles);
+    var ctx = { indexTrendScore: idxEntryScoreVal, entryPrice: position.entry_price || sn.c, currentPrice: sn.c, holdingDays: position.holding_days || 0, entryScore: position.entry_score != null ? position.entry_score : 50, guard: guard };
 
     var penaltyItems = buildExitPenaltyItems(sn, ctx);
     var bonusItems = buildExitBonusItems(sn, ctx);
@@ -1433,6 +1434,9 @@ window.TechIndicators = (function () {
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
       penalty_items: penaltyItems, bonus_items: bonusItems,
       classification: cls.classification, signal: cls.signal, action: cls.action,
+      todaySpike: guard.todaySpike, sessionReturnPct: guard.sessionReturnPct, gapPct: guard.gapPct,
+      dominanceRatio: guard.dominanceRatio, efficiencyRatio10: guard.efficiencyRatio10,
+      stabilityScore: round(sn.stabilityScore, 2), rsi14: round(sn.rsi14, 1), distDayRatio: round(sn.distDayRatio, 2),
       details: {
         maBreakdown: round(comps.tf1a, 2), macdTsiStcAoExit: round(comps.tf1b, 2), adxStPsarViAroonExit: round(comps.tf1c, 2),
         rsiStochRsiWillrExit: round(comps.tf2a, 2), cciRocMomFiExit: round(comps.tf2b, 2), mfiCmfExit: round(comps.tf2c, 2),
@@ -1685,6 +1689,27 @@ window.TechIndicators = (function () {
     if (sn.beta !== null && sn.beta > 1.5 && ctx.indexTrendScore !== null && ctx.indexTrendScore < 40) items.push({ reason: "High beta + index trend <40", amount: 3 });
     if (c < sn.chandelierLong && sn.pivotS1 !== null && c < sn.pivotS1) items.push({ reason: "Below Chandelier + S1", amount: 3 });
     if (sn.kvoL !== null && sn.kvoSig !== null && sn.kvoPrev !== null && sn.kvoSigPrev !== null && sn.kvoL < sn.kvoSig && sn.kvoPrev >= sn.kvoSigPrev) items.push({ reason: "KVO bearish cross", amount: 3 });
+
+    /* ── Spike/Stability Guard (exit side) — bonus only, gated to avoid double-counting:
+         E1 golden-exit nudge: an up-spike while holding that carries us NEAR the 4% target.
+            Near-target profit (entry-price based) is not measured by any pillar (12.x–15.x)
+            or bonus (the only entry-price bonus, "Price <97% entry", is for losses), so it is
+            genuinely additive; RSI exhaustion (13.1) is an independent momentum signal and
+            stacks legitimately. Requires c >= 21-EMA so 12.x downtrend breakdowns are not
+            active, and excludes profit >= 4% (the hard target rule already exits there).
+            +5 at 3.0–4.0% profit, +3 at 2.0–3.0%.
+         E2 stability collapse (whipsaw): only when distDayRatio < 0.6 (14.3 + the >=60%
+            distribution bonus already cover heavy distribution) and today is not a spike day
+            (E1 owns the single-session case).
+         NOTE: no down-spike bonus — on a panic day 13.2 (ROC/Mom/FI), 14.1 (OBV/PVT/KVO)
+            and 15.1 (BB/DC/Chandelier) already fire, so an extra bonus would double-count. */
+    var guard = ctx.guard || null;
+    if (guard && guard.todaySpike && guard.sessionReturnPct != null && guard.sessionReturnPct > 0 && c >= sn.ema21 && ctx.entryPrice != null && ctx.entryPrice > 0) {
+      var profitPct = (c - ctx.entryPrice) / ctx.entryPrice * 100;
+      if (profitPct >= 3.0 && profitPct < 4.0) items.push({ reason: "Golden exit opportunity (spike near 4% target)", amount: 5 });
+      else if (profitPct >= 2.0 && profitPct < 3.0) items.push({ reason: "Spike toward 4% target", amount: 3 });
+    }
+    if (sn.stabilityScore != null && sn.stabilityScore < 0.35 && sn.distDayRatio < 0.6 && !(guard && guard.todaySpike)) items.push({ reason: "Erratic whipsaw \u2014 stability collapse", amount: 3 });
     return items;
   }
 
@@ -2583,9 +2608,11 @@ window.TechIndicators = (function () {
       var primary = tfResults.filter(function(tf) { return weights[tf.timeframe] === 0.50; })[0] || tfResults[0];
       try { if (primary && primary.candles) primarySn = buildTFSnapshot(primary.candles, indexCandles); } catch(e) {}
     }
+    var primaryTF = tfResults.filter(function(tf) { return weights[tf.timeframe] === 0.50; })[0] || tfResults[0];
+    var guard = primaryTF && primaryTF.candles ? computeSpikeGuard(primaryTF.candles) : { todaySpike: false, sessionReturnPct: null, gapPct: null, dominanceRatio: null, efficiencyRatio10: null };
     var penaltyItems = [], bonusItems = [];
     if (primarySn) {
-      var ctx = { indexTrendScore: idxEntryScoreVal, entryPrice: position.entry_price || primarySn.c, currentPrice: primarySn.c, holdingDays: position.holding_days || 0, entryScore: position.entry_score != null ? position.entry_score : 50 };
+      var ctx = { indexTrendScore: idxEntryScoreVal, entryPrice: position.entry_price || primarySn.c, currentPrice: primarySn.c, holdingDays: position.holding_days || 0, entryScore: position.entry_score != null ? position.entry_score : 50, guard: guard };
       penaltyItems = buildExitPenaltyItems(primarySn, ctx);
       bonusItems = buildExitBonusItems(primarySn, ctx);
     }
@@ -2597,7 +2624,7 @@ window.TechIndicators = (function () {
     var cls = classifyExitScore(finalScore);
     var avgC = function(k) { return totalWeight > 0 ? compTotal[k] / totalWeight : 0; };
     return {
-      multiTF_exit_score: finalScore,
+      multiTF_exit_score: round(finalScore, 1),
       trend_breakdown: round(Math.min(avgC('tf1a') + avgC('tf1b') + avgC('tf1c'), 25), 1),
       momentum_exhaustion: round(Math.min(avgC('tf2a') + avgC('tf2b') + avgC('tf2c'), 25), 1),
       volume_distribution: round(Math.min(avgC('tf3a') + avgC('tf3b') + avgC('tf3c'), 25), 1),
@@ -2606,7 +2633,10 @@ window.TechIndicators = (function () {
       penalties: penalties, bonuses: bonuses,
       penalty_items: penaltyItems, bonus_items: bonusItems,
       classification: cls.classification, signal: cls.signal, action: cls.action,
-      timeframesUsed: activeTFs, details: tfDetails
+      timeframesUsed: activeTFs, details: tfDetails,
+      todaySpike: guard.todaySpike, sessionReturnPct: guard.sessionReturnPct, gapPct: guard.gapPct,
+      dominanceRatio: guard.dominanceRatio, efficiencyRatio10: guard.efficiencyRatio10,
+      stabilityScore: primarySn ? round(primarySn.stabilityScore, 2) : null
     };
   }
 
@@ -2683,6 +2713,187 @@ window.TechIndicators = (function () {
     return Object.assign({}, exitResult || {}, { signal: 'HOLD', reason: 'Exit score ' + exitScore + ' conditions intact', action: 'Continue holding', exit_score: exitScore });
   }
 
+  /* ── Session Confidence Score ─────────────────────────────────────────────
+     "Will this position reach the target profit within today's session?" 0–100.
+     Driven SOLELY by the stock's own intraday 15m tape plus the two mechanical
+     constraints of the session itself (time left, average range consumed).
+     Deliberately excludes index, beta and daily-trend inputs.
+
+       +20  VWAP position + slope      (session VWAP anchor, 15m)
+       +20  Intraday ADX/±DI           (trend strength & direction, 15m)
+       +15  MFI(14) money flow         (volume-confirmed buying, not exhausted)
+       +10  ROC(5) acceleration        (short-term momentum still rising)
+       +15  ADR headroom               (avg daily range not yet consumed)
+       +10  Time remaining in session  (09:15–15:30 IST)
+       −10  Overextension penalty      (intraday RSI(5) stretched / too far > VWAP)
+
+     Returns { confidence, reason, components, flags }.
+     Confidence is normalized to the weight actually available when data is
+     too thin early in the session (e.g. ADX not yet meaningful). */
+  function computeSessionConfidence(intradayCandles, dailyCandles, position) {
+    var base = {
+      confidence: null, reason: 'insufficient_intraday_data',
+      components: { vwap: null, vwapSlope: null, adx: null, plusDI: null, minusDI: null, mfi: null, roc5: null, rsi5: null, rangeUsedPct: null, atrPct: null, remainingPct: null, timeRemainingMin: null },
+      flags: { inTargetBand: false, alreadyAtTarget: false }
+    };
+    try {
+      if (!intradayCandles || intradayCandles.length < 10) return base;
+      position = position || {};
+      var entry = position.entry_price || position.entry || 0;
+      var targetPct = position.target_pct != null ? position.target_pct : 4;
+      if (entry <= 0) { base.reason = 'no_entry_price'; return base; }
+
+      /* isolate today's session bars (same IST date as the last bar) */
+      var lastT = intradayCandles[intradayCandles.length - 1].t;
+      var sessionKey = lastT == null ? null : String(lastT).slice(0, 10);
+      var session = [];
+      for (var i = 0; i < intradayCandles.length; i++) {
+        var key = intradayCandles[i].t == null ? (sessionKey || 'all') : String(intradayCandles[i].t).slice(0, 10);
+        if (key === sessionKey) session.push(intradayCandles[i]);
+      }
+      if (session.length < 6) { base.reason = 'insufficient_session_bars'; return base; }
+
+      var cur = session[session.length - 1];
+      var c = cur.c;
+      var profitPct = (c - entry) / entry * 100;
+      var remainingPct = targetPct - profitPct;
+      base.components.remainingPct = round(remainingPct, 2);
+      if (remainingPct <= 0) {
+        base.confidence = 100; base.flags.alreadyAtTarget = true;
+        base.flags.inTargetBand = profitPct >= 2.0 && profitPct < targetPct;
+        base.reason = 'already_at_target';
+        return base;
+      }
+      base.flags.inTargetBand = profitPct >= 2.0 && profitPct < targetPct;
+
+      var vwapSer = calcSessionVWAP(session);
+      var vwap = last(vwapSer);
+      var vwapSlopePct = null;
+      if (vwap != null && session.length >= 4 && vwapSer[session.length - 4] != null) {
+        vwapSlopePct = (vwap - vwapSer[session.length - 4]) / vwap * 100;
+      }
+
+      var adxRes = session.length >= 15 ? calcADX(session, 14) : null;
+      var adx = adxRes ? last(adxRes.adx) : null;
+      var plusDI = adxRes ? last(adxRes.plusDI) : null;
+      var minusDI = adxRes ? last(adxRes.minusDI) : null;
+
+      var mfi = last(calcMFI(session, 14));
+      var roc5 = last(calcROC(session, 5));
+      var rsi5 = last(calcRSI(session, 5));
+
+      var rangeUsedPct = null, atrPct = null;
+      if (dailyCandles && dailyCandles.length >= 16) {
+        var dayHigh = 0, dayLow = Infinity;
+        for (var k = 0; k < session.length; k++) {
+          if (session[k].h > dayHigh) dayHigh = session[k].h;
+          if (session[k].l < dayLow) dayLow = session[k].l;
+        }
+        var prevClose = dailyCandles[dailyCandles.length - 1].c;
+        if (prevClose > 0 && dayLow < Infinity) {
+          rangeUsedPct = (dayHigh - dayLow) / prevClose * 100;
+          var atrV = last(calcATR(dailyCandles, 14));
+          atrPct = atrV != null ? atrV / prevClose * 100 : null;
+        }
+      }
+
+      base.components = {
+        vwap: vwap != null ? round(vwap, 2) : null,
+        vwapSlope: vwapSlopePct != null ? round(vwapSlopePct, 3) : null,
+        adx: adx != null ? round(adx, 1) : null,
+        plusDI: plusDI != null ? round(plusDI, 1) : null,
+        minusDI: minusDI != null ? round(minusDI, 1) : null,
+        mfi: mfi != null ? round(mfi, 1) : null,
+        roc5: roc5 != null ? round(roc5, 2) : null,
+        rsi5: rsi5 != null ? round(rsi5, 1) : null,
+        rangeUsedPct: rangeUsedPct != null ? round(rangeUsedPct, 2) : null,
+        atrPct: atrPct != null ? round(atrPct, 2) : null,
+        remainingPct: round(remainingPct, 2),
+        timeRemainingMin: null
+      };
+
+      var total = 0;
+
+      /* Session clock — minutes elapsed vs 09:15 open (fallback: middle of day).
+         Unknown components below use a NEUTRAL 50% fill so early-session reads are
+         conservatively weighted and rise as the tape confirms. */
+      var elapsedFrac = 0.5, timeScore = 5, remainMin = null;
+      if (lastT != null) {
+        var tm = String(lastT).match(/(\d{2}):(\d{2})/);
+        if (tm) {
+          var minutes = parseInt(tm[1], 10) * 60 + parseInt(tm[2], 10);
+          var elapsed = minutes - 555; /* 09:15 IST = 555 min */
+          if (elapsed >= 0) {
+            elapsedFrac = Math.min(1, elapsed / 375);
+            remainMin = Math.max(0, 375 - elapsed);
+            timeScore = 10 * (remainMin / 375);
+            base.components.timeRemainingMin = remainMin;
+          }
+        }
+      }
+      total += timeScore;
+
+      /* ADR headroom (15) — typical range left for the day, minus any abnormal
+         over-consumption so far; vs the distance still needed to the target. */
+      var headScore = 7.5;
+      if (atrPct != null && rangeUsedPct != null) {
+        var normUsed = atrPct * elapsedFrac;
+        var excessUsed = Math.max(0, rangeUsedPct - normUsed);
+        var avail = Math.max(0, atrPct * (1 - elapsedFrac) - excessUsed);
+        var roomRatio = avail / Math.max(remainingPct, 0.05);
+        headScore = 15 * Math.max(0, Math.min(1, roomRatio));
+      }
+      total += headScore;
+
+      /* VWAP position + slope (20) */
+      var vwapScore = 10;
+      if (vwap != null) {
+        var distPct = (c - vwap) / vwap * 100;
+        var posScore = distPct > 0 ? 12 * Math.min(1, distPct / 1.5) : 0;
+        var slopeScore = 0;
+        if (vwapSlopePct != null && vwapSlopePct > 0) slopeScore = 8 * Math.min(1, vwapSlopePct / 0.2);
+        vwapScore = posScore + slopeScore;
+      }
+      total += vwapScore;
+
+      /* ADX/DI trend strength (20) */
+      var adxScore = 10;
+      if (adx != null && plusDI != null && minusDI != null) {
+        var dir = plusDI > minusDI ? 1 : 0;
+        adxScore = 20 * dir * Math.max(0, Math.min(1, adx / 40));
+      }
+      total += adxScore;
+
+      /* MFI money flow (15) */
+      var mfiScore = 7.5;
+      if (mfi != null) {
+        if (mfi > 45 && mfi < 70) mfiScore = 15 * ((mfi - 45) / 25);
+        else if (mfi >= 70 && mfi <= 85) mfiScore = 15;
+        else if (mfi > 85) mfiScore = 15 * ((100 - mfi) / 15);
+      }
+      total += mfiScore;
+
+      /* ROC(5) acceleration (10) */
+      var rocScore = 5;
+      if (roc5 != null) rocScore = 10 * (roc5 > 0 ? Math.min(1, roc5 / 0.8) : 0);
+      total += rocScore;
+
+      /* Overextension penalty (−10) */
+      var pen = 0;
+      if (rsi5 != null) { if (rsi5 >= 90) pen += 7; else if (rsi5 >= 85) pen += 4; }
+      if (vwap != null) { var d2 = (c - vwap) / vwap * 100; if (d2 > 3) pen += 3; else if (d2 > 2) pen += 2; }
+      total -= Math.min(10, pen);
+
+      total = Math.max(0, Math.min(100, total));
+      base.confidence = round(total, 1);
+      base.reason = 'ok';
+      return base;
+    } catch (e) {
+      base.reason = 'error';
+      return base;
+    }
+  }
+
   /* --------------------------------------------------------------------------
      Public API
      -------------------------------------------------------------------------- */
@@ -2720,6 +2931,7 @@ window.TechIndicators = (function () {
     computeMultiTFEntryScore: computeMultiTFEntryScore,
     computeMultiTFExitScore: computeMultiTFExitScore,
     computeCompatExitScore: computeCompatExitScore,
+    computeSessionConfidence: computeSessionConfidence,
     integratedExitDecision: integratedExitDecision
   };
 })();

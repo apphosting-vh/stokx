@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.7.1";
+window.__STOX_APP_VERSION = "2.7.4";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -1345,6 +1345,14 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
       entryScore: holding.entryScore,
     }),
 
+    // Session Confidence — will this holding reach +4% today? (active holdings only)
+    ticker && holding && React.createElement(SessionConfidencePanel, {
+      ticker: ticker,
+      buyPrice: holding.buyPrice,
+      buyDate: holding.buyDate,
+      entryScore: holding.entryScore,
+    }),
+
     // Full technical indicators panel
     React.createElement(window.TechnicalIndicatorsPanel, { shares: holdings || [], isMobile: isMobile })
   );
@@ -2224,6 +2232,96 @@ const ExitScoreTrend = ({ ticker, buyPrice, buyDate, entryScore }) => {
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
+   SESSION CONFIDENCE PANEL
+   "Will this position reach the +4% target within today's session?" 0–100,
+   driven by the stock's own intraday 15m tape + session mechanics.
+   ══════════════════════════════════════════════════════════════════════════ */
+const SessionConfidencePanel = ({ ticker, buyPrice, buyDate, entryScore }) => {
+  const TI = window.TechIndicators;
+  const DF = window.OHLCVFetcher;
+  const [loading, setLoading] = React.useState(true);
+  const [conf, setConf] = React.useState(null);
+  const [exitScore, setExitScore] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!ticker || !DF || !TI) { setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true); setErr(null); setConf(null); setExitScore(null);
+    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "15m")])
+      .then((res) => {
+        if (cancelled) return;
+        const d = res[0] && res[0].data;
+        const i15 = res[1] && res[1].data;
+        if (!d || d.length < 50) { setErr("insufficient_daily"); return; }
+        const entry = buyPrice || 0;
+        if (entry <= 0) { setErr("no_entry"); return; }
+        const buyD = buyDate ? new Date(buyDate + "T12:00:00") : null;
+        const holdingDays = buyD ? Math.max(0, Math.floor((Date.now() - buyD.getTime()) / 86400000)) : 0;
+        const c = TI.computeSessionConfidence(i15, d, { entry_price: entry, target_pct: 4 });
+        const e = TI.computeExitScore(d, { entry_price: entry, holding_days: holdingDays, entry_score: entryScore != null ? entryScore : 50 });
+        setConf(c);
+        setExitScore(e && e.exit_score != null ? e.exit_score : null);
+      })
+      .catch(() => { if (!cancelled) setErr("fetch"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [ticker, buyPrice, buyDate, entryScore]);
+
+  if (loading) {
+    return React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: "10px 14px" } },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, "Session Confidence"),
+        React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "Computing intraday read...")
+      )
+    );
+  }
+  if (err || !conf) return null;
+
+  const profitPct = conf.components.remainingPct != null ? Math.round((4 - conf.components.remainingPct) * 100) / 100 : null;
+  const sc = conf.confidence;
+  const inBand = conf.flags.inTargetBand;
+  const tone = inBand && sc != null
+    ? (sc >= 70 ? { c: "#16a34a", bg: "var(--profitbg)", bd: "var(--profitborder)" } : sc >= 40 ? { c: "#d97706", bg: "var(--warnbg)", bd: "var(--warnborder)" } : { c: "#dc2626", bg: "var(--lossbg)", bd: "var(--lossborder)" })
+    : { c: "var(--text5)", bg: "var(--bg5)", bd: "var(--border)" };
+  const label = sc == null ? "Insufficient intraday data"
+    : !inBand ? (profitPct != null && profitPct >= 4 ? "Target hit \u2014 hard exit rule applies" : "Confidence applies at 2.0\u20134.0% profit")
+    : sc >= 70 ? "Let it ride \u2014 strong chance of tagging +4% today"
+    : sc >= 40 ? "Wait & watch \u2014 keep a tight stop"
+    : "Low odds \u2014 bank the gain today";
+  const cp = conf.components;
+  const chips = [
+    { k: "VWAP", v: cp.vwap != null ? cp.vwap.toFixed(2) : "\u2014", hint: cp.vwapSlope != null ? "slope " + (cp.vwapSlope > 0 ? "+" : "") + cp.vwapSlope + "%" : null },
+    { k: "ADX", v: cp.adx != null ? cp.adx + " (+DI " + cp.plusDI + " / \u2212DI " + cp.minusDI + ")" : "\u2014" },
+    { k: "MFI", v: cp.mfi != null ? cp.mfi : "\u2014" },
+    { k: "ROC5", v: cp.roc5 != null ? cp.roc5 + "%" : "\u2014" },
+    { k: "RSI5", v: cp.rsi5 != null ? cp.rsi5 : "\u2014" },
+    { k: "Range", v: cp.rangeUsedPct != null ? cp.rangeUsedPct + "% of ATR " + cp.atrPct + "%" : "\u2014" },
+  ];
+  const chipRow = (c) => React.createElement("div", { key: c.k, style: { padding: "5px 9px", borderRadius: 6, background: "var(--bg4)", border: "1px solid var(--border)", fontSize: 9.5 } },
+    React.createElement("div", { style: { color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600, marginBottom: 1 } }, c.k),
+    React.createElement("div", { style: { color: "var(--text2)", fontWeight: 700, fontFamily: "var(--font-heading)" } }, c.v),
+    c.hint && React.createElement("div", { style: { color: "var(--text6)", marginTop: 1 } }, c.hint)
+  );
+
+  return React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: "10px 14px", border: "1px solid " + tone.bd } },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, "Session Confidence"),
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 1 } }, "Reach +4% target within today's session \u00b7 15m intraday read")
+      ),
+      sc != null && React.createElement("div", { style: { textAlign: "right" } },
+        React.createElement("div", { style: { fontSize: 22, fontWeight: 800, fontFamily: "var(--font-heading)", color: tone.c, lineHeight: 1 } }, sc + "/100"),
+        profitPct != null && React.createElement("div", { style: { fontSize: 9.5, color: "var(--text6)", marginTop: 2 } }, "at +" + profitPct + "% \u00b7 " + (cp.timeRemainingMin != null ? cp.timeRemainingMin + " min left" : "")),
+        exitScore != null && React.createElement("div", { style: { fontSize: 9.5, color: "var(--text6)", marginTop: 1 } }, "Exit score " + exitScore)
+      )
+    ),
+    React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: tone.c, padding: "6px 10px", borderRadius: 7, background: tone.bg, marginBottom: 8 } }, label),
+    sc != null && React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } }, chips.map(chipRow))
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
    HOLDING HISTORY PANEL
    Fetches daily closing prices from buyDate → today, renders chart
    ══════════════════════════════════════════════════════════════════════════ */
@@ -2368,6 +2466,7 @@ const SnapshotChartPanel = ({ sn, dispatch }) => {
    PAGE: Portfolio Management
    ══════════════════════════════════════════════════════════════════════════ */
 function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, refreshPrices, setSoldShareSnapshots }) {
+  const DF = window.OHLCVFetcher;
   const [showAdd, setShowAdd] = useState(false);
   const [editShare, setEditShare] = useState(null);
   const [mode, setMode] = useState("active"); /* "active" | "past" */
@@ -2378,6 +2477,51 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
     buyDate: TODAY(), sellDate: "", sellPrice: "",
     brokerage: "", notes: "", entryScore: "", sector: "Technology"
   });
+  const [exitInfo, setExitInfo] = useState({});
+
+  /* ── Golden exit + Session Confidence detector: per holding, run the exit guard
+        on daily data (surfacing the E1 up-spike bonus) and the intraday Confidence
+        Score on 15m data (how confident we are of tagging the 4% target today). ── */
+  useEffect(() => {
+    if (!holdings || holdings.length === 0) { setExitInfo({}); return; }
+    if (!DF) return;
+    let cancelled = false;
+    setExitInfo({});
+    holdings.forEach((h) => {
+      const ticker = String(h.ticker || "").toUpperCase();
+      if (!ticker) return;
+      Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached("^NSEI", "daily"), DF.fetchOHLCVCached(ticker, "15m")])
+        .then((res) => {
+          if (cancelled) return;
+          const d = res[0] && res[0].data;
+          const idxD = res[1] && res[1].data;
+          const i15 = res[2] && res[2].data;
+          if (!d || d.length < 50) return;
+          const buyD = h.buyDate ? new Date(h.buyDate + "T12:00:00") : null;
+          const holdingDays = buyD ? Math.max(0, Math.floor((Date.now() - buyD.getTime()) / 86400000)) : 0;
+          const entry = h.buyPrice || h.avgPrice || 0;
+          const pos = { entry_price: entry, holding_days: holdingDays, entry_score: h.entryScore != null ? h.entryScore : 50 };
+          const resX = TI.computeExitScore(d, pos, idxD);
+          let golden = null;
+          if (resX && resX.bonus_items) {
+            for (let i = 0; i < resX.bonus_items.length; i++) {
+              const it = resX.bonus_items[i];
+              if (it.reason === "Golden exit opportunity (spike near 4% target)" || it.reason === "Spike toward 4% target") {
+                golden = { amount: it.amount, reason: it.reason, exit_score: resX.exit_score };
+                break;
+              }
+            }
+          }
+          const conf = TI.computeSessionConfidence(i15, d, { entry_price: entry, target_pct: 4 });
+          const update = { golden: golden, conf: conf };
+          if (golden || (conf && conf.confidence != null)) {
+            setExitInfo((prev) => { const next = Object.assign({}, prev); next[h.id] = update; return next; });
+          }
+        })
+        .catch(() => {});
+    });
+    return () => { cancelled = true; };
+  }, [holdings]);
 
   const resetForm = () => {
     setForm({ company: "", ticker: "", qty: "", buyPrice: "", currentPrice: "", buyDate: TODAY(), sellDate: "", sellPrice: "", brokerage: "", notes: "", entryScore: "", sector: "Technology" });
@@ -2824,6 +2968,41 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, "Entry Score:"),
                 React.createElement("span", { style: { fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: h.entryScore >= 70 ? "var(--profitbg)" : h.entryScore >= 40 ? "var(--warnbg)" : "var(--lossbg)", color: h.entryScore >= 70 ? "var(--profit)" : h.entryScore >= 40 ? "var(--warn)" : "var(--loss)", border: "1px solid " + (h.entryScore >= 70 ? "var(--profitborder)" : h.entryScore >= 40 ? "var(--warnborder)" : "var(--lossborder)") } }, h.entryScore + "/100")
               ),
+
+              /* ── Golden exit callout (E1 up-spike near 4% target) ── */
+              exitInfo[h.id] && exitInfo[h.id].golden && React.createElement("div", { style: {
+                display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
+                padding: "8px 12px", borderRadius: 8,
+                background: "linear-gradient(90deg, rgba(251,191,36,.16), rgba(251,191,36,.04))",
+                border: "1px solid rgba(251,191,36,.5)"
+              } },
+                React.createElement("span", { style: { fontSize: 13 } }, "\u2728"),
+                React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                  React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#d97706" } },
+                    exitInfo[h.id].golden.amount >= 5 ? "Golden Exit Opportunity" : "Spike Toward 4% Target"
+                  ),
+                  React.createElement("div", { style: { fontSize: 10.5, color: "var(--text5)", marginTop: 1, lineHeight: 1.4 } },
+                    "Up-spike carrying this holding near the +4% target \u00b7 spikes often precede a sharp reversal \u2014 consider banking the gain"
+                  )
+                ),
+                exitInfo[h.id].golden.exit_score != null && React.createElement("span", { style: { fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 6, background: "rgba(251,191,36,.18)", color: "#d97706", border: "1px solid rgba(251,191,36,.4)", whiteSpace: "nowrap" } }, "EXIT " + exitInfo[h.id].golden.exit_score)
+              ),
+
+              /* ── Session Confidence Score (reach +4% today, 2.0–4.0% profit band) ── */
+              (function () {
+                const ci = exitInfo[h.id] && exitInfo[h.id].conf;
+                if (!ci || ci.confidence == null || !ci.flags.inTargetBand) return null;
+                const sc = ci.confidence;
+                const tone = sc >= 70 ? { c: "#16a34a", bg: "var(--profitbg)", bd: "var(--profitborder)" } : sc >= 40 ? { c: "#d97706", bg: "var(--warnbg)", bd: "var(--warnborder)" } : { c: "#dc2626", bg: "var(--lossbg)", bd: "var(--lossborder)" };
+                const label = sc >= 70 ? "Let it ride \u2014 strong chance of tagging +4% today" : sc >= 40 ? "Wait & watch \u2014 keep a tight stop" : "Low odds \u2014 bank the gain today";
+                return React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "8px 12px", borderRadius: 8, background: tone.bg, border: "1px solid " + tone.bd } },
+                  React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                    React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: tone.c } }, "Reach +4% today"),
+                    React.createElement("div", { style: { fontSize: 10.5, color: "var(--text5)", marginTop: 1, lineHeight: 1.4 } }, label + " \u00b7 " + ci.components.timeRemainingMin + " min left")
+                  ),
+                  React.createElement("div", { style: { fontSize: 17, fontWeight: 800, fontFamily: "var(--font-heading)", color: tone.c, whiteSpace: "nowrap" } }, sc + "/100")
+                );
+              })(),
 
               /* ── Notes preview ── */
               h.notes && React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8, fontStyle: "italic" } }, h.notes),
@@ -6112,7 +6291,9 @@ function InfoPage() {
           React.createElement("p", { style: subSub }, "Dominance Ratio"),
           React.createElement("p", null, "Largest single-day |move| / |net 5-day move| (1.0 if |net| < 0.5%). Penalty -12 when > 0.6. Suppressed when the spike sub-score is >=4: the latest/prior-bar spike tiers already penalize that session, so one abnormal session is never double-penalized."),
           React.createElement("p", { style: subSub }, "Efficiency Bonus"),
-          React.createElement("p", null, "Efficiency ratio 10 = |close - close[10]| / sum|daily diffs| (the KAMA ratio). Bonus +3 when > 0.6 and not a spike day (smooth steady climb). Choppy paths are covered by the stability sub-score, so there is no separate ER penalty.")
+          React.createElement("p", null, "Efficiency ratio 10 = |close - close[10]| / sum|daily diffs| (the KAMA ratio). Bonus +3 when > 0.6 and not a spike day (smooth steady climb). Choppy paths are covered by the stability sub-score, so there is no separate ER penalty."),
+          React.createElement("p", { style: subSub }, "Exit side (bonus only, no double-count)"),
+          React.createElement("p", null, "Golden exit nudge: an up-spike while holding that carries you near the 4% target (+5 at 3.0\u20134.0% profit, +3 at 2.0\u20133.0%) \u2014 the spike is often the top before a sharp reversal, so bank the gain. Suppressed past 4% (hard target rule exits there) and below 2% (too far from target). Stability collapse +3 when distribution ratio < 0.6 and not a spike day. No down-spike bonus: a panic day already fires the 13.2 / 14.1 / 15.1 pillars.")
         ),
 
         // EXIT SCORE
@@ -6300,7 +6481,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally. No data is sent to any server."),
         React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.25"),
-        React.createElement("p", { style: { marginTop: 4, color: "var(--text5)" } }, "Latest: Spike & Stability Guard \u2014 todaySpike hard gate (cap 49), dominance penalty, and smooth-climb efficiency bonus with no double-counted penalties."),
+        React.createElement("p", { style: { marginTop: 4, color: "var(--text5)" } }, "Latest: Spike & Stability Guard \u2014 todaySpike hard gate (cap 49), dominance penalty, smooth-climb efficiency bonus on entry; blow-off/stability-collapse urgency bonuses on exit. No double-counted penalties."),
         React.createElement("p", null, "Data: Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),

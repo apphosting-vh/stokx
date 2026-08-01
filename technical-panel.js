@@ -387,6 +387,7 @@ window.TechnicalIndicatorsPanel = (function () {
     };
     var es = TI.computeCompatExitScore(candles, weeklyCandles, dailyCandles, hourlyCandles, position, indexCandles);
     if (!es || es.exit_score == null) return null;
+    var exitScoreShown = es.exit_score != null ? Math.round(es.exit_score * 10) / 10 : es.exit_score;
 
     var decisionMap = {
       URGENT_EXIT: { label: "Urgent Exit", color: "#ef4444" },
@@ -485,7 +486,7 @@ window.TechnicalIndicatorsPanel = (function () {
           },
             React.createElement("span", {
               style: { fontSize: 20, fontWeight: 900, color: decision.color, fontFamily: "'Sora',sans-serif", lineHeight: 1 }
-            }, es.exit_score)
+            }, exitScoreShown)
           )
         )
       ),
