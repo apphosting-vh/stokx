@@ -1281,7 +1281,7 @@ window.TechIndicators = (function () {
     if (!base) return null;
     if (indexCandles && indexCandles.length > 10) {
       base.rs_vs_nifty = calcRelativeStrength(candles, indexCandles);
-      base.beta_nifty = calcBeta(candles, indexCandles);
+      base.beta_nifty = last(calcBeta(candles, indexCandles));
     }
     return base;
   }
@@ -1809,9 +1809,9 @@ window.TechIndicators = (function () {
     var poc = vpRes ? vpRes.poc : null, prevPoc = null;
     var vah = vpRes ? vpRes.vah : null;
     if (vpRes && vpRes.bins && vpRes.bins.length > 1) {
-      var prevPocBin = vpRes.bins[0];
-      for (var b = 1; b < vpRes.bins.length; b++) { if (vpRes.bins[b].volume > prevPocBin.volume) prevPocBin = vpRes.bins[b]; }
-      prevPoc = prevPocBin ? round((prevPocBin.priceFrom + prevPocBin.priceTo) / 2, 2) : poc;
+      var prevVp = null;
+      try { prevVp = calcVolumeProfile(candles.slice(0, -1)); } catch (e) {}
+      prevPoc = prevVp && prevVp.poc != null ? prevVp.poc : poc;
     }
     var smRes = calcSqueezeMomentum(candles);
     var squeezeOn = null, squeezeOnPrev = null, squeezeMomVal = null, squeezeMomPrev = null;
@@ -1856,7 +1856,7 @@ window.TechIndicators = (function () {
     var rsMansfield = null, rsMansfieldPrev = null;
     if (indexCandles && indexCandles.length > 10) {
       try {
-        beta = calcBeta(candles, indexCandles);
+        beta = last(calcBeta(candles, indexCandles));
         var rsSeries = calcMansfieldRS(candles, indexCandles, 52);
         if (rsSeries) {
           var rv = lastVals(rsSeries, 2);

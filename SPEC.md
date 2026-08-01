@@ -1,7 +1,7 @@
 # StoX — Technical Indicator & Scoring Specification
 
-> **App version:** 2.6.21  
-> **Last updated:** 2026-07-31
+> **App version:** 2.6.26  
+> **Last updated:** 2026-08-01
 
 ---
 
