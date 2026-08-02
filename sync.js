@@ -873,6 +873,18 @@ window.FSAStoragePanel = function(props) {
   var busy = _s5[0], setBusy = _s5[1];
   var _s6 = React.useState({ text: "", ok: true });
   var msg = _s6[0], setMsg = _s6[1];
+  var _s7 = React.useState(null);
+  var fileSize = _s7[0], setFileSize = _s7[1];
+
+  var refreshSize = async function() {
+    try {
+      if (!window.__fsa || !window.__fsa.handle) { setFileSize(null); return; }
+      var f = await window.__fsa.handle.getFile();
+      setFileSize(f.size);
+    } catch (e) { setFileSize(null); }
+  };
+
+  var fmtMB = function(b) { var mb = b / 1048576; if (mb >= 100) return mb.toFixed(0) + " MB"; if (mb >= 1) return mb.toFixed(2) + " MB"; return mb.toFixed(3) + " MB"; };
 
   var say = function(text, ok) {
     if (ok === undefined) ok = true;
@@ -881,7 +893,7 @@ window.FSAStoragePanel = function(props) {
   };
 
   React.useEffect(function() {
-    var onSaved = function() { setLastSaved(new Date(window.__fsa.lastSaved)); };
+    var onSaved = function() { setLastSaved(new Date(window.__fsa.lastSaved)); refreshSize(); };
     var onWriteFailed = function() {
       say("Auto-save failed - file may have been moved, deleted, or permission has lapsed.", false);
       if (window.__fsa && window.__fsa.handle && !window.__fsa.ready) {
@@ -906,6 +918,7 @@ window.FSAStoragePanel = function(props) {
       setFilename(window.__fsa.filename || "");
       setConnected(!!window.__fsa.ready);
       setPermNeeded(!!window.__fsa.handle && !window.__fsa.ready);
+      refreshSize();
       if (ok) setTimeout(function() { if (window.__fsa.writeNow) window.__fsa.writeNow(); }, 50);
     })();
   }, []);
@@ -925,7 +938,7 @@ window.FSAStoragePanel = function(props) {
       window.__fsa.writeNow = _fsaMakeWriteNow();
       setConnected(true); setFilename(handle.name); setPermNeeded(false);
       var ok = await window.__fsa.writeNow();
-      if (ok) { setLastSaved(window.__fsa.lastSaved); say("Connected! Current data saved to " + handle.name); }
+      if (ok) { setLastSaved(window.__fsa.lastSaved); refreshSize(); say("Connected! Current data saved to " + handle.name); }
       else say("File connected, but initial write failed. Try 'Save Now'.", false);
     } catch (e) { if (e.name !== "AbortError") say("Could not connect file: " + e.message, false); }
     setBusy(false);
@@ -971,7 +984,7 @@ window.FSAStoragePanel = function(props) {
     if (!ok) { say("Permission denied. Please click 'Re-grant Permission'.", false); setBusy(false); return; }
     window.__fsa.ready = true;
     var saved = await window.__fsa.writeNow();
-    if (saved) { setLastSaved(window.__fsa.lastSaved); say("Saved to " + window.__fsa.filename); }
+    if (saved) { setLastSaved(window.__fsa.lastSaved); refreshSize(); say("Saved to " + window.__fsa.filename); }
     else say("Write failed - the file may have been moved or deleted.", false);
     setBusy(false);
   };
@@ -985,6 +998,7 @@ window.FSAStoragePanel = function(props) {
       window.__fsa.writeNow = _fsaMakeWriteNow();
       var ok = await window.__fsa.writeNow();
       setPermNeeded(false); setConnected(true);
+      if (ok) refreshSize();
       say(ok ? "Permission granted - data saved to " + window.__fsa.filename : "Permission granted - save queued.");
       window.dispatchEvent(new CustomEvent("fsa:permission-granted"));
     } else say("Permission was denied.", false);
@@ -995,7 +1009,7 @@ window.FSAStoragePanel = function(props) {
   var handleDisconnect = async function() {
     await fsaClearHandle();
     window.__fsa.handle = null; window.__fsa.filename = ""; window.__fsa.ready = false; window.__fsa.lastSaved = null; window.__fsa.writeNow = null;
-    setConnected(false); setFilename(""); setPermNeeded(false); setLastSaved(null);
+    setConnected(false); setFilename(""); setPermNeeded(false); setLastSaved(null); setFileSize(null);
     say("File storage disconnected. Data continues to save to browser storage.");
   };
 
@@ -1050,6 +1064,11 @@ window.FSAStoragePanel = function(props) {
         React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "var(--text2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, filename),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 3 } },
           connected ? "Last saved: " + fmtTime(lastSaved) + " \u00b7 Auto-save active" : "Grant write permission to enable auto-save."
+        ),
+        connected && React.createElement("div", { style: { fontSize: 11, marginTop: 4, fontWeight: fileSize != null && fileSize >= 8 * 1048576 ? 700 : 500, color: fileSize != null && fileSize >= 15 * 1048576 ? "#ef4444" : fileSize != null && fileSize >= 8 * 1048576 ? "#d97706" : "var(--text5)" } },
+          fileSize != null
+            ? "File size: " + fmtMB(fileSize) + (fileSize >= 15 * 1048576 ? " \u2014 heavy; auto-saves may lag. Consider a fresh file." : fileSize >= 8 * 1048576 ? " \u2014 approaching smooth-save threshold (~10 MB)." : " \u00b7 \u2713 well under the smooth-save threshold.")
+            : "File size: measuring..."
         )
       )
     ),

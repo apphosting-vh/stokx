@@ -351,7 +351,9 @@ function DataBackupSection(props) {
       var idbFsa = await _scanIndexedDb("stox_fsa_db");
       var ls = _scanLocalStorage();
       var fsa = await _readFsaFile();
-      if (!cancelled) setStorageStats({ idbMain: idbMain, idbFsa: idbFsa, ls: ls, fsa: fsa });
+      var est = null;
+      try { if (navigator.storage && navigator.storage.estimate) { var e = await navigator.storage.estimate(); if (e && e.quota) est = { usage: e.usage || 0, quota: e.quota }; } } catch (err) {}
+      if (!cancelled) setStorageStats({ idbMain: idbMain, idbFsa: idbFsa, ls: ls, fsa: fsa, est: est });
     })();
     return function() { cancelled = true; };
   }, []);
@@ -490,6 +492,26 @@ function DataBackupSection(props) {
     singleStockSnapshots: "Analysis Snaps", notes: "Notes"
   };
 
+  var est = ss.est || null;
+  var estPct = est && est.quota ? est.usage / est.quota * 100 : null;
+  var MB = 1048576;
+  var alerts = [];
+  if (storageStats) {
+    if (storageInfo.totalB >= 15 * MB) alerts.push({ sev: 2, title: "App data is heavy", msg: storageInfo.totalB + " bytes (" + fmtMB(storageInfo.totalB) + ") \u2014 JSON saves may freeze the UI. Trim snapshots or export & clear old data." });
+    else if (storageInfo.totalB >= 8 * MB) alerts.push({ sev: 1, title: "App data growing", msg: storageInfo.totalB + " bytes (" + fmtMB(storageInfo.totalB) + ") \u2014 approaching the smooth-save threshold (~10 MB)." });
+    if (fsaConnected && fsaBytes >= 15 * MB) alerts.push({ sev: 2, title: "FSA file is heavy", msg: fmtMB(fsaBytes) + " \u2014 auto-saves may lag. Start a fresh backup file or trim stored data." });
+    else if (fsaConnected && fsaBytes >= 8 * MB) alerts.push({ sev: 1, title: "FSA file growing", msg: fmtMB(fsaBytes) + " \u2014 approaching the smooth auto-save threshold (~10 MB)." });
+    if (lsBytes >= 4.5 * MB) alerts.push({ sev: 2, title: "localStorage near limit", msg: fmtMB(lsBytes) + " \u2014 browser cap is ~5 MB. Clear unused keys / re-authenticate to shrink tokens." });
+    else if (lsBytes >= 3.5 * MB) alerts.push({ sev: 1, title: "localStorage filling up", msg: fmtMB(lsBytes) + " \u2014 getting close to the ~5 MB browser cap." });
+    if (estPct != null) {
+      if (estPct >= 80) alerts.push({ sev: 2, title: "Browser storage almost full", msg: fmtMB(est.usage) + " of " + fmtMB(est.quota) + " used (" + estPct.toFixed(0) + "%). Free up disk space or trim app data." });
+      else if (estPct >= 60) alerts.push({ sev: 1, title: "Browser storage at " + estPct.toFixed(0) + "%", msg: fmtMB(est.usage) + " of " + fmtMB(est.quota) + " used by this site." });
+    }
+  }
+  var alertTone = function(sev) { return sev === 2 ? { c: "#ef4444", bg: "rgba(239,68,68,.08)", bd: "rgba(239,68,68,.3)" } : { c: "#d97706", bg: "rgba(217,119,6,.08)", bd: "rgba(217,119,6,.3)" }; };
+  var healthy = !!storageStats && alerts.length === 0;
+  var estTone = estPct != null ? (estPct >= 80 ? "#ef4444" : estPct >= 60 ? "#d97706" : "#16a34a") : "#16a34a";
+
   var btnBase = {
     display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 17px", fontSize: 14,
     borderRadius: 8, cursor: "pointer", fontFamily: "var(--font-body)", fontWeight: 600, transition: "all .2s", border: "none"
@@ -500,6 +522,19 @@ function DataBackupSection(props) {
       React.createElement("div", { style: labelStyle }, "Storage Overview"),
       React.createElement("div", { style: { fontSize: 10.5, color: "var(--text6)", lineHeight: 1.6, marginBottom: 12 } },
         "App data lives in the browser IndexedDB. A copy is auto-saved to the FSA / Drive file, and small preferences (theme, sync tokens) sit in localStorage."
+      ),
+      storageStats && alerts.map(function(a, i) {
+        var t = alertTone(a.sev);
+        return React.createElement("div", { key: i, style: { display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 14px", borderRadius: 9, marginBottom: 8, background: t.bg, border: "1px solid " + t.bd } },
+          React.createElement("span", { style: { fontSize: 14, lineHeight: 1.2 } }, a.sev === 2 ? "\u26a0\ufe0f" : "\u26a0"),
+          React.createElement("div", null,
+            React.createElement("div", { style: { fontSize: 11.5, fontWeight: 700, color: t.c } }, a.title),
+            React.createElement("div", { style: { fontSize: 10.5, color: "var(--text5)", marginTop: 2, lineHeight: 1.5 } }, a.msg)
+          )
+        );
+      }),
+      healthy && React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", padding: "8px 12px", borderRadius: 9, marginBottom: 8, background: "rgba(22,163,74,.07)", border: "1px solid rgba(22,163,74,.25)", fontSize: 11, color: "#16a34a", fontWeight: 600 } },
+        "\u2713 All storage levels healthy."
       ),
       React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8, marginBottom: 14 } },
         React.createElement("div", { style: { background: "var(--bg3)", borderRadius: 10, padding: "10px 14px", border: "1px solid var(--border)" } },
@@ -522,6 +557,16 @@ function DataBackupSection(props) {
           React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, storageStats ? fmtMB(grandBytes) : "\u2026"),
           React.createElement("div", { style: { fontSize: 9.5, color: "var(--text5)", marginTop: 2 } }, "physical footprint on disk")
         )
+      ),
+      storageStats && est && React.createElement("div", { style: { background: "var(--bg3)", borderRadius: 10, padding: "10px 14px", border: "1px solid var(--border)", marginBottom: 14 } },
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
+          React.createElement("span", { style: { fontSize: 9, color: "var(--text5)", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 700 } }, "Browser Storage Quota"),
+          React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: estTone, fontFamily: "var(--font-mono)" } }, fmtMB(est.usage) + " / " + fmtMB(est.quota) + (estPct != null ? " \u00b7 " + estPct.toFixed(0) + "%" : ""))
+        ),
+        React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--bg5)", overflow: "hidden" } },
+          React.createElement("div", { style: { width: (estPct != null ? Math.max(0, Math.min(100, estPct)) : 0) + "%", height: "100%", background: estTone, borderRadius: 3, transition: "width .4s" } })
+        ),
+        React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 5 } }, "Total browser quota for this site (IndexedDB + Cache + localStorage). Writes fail once full.")
       ),
       React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text4)", marginBottom: 8 } }, "App Data Breakdown"),
       React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 8 } },
