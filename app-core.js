@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.8.0";
+window.__STOX_APP_VERSION = "2.8.2";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -2592,6 +2592,87 @@ const OptimumEntryPanel = ({ ticker }) => {
   );
 };
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SINGLE STOCK ANALYSIS — SNAPSHOT SUPPORT
+   Captures the current chart (Daily + Hourly candles), Overall Signal,
+   Entry Score, "Confidence Score — Next 10 Days", Optimum Entry Price and a
+   compact daily-indicator panel into a snapshot persisted in IndexedDB and
+   browsable grouped by year → month → day.
+   ══════════════════════════════════════════════════════════════════════════ */
+const SS_SNAP_KEY = "stox_single_stock_snapshots";
+const SS_DAILY_BARS = 60;
+const SS_HOURLY_BARS = 120;
+
+const SS_IND_KEYS = [
+  ["rsi_14", "RSI(14)"], ["adx_14", "ADX(14)"], ["macd", "MACD"],
+  ["stochRSI", "Stoch RSI"], ["ema_9", "EMA 9"], ["ema_21", "EMA 21"],
+  ["ema_50", "EMA 50"], ["sma_20", "SMA 20"], ["sma_50", "SMA 50"],
+  ["supertrend", "Supertrend"], ["psar", "PSAR"], ["atr_14", "ATR(14)"],
+  ["vwap", "VWAP"], ["bb", "Bollinger"], ["cci_20", "CCI(20)"],
+  ["mfi_14", "MFI(14)"], ["obv", "OBV"], ["roc_12", "ROC(12)"],
+  ["cmf_20", "CMF(20)"], ["williamsR", "Williams %R"], ["choppiness", "Choppiness"],
+  ["tsi", "TSI"], ["stc", "STC"], ["week52HL", "52W"]
+];
+
+const pickCompactIndicators = (ind) => {
+  if (!ind) return null;
+  const out = {};
+  SS_IND_KEYS.forEach((pair) => {
+    const k = pair[0];
+    const v = ind[k];
+    if (v === null || v === undefined) return;
+    out[k] = v;
+  });
+  return out;
+};
+
+const renderMiniCandles = (data, opts) => {
+  if (!data || !data.length) return null;
+  const maxN = opts && opts.max;
+  const w = (opts && opts.w) || 300;
+  const h = (opts && opts.h) || 72;
+  const filtered = data.filter(c => c && typeof c.o === "number" && !isNaN(c.o) && typeof c.h === "number" && !isNaN(c.h) && typeof c.l === "number" && !isNaN(c.l) && typeof c.c === "number" && !isNaN(c.c));
+  if (filtered.length < 2) return null;
+  const sliced = maxN ? filtered.slice(-maxN) : filtered;
+  const padL = 40, padR = 6, padT = 6, padB = 16;
+  const cw = w - padL - padR;
+  const ph = h - padT - padB;
+  const hi = Math.max.apply(null, sliced.map(c => c.h));
+  const lo = Math.min.apply(null, sliced.map(c => c.l));
+  const range = hi - lo || 1;
+  const gap = cw / sliced.length;
+  const barW = Math.max(1, Math.floor(gap) - 1);
+  const yScale = (v) => padT + ph - ((v - lo) / range) * ph;
+  const lastC = sliced[sliced.length - 1];
+  const lastY = yScale(lastC.c);
+  const fmtY = (v) => "\u20b9" + Number(v).toFixed(v >= 1000 ? 0 : 2);
+  const gridEls = [0, 0.25, 0.5, 0.75, 1].map((pct, gi) => {
+    const y = padT + ph * (1 - pct);
+    const val = lo + range * pct;
+    return React.createElement("g", { key: "g" + gi },
+      React.createElement("line", { x1: padL, y1: y, x2: w - padR, y2: y, stroke: "var(--border)", strokeWidth: 0.4, strokeDasharray: "2,3" }),
+      React.createElement("text", { x: padL - 3, y: y + 3, fontSize: 7, fill: "var(--text6)", textAnchor: "end", fontFamily: "var(--font-mono)" }, fmtY(val))
+    );
+  });
+  const candleEls = sliced.map((c, i) => {
+    const x = padL + i * gap + gap / 2;
+    const isUp = c.c >= c.o;
+    const color = isUp ? "#22c55e" : "#ef4444";
+    const bodyTop = yScale(Math.max(c.o, c.c));
+    const bodyBot = yScale(Math.min(c.o, c.c));
+    return React.createElement("g", { key: "c" + i },
+      React.createElement("line", { x1: x, y1: yScale(c.h), x2: x, y2: yScale(c.l), stroke: color, strokeWidth: 0.8 }),
+      React.createElement("rect", { x: x - barW / 2, y: bodyTop, width: barW, height: Math.max(1, bodyBot - bodyTop), fill: color, rx: 0.4 })
+    );
+  });
+  return React.createElement("svg", { viewBox: "0 0 " + w + " " + h, style: { width: "100%", height: "auto" } },
+    gridEls,
+    candleEls,
+    React.createElement("line", { x1: padL, y1: lastY, x2: w - padR, y2: lastY, stroke: "var(--accent)", strokeWidth: 0.6, strokeDasharray: "3,3" }),
+    React.createElement("text", { x: w - padR - 2, y: lastY - 2, fontSize: 7, fill: "var(--accent)", textAnchor: "end", fontFamily: "var(--font-mono)" }, fmtY(lastC.c))
+  );
+};
 
 /* ══════════════════════════════════════════════════════════════════════════
    HOLDING HISTORY PANEL
@@ -5692,6 +5773,12 @@ function SingleStockAnalysis() {
   var _p = useState(null), quote = _p[0], setQuote = _p[1];
   var _q = useState(null), mtf = _q[0], setMtf = _q[1];
   var _r = useState(false), mtfLoading = _r[0], setMtfLoading = _r[1];
+  var _s = useState([]), snapshots = _s[0], setSnapshots = _s[1];
+  var _t = useState(false), savingSnap = _t[0], setSavingSnap = _t[1];
+  var _v = useState(null), snapYear = _v[0], setSnapYear = _v[1];
+  var _w = useState(null), snapMonth = _w[0], setSnapMonth = _w[1];
+  var _x = useState(null), snapDay = _x[0], setSnapDay = _x[1];
+  var _y = useState({}), snapOpen = _y[0], setSnapOpen = _y[1];
 
   useEffect(function () {
     try { localStorage.setItem(_LS_KEY, JSON.stringify({ ticker: ticker, timeframe: timeframe, category: category, autoRefresh: autoRefresh })); } catch (e) {}
@@ -5776,6 +5863,90 @@ function SingleStockAnalysis() {
   }, [autoRefresh]);
 
   useEffect(function () { fetchData(); }, [refreshTick, fetchData]);
+
+  useEffect(function () {
+    var cancelled = false;
+    dbGetSetting(SS_SNAP_KEY).then(function (val) {
+      if (cancelled) return;
+      if (val && Array.isArray(val)) setSnapshots(val);
+    }).catch(function () {});
+    return function () { cancelled = true; };
+  }, []);
+
+  var persistSnapshots = function (arr) {
+    setSnapshots(arr);
+    dbSetSetting(SS_SNAP_KEY, arr);
+    window.dispatchEvent(new CustomEvent("stox:data-changed"));
+  };
+  var deleteSnapshot = function (id) { persistSnapshots(snapshots.filter(function (s) { return s.id !== id; })); };
+  var deleteSnapshotsWhere = function (pred) { persistSnapshots(snapshots.filter(function (s) { return !pred(s); })); };
+
+  var saveSnapshot = useCallback(async function () {
+    if (!ticker || savingSnap) return;
+    setSavingSnap(true);
+    try {
+      var resD = await DF.fetchOHLCVCached(ticker, "daily");
+      var resH = await DF.fetchOHLCVCached(ticker, "1h");
+      var d = resD && resD.data;
+      var h1 = resH && resH.data;
+      var dailyBar = d && d.length ? d[d.length - 1] : null;
+      var currentPrice = quote && quote.price > 0 ? quote.price : (dailyBar ? dailyBar.c : null);
+      var tenDayConf = null, optimumRes = null, indCompact = null;
+      if (d && h1 && d.length >= 30 && h1.length >= 60) {
+        tenDayConf = TI.computeTenDayForwardConfidence(h1, d);
+        optimumRes = TI.computeOptimumEntryPrice(h1, d);
+        try { indCompact = pickCompactIndicators(TI.computeAll(d)); } catch (e) {}
+      }
+      var entry = mtf && mtf.entry ? mtf.entry : null;
+      if (!entry) {
+        try {
+          var resW = await DF.fetchOHLCVCached(ticker, "weekly");
+          if (resW && resW.data && d && resW.data.length >= 12 && d.length >= 12) {
+            entry = computeCompatEntryScore(resW.data, d, h1 && h1.length >= 100 ? h1 : null);
+          }
+        } catch (e) {}
+      }
+      var snap = {
+        id: Date.now(),
+        savedAt: new Date().toISOString(),
+        ticker: ticker,
+        timeframe: timeframe,
+        currentPrice: currentPrice,
+        overall: signals && signals._score && signals._score.total > 0
+          ? { bull: signals._score.bull, neutral: signals._score.neutral, bear: signals._score.bear, total: signals._score.total }
+          : null,
+        entryScore: entry ? { finalScore: entry.finalScore, decision: entry.decision, weekly: entry.weekly, daily: entry.daily, hourly: entry.hourly } : null,
+        rsBeta: mtf ? { rs: mtf.rs, beta: mtf.beta } : null,
+        tenDayConfidence: tenDayConf,
+        optimumEntry: optimumRes,
+        indicators: indCompact,
+        daily: d ? d.slice(-SS_DAILY_BARS).map(function (c) { return { t: c.t, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v }; }) : null,
+        hourly: h1 ? h1.slice(-SS_HOURLY_BARS).map(function (c) { return { t: c.t, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v }; }) : null
+      };
+      var next = [snap].concat(snapshots).slice(0, 200);
+      persistSnapshots(next);
+      showToast("Snapshot saved for " + ticker + ".NS", 0);
+    } catch (e) {
+      showToast("Snapshot failed: " + (e.message || "error"), 0);
+    }
+    setSavingSnap(false);
+  }, [ticker, timeframe, savingSnap, snapshots, signals, mtf, quote]);
+
+  var groupSnapshots = function () {
+    var years = {};
+    snapshots.forEach(function (snap) {
+      var d = new Date(snap.savedAt);
+      var yKey = String(d.getFullYear());
+      var mKey = yKey + "-" + d.toLocaleString("en-IN", { month: "long" });
+      var dayKey = mKey + "-" + d.getDate();
+      var dayLabel = d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+      if (!years[yKey]) years[yKey] = {};
+      if (!years[yKey][mKey]) years[yKey][mKey] = {};
+      if (!years[yKey][mKey][dayKey]) years[yKey][mKey][dayKey] = { label: dayLabel, snaps: [] };
+      years[yKey][mKey][dayKey].snaps.push(snap);
+    });
+    return years;
+  };
 
   var filteredIndicators = useMemo(function () {
     if (category === "all") return ALL_INDS;
@@ -6216,6 +6387,202 @@ function SingleStockAnalysis() {
     );
   };
 
+  var ssPrice = function (v) { return v == null ? "\u2014" : "\u20b9" + Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var formatSnapshotIndValue = function (k, v) {
+    if (v == null) return "\u2014";
+    if (typeof v === "object") {
+      if (k === "macd") return v.macd != null ? v.macd.toFixed(3) : "\u2014";
+      if (k === "stochRSI") return v.k != null ? v.k.toFixed(1) + " / " + v.d.toFixed(1) : "\u2014";
+      if (k === "bb") return v.upper != null ? v.upper.toFixed(2) + " / " + v.lower.toFixed(2) : "\u2014";
+      if (k === "week52HL") return v.pctFromHigh != null ? (v.pctFromHigh > 0 ? "+" : "") + v.pctFromHigh.toFixed(1) + "% from high" : "\u2014";
+      return "\u2014";
+    }
+    if (typeof v === "number") {
+      if (k === "atr_14") return v.toFixed(2);
+      if (k === "adx_14") return v.toFixed(1);
+      if (k === "obv") return v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e3 ? (v / 1e3).toFixed(1) + "K" : v.toFixed(0);
+      if (k === "vwap" || k === "supertrend" || k === "psar" || k === "ema_9" || k === "ema_21" || k === "ema_50" || k === "sma_20" || k === "sma_50") return ssPrice(v);
+      return v.toFixed(2);
+    }
+    return String(v);
+  };
+
+  var snapshotCard = function (snap) {
+    var isOpen = !!snapOpen[snap.id];
+    var r = snap.entryScore;
+    var td = snap.tenDayConfidence;
+    var oe = snap.optimumEntry;
+    var overall = snap.overall;
+    var ind = snap.indicators;
+    var confScore = td && td.confidence != null ? td.confidence : null;
+    var confTone = confScore != null ? (confScore >= 70 ? "#16a34a" : confScore >= 40 ? "#d97706" : "#dc2626") : "var(--text5)";
+    var entryTone = r && r.decision && r.decision.color ? r.decision.color : "var(--text5)";
+    var oeConf = oe && oe.entryConfidence != null ? oe.entryConfidence : null;
+    var oeTone = oeConf != null ? (oeConf >= 70 ? "#16a34a" : oeConf >= 40 ? "#d97706" : "#dc2626") : "var(--text5)";
+    var confLabel = confScore == null ? "No 10-day read"
+      : confScore >= 70 ? "Strong odds \u2014 +4% likely in 10 sessions"
+      : confScore >= 40 ? "Moderate odds" : "Low odds";
+    var oeLabel = oe == null ? null
+      : oe.overextended && oe.discountPct > 0 ? "Wait for pullback"
+      : oe.discountPct > 0 ? "Limit " + oe.discountPct + "% below" : "Enter at market";
+    var hasCharts = (snap.daily && snap.daily.length > 1) || (snap.hourly && snap.hourly.length > 1);
+
+    var scoreTile = function (label, value, sub, color) {
+      return React.createElement("div", { style: { flex: 1, minWidth: 130, padding: "8px 10px", borderRadius: 8, background: "var(--bg5)", border: "1px solid var(--border)" } },
+        React.createElement("div", { style: { fontSize: 8.5, fontWeight: 600, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 } }, label),
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: color || "var(--text)", lineHeight: 1.1 } }, value),
+        sub ? React.createElement("div", { style: { fontSize: 9, color: "var(--text5)", marginTop: 3, fontFamily: "var(--font-mono)" } }, sub) : null
+      );
+    };
+
+    var overallEl = null;
+    if (overall && overall.total > 0) {
+      var bullPct = overall.bull / overall.total * 100;
+      var neutralPct = overall.neutral / overall.total * 100;
+      var bearPct = overall.bear / overall.total * 100;
+      overallEl = React.createElement("div", { style: { marginBottom: 8 } },
+        React.createElement("div", { style: { fontSize: 9, fontWeight: 600, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 } }, "Overall Signal"),
+        React.createElement("div", { style: { height: 5, borderRadius: 3, background: "var(--bg5)", overflow: "hidden", display: "flex" } },
+          bullPct > 0 && React.createElement("div", { style: { width: bullPct + "%", height: "100%", background: "#22c55e" } }),
+          neutralPct > 0 && React.createElement("div", { style: { width: neutralPct + "%", height: "100%", background: "#9ca3af" } }),
+          bearPct > 0 && React.createElement("div", { style: { width: bearPct + "%", height: "100%", background: "#ef4444" } })
+        ),
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 2, fontSize: 8, color: "var(--text5)" } },
+          React.createElement("span", null, overall.bull + " Bull"),
+          React.createElement("span", null, overall.neutral + " Neutral"),
+          React.createElement("span", null, overall.bear + " Bear")
+        )
+      );
+    }
+
+    var tfRow = null;
+    if (r && (r.weekly || r.daily || r.hourly)) {
+      tfRow = React.createElement("div", { style: { display: "flex", gap: 5, marginTop: 8 } },
+        [["Weekly", r.weekly], ["Daily", r.daily], ["Hourly", r.hourly]].map(function (t) {
+          var s = t[1];
+          var total = s && s.total != null ? s.total : null;
+          var col = s && s.decision && s.decision.color ? s.decision.color : "var(--text5)";
+          return React.createElement("div", { key: t[0], style: { flex: 1, padding: "4px 6px", borderRadius: 6, background: "var(--bg4)", textAlign: "center" } },
+            React.createElement("div", { style: { fontSize: 8, fontWeight: 600, color: "var(--text6)" } }, t[0]),
+            React.createElement("div", { style: { fontSize: 13, fontWeight: 800, color: col, fontFamily: "var(--font-heading)" } }, total != null ? total : "\u2014")
+          );
+        })
+      );
+    }
+
+    var chartsEl = null;
+    if (isOpen && hasCharts) {
+      chartsEl = React.createElement("div", { style: { marginTop: 8 } },
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 } },
+          snap.daily && snap.daily.length > 1 && React.createElement("div", { style: { padding: 8, borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)" } },
+            React.createElement("div", { style: { fontSize: 8, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 } }, "Daily \u00b7 last " + snap.daily.length + " sessions"),
+            renderMiniCandles(snap.daily, { max: SS_DAILY_BARS })
+          ),
+          snap.hourly && snap.hourly.length > 1 && React.createElement("div", { style: { padding: 8, borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)" } },
+            React.createElement("div", { style: { fontSize: 8, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 } }, "Hourly \u00b7 last " + snap.hourly.length + " bars"),
+            renderMiniCandles(snap.hourly, { max: SS_HOURLY_BARS })
+          )
+        )
+      );
+    }
+
+    var indEl = null;
+    if (isOpen && ind) {
+      var rows = [];
+      SS_IND_KEYS.forEach(function (pair) {
+        var k = pair[0];
+        var v = ind[k];
+        if (v === null || v === undefined) return;
+        rows.push(React.createElement("div", { key: k, style: { padding: "5px 7px", borderRadius: 6, background: "var(--bg4)", border: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4 } },
+          React.createElement("span", { style: { fontSize: 8.5, color: "var(--text6)", fontWeight: 600 } }, pair[1]),
+          React.createElement("span", { style: { fontSize: 9.5, fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--text2)" } }, formatSnapshotIndValue(k, v))
+        ));
+      });
+      indEl = React.createElement("div", { style: { marginTop: 8 } },
+        React.createElement("div", { style: { fontSize: 8, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 5 } }, "Indicators (Daily)"),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 5 } }, rows)
+      );
+    }
+
+    return React.createElement("div", { key: snap.id, style: { padding: 12, borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", marginBottom: 8 } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 } },
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, snap.ticker + ".NS"),
+          React.createElement("div", { style: { fontSize: 9.5, color: "var(--text6)", marginTop: 2 } }, "\u23f0 " + new Date(snap.savedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })),
+          React.createElement("div", { style: { fontSize: 9.5, color: "var(--text6)", marginTop: 1 } }, "\u2022 " + ssPrice(snap.currentPrice) + " \u00b7 view: " + (snap.timeframe || "daily"))
+        ),
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+          r && React.createElement("div", { textAlign: "right" },
+            React.createElement("div", { style: { fontSize: 8, color: "var(--text5)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3 } }, "Entry Score"),
+            React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: entryTone, fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore != null ? r.finalScore : "\u2014")
+          ),
+          React.createElement("div", { onClick: function () { deleteSnapshot(snap.id); }, style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--text6)", fontSize: 13, title: "Delete snapshot" } }, "\u2715")
+        )
+      ),
+      overallEl,
+      React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 } },
+        scoreTile("Entry Score", r ? (r.finalScore != null ? r.finalScore : "\u2014") : "\u2014", r && r.decision ? r.decision.label : "\u2014", entryTone),
+        scoreTile("Conf. Next 10D", confScore != null ? confScore + "/100" : "\u2014", confLabel, confTone),
+        scoreTile("Optimum Entry", oe ? ssPrice(oe.optimumEntryPrice) : "\u2014", oeLabel, oeTone)
+      ),
+      tfRow,
+      React.createElement("div", { style: { display: "flex", gap: 12, justifyContent: "center", marginTop: 8 } },
+        React.createElement("div", { onClick: function () { setSnapOpen(function (p) { var n = Object.assign({}, p); n[snap.id] = !n[snap.id]; return n; }); }, style: { fontSize: 9, color: "var(--accent)", cursor: "pointer", fontWeight: 600 } },
+          isOpen ? "\u25b2 Hide Details" : "\u25bc Show Details"
+        )
+      ),
+      isOpen && chartsEl,
+      isOpen && indEl
+    );
+  };
+
+  var renderSnapshots = function () {
+    var grouped = groupSnapshots();
+    var yKeys = Object.keys(grouped).sort().reverse();
+    if (yKeys.length === 0) return React.createElement("div", { style: { textAlign: "center", padding: 30, color: "var(--text6)", fontSize: 12 } }, "No saved snapshots yet.");
+    return yKeys.map(function (yKey) {
+      var months = grouped[yKey];
+      var isYExp = snapYear === yKey;
+      var totalSnaps = Object.values(months).reduce(function (a, m) { return a + Object.values(m).reduce(function (b, d) { return b + d.snaps.length; }, 0); }, 0);
+      return React.createElement("div", { key: yKey, style: { marginBottom: 10, borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)", overflow: "hidden" } },
+        React.createElement("div", { onClick: function () { setSnapYear(isYExp ? null : yKey); }, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", cursor: "pointer", background: isYExp ? "var(--bg4)" : "transparent" } },
+          React.createElement("span", { style: { fontSize: 13, fontWeight: 800, color: "var(--text)", fontFamily: "var(--font-heading)" } }, (isYExp ? "\u25be " : "\u25b8 ") + yKey),
+          React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, totalSnaps + " snapshot" + (totalSnaps !== 1 ? "s" : ""))
+        ),
+        isYExp && Object.keys(months).sort().reverse().map(function (mKey) {
+          var days = months[mKey];
+          var isMExp = snapMonth === mKey;
+          var mSnaps = Object.values(days).reduce(function (a, d) { return a + d.snaps.length; }, 0);
+          return React.createElement("div", { key: mKey, style: { borderTop: "1px solid var(--border)" } },
+            React.createElement("div", { onClick: function () { setSnapMonth(isMExp ? null : mKey); }, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 14px 8px 28px", cursor: "pointer", background: isMExp ? "var(--bg4)" : "transparent" } },
+              React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, (isMExp ? "\u25be " : "\u25b8 ") + mKey.split("-").slice(1).join("-")),
+              React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+                React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, mSnaps + " snap" + (mSnaps !== 1 ? "s" : "")),
+                React.createElement("span", { onClick: async function (e) { e.stopPropagation(); if (await showConfirm("Delete all " + mSnaps + " snapshot" + (mSnaps !== 1 ? "s" : "") + " in " + mKey.split("-").slice(1).join("-") + "?")) deleteSnapshotsWhere(function (s) { var d = new Date(s.savedAt); return String(d.getFullYear()) + "-" + d.toLocaleString("en-IN", { month: "long" }) === mKey; }); }, style: { fontSize: 9, color: "#ef4444", cursor: "pointer", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, mSnaps === 1 ? "Delete" : "Delete All")
+              )
+            ),
+            isMExp && Object.keys(days).sort().reverse().map(function (dayKey) {
+              var day = days[dayKey];
+              var isDExp = snapDay === dayKey;
+              return React.createElement("div", { key: dayKey, style: { borderTop: "1px solid var(--border)" } },
+                React.createElement("div", { onClick: function () { setSnapDay(isDExp ? null : dayKey); }, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 14px 6px 42px", cursor: "pointer", background: isDExp ? "var(--bg4)" : "transparent" } },
+                  React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "var(--text3)" } }, (isDExp ? "\u25be " : "\u25b8 ") + day.label),
+                  React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+                    React.createElement("span", { style: { fontSize: 9, color: "var(--text5)" } }, day.snaps.length + " snap" + (day.snaps.length !== 1 ? "s" : "")),
+                    React.createElement("span", { onClick: async function (e) { e.stopPropagation(); if (await showConfirm("Delete all " + day.snaps.length + " snapshot" + (day.snaps.length !== 1 ? "s" : "") + " on " + day.label + "?")) deleteSnapshotsWhere(function (s) { var d = new Date(s.savedAt); var dk = mKey + "-" + d.getDate(); return dk === dayKey; }); }, style: { fontSize: 9, color: "#ef4444", cursor: "pointer", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", whiteSpace: "nowrap" } }, day.snaps.length === 1 ? "Delete" : "Delete All")
+                  )
+                ),
+                isDExp && React.createElement("div", { style: { padding: "6px 14px 6px 56px" } },
+                  day.snaps.map(function (snap) { return snapshotCard(snap); })
+                )
+              );
+            })
+          );
+        })
+      );
+    });
+  };
+
   return React.createElement("div", null,
     React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 14, alignItems: "center" } },
       React.createElement("input", {
@@ -6260,7 +6627,12 @@ function SingleStockAnalysis() {
             onClick: function () { DF.clearCache(); setRefreshTick(function (t) { return t + 1; }); },
             disabled: loading,
             style: { padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text5)", cursor: loading ? "wait" : "pointer", opacity: loading ? 0.6 : 1 }
-          }, loading ? "..." : "\u21bb")
+          }, loading ? "..." : "\u21bb"),
+          React.createElement("button", {
+            onClick: saveSnapshot, disabled: savingSnap || loading || !candles,
+            title: "Capture current chart, signal, entry score, 10-day confidence and optimum entry",
+            style: { padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, border: "1px solid rgba(139,92,246,.4)", background: savingSnap ? "var(--bg4)" : "rgba(139,92,246,.1)", color: "#a78bfa", cursor: savingSnap || loading || !candles ? "wait" : "pointer", opacity: savingSnap || loading || !candles ? 0.6 : 1, whiteSpace: "nowrap" }
+          }, savingSnap ? "\u23f3 Saving..." : "\ud83d\udcf7 Snapshot")
         )
       ),
       error && React.createElement("div", { style: { padding: "8px 12px", borderRadius: 8, marginBottom: 10, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", fontSize: 11, color: "var(--loss)" } }, error),
@@ -6399,6 +6771,13 @@ function SingleStockAnalysis() {
               )
             );
           })
+        ),
+        React.createElement("div", { style: { marginTop: 16 } },
+          React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+            React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Saved Snapshots"),
+            snapshots.length > 0 && React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, snapshots.length + " total")
+          ),
+          renderSnapshots()
         )
       )
     )

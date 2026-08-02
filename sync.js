@@ -120,6 +120,7 @@ var fsaReadFile = async function(handle) {
       screenerData: d.screenerData || null,
       screenerSnapshots: d.screenerSnapshots || [],
       screenerBookmarks: d.screenerBookmarks || {},
+      singleStockSnapshots: d.singleStockSnapshots || [],
       notes: d.notes || []
     };
   } catch (e) {
@@ -172,6 +173,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
   var screenerSnapshots = [];
   var screenerBookmarks = {};
   var entryPerfPrices = {};
+  var singleStockSnapshots = [];
   var notes = [];
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch (e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch (e) {}
@@ -179,6 +181,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
   try { screenerSnapshots = (await dbGetSetting("stox_screener_snapshots")) || []; } catch (e) {}
   try { screenerBookmarks = (await dbGetSetting("stox_screener_bookmarks")) || {}; } catch (e) {}
   try { entryPerfPrices = (await dbGetSetting("mm_entry_perf_prices")) || {}; } catch (e) {}
+  try { singleStockSnapshots = (await dbGetSetting("stox_single_stock_snapshots")) || []; } catch (e) {}
   try { notes = (await dbGetSetting("stox_notes")) || []; } catch (e) {}
 
   return {
@@ -195,6 +198,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       screenerStocks: screenerData && screenerData.results ? screenerData.results.length : 0,
       screenerSnapshots: screenerSnapshots.length,
       screenerBookmarks: Object.keys(screenerBookmarks).length,
+      singleStockSnapshots: singleStockSnapshots.length,
       notes: notes.length
     },
     data: {
@@ -207,6 +211,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       screenerData: screenerData,
       screenerSnapshots: screenerSnapshots,
       screenerBookmarks: screenerBookmarks,
+      singleStockSnapshots: singleStockSnapshots,
       notes: notes
     }
   };
@@ -254,6 +259,7 @@ window.__stoxRestoreFromPayload = async function(data) {
     if (data.screenerData) await dbSetSetting("stox_screener_data", data.screenerData);
     if (data.screenerSnapshots) await dbSetSetting("stox_screener_snapshots", data.screenerSnapshots);
     if (data.screenerBookmarks && typeof data.screenerBookmarks === "object") await dbSetSetting("stox_screener_bookmarks", data.screenerBookmarks);
+    if (data.singleStockSnapshots) await dbSetSetting("stox_single_stock_snapshots", data.singleStockSnapshots);
     if (data.notes) await dbSetSetting("stox_notes", data.notes);
     if (window.__fsa) window.__fsa.state = {
       holdings: data.holdings || [],
@@ -667,6 +673,7 @@ var gdriveReadSyncFile = async function(silent) {
         screenerData: data.data.screenerData || null,
         screenerSnapshots: data.data.screenerSnapshots || [],
         screenerBookmarks: data.data.screenerBookmarks || {},
+        singleStockSnapshots: data.data.singleStockSnapshots || [],
         notes: data.data.notes || []
       },
       modifiedTime: remoteExportedAt
