@@ -35,6 +35,86 @@ function readFromFileInput(accept) {
   });
 }
 
+/* ── Storage measurement helpers ── */
+function _estBytes(obj) {
+  try { return new Blob([JSON.stringify(obj)]).size; } catch (e) { return 0; }
+}
+
+function _scanIndexedDb(dbName) {
+  return new Promise(function(resolve) {
+    try {
+      var req = indexedDB.open(dbName);
+      req.onsuccess = function(e) {
+        var db = e.target.result;
+        var storeNames = [];
+        for (var i = 0; i < db.objectStoreNames.length; i++) storeNames.push(db.objectStoreNames[i]);
+        var out = { db: dbName, bytes: 0, records: 0, stores: {} };
+        var pending = storeNames.length;
+        if (pending === 0) { db.close(); resolve(out); return; }
+        storeNames.forEach(function(sn) {
+          var tx = db.transaction(sn, "readonly");
+          var g = tx.objectStore(sn).getAll();
+          g.onsuccess = function() {
+            var recs = g.result || [];
+            var stBytes = 0;
+            for (var r = 0; r < recs.length; r++) stBytes += _estBytes(recs[r]);
+            out.stores[sn] = { records: recs.length, bytes: stBytes };
+            out.records += recs.length;
+            out.bytes += stBytes;
+            if (--pending === 0) { db.close(); resolve(out); }
+          };
+          g.onerror = function() { if (--pending === 0) { db.close(); resolve(out); } };
+        });
+      };
+      req.onerror = function() { resolve(null); };
+    } catch (e) { resolve(null); }
+  });
+}
+
+function _scanLocalStorage() {
+  var bytes = 0, keys = [];
+  try {
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i) || "";
+      var v = "";
+      try { v = localStorage.getItem(k) || ""; } catch (e) {}
+      var b = _estBytes(k) + _estBytes(v);
+      bytes += b;
+      keys.push({ key: k, bytes: b });
+    }
+  } catch (e) {}
+  keys.sort(function(a, b) { return b.bytes - a.bytes; });
+  return { bytes: bytes, keys: keys };
+}
+
+function _readFsaFile() {
+  return new Promise(function(resolve) {
+    try {
+      var fsa = window.__fsa;
+      if (!fsa || !fsa.handle) { resolve({ connected: false }); return; }
+      fsa.handle.getFile().then(function(file) {
+        var info = { connected: true, bytes: file.size, name: fsa.filename || file.name, lastSaved: fsa.lastSaved, error: null };
+        file.text().then(function(text) {
+          try {
+            var parsed = JSON.parse(text);
+            var d = parsed && parsed.data ? parsed.data : null;
+            if (d) {
+              var keys = ["holdings", "soldShareSnapshots", "watchlist", "entryScores", "entrySnapshots", "entryPerfPrices", "screenerData", "screenerSnapshots", "screenerBookmarks", "singleStockSnapshots", "notes"];
+              var sections = [], secTotal = 0;
+              keys.forEach(function(k) { var b = _estBytes(d[k]); sections.push({ key: k, bytes: b }); secTotal += b; });
+              info.sections = sections;
+              info.sectionsBytes = secTotal;
+            }
+          } catch (e) {}
+          resolve(info);
+        }).catch(function() { resolve(info); });
+      }).catch(function() {
+        resolve({ connected: true, bytes: 0, name: (window.__fsa && window.__fsa.filename) || "", lastSaved: window.__fsa && window.__fsa.lastSaved, error: "permission" });
+      });
+    } catch (e) { resolve({ connected: false }); }
+  });
+}
+
 async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   var entryScores = [];
   var entrySnapshots = [];
@@ -247,6 +327,8 @@ function DataBackupSection(props) {
   var [screenerSnapshots, setScreenerSnapshots] = React.useState([]);
   var [singleStockSnapshots, setSingleStockSnapshots] = React.useState([]);
   var [notes, setNotes] = React.useState([]);
+  var [entryPerfPrices, setEntryPerfPrices] = React.useState({});
+  var [screenerBookmarks, setScreenerBookmarks] = React.useState({});
 
   React.useEffect(function() {
     (async function() {
@@ -256,32 +338,45 @@ function DataBackupSection(props) {
       try { var ss = await dbGetSetting("stox_screener_snapshots"); if (ss) setScreenerSnapshots(ss); } catch(e) {}
       try { var sss = await dbGetSetting("stox_single_stock_snapshots"); if (sss) setSingleStockSnapshots(sss); } catch(e) {}
       try { var nt = await dbGetSetting("stox_notes"); if (nt) setNotes(nt); } catch(e) {}
+      try { var epp = await dbGetSetting("mm_entry_perf_prices"); if (epp) setEntryPerfPrices(epp); } catch(e) {}
+      try { var sbm = await dbGetSetting("stox_screener_bookmarks"); if (sbm) setScreenerBookmarks(sbm); } catch(e) {}
     })();
   }, []);
 
+  var [storageStats, setStorageStats] = React.useState(null);
+  React.useEffect(function() {
+    var cancelled = false;
+    (async function() {
+      var idbMain = await _scanIndexedDb("stox_db");
+      var idbFsa = await _scanIndexedDb("stox_fsa_db");
+      var ls = _scanLocalStorage();
+      var fsa = await _readFsaFile();
+      if (!cancelled) setStorageStats({ idbMain: idbMain, idbFsa: idbFsa, ls: ls, fsa: fsa });
+    })();
+    return function() { cancelled = true; };
+  }, []);
+
   var storageInfo = React.useMemo(function() {
-    var holdingsKB = new Blob([JSON.stringify(holdings)]).size / 1024;
-    var snapsKB = new Blob([JSON.stringify(soldShareSnapshots)]).size / 1024;
-    var watchKB = new Blob([JSON.stringify(watchlist)]).size / 1024;
-    var esKB = new Blob([JSON.stringify(entryScores)]).size / 1024;
-    var esnKB = new Blob([JSON.stringify(entrySnapshots)]).size / 1024;
-    var scKB = new Blob([JSON.stringify(screenerData)]).size / 1024;
-    var scnKB = new Blob([JSON.stringify(screenerSnapshots)]).size / 1024;
-    var sssKB = new Blob([JSON.stringify(singleStockSnapshots)]).size / 1024;
-    var ntKB = new Blob([JSON.stringify(notes)]).size / 1024;
+    var sz = function(obj) { try { return new Blob([JSON.stringify(obj)]).size; } catch (e) { return 0; } };
+    var holdingsB = sz(holdings);
+    var snapsB = sz(soldShareSnapshots);
+    var watchB = sz(watchlist);
+    var esB = sz(entryScores);
+    var esnB = sz(entrySnapshots);
+    var eppB = sz(entryPerfPrices);
+    var scB = sz(screenerData);
+    var scnB = sz(screenerSnapshots);
+    var sbmB = sz(screenerBookmarks);
+    var sssB = sz(singleStockSnapshots);
+    var ntB = sz(notes);
     return {
-      holdingsKB: holdingsKB.toFixed(1),
-      snapsKB: snapsKB.toFixed(1),
-      watchKB: watchKB.toFixed(1),
-      esKB: esKB.toFixed(1),
-      esnKB: esnKB.toFixed(1),
-      scKB: scKB.toFixed(1),
-      scnKB: scnKB.toFixed(1),
-      sssKB: sssKB.toFixed(1),
-      ntKB: ntKB.toFixed(1),
-      totalKB: (holdingsKB + snapsKB + watchKB + esKB + esnKB + scKB + scnKB + sssKB + ntKB).toFixed(1)
+      holdingsB: holdingsB, snapsB: snapsB, watchB: watchB,
+      esB: esB, esnB: esnB, eppB: eppB,
+      scB: scB, scnB: scnB, sbmB: sbmB,
+      sssB: sssB, ntB: ntB,
+      totalB: holdingsB + snapsB + watchB + esB + esnB + eppB + scB + scnB + sbmB + sssB + ntB
     };
-  }, [holdings, soldShareSnapshots, watchlist, entryScores, entrySnapshots, screenerData, screenerSnapshots, singleStockSnapshots, notes]);
+  }, [holdings, soldShareSnapshots, watchlist, entryScores, entrySnapshots, entryPerfPrices, screenerData, screenerSnapshots, screenerBookmarks, singleStockSnapshots, notes]);
 
   var pastTradeCount = Object.values(soldShareSnapshots).reduce(function(s, a) { return s + a.length; }, 0);
 
@@ -350,17 +445,50 @@ function DataBackupSection(props) {
   var descStyle = { fontSize: 12, color: "var(--text4)", marginBottom: 14, lineHeight: 1.6 };
 
   var screenerCount = screenerData.results ? screenerData.results.length : 0;
-  var stats = [
-    { label: "Holdings", val: holdings.length, sub: storageInfo.holdingsKB + " KB", color: "#10b981" },
-    { label: "Past Trades", val: pastTradeCount, sub: storageInfo.snapsKB + " KB", color: "#6d28d9" },
-    { label: "Watchlist", val: watchlist.length, sub: storageInfo.watchKB + " KB", color: "#0ea5e9" },
-    { label: "Entry Scores", val: entryScores.length, sub: storageInfo.esKB + " KB", color: "#f97316" },
-    { label: "Screener", val: screenerCount, sub: storageInfo.scKB + " KB", color: "#8b5cf6" },
-    { label: "Screener Snaps", val: screenerSnapshots.length, sub: storageInfo.scnKB + " KB", color: "#ec4899" },
-    { label: "Analysis Snaps", val: singleStockSnapshots.length, sub: storageInfo.sssKB + " KB", color: "#a78bfa" },
-    { label: "Notes", val: notes.length, sub: storageInfo.ntKB + " KB", color: "#f59e0b" },
-    { label: "Total", val: holdings.length + pastTradeCount + watchlist.length + entryScores.length + screenerCount + screenerSnapshots.length + singleStockSnapshots.length + notes.length, sub: storageInfo.totalKB + " KB", color: "var(--text)" }
+  var fmtMB = function(v) {
+    var mb = (v != null && isFinite(Number(v)) ? Number(v) : 0) / 1048576;
+    if (mb >= 100) return mb.toFixed(0) + " MB";
+    if (mb >= 1) return mb.toFixed(2) + " MB";
+    return mb.toFixed(3) + " MB";
+  };
+  var totalCount = holdings.length + pastTradeCount + watchlist.length + entryScores.length + entrySnapshots.length + Object.keys(entryPerfPrices).length + screenerCount + screenerSnapshots.length + Object.keys(screenerBookmarks).length + singleStockSnapshots.length + notes.length;
+  var sectionList = [
+    { label: "Holdings", val: holdings.length, bytes: storageInfo.holdingsB, color: "#10b981" },
+    { label: "Past Trades", val: pastTradeCount, bytes: storageInfo.snapsB, color: "#6d28d9" },
+    { label: "Watchlist", val: watchlist.length, bytes: storageInfo.watchB, color: "#0ea5e9" },
+    { label: "Entry Scores", val: entryScores.length, bytes: storageInfo.esB, color: "#f97316" },
+    { label: "Entry Snaps", val: entrySnapshots.length, bytes: storageInfo.esnB, color: "#fb7185" },
+    { label: "Perf Prices", val: Object.keys(entryPerfPrices).length, bytes: storageInfo.eppB, color: "#f43f5e" },
+    { label: "Screener", val: screenerCount, bytes: storageInfo.scB, color: "#8b5cf6" },
+    { label: "Screener Snaps", val: screenerSnapshots.length, bytes: storageInfo.scnB, color: "#ec4899" },
+    { label: "Screener Bkmk", val: Object.keys(screenerBookmarks).length, bytes: storageInfo.sbmB, color: "#c084fc" },
+    { label: "Analysis Snaps", val: singleStockSnapshots.length, bytes: storageInfo.sssB, color: "#a78bfa" },
+    { label: "Notes", val: notes.length, bytes: storageInfo.ntB, color: "#f59e0b" }
   ];
+  var stats = sectionList.concat([{ label: "Total", val: totalCount, bytes: storageInfo.totalB, color: "var(--text)" }]);
+  var appMaxBytes = Math.max(1, sectionList.reduce(function(m, s) { return Math.max(m, s.bytes); }, 0));
+
+  var ss = storageStats || {};
+  var idbMain = ss.idbMain || null;
+  var idbFsa = ss.idbFsa || null;
+  var ls = ss.ls || null;
+  var fsa = ss.fsa || null;
+  var idbMainBytes = idbMain ? idbMain.bytes : 0;
+  var idbMainRecords = idbMain ? idbMain.records : 0;
+  var idbFsaBytes = idbFsa ? idbFsa.bytes : 0;
+  var idbFsaRecords = idbFsa ? idbFsa.records : 0;
+  var lsBytes = ls ? ls.bytes : 0;
+  var lsKeys = ls ? ls.keys.length : 0;
+  var fsaBytes = fsa && fsa.bytes ? fsa.bytes : 0;
+  var grandBytes = idbMainBytes + idbFsaBytes + lsBytes + fsaBytes;
+  var fsaConnected = fsa && fsa.connected;
+  var fsaLabel = fsaConnected ? (fsa.name || "file") + (fsa.lastSaved ? " \u00b7 saved " + new Date(fsa.lastSaved).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "") : "Not connected";
+  var FSA_SECTION_LABELS = {
+    holdings: "Holdings", soldShareSnapshots: "Past Trades", watchlist: "Watchlist",
+    entryScores: "Entry Scores", entrySnapshots: "Entry Snaps", entryPerfPrices: "Perf Prices",
+    screenerData: "Screener", screenerSnapshots: "Screener Snaps", screenerBookmarks: "Screener Bkmk",
+    singleStockSnapshots: "Analysis Snaps", notes: "Notes"
+  };
 
   var btnBase = {
     display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 17px", fontSize: 14,
@@ -370,14 +498,70 @@ function DataBackupSection(props) {
   return React.createElement("div", null,
     React.createElement("div", { className: "stx-card", style: cardStyle },
       React.createElement("div", { style: labelStyle }, "Storage Overview"),
-      React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 8 } },
+      React.createElement("div", { style: { fontSize: 10.5, color: "var(--text6)", lineHeight: 1.6, marginBottom: 12 } },
+        "App data lives in the browser IndexedDB. A copy is auto-saved to the FSA / Drive file, and small preferences (theme, sync tokens) sit in localStorage."
+      ),
+      React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8, marginBottom: 14 } },
+        React.createElement("div", { style: { background: "var(--bg3)", borderRadius: 10, padding: "10px 14px", border: "1px solid var(--border)" } },
+          React.createElement("div", { style: { fontSize: 9, color: "var(--text5)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 } }, "IndexedDB"),
+          React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "#0ea5e9" } }, storageStats ? fmtMB(idbMainBytes) : "\u2026"),
+          React.createElement("div", { style: { fontSize: 9.5, color: "var(--text5)", marginTop: 2 } }, idbMainRecords + " records \u00b7 " + idbFsaRecords + " fsa handle")
+        ),
+        React.createElement("div", { style: { background: "var(--bg3)", borderRadius: 10, padding: "10px 14px", border: "1px solid var(--border)" } },
+          React.createElement("div", { style: { fontSize: 9, color: "var(--text5)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 } }, "localStorage"),
+          React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "#f59e0b" } }, storageStats ? fmtMB(lsBytes) : "\u2026"),
+          React.createElement("div", { style: { fontSize: 9.5, color: "var(--text5)", marginTop: 2 } }, lsKeys + " keys")
+        ),
+        React.createElement("div", { style: { background: "var(--bg3)", borderRadius: 10, padding: "10px 14px", border: "1px solid " + (fsaConnected ? "rgba(139,92,246,.35)" : "var(--border)") } },
+          React.createElement("div", { style: { fontSize: 9, color: "var(--text5)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 } }, "FSA / Drive File"),
+          React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: fsaConnected ? "#8b5cf6" : "var(--text5)" } }, fsaConnected ? fmtMB(fsaBytes) : "\u2014"),
+          React.createElement("div", { style: { fontSize: 9.5, color: "var(--text5)", marginTop: 2 } }, fsaLabel)
+        ),
+        React.createElement("div", { style: { background: "var(--bg3)", borderRadius: 10, padding: "10px 14px", border: "1px solid var(--border)" } },
+          React.createElement("div", { style: { fontSize: 9, color: "var(--text5)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 } }, "Grand Total"),
+          React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, storageStats ? fmtMB(grandBytes) : "\u2026"),
+          React.createElement("div", { style: { fontSize: 9.5, color: "var(--text5)", marginTop: 2 } }, "physical footprint on disk")
+        )
+      ),
+      React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text4)", marginBottom: 8 } }, "App Data Breakdown"),
+      React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 8 } },
         stats.map(function(s) {
-          return React.createElement("div", { key: s.label, style: { background: "var(--bg3)", borderRadius: 10, padding: "10px 14px", border: "1px solid var(--border)" } },
+          var pct = s.label === "Total" ? 100 : Math.max(0, Math.min(100, Math.round(s.bytes / appMaxBytes * 100)));
+          return React.createElement("div", { key: s.label, style: { background: "var(--bg3)", borderRadius: 10, padding: "10px 14px", border: "1px solid " + (s.label === "Total" ? "rgba(139,92,246,.35)" : "var(--border)") } },
             React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 3 } }, s.label),
-            React.createElement("div", { style: { fontSize: 20, fontWeight: 800, fontFamily: "var(--font-heading)", color: s.color } }, s.val),
-            React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, s.sub)
+            React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: s.color } }, s.val),
+            React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 1 } }, fmtMB(s.bytes)),
+            React.createElement("div", { style: { height: 4, borderRadius: 2, background: "var(--bg5)", marginTop: 6, overflow: "hidden" } },
+              React.createElement("div", { style: { width: pct + "%", height: "100%", background: s.color, borderRadius: 2, transition: "width .4s" } })
+            )
           );
         })
+      ),
+      fsaConnected && fsa.sections && React.createElement("div", { style: { marginTop: 14 } },
+        React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text4)", marginBottom: 8 } }, "FSA / Drive File Breakdown"),
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginBottom: 8 } }, "Disk copy of the same sections \u2014 " + fmtMB(fsaBytes) + " total on disk."),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 8 } },
+          fsa.sections.filter(function(sx) { return sx.bytes > 0; }).map(function(sx) {
+            var pct = fsa.sectionsBytes > 0 ? Math.max(0, Math.min(100, Math.round(sx.bytes / fsa.sectionsBytes * 100))) : 0;
+            return React.createElement("div", { key: sx.key, style: { background: "var(--bg3)", borderRadius: 10, padding: "9px 12px", border: "1px solid var(--border)" } },
+              React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 2 } }, FSA_SECTION_LABELS[sx.key] || sx.key),
+              React.createElement("div", { style: { fontSize: 12.5, fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--text2)" } }, fmtMB(sx.bytes)),
+              React.createElement("div", { style: { height: 3, borderRadius: 2, background: "var(--bg5)", marginTop: 4, overflow: "hidden" } },
+                React.createElement("div", { style: { width: pct + "%", height: "100%", background: "#8b5cf6", borderRadius: 2 } })
+              )
+            );
+          })
+        )
+      ),
+      storageStats && ls && ls.keys.length > 0 && React.createElement("div", { style: { marginTop: 14 } },
+        React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text4)", marginBottom: 8 } }, "localStorage Keys"),
+        React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+          ls.keys.slice(0, 8).map(function(ks) {
+            return React.createElement("div", { key: ks.key, style: { padding: "6px 10px", borderRadius: 7, background: "var(--bg4)", border: "1px solid var(--border)", fontSize: 10, color: "var(--text5)", fontFamily: "var(--font-mono)" } },
+              ks.key + " \u00b7 " + fmtMB(ks.bytes)
+            );
+          })
+        )
       )
     ),
 
