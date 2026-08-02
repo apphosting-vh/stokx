@@ -2894,6 +2894,390 @@ window.TechIndicators = (function () {
     }
   }
 
+  /* ── Horizon Confidence Score (Next N Days) ────────────────────────────────
+     "Will the stock reach the target % within the NEXT N trading days?"
+     0–100. Driven by the stock's OWN hourly tape over the last W sessions,
+     plus the mechanical anchor of how far the target is vs the stock's typical
+     N-day range. Deliberately intraday/hourly-scaled — no index or beta inputs.
+
+       +20  Hourly trend strength (ADX/±DI, hourly window)
+       +15  Hourly structure (above session VWAP + rising, EMA9>EMA21 on hourly)
+       +10  Hourly momentum (RSI(14) healthy 55–78, ROC(10) still rising)
+       +10  Daily trend confirmation (daily EMA9>EMA21, price>EMA21, MACD bullish)
+       +30  Range reach (typical N-day range ≈ ATR×√N vs % still needed to target,
+            blended with recent trend drift toward the gap + up-bar volume strength)
+       + 5  Holding runway (fresh entry = full runway; decays as days held pile up)
+       −10  Overextension penalty (hourly RSI(14) stretched / too far above VWAP)
+
+     Unknown components get a neutral 50% fill so early/low-data reads are
+     conservative. Returns { confidence, reason, components, flags }. */
+  function computeHorizonConfidence(hourlyCandles, dailyCandles, cfg) {
+    cfg = cfg || {};
+    var horizonDays = cfg.horizonDays != null ? cfg.horizonDays : 5;
+    var windowSessions = cfg.windowSessions != null ? cfg.windowSessions : 10;
+    var base = {
+      confidence: null, reason: 'insufficient_hourly_data',
+      components: { horizonDays: horizonDays, targetPct: 4, profitPct: null, remainingPct: null, daysHeld: null, sessions: 0, hourlyAdx: null, hourlyPlusDI: null, hourlyMinusDI: null, hourlyVwap: null, hourlyVwapSlope: null, hourlyRsi14: null, roc10: null, ema9: null, ema21: null, dailyEmaBullish: false, dailyMacdBullish: false, atrPct: null, horizonReachPct: null, reachRatio: null, driftPct: null, volConfirm: null },
+      flags: { alreadyAtTarget: false, withinReach: false }
+    };
+    try {
+      if (!hourlyCandles || hourlyCandles.length < 60) return base;
+      var entry = cfg.entry_price || cfg.entry || 0;
+      var targetPct = cfg.target_pct != null ? cfg.target_pct : 4;
+      var daysHeld = cfg.holding_days != null ? cfg.holding_days : null;
+      if (entry <= 0) { base.reason = 'no_entry_price'; return base; }
+
+      var cur = hourlyCandles[hourlyCandles.length - 1];
+      var c = cur.c;
+      var profitPct = (c - entry) / entry * 100;
+      var remainingPct = targetPct - profitPct;
+      base.components.targetPct = targetPct;
+      base.components.profitPct = round(profitPct, 2);
+      base.components.remainingPct = round(remainingPct, 2);
+      base.components.daysHeld = daysHeld;
+      if (remainingPct <= 0) { base.confidence = 100; base.flags.alreadyAtTarget = true; base.reason = 'already_at_target'; return base; }
+
+      /* isolate the last `windowSessions` hourly sessions */
+      var seen = {}, keys = [];
+      for (var i = hourlyCandles.length - 1; i >= 0 && keys.length < windowSessions; i--) {
+        var k = String(hourlyCandles[i].t).slice(0, 10);
+        if (!seen[k]) { seen[k] = true; keys.push(k); }
+      }
+      var recent = [];
+      for (var j = 0; j < hourlyCandles.length; j++) {
+        if (seen[String(hourlyCandles[j].t).slice(0, 10)]) recent.push(hourlyCandles[j]);
+      }
+      base.components.sessions = keys.length;
+      if (recent.length < 20) { base.reason = 'insufficient_hourly_window'; return base; }
+
+      /* indicators evaluated on the full hourly series (correct warm-up);
+         their latest values lie within the recent session window */
+      var adxRes = hourlyCandles.length >= 30 ? calcADX(hourlyCandles, 14) : null;
+      var adx = adxRes ? last(adxRes.adx) : null;
+      var plusDI = adxRes ? last(adxRes.plusDI) : null;
+      var minusDI = adxRes ? last(adxRes.minusDI) : null;
+      var rsi14 = last(calcRSI(hourlyCandles, 14));
+      var roc10 = last(calcROC(hourlyCandles, 10));
+      var ema9 = last(calcEMA(hourlyCandles, 9));
+      var ema21 = last(calcEMA(hourlyCandles, 21));
+
+      var vwapSer = calcSessionVWAP(recent);
+      var vwap = last(vwapSer);
+      var vwapSlope = null;
+      if (vwap != null && recent.length >= 4 && vwapSer[recent.length - 4] != null) vwapSlope = (vwap - vwapSer[recent.length - 4]) / vwap * 100;
+
+      /* daily context: EMA stack, MACD, ATR headroom */
+      var dailyEmaBullish = false, dailyMacdBullish = false, atrPct = null;
+      if (dailyCandles && dailyCandles.length >= 30) {
+        var dCl = closes(dailyCandles);
+        var prevClose = dCl[dCl.length - 1];
+        var de9 = last(calcEMA(dailyCandles, 9)), de21 = last(calcEMA(dailyCandles, 21));
+        dailyEmaBullish = de9 != null && de21 != null && de9 > de21;
+        var macdRes = calcMACD(dailyCandles);
+        dailyMacdBullish = macdRes && macdRes.macd != null && macdRes.signal != null && macdRes.macd > macdRes.signal;
+        var atrV = last(calcATR(dailyCandles, 14));
+        if (prevClose > 0 && atrV != null) atrPct = atrV / prevClose * 100;
+      }
+
+      /* trend persistence + volume strength over the recent window:
+         driftPct = how far the stock already climbed the gap in the window;
+         volConfirm = share of volume on up-bars (buying dominates selling). */
+      var startClose = recent[0].o > 0 ? recent[0].o : recent[0].c;
+      var driftPct = (c - startClose) / startClose * 100;
+      var upVol = 0, dnVol = 0, upCount = 0, dnCount = 0;
+      for (var n = 0; n < recent.length; n++) {
+        if (recent[n].c >= recent[n].o) { upVol += recent[n].v; upCount++; }
+        else { dnVol += recent[n].v; dnCount++; }
+      }
+      var avgUp = upCount > 0 ? upVol / upCount : 0;
+      var avgDn = dnCount > 0 ? dnVol / dnCount : 0;
+      var volConfirm = (avgUp + avgDn) > 0 ? avgUp / (avgUp + avgDn) : 0.5;
+
+      /* typical N-day reach ≈ daily ATR × √N */
+      var horizonReach = null, reachRatio = null;
+      if (atrPct != null) {
+        horizonReach = atrPct * Math.sqrt(horizonDays);
+        base.components.atrPct = round(atrPct, 2);
+        base.components.horizonReachPct = round(horizonReach, 2);
+        reachRatio = horizonReach / Math.max(remainingPct, 0.05);
+        base.components.reachRatio = round(reachRatio, 2);
+        base.flags.withinReach = reachRatio >= 1;
+      }
+
+      var total = 0;
+
+      /* Hourly trend strength (20) */
+      var trendScore = 10;
+      if (adx != null && plusDI != null && minusDI != null) {
+        var dir = plusDI > minusDI ? 1 : 0;
+        trendScore = 20 * dir * Math.max(0, Math.min(1, adx / 35));
+      }
+      total += trendScore;
+
+      /* Hourly structure (15) — VWAP position + slope + EMA stack */
+      var structScore = 7.5;
+      if (vwap != null) {
+        var dPct = (c - vwap) / vwap * 100;
+        var pos = dPct > 0 ? 8 * Math.min(1, dPct / 1.2) : 0;
+        var slp = vwapSlope != null && vwapSlope > 0 ? 4 * Math.min(1, vwapSlope / 0.15) : 0;
+        var stack = ema9 != null && ema21 != null && ema9 > ema21 ? 3 : 0;
+        structScore = pos + slp + stack;
+      }
+      total += structScore;
+
+      /* Hourly momentum (10) — RSI(14) healthy band + ROC(10) rising */
+      var momScore = 5;
+      if (rsi14 != null && roc10 != null) {
+        var rsiPart = rsi14 >= 55 && rsi14 <= 78 ? 6 : (rsi14 > 45 && rsi14 < 55) || (rsi14 > 78 && rsi14 <= 88) ? 3 : 0;
+        var rocPart = roc10 > 0 ? 4 * Math.min(1, roc10 / 1.5) : 0;
+        momScore = rsiPart + rocPart;
+      }
+      total += momScore;
+
+      /* Daily trend confirmation (10) */
+      var dayScore = 5;
+      if (dailyEmaBullish) dayScore += 5;
+      if (dailyMacdBullish) dayScore += 5;
+      total += Math.min(10, dayScore);
+
+      /* Range reach (30) — mechanical anchor + demonstrated trend/volume.
+         ratioPart: typical N-day range (ATR×√N) vs the gap left to the target.
+         driftPart: did the stock already climb the gap in the recent window?
+         volPart:  up-bar volume dominance (buying pressure confirms the trend). */
+      var driftPart = driftPct > 0 ? Math.min(1, driftPct / Math.max(remainingPct, 0.05)) : 0;
+      var volPart = Math.max(0, Math.min(1, (volConfirm - 0.5) * 2));
+      base.components.driftPct = round(driftPct, 2);
+      base.components.volConfirm = round(volConfirm, 2);
+      var reachScore = 15;
+      if (horizonReach != null) {
+        var ratioPart = Math.max(0, Math.min(1, reachRatio));
+        reachScore = 30 * (0.6 * ratioPart + 0.25 * driftPart + 0.15 * volPart);
+      }
+      total += reachScore;
+
+      /* Holding runway (5) — fresh entry full, decays with days held */
+      var runway = daysHeld != null ? Math.max(1, Math.min(5, 5 - (daysHeld - 1) * (4 / 9))) : 2.5;
+      total += runway;
+
+      /* Overextension penalty (−10) */
+      var pen = 0;
+      if (rsi14 != null) { if (rsi14 >= 90) pen += 6; else if (rsi14 >= 85) pen += 4; }
+      if (vwap != null) { var d2 = (c - vwap) / vwap * 100; if (d2 > 3) pen += 4; else if (d2 > 2) pen += 2; }
+      total -= Math.min(10, pen);
+
+      total = Math.max(0, Math.min(100, total));
+      base.confidence = round(total, 1);
+      base.components.hourlyAdx = adx != null ? round(adx, 1) : null;
+      base.components.hourlyPlusDI = plusDI != null ? round(plusDI, 1) : null;
+      base.components.hourlyMinusDI = minusDI != null ? round(minusDI, 1) : null;
+      base.components.hourlyVwap = vwap != null ? round(vwap, 2) : null;
+      base.components.hourlyVwapSlope = vwapSlope != null ? round(vwapSlope, 3) : null;
+      base.components.hourlyRsi14 = rsi14 != null ? round(rsi14, 1) : null;
+      base.components.roc10 = roc10 != null ? round(roc10, 2) : null;
+      base.components.ema9 = ema9 != null ? round(ema9, 2) : null;
+      base.components.ema21 = ema21 != null ? round(ema21, 2) : null;
+      base.components.dailyEmaBullish = dailyEmaBullish;
+      base.components.dailyMacdBullish = dailyMacdBullish;
+      base.reason = 'ok';
+      return base;
+    } catch (e) {
+      base.reason = 'error';
+      return base;
+    }
+  }
+
+  /* Entry-position wrapper: "will THIS holding reach its target within the next
+     5 trading days?" — hourly window = last 10 sessions. */
+  function computeForwardConfidence(hourlyCandles, dailyCandles, position) {
+    position = position || {};
+    var entry = position.entry_price || position.entry || 0;
+    return computeHorizonConfidence(hourlyCandles, dailyCandles, {
+      horizonDays: 5, windowSessions: 10,
+      entry_price: entry,
+      target_pct: position.target_pct != null ? position.target_pct : 4,
+      holding_days: position.holding_days != null ? position.holding_days : null
+    });
+  }
+
+  /* Stock-level wrapper: "will THIS stock rise +4% from its CURRENT price within
+     the next 10 trading days?" — hourly window = last 15 sessions. */
+  function computeTenDayForwardConfidence(hourlyCandles, dailyCandles) {
+    if (!hourlyCandles || hourlyCandles.length === 0) {
+      return computeHorizonConfidence(hourlyCandles, dailyCandles, { horizonDays: 10, windowSessions: 15, entry_price: 0 });
+    }
+    var cur = hourlyCandles[hourlyCandles.length - 1];
+    return computeHorizonConfidence(hourlyCandles, dailyCandles, {
+      horizonDays: 10, windowSessions: 15,
+      entry_price: cur.c,
+      target_pct: 4,
+      holding_days: null
+    });
+  }
+
+  /* ── Optimum Entry Price ──────────────────────────────────────────────────
+     "At what price should I enter so that +4% within the next 10 trading
+     sessions is realistic?" Derives limit levels from the stock's OWN last
+     ~15 hourly sessions (current market, session VWAP, hourly EMA21, the
+     typical intraday dip, recent swing support) and scores each one with the
+     10-day horizon-confidence model. Returns the highest-priced level that
+     still carries strong odds — so the user doesn't chase the day's high or
+     pay an unreasonable price.
+     Returns { reason, currentPrice, optimumEntryPrice, discountPct,
+               entryConfidence, currentConfidence, advantagePct, overextended,
+               components, candidates }. */
+  function computeOptimumEntryPrice(hourlyCandles, dailyCandles) {
+    var base = {
+      reason: 'insufficient_hourly_data',
+      currentPrice: null, optimumEntryPrice: null, discountPct: null,
+      entryConfidence: null, currentConfidence: null, advantagePct: null,
+      overextended: false,
+      components: {
+        atrPct: null, horizonReachPct: null, vwap: null, ema21: null,
+        high15: null, low15: null, swingLow: null, dipDepthPct: null,
+        vDistPct: null, highGapPct: null, rsi14: null,
+        hourlyAdx: null, hourlyPlusDI: null, hourlyMinusDI: null,
+        dailyEmaBullish: false, dailyMacdBullish: false
+      },
+      candidates: []
+    };
+    try {
+      if (!hourlyCandles || hourlyCandles.length < 60) return base;
+      var cur = hourlyCandles[hourlyCandles.length - 1];
+      var c = cur.c;
+      if (!(c > 0)) return base;
+      base.currentPrice = round(c, 2);
+
+      /* 10-day context from the current market price (entry = C → 0% profit) */
+      var ctx = computeHorizonConfidence(hourlyCandles, dailyCandles, {
+        horizonDays: 10, windowSessions: 15, entry_price: c, target_pct: 4, holding_days: 0
+      });
+      if (ctx.reason !== 'ok' || ctx.confidence == null) { base.reason = ctx.reason || base.reason; return base; }
+      base.currentConfidence = ctx.confidence;
+
+      var cp = ctx.components;
+      base.components.atrPct = cp.atrPct;
+      base.components.horizonReachPct = cp.horizonReachPct;
+      base.components.vwap = cp.hourlyVwap;
+      base.components.ema21 = cp.ema21;
+      base.components.rsi14 = cp.hourlyRsi14;
+      base.components.hourlyAdx = cp.hourlyAdx;
+      base.components.hourlyPlusDI = cp.hourlyPlusDI;
+      base.components.hourlyMinusDI = cp.hourlyMinusDI;
+      base.components.dailyEmaBullish = cp.dailyEmaBullish;
+      base.components.dailyMacdBullish = cp.dailyMacdBullish;
+
+      /* isolate the last 15 hourly sessions */
+      var seen = {}, keys = [];
+      for (var i = hourlyCandles.length - 1; i >= 0 && keys.length < 15; i--) {
+        var k = String(hourlyCandles[i].t).slice(0, 10);
+        if (!seen[k]) { seen[k] = true; keys.push(k); }
+      }
+      var recent = [];
+      for (var j = 0; j < hourlyCandles.length; j++) {
+        if (seen[String(hourlyCandles[j].t).slice(0, 10)]) recent.push(hourlyCandles[j]);
+      }
+      if (recent.length < 20) { base.reason = 'insufficient_hourly_window'; return base; }
+
+      var high15 = -Infinity, low15 = Infinity, sessionOp = {}, sessionLo = {};
+      for (var n = 0; n < recent.length; n++) {
+        if (recent[n].h > high15) high15 = recent[n].h;
+        if (recent[n].l < low15) low15 = recent[n].l;
+        var sk = String(recent[n].t).slice(0, 10);
+        if (sessionOp[sk] == null) sessionOp[sk] = recent[n].o;
+        if (sessionLo[sk] == null || recent[n].l < sessionLo[sk]) sessionLo[sk] = recent[n].l;
+      }
+      base.components.high15 = round(high15, 2);
+      base.components.low15 = round(low15, 2);
+
+      /* typical intraday dip: average pullback from session open to session low */
+      var dipSum = 0, dipCnt = 0;
+      for (var sk2 in sessionLo) {
+        var op = sessionOp[sk2];
+        if (op > 0) { dipSum += (op - sessionLo[sk2]) / op * 100; dipCnt++; }
+      }
+      var dipDepthPct = dipCnt > 0 ? dipSum / dipCnt : 0;
+      base.components.dipDepthPct = round(dipDepthPct, 2);
+
+      /* recent support = lowest low of the last 3 sessions */
+      var last3 = {}, cnt3 = 0;
+      for (var m = recent.length - 1; m >= 0 && cnt3 < 3; m--) {
+        var mk = String(recent[m].t).slice(0, 10);
+        if (!last3[mk]) { last3[mk] = recent[m].l; cnt3++; }
+      }
+      var swingLow = Infinity;
+      for (var sk3 in last3) if (last3[sk3] < swingLow) swingLow = last3[sk3];
+      base.components.swingLow = swingLow === Infinity ? null : round(swingLow, 2);
+
+      var vwap = cp.hourlyVwap;
+      var vDistPct = vwap != null && vwap > 0 ? (c - vwap) / vwap * 100 : null;
+      var highGapPct = (high15 - c) / high15 * 100;
+      base.components.vDistPct = vDistPct != null ? round(vDistPct, 2) : null;
+      base.components.highGapPct = round(highGapPct, 2);
+
+      /* stretched = chasing risk: well above session VWAP, or pinned to the
+         15-session high while hot, or blown-off RSI */
+      var overextended = (vDistPct != null && vDistPct > 1.5)
+        || (highGapPct < 0.4 && cp.hourlyRsi14 != null && cp.hourlyRsi14 >= 70)
+        || (cp.hourlyRsi14 != null && cp.hourlyRsi14 >= 85);
+      base.overextended = overextended;
+
+      /* candidate limit levels — never more than 3.5% below the market */
+      var floorP = c * (1 - 0.035);
+      var cand = {};
+      cand[c] = 'current';
+      if (vwap != null && vwap > 0) cand[vwap] = 'VWAP';
+      if (cp.ema21 != null && cp.ema21 > 0) cand[cp.ema21] = 'EMA21';
+      if (dipDepthPct > 0.25) cand[c * (1 - dipDepthPct / 100)] = 'Typical dip';
+      if (swingLow !== Infinity) cand[swingLow] = 'Swing low';
+
+      var prices = Object.keys(cand).map(Number).filter(function (p) {
+        return p > 0 && p <= c && p >= floorP;
+      }).sort(function (a, b) { return b - a; });
+      if (prices.length === 0) prices = [c];
+
+      var candData = [];
+      for (var p2 = 0; p2 < prices.length; p2++) {
+        var P = prices[p2];
+        var res = computeHorizonConfidence(hourlyCandles, dailyCandles, {
+          horizonDays: 10, windowSessions: 15, entry_price: P, target_pct: 4, holding_days: 0
+        });
+        candData.push({ price: round(P, 2), confidence: res.confidence, tag: cand[P] });
+      }
+      base.candidates = candData;
+
+      /* pick the level: if not stretched and the market already has strong
+         odds, enter at market. Otherwise take the highest-priced limit below
+         the market with strong odds (>=60); else the level with the best odds. */
+      var chosen;
+      if (!overextended && ctx.confidence >= 60) {
+        chosen = candData[0];
+      } else {
+        var strong = null;
+        for (var q = 0; q < candData.length; q++) {
+          if (candData[q].price < c - 1e-9 && candData[q].confidence != null && candData[q].confidence >= 60) { strong = candData[q]; break; }
+        }
+        if (strong) chosen = strong;
+        else {
+          var best = candData[0];
+          for (var r2 = 1; r2 < candData.length; r2++) {
+            if ((candData[r2].confidence != null ? candData[r2].confidence : -1) > (best.confidence != null ? best.confidence : -1)) best = candData[r2];
+          }
+          chosen = best;
+        }
+      }
+
+      base.optimumEntryPrice = chosen.price;
+      base.entryConfidence = chosen.confidence != null ? round(chosen.confidence, 1) : null;
+      base.discountPct = round((c - chosen.price) / c * 100, 2);
+      base.advantagePct = chosen.confidence != null && ctx.confidence != null ? round(chosen.confidence - ctx.confidence, 1) : null;
+      base.reason = 'ok';
+      return base;
+    } catch (e) {
+      base.reason = 'error';
+      return base;
+    }
+  }
+
   /* --------------------------------------------------------------------------
      Public API
      -------------------------------------------------------------------------- */
@@ -2932,6 +3316,9 @@ window.TechIndicators = (function () {
     computeMultiTFExitScore: computeMultiTFExitScore,
     computeCompatExitScore: computeCompatExitScore,
     computeSessionConfidence: computeSessionConfidence,
+    computeForwardConfidence: computeForwardConfidence,
+    computeTenDayForwardConfidence: computeTenDayForwardConfidence,
+    computeOptimumEntryPrice: computeOptimumEntryPrice,
     integratedExitDecision: integratedExitDecision
   };
 })();
