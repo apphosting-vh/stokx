@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.9.0";
+window.__STOX_APP_VERSION = "2.9.1";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -4797,6 +4797,8 @@ const ConfidenceTracker = () => {
   const [prices, setPrices] = useState({});
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState({});
+  const [sortKey, setSortKey] = useState("addedAt");
+  const [sortDir, setSortDir] = useState("desc");
 
   useEffect(() => {
     (async () => {
@@ -4956,6 +4958,11 @@ const ConfidenceTracker = () => {
     saveTracked(tracked.filter((t) => ids.indexOf(t.id) < 0));
   };
 
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    else { setSortKey(key); setSortDir("desc"); }
+  };
+
   const exportConfCSV = () => {
     var rows = [["Stock", "Date Added", "Confidence 10D", "Entry Score", "Price on Add", "Days", "Current Price", "% Change"]];
     var now = new Date();
@@ -4984,9 +4991,39 @@ const ConfidenceTracker = () => {
     showToast("Exported " + tracked.length + " tracked stocks to CSV", 3000);
   };
 
-  var sorted = tracked.slice().sort(function (a, b) { return new Date(b.addedAt) - new Date(a.addedAt); });
   var now = new Date();
+  var tradingDays = function (addedAt) {
+    var addedDate = new Date(addedAt);
+    var _startMs = Date.UTC(addedDate.getFullYear(), addedDate.getMonth(), addedDate.getDate());
+    var _endMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    var days = 0;
+    for (var _t = _startMs; _t < _endMs; _t += 86400000) { var _day = new Date(_t).getUTCDay(); if (_day !== 0 && _day !== 6) days++; }
+    return days;
+  };
+  var rowPct = function (tr) {
+    var priceOnAdd = tr.currentPrice || 0;
+    var currentPrice = prices[tr.ticker] || 0;
+    return priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100) : null;
+  };
+  var sorted = tracked.slice().sort(function (a, b) {
+    var dir = sortDir === "desc" ? -1 : 1;
+    var av, bv;
+    if (sortKey === "ticker") { av = a.ticker; bv = b.ticker; return dir * av.localeCompare(bv); }
+    if (sortKey === "addedAt") { av = new Date(a.addedAt).getTime(); bv = new Date(b.addedAt).getTime(); return dir * (av - bv); }
+    if (sortKey === "confidence") { av = a.confidence != null ? a.confidence : -1; bv = b.confidence != null ? b.confidence : -1; }
+    else if (sortKey === "entryScore") { av = a.entryScore != null ? a.entryScore : -1; bv = b.entryScore != null ? b.entryScore : -1; }
+    else if (sortKey === "priceOnAdd") { av = a.currentPrice || 0; bv = b.currentPrice || 0; }
+    else if (sortKey === "days") { av = tradingDays(a.addedAt); bv = tradingDays(b.addedAt); }
+    else if (sortKey === "currentPrice") { av = prices[a.ticker] || 0; bv = prices[b.ticker] || 0; }
+    else if (sortKey === "pct") { av = rowPct(a); bv = rowPct(b); av = av == null ? -999 : av; bv = bv == null ? -999 : bv; }
+    else { av = 0; bv = 0; }
+    return dir * (av - bv);
+  });
   var selectedCount = Object.keys(selected).filter(function(id) { return selected[id]; }).length;
+  var arrow = function (key) {
+    if (sortKey !== key) return "";
+    return sortDir === "asc" ? " \u25b2" : " \u25bc";
+  };
   var thStyle = { padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" };
   var thRight = Object.assign({}, thStyle, { textAlign: "right" });
   var tdStyle = { padding: "8px 10px", fontSize: 11, borderBottom: "1px solid var(--border)" };
@@ -5062,27 +5099,24 @@ const ConfidenceTracker = () => {
             React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center", width: 36 }) },
               React.createElement("input", { type: "checkbox", checked: sorted.length > 0 && sorted.every(function(t) { return selected[t.id]; }), onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 13, height: 13 } })
             ),
-            React.createElement("th", { style: thStyle }, "Stock"),
-            React.createElement("th", { style: thStyle }, "Date Added"),
-            React.createElement("th", { style: thStyle }, "Conf 10D"),
-            React.createElement("th", { style: thStyle }, "Entry Score"),
-            React.createElement("th", { style: thRight }, "Price on Add"),
-            React.createElement("th", { style: thRight }, "Days"),
-            React.createElement("th", { style: thRight }, "Current Price"),
-            React.createElement("th", { style: thRight }, "% Change"),
+            React.createElement("th", { style: thStyle, title: "Sort by stock", onClick: function() { toggleSort("ticker"); } }, "Stock" + arrow("ticker")),
+            React.createElement("th", { style: thStyle, title: "Sort by date added", onClick: function() { toggleSort("addedAt"); } }, "Date Added" + arrow("addedAt")),
+            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }), title: "Sort by confidence score", onClick: function() { toggleSort("confidence"); } }, "Conf 10D" + arrow("confidence")),
+            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }), title: "Sort by entry score", onClick: function() { toggleSort("entryScore"); } }, "Entry Score" + arrow("entryScore")),
+            React.createElement("th", { style: thRight, title: "Sort by price on add", onClick: function() { toggleSort("priceOnAdd"); } }, "Price on Add" + arrow("priceOnAdd")),
+            React.createElement("th", { style: thRight, title: "Sort by days held", onClick: function() { toggleSort("days"); } }, "Days" + arrow("days")),
+            React.createElement("th", { style: thRight, title: "Sort by current price", onClick: function() { toggleSort("currentPrice"); } }, "Current Price" + arrow("currentPrice")),
+            React.createElement("th", { style: thRight, title: "Sort by % change", onClick: function() { toggleSort("pct"); } }, "% Change" + arrow("pct")),
             React.createElement("th", { style: Object.assign({}, thStyle, { width: 40 }) })
           )
         ),
         React.createElement("tbody", null,
           sorted.map(function (tr) {
             var addedDate = new Date(tr.addedAt);
-            var _startMs = Date.UTC(addedDate.getFullYear(), addedDate.getMonth(), addedDate.getDate());
-            var _endMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-            var daysElapsed = 0;
-            for (var _t = _startMs; _t < _endMs; _t += 86400000) { var _day = new Date(_t).getUTCDay(); if (_day !== 0 && _day !== 6) daysElapsed++; }
+            var daysElapsed = tradingDays(tr.addedAt);
             var priceOnAdd = tr.currentPrice || 0;
             var currentPrice = prices[tr.ticker] || 0;
-            var pctChange = priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100) : null;
+            var pctChange = rowPct(tr);
             var pctColor = pctChange === null ? "var(--text6)" : pctChange >= 0 ? "#22c55e" : "#ef4444";
             var confColor = tr.confidence == null ? "var(--text6)" : tr.confidence >= 70 ? "#16a34a" : tr.confidence >= 40 ? "#d97706" : "#dc2626";
             var esColor = "var(--text6)";
