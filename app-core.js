@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.9.1";
+window.__STOX_APP_VERSION = "2.9.4";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -2346,17 +2346,18 @@ const ForwardConfidencePanel = ({ ticker, buyPrice, buyDate, entryScore }) => {
     if (!ticker || !DF || !TI) { setLoading(false); return; }
     let cancelled = false;
     setLoading(true); setErr(null); setConf(null);
-    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h")])
+    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h"), DF.fetchOHLCVCached("^NSEI", "daily")])
       .then((res) => {
         if (cancelled) return;
         const d = res[0] && res[0].data;
         const h1 = res[1] && res[1].data;
+        const idxD = res[2] && res[2].data;
         if (!d || d.length < 30 || !h1 || h1.length < 60) { setErr("insufficient_data"); return; }
         const entry = buyPrice || 0;
         if (entry <= 0) { setErr("no_entry"); return; }
         const buyD = buyDate ? new Date(buyDate + "T12:00:00") : null;
         const holdingDays = buyD ? Math.max(0, Math.floor((Date.now() - buyD.getTime()) / 86400000)) : 0;
-        const c = TI.computeForwardConfidence(h1, d, { entry_price: entry, target_pct: 4, holding_days: holdingDays });
+        const c = TI.computeForwardConfidence(h1, d, { entry_price: entry, target_pct: 4, holding_days: holdingDays, indexCandles: idxD });
         setConf(c);
       })
       .catch(() => { if (!cancelled) setErr("fetch"); })
@@ -2435,13 +2436,14 @@ const TenDayConfidencePanel = ({ ticker }) => {
     if (!ticker || !DF || !TI) { setLoading(false); return; }
     let cancelled = false;
     setLoading(true); setErr(null); setConf(null);
-    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h")])
+    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h"), DF.fetchOHLCVCached("^NSEI", "daily")])
       .then((res) => {
         if (cancelled) return;
         const d = res[0] && res[0].data;
         const h1 = res[1] && res[1].data;
+        const idxD = res[2] && res[2].data;
         if (!d || d.length < 30 || !h1 || h1.length < 60) { setErr("insufficient_data"); return; }
-        const c = TI.computeTenDayForwardConfidence(h1, d);
+        const c = TI.computeTenDayForwardConfidence(h1, d, idxD);
         setConf(c);
       })
       .catch(() => { if (!cancelled) setErr("fetch"); })
@@ -2520,13 +2522,14 @@ const OptimumEntryPanel = ({ ticker }) => {
     if (!ticker || !DF || !TI) { setLoading(false); return; }
     let cancelled = false;
     setLoading(true); setErr(null); setRes(null);
-    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h")])
+    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h"), DF.fetchOHLCVCached("^NSEI", "daily")])
       .then((r) => {
         if (cancelled) return;
         const d = r[0] && r[0].data;
         const h1 = r[1] && r[1].data;
+        const idxD = r[2] && r[2].data;
         if (!d || d.length < 30 || !h1 || h1.length < 60) { setErr("insufficient_data"); return; }
-        setRes(TI.computeOptimumEntryPrice(h1, d));
+        setRes(TI.computeOptimumEntryPrice(h1, d, idxD));
       })
       .catch(() => { if (!cancelled) setErr("fetch"); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -4906,7 +4909,9 @@ const ConfidenceTracker = () => {
       const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
       let confidence = null;
       try {
-        const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data);
+        let idxD = null;
+        try { const _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch (e) {}
+        const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, idxD);
         if (conf && conf.confidence != null) confidence = conf.confidence;
       } catch (e) {}
       const row = {
@@ -5459,12 +5464,13 @@ function StockScreener(props) {
     input.click();
   };
 
-  var refreshStock = async function(s) {
+  var refreshStock = async function(s, indexDaily) {
     if (!TI || !DF) return;
     setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = true; return c; });
     try {
       var tk = s.t.replace(".NS", "");
       DF.clearCache();
+      if (!indexDaily) { try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {} }
       var [resW, resD, resH] = await Promise.all([
         DF.fetchOHLCVCached(tk, "weekly"),
         DF.fetchOHLCVCached(tk, "daily"),
@@ -5482,7 +5488,7 @@ function StockScreener(props) {
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
       var conf10d = null;
-      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
+      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -5511,6 +5517,8 @@ function StockScreener(props) {
     var found = NIFTY_100_UNIQUE.find(function(s) { return s.t === tk + ".NS"; });
     var stockObj = found ? found : { t: tk + ".NS", n: tk };
     try {
+      var indexDaily = null;
+      try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {}
       var [resW, resD, resH] = await Promise.all([
         DF.fetchOHLCVCached(tk, "weekly"),
         DF.fetchOHLCVCached(tk, "daily"),
@@ -5528,7 +5536,7 @@ function StockScreener(props) {
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
       var conf10d = null;
-      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
+      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -5550,8 +5558,10 @@ function StockScreener(props) {
     var batch = results.filter(function(r) { return tickers.indexOf(r.s.t) >= 0; });
     var oldScores = {};
     batch.forEach(function(r) { oldScores[r.s.t] = r.result ? r.result.finalScore : null; });
+    var indexDaily = null;
+    try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {}
     for (var i = 0; i < batch.length; i++) {
-      await refreshStock(batch[i].s);
+      await refreshStock(batch[i].s, indexDaily);
     }
     var updatedResults = _resultsRef.current;
     var changes = [];
@@ -5597,6 +5607,8 @@ function StockScreener(props) {
     setBgRefreshing(true);
     setBgProgress({ done: 0, total: batch.length, current: "" });
     setSelected({});
+    var indexDaily = null;
+    try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {}
     for (var i = 0; i < batch.length; i++) {
       if (!bg.active) break;
       var stk = batch[i].s;
@@ -5620,7 +5632,7 @@ function StockScreener(props) {
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
           var conf10d = null;
-          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
+          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -5733,7 +5745,9 @@ function StockScreener(props) {
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
       var confidence = null;
       try {
-        var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data);
+        var idxD = null;
+        try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch(e) {}
+        var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, idxD);
         if (conf && conf.confidence != null) confidence = conf.confidence;
       } catch (e) {}
       var row = {
@@ -5767,6 +5781,8 @@ function StockScreener(props) {
     setProgress({ done: 0, total: total, current: "Starting..." });
     var out = [];
     var BATCH = 3;
+    var indexDaily = null;
+    try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {}
     for (var i = 0; i < stocks.length; i += BATCH) {
       var batch = stocks.slice(i, i + BATCH);
       var promises = batch.map(async function(s) {
@@ -5787,7 +5803,7 @@ function StockScreener(props) {
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
           var conf10d = null;
-          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
+          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -6371,8 +6387,10 @@ function SingleStockAnalysis({ requestedTicker }) {
       var currentPrice = quote && quote.price > 0 ? quote.price : (dailyBar ? dailyBar.c : null);
       var tenDayConf = null, optimumRes = null, indCompact = null;
       if (d && h1 && d.length >= 30 && h1.length >= 60) {
-        tenDayConf = TI.computeTenDayForwardConfidence(h1, d);
-        optimumRes = TI.computeOptimumEntryPrice(h1, d);
+        var idxD = null;
+        try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch (e) {}
+        tenDayConf = TI.computeTenDayForwardConfidence(h1, d, idxD);
+        optimumRes = TI.computeOptimumEntryPrice(h1, d, idxD);
         try { indCompact = pickCompactIndicators(TI.computeAll(d)); } catch (e) {}
       }
       var entry = mtf && mtf.entry ? mtf.entry : null;
