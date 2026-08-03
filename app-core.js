@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.8.8";
+window.__STOX_APP_VERSION = "2.9.0";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -6205,7 +6205,7 @@ function SingleStockAnalysis({ requestedTicker }) {
   var timerRef = useRef(null);
   var fetchIdRef = useRef(0);
   var _n = useState("none"), oscPane = _n[0], setOscPane = _n[1];
-  var _o = useState({ ma: true, bb: true, vwap: true, st: true, sar: true, lvl: true }), overlays = _o[0], setOverlays = _o[1];
+  var _o = useState({ ma: false, bb: false, vwap: false, st: false, sar: false, lvl: false }), overlays = _o[0], setOverlays = _o[1];
   var _p = useState(null), quote = _p[0], setQuote = _p[1];
   var _q = useState(null), mtf = _q[0], setMtf = _q[1];
   var _r = useState(false), mtfLoading = _r[0], setMtfLoading = _r[1];
@@ -6725,6 +6725,8 @@ function SingleStockAnalysis({ requestedTicker }) {
     var lastC = data[data.length - 1];
     var firstC = data[0];
     var priceColor = lastC.c >= firstC.c ? "var(--profit)" : "var(--loss)";
+    var chartPct = firstC && firstC.c > 0 ? ((lastC.c - firstC.c) / firstC.c) * 100 : null;
+    var chartPctColor = chartPct == null ? "var(--text6)" : chartPct >= 0 ? "var(--profit)" : "var(--loss)";
 
     var vMax = Math.max.apply(null, data.map(function (c) { return c.v || 0; })) || 1;
     var volEls = data.map(function (c, ci) {
@@ -6740,6 +6742,7 @@ function SingleStockAnalysis({ requestedTicker }) {
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: priceColor } }, "\u20b9" + _fmt(lastC.c)),
+          React.createElement("span", { title: "% change from first candle to last candle in this " + timeframe + " chart", style: { fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)", color: chartPctColor, padding: "1px 6px", borderRadius: 5, background: chartPctColor === "var(--text6)" ? "transparent" : chartPct >= 0 ? "rgba(22,163,74,.1)" : "rgba(239,68,68,.1)", border: "1px solid " + (chartPctColor === "var(--text6)" ? "transparent" : chartPct >= 0 ? "rgba(22,163,74,.3)" : "rgba(239,68,68,.3)") } }, chartPct != null ? (chartPct >= 0 ? "+" : "") + chartPct.toFixed(2) + "%" : "\u2014"),
           React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "O: " + _fmt(lastC.o) + " H: " + _fmt(lastC.h) + " L: " + _fmt(lastC.l) + " C: " + _fmt(lastC.c))
         )
       ),
