@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.9.7";
+window.__STOX_APP_VERSION = "2.10.2";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -4061,7 +4061,7 @@ const EntryScorePanel = ({ shares }) => {
   };
 
   const exportEntryScoreCSV = () => {
-    var rows = [["Stock","Date Added","Hourly","Daily","Weekly","Base","Bonus/Pen","Final","Price on Add","Days","Current Price","% Change"]];
+    var rows = [["Stock","Date Added","Hourly","Daily","Weekly","Base","Bonus/Pen","Final","10-Day Conf","Price on Add","Days","Current Price","% Change"]];
     var now = new Date();
     entries.forEach(function(entry) {
       var addedDate = new Date(entry.addedAt);
@@ -4081,7 +4081,7 @@ const EntryScorePanel = ({ shares }) => {
       var pct = priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100).toFixed(2) : "";
       var dateStr = addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       function esc(v) { var s = String(v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
-      rows.push([esc(entry.ticker), esc(dateStr), hourly, daily, weekly, base, esc(bonus), final, priceOnAdd, daysElapsed, currentPrice, pct].join(","));
+      rows.push([esc(entry.ticker), esc(dateStr), hourly, daily, weekly, base, esc(bonus), final, entry.conf10d != null ? entry.conf10d : "", priceOnAdd, daysElapsed, currentPrice, pct].join(","));
     });
     var csv = rows.join("\r\n");
     var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
@@ -4198,7 +4198,14 @@ const EntryScorePanel = ({ shares }) => {
       const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
       const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
       if (result) result.lastClose = lastDailyClose;
-      const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), indicators: { weekly: indW, daily: indD, hourly: indH } };
+      let conf10d = null;
+      try {
+        let idxD = null;
+        try { const _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch (e) {}
+        const _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, idxD);
+        if (_conf && _conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10;
+      } catch (e) {}
+      const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d, indicators: { weekly: indW, daily: indD, hourly: indH } };
       saveEntries([entry, ...entries]);
       setAddTicker(""); setAddPrice(""); setShowAdd(false);
     } catch (e) { setAddErr("Error: " + (e.message || "Failed")); }
@@ -4697,6 +4704,7 @@ const EntryScorePanel = ({ shares }) => {
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Stock"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Date Added"),
               React.createElement("th", { colSpan: 6, style: { padding: "8px 10px", textAlign: "center", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Entry Score"),
+              React.createElement("th", { title: "10-day forward confidence score frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10-Day Conf"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Price on Add"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Days"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Current Price"),
@@ -4708,6 +4716,7 @@ const EntryScorePanel = ({ shares }) => {
               ["Hourly", "Daily", "Weekly", "Base", "Bonus/Pen", "Final"].map(function(sub) {
                 return React.createElement("th", { key: sub, style: { padding: "4px 10px", textAlign: "center", fontWeight: 600, color: "var(--text5)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, sub);
               }),
+              React.createElement("th", { style: { background: "var(--bg3)" } }),
               React.createElement("th", { style: { background: "var(--bg3)" } }),
               React.createElement("th", { style: { background: "var(--bg3)" } }),
               React.createElement("th", { style: { background: "var(--bg3)" } }),
@@ -4753,6 +4762,7 @@ const EntryScorePanel = ({ shares }) => {
                   ) : "—"
                 ),
                 React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: finalColor, fontWeight: 900 }) }, finalScore !== null ? finalScore : "—"),
+                React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: entry.conf10d != null ? (entry.conf10d >= 70 ? "#16a34a" : entry.conf10d >= 40 ? "#d97706" : "#dc2626") : "var(--text6)", fontFamily: "var(--font-mono)" } }, entry.conf10d != null ? Number(entry.conf10d).toFixed(0) : "—"),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text2)", fontFamily: "var(--font-mono)" } }, priceOnAdd > 0 ? INR(priceOnAdd) : "—"),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text4)" } }, daysElapsed),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text2)", fontFamily: "var(--font-mono)" } }, currentPrice > 0 ? INR(currentPrice) : (perfTrackerRefreshing ? "..." : "—")),
@@ -5150,6 +5160,485 @@ const ConfidenceTracker = () => {
           })
         )
       )
+    )
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   COMPONENT: Backtesting (Pulse sub-tab)
+   Replays a ticker's last N trading days as-of historical dates. At each past
+   date D the daily/hourly/weekly/index series are sliced to end at D (no
+   lookahead) and the SAME production engines run — computeMultiTFEntryScore
+   (Entry Score, H/D/W) and computeTenDayForwardConfidence (10-Day Confidence).
+   The +4% / 10-session target is then graded on candles strictly after D
+   (Touch Hit = intraday high reaches +4%; Close Hit = a close reaches +4%).
+   Output: score-bucket accuracy tables + correlations + per-date CSV.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function _btDateStr(c) { return String(c && c.t).slice(0, 10); }
+
+function _btSliceByDate(arr, dateStr) {
+  if (!arr || !arr.length) return null;
+  var n = 0;
+  for (var i = 0; i < arr.length; i++) {
+    if (_btDateStr(arr[i]) <= dateStr) n = i + 1;
+    else break;
+  }
+  return n > 0 ? arr.slice(0, n) : null;
+}
+
+function _btHourlyUpTo(hourly, dateStr, maxBars) {
+  if (!hourly || !hourly.length) return null;
+  var end = 0;
+  for (var i = 0; i < hourly.length; i++) {
+    if (_btDateStr(hourly[i]) <= dateStr) end = i + 1;
+    else break;
+  }
+  if (end === 0) return null;
+  var start = Math.max(0, end - (maxBars || 420));
+  return hourly.slice(start, end);
+}
+
+function _btDailyUpTo(daily, dateStr, maxBars) {
+  if (!daily || !daily.length) return null;
+  var end = 0;
+  for (var i = 0; i < daily.length; i++) {
+    if (_btDateStr(daily[i]) <= dateStr) end = i + 1;
+    else break;
+  }
+  if (end === 0) return null;
+  var start = Math.max(0, end - (maxBars || 600));
+  return daily.slice(start, end);
+}
+
+function _btPearson(xs, ys) {
+  var n = xs.length;
+  if (n < 3) return null;
+  var sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+  for (var i = 0; i < n; i++) {
+    sx += xs[i]; sy += ys[i]; sxx += xs[i] * xs[i]; syy += ys[i] * ys[i]; sxy += xs[i] * ys[i];
+  }
+  var denom = Math.sqrt((n * sxx - sx * sx) * (n * syy - sy * sy));
+  return denom === 0 ? null : (n * sxy - sx * sy) / denom;
+}
+
+function _btEvalOne(TI, d1, h1, w1, idxD, i) {
+  var D = _btDateStr(d1[i]);
+  var entry = d1[i].c;
+  var daySlice = _btDailyUpTo(d1, D, 250);
+  var wSlice = _btSliceByDate(w1, D);
+  var idxSlice = _btSliceByDate(idxD, D);
+  if (idxSlice && idxSlice.length > 300) idxSlice = idxSlice.slice(idxSlice.length - 300);
+  var hSliceC = _btHourlyUpTo(h1, D, 420);
+  var hSliceE = _btHourlyUpTo(h1, D, 120);
+
+  var entryScore = null;
+  try {
+    var mtf = TI.computeMultiTFEntryScore([
+      { timeframe: "H", candles: hSliceE },
+      { timeframe: "D", candles: daySlice },
+      { timeframe: "W", candles: wSlice }
+    ], idxSlice, null);
+    entryScore = mtf && mtf.multiTF_score != null ? mtf.multiTF_score : null;
+  } catch (e) {}
+
+  var conf = null;
+  try {
+    var cr = TI.computeTenDayForwardConfidence(hSliceC, daySlice, idxSlice);
+    conf = cr && cr.confidence != null ? cr.confidence : null;
+  } catch (e) {}
+
+  var touchHit = false, closeHit = false, maxHi = entry, minLo = entry;
+  for (var k = i + 1; k <= i + 10 && k < d1.length; k++) {
+    if (d1[k].h >= entry * 1.04) touchHit = true;
+    if (d1[k].c >= entry * 1.04) closeHit = true;
+    if (d1[k].h > maxHi) maxHi = d1[k].h;
+    if (d1[k].l < minLo) minLo = d1[k].l;
+  }
+  var fwd5 = i + 5 < d1.length ? (d1[i + 5].c / entry - 1) * 100 : null;
+  var fwd10 = i + 10 < d1.length ? (d1[i + 10].c / entry - 1) * 100 : null;
+  var fwd20 = i + 20 < d1.length ? (d1[i + 20].c / entry - 1) * 100 : null;
+  return {
+    date: D, entry: entry, entryScore: entryScore, conf: conf,
+    fwd5: fwd5, fwd10: fwd10, fwd20: fwd20,
+    touchHit: touchHit, closeHit: closeHit,
+    lossHit: fwd10 != null && fwd10 <= -3,
+    maxFav: (maxHi / entry - 1) * 100, maxAdv: (minLo / entry - 1) * 100
+  };
+}
+
+function _btSummarize(rows) {
+  var entryBuckets = [
+    { label: "70\u2013100", lo: 70, hi: 101, n: 0, s5: 0, s10: 0, s20: 0, s5n: 0, s20n: 0, touch: 0, close: 0, loss: 0, sScore: 0 },
+    { label: "50\u201369", lo: 50, hi: 70, n: 0, s5: 0, s10: 0, s20: 0, s5n: 0, s20n: 0, touch: 0, close: 0, loss: 0, sScore: 0 },
+    { label: "0\u201349", lo: 0, hi: 50, n: 0, s5: 0, s10: 0, s20: 0, s5n: 0, s20n: 0, touch: 0, close: 0, loss: 0, sScore: 0 }
+  ];
+  var confBuckets = [
+    { label: "70\u2013100", lo: 70, hi: 101, n: 0, touch: 0, close: 0, sConf: 0 },
+    { label: "50\u201369", lo: 50, hi: 70, n: 0, touch: 0, close: 0, sConf: 0 },
+    { label: "30\u201349", lo: 30, hi: 50, n: 0, touch: 0, close: 0, sConf: 0 },
+    { label: "0\u201329", lo: 0, hi: 30, n: 0, touch: 0, close: 0, sConf: 0 }
+  ];
+  var eXs = [], eYs = [], cXs = [], cTs = [], cCs = [];
+  var sumScore = 0, sN = 0, sumConf = 0, cN = 0, sum10 = 0;
+
+  rows.forEach(function (r) {
+    if (r.entryScore != null) {
+      sumScore += r.entryScore; sN++;
+      for (var b = 0; b < entryBuckets.length; b++) {
+        var eb = entryBuckets[b];
+        if (r.entryScore >= eb.lo && r.entryScore < eb.hi) {
+          eb.n++;
+          eb.s10 += r.fwd10 != null ? r.fwd10 : 0;
+          eb.sScore += r.entryScore;
+          eb.s5 += r.fwd5 != null ? r.fwd5 : 0; if (r.fwd5 != null) eb.s5n++;
+          eb.s20 += r.fwd20 != null ? r.fwd20 : 0; if (r.fwd20 != null) eb.s20n++;
+          if (r.touchHit) eb.touch++;
+          if (r.closeHit) eb.close++;
+          if (r.lossHit) eb.loss++;
+          break;
+        }
+      }
+      if (r.fwd10 != null) { eXs.push(r.entryScore); eYs.push(r.fwd10); sum10 += r.fwd10; }
+    }
+    if (r.conf != null) {
+      sumConf += r.conf; cN++;
+      for (var b2 = 0; b2 < confBuckets.length; b2++) {
+        var cb = confBuckets[b2];
+        if (r.conf >= cb.lo && r.conf < cb.hi) {
+          cb.n++; cb.sConf += r.conf;
+          if (r.touchHit) cb.touch++;
+          if (r.closeHit) cb.close++;
+          break;
+        }
+      }
+      cXs.push(r.conf); cTs.push(r.touchHit ? 1 : 0); cCs.push(r.closeHit ? 1 : 0);
+    }
+  });
+
+  var out = {
+    n: rows.length,
+    avgEntry: sN ? sumScore / sN : null,
+    avgConf: cN ? sumConf / cN : null,
+    avgFwd10: eXs.length ? sum10 / eXs.length : null
+  };
+
+  entryBuckets.forEach(function (b) {
+    out.entryBuckets = out.entryBuckets || [];
+    out.entryBuckets.push({
+      label: b.label, n: b.n,
+      avgScore: b.n ? b.sScore / b.n : null,
+      avg5: b.s5n ? b.s5 / b.s5n : null,
+      avg10: b.n ? b.s10 / b.n : null,
+      avg20: b.s20n ? b.s20 / b.s20n : null,
+      touchRate: b.n ? b.touch / b.n : null,
+      closeRate: b.n ? b.close / b.n : null,
+      lossRate: b.n ? b.loss / b.n : null
+    });
+  });
+  confBuckets.forEach(function (b) {
+    out.confBuckets = out.confBuckets || [];
+    out.confBuckets.push({
+      label: b.label, n: b.n,
+      avgConf: b.n ? b.sConf / b.n : null,
+      touchRate: b.n ? b.touch / b.n : null,
+      closeRate: b.n ? b.close / b.n : null
+    });
+  });
+
+  out.corrEntry = _btPearson(eXs, eYs);
+  out.corrTouch = _btPearson(cXs, cTs);
+  out.corrClose = _btPearson(cXs, cCs);
+
+  var ePop = (out.entryBuckets || []).filter(function (b) { return b.n > 0; });
+  var cPop = (out.confBuckets || []).filter(function (b) { return b.n > 0; });
+  out.verdict = {
+    entryGap: ePop.length >= 2 && ePop[0].avg10 != null && ePop[ePop.length - 1].avg10 != null ? ePop[0].avg10 - ePop[ePop.length - 1].avg10 : null,
+    confSpread: cPop.length >= 2 && cPop[0].touchRate != null && cPop[cPop.length - 1].touchRate != null ? (cPop[0].touchRate - cPop[cPop.length - 1].touchRate) * 100 : null,
+    hiEntryAvg10: ePop.length ? ePop[0].avg10 : null,
+    loEntryAvg10: ePop.length ? ePop[ePop.length - 1].avg10 : null,
+    hiConfTouch: cPop.length ? cPop[0].touchRate : null,
+    loConfTouch: cPop.length ? cPop[cPop.length - 1].touchRate : null
+  };
+  return out;
+}
+
+async function _btRun(bundle, daysBack, onProgress, onDone, onErr, isCancelled) {
+  var TI = window.TechIndicators;
+  var d1 = bundle.d1, h1 = bundle.h1, w1 = bundle.w1, idxD = bundle.idxD;
+  try {
+    if (!d1 || d1.length < 50) { onErr("Not enough daily history for " + bundle.ticker + " (need 50+ daily bars)."); return; }
+    if (!h1 || h1.length < 60) { onErr("Hourly data unavailable for " + bundle.ticker + " \u2014 try a liquid NSE ticker."); return; }
+    var L = d1.length;
+    var first = Math.max(0, L - daysBack);
+    var idx = [];
+    for (var i = first; i < L; i++) if (i + 10 < L) idx.push(i);
+    var pending = (L - first) - idx.length;
+    var sampleNote = null;
+    var MAX_DATES = 280;
+    if (idx.length > MAX_DATES) {
+      var step = Math.ceil(idx.length / MAX_DATES);
+      var sampled = [];
+      for (var s = 0; s < idx.length; s += step) sampled.push(idx[s]);
+      if (sampled[sampled.length - 1] !== idx[idx.length - 1]) sampled.push(idx[idx.length - 1]);
+      sampleNote = "evenly sampled " + sampled.length + " of " + idx.length + " sessions";
+      idx = sampled;
+    }
+    var rows = [];
+    var CHUNK = 6;
+    for (var c = 0; c < idx.length; c += CHUNK) {
+      if (isCancelled && isCancelled()) { onErr("Backtest cancelled \u2014 partial results discarded."); return; }
+      var chunkEnd = Math.min(c + CHUNK, idx.length);
+      for (var k = c; k < chunkEnd; k++) rows.push(_btEvalOne(TI, d1, h1, w1, idxD, idx[k]));
+      if (onProgress) onProgress(Math.min(c + CHUNK, idx.length), idx.length);
+      if (c + CHUNK < idx.length) await new Promise(function (res) { setTimeout(res, 0); });
+    }
+    onDone(rows, idx.length, pending, sampleNote);
+  } catch (e) {
+    onErr((e && e.message) || String(e));
+  }
+}
+
+var _btBundleCache = {};
+
+const BacktestPanel = () => {
+  const DF = window.OHLCVFetcher;
+  const [ticker, setTicker] = useState("");
+  const [days, setDays] = useState(60);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [err, setErr] = useState("");
+  const [result, setResult] = useState(null);
+  const cancelRef = useRef(false);
+  const RANGES = [30, 60, 90, 180, 270, 365, 500, 730];
+
+  const run = async () => {
+    const tk = (ticker || "").trim().toUpperCase();
+    if (!tk) { setErr("Enter a ticker first, e.g. RELIANCE."); return; }
+    if (running) return;
+    setErr(""); setResult(null);
+    setProgress({ phase: "Fetching 1h / 1d / 1wk + Nifty history\u2026", done: 0, total: 0 });
+    setRunning(true); cancelRef.current = false;
+    try {
+      let bundle = _btBundleCache[tk];
+      if (!bundle) {
+        const [h1, d1, w1, idxD] = await Promise.all([
+          DF.fetchFromYahooIntraday(tk, "1h", "2y"),
+          DF.fetchFromYahooIntraday(tk, "1d", "5y"),
+          DF.fetchFromYahooIntraday(tk, "1wk", "5y"),
+          DF.fetchFromYahooIntraday("^NSEI", "1d", "5y")
+        ]);
+        bundle = { ticker: tk, h1, d1, w1, idxD };
+        if (d1 && d1.length) _btBundleCache[tk] = bundle;
+      }
+      await new Promise(function (res) { setTimeout(res, 20); });
+      if (cancelRef.current) { setErr("Backtest cancelled \u2014 partial results discarded."); return; }
+      await _btRun(bundle, days,
+        function (done, total) { setProgress({ phase: "Scoring " + total + " historical sessions\u2026", done: done, total: total }); },
+        function (rows, total, pending, sampleNote) {
+          if (!rows.length) { setErr("No scorable sessions in this window (need a full 10-session forward window)."); setResult(null); return; }
+          var sum = _btSummarize(rows);
+          var confCovered = rows.filter(function (r) { return r.conf != null; }).length;
+          setResult(Object.assign({
+            ticker: tk, days: days, matured: rows.length, pending: pending,
+            confCovered: confCovered, sampleNote: sampleNote || null,
+            rangeStart: rows[0].date, rangeEnd: rows[rows.length - 1].date,
+            log: rows
+          }, sum));
+        },
+        function (msg) { setErr(msg); setResult(null); },
+        function () { return cancelRef.current; }
+      );
+    } catch (e) {
+      setErr((e && e.message) || String(e));
+    } finally {
+      setRunning(false); setProgress(null);
+    }
+  };
+
+  const exportCSV = () => {
+    if (!result || !result.log || !result.log.length) return;
+    const header = ["Date", "Entry", "EntryScore", "Conf10d", "Fwd5d%", "Fwd10d%", "Fwd20d%", "TouchHit(+4%)", "CloseHit(+4%)", "Loss(\u2264-3%)", "MaxFav%", "MaxAdv%"];
+    function esc(v) { const s = String(v == null ? "" : Math.round(v * 100) / 100); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
+    const lines = [header.join(",")].concat(result.log.map(function (r) {
+      return [r.date, esc(r.entry), r.entryScore != null ? r.entryScore : "", r.conf != null ? r.conf : "",
+        esc(r.fwd5), esc(r.fwd10), esc(r.fwd20), r.touchHit ? "1" : "0", r.closeHit ? "1" : "0", r.lossHit ? "1" : "0",
+        esc(r.maxFav), esc(r.maxAdv)].join(",");
+    }));
+    const csv = lines.join("\r\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "stox-backtest-" + result.ticker + "-" + result.days + "d-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    showToast("Exported " + result.log.length + " backtested sessions to CSV", 3000);
+  };
+
+  var fmt2 = function (v) { return v == null ? "\u2014" : v.toFixed(1); };
+  var fmtR = function (v) { return v == null ? "\u2014" : (v > 0 ? "+" : "") + v.toFixed(1) + "%"; };
+  var fmtPct = function (v) { return v == null ? "\u2014" : Math.round(v * 100) + "%"; };
+  var fmtS = function (v) { return v == null ? "\u2014" : Math.round(v); };
+  var retColor = function (v) { return v == null ? "var(--text2)" : v > 0 ? "#22c55e" : v < 0 ? "#ef4444" : "var(--text2)"; };
+  var th = { padding: "8px 10px", textAlign: "left", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--text5)", fontWeight: 700, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+  var td = { padding: "8px 10px", fontSize: 12, color: "var(--text2)", borderBottom: "1px solid var(--border)", textAlign: "right", fontFamily: "var(--font-mono)", whiteSpace: "nowrap" };
+  var tdL = Object.assign({}, td, { textAlign: "left", fontFamily: "var(--font-body)", fontWeight: 700, color: "var(--text)" });
+
+  var Stat = function (label, val, sub, color) {
+    return React.createElement("div", { style: { flex: 1, minWidth: 130, padding: "12px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)" } },
+      React.createElement("div", { style: { fontSize: 9, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text6)", fontWeight: 700 } }, label),
+      React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: color || "var(--text)", marginTop: 3 } }, val),
+      sub ? React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, sub) : null
+    );
+  };
+
+  const cell = (txt, style) => React.createElement("td", { style: style || td }, txt);
+
+  return React.createElement("div", null,
+
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Backtesting"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } },
+          "Replays the last N trading days as-of-date \u00b7 Entry Score & 10-Day Confidence graded against the next 10 sessions (+4% target)"
+        )
+      )
+    ),
+
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+      React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" } },
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Stock Ticker"),
+          React.createElement("input", { className: "inp", type: "text", placeholder: "e.g. RELIANCE", value: ticker, onChange: function (e) { setTicker(e.target.value.toUpperCase()); }, style: { width: 160 } })
+        ),
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Backtest Window"),
+          React.createElement("div", { style: { display: "flex", gap: 4 } },
+            RANGES.map(function (d) {
+              return React.createElement("button", {
+                key: d, onClick: function () { setDays(d); },
+                style: {
+                  padding: "8px 12px", fontSize: 11, fontWeight: 700, borderRadius: 6, cursor: "pointer",
+                  border: "1px solid " + (days === d ? "var(--accent)" : "var(--border)"),
+                  background: days === d ? "rgba(6,182,212,.12)" : "var(--bg4)",
+                  color: days === d ? "var(--accent)" : "var(--text5)"
+                }
+              }, d + "d");
+            })
+          )
+        ),
+        React.createElement("button", { onClick: run, disabled: running, className: "stx-btn stx-btn-primary", style: { padding: "8px 18px", fontSize: 12, opacity: running ? 0.6 : 1, cursor: running ? "wait" : "pointer" } },
+          running ? "Running\u2026" : "\u25b6 Run Backtest"
+        ),
+        running && React.createElement("button", { onClick: function () { cancelRef.current = true; }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "#eab308", cursor: "pointer" } }, "Cancel"),
+        result && !running && React.createElement("button", { onClick: exportCSV, className: "stx-btn", style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "\u2b06 CSV")
+      ),
+      err && React.createElement("div", { style: { marginTop: 10, fontSize: 11, color: err.indexOf("cancelled") >= 0 ? "#eab308" : "#ef4444" } }, err),
+      progress && React.createElement("div", { style: { marginTop: 12 } },
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 6, fontFamily: "var(--font-mono)" } },
+          progress.phase + (progress.total ? " " + progress.done + " / " + progress.total : "")
+        ),
+        React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--bg4)", overflow: "hidden" } },
+          React.createElement("div", { style: { height: "100%", width: progress.total ? Math.round(progress.done / progress.total * 100) + "%" : "100%", background: "var(--accent)", transition: "width .2s" } })
+        )
+      )
+    ),
+
+    result && result.matured > 0 && React.createElement("div", null,
+      React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } },
+        Stat("Matured Sessions", result.matured, result.sampleNote || (result.pending > 0 ? result.pending + " recent sessions pending (no forward window)" : "full 10-session window each")),
+        Stat("Period", result.rangeStart + " \u2192 " + result.rangeEnd, result.ticker + " \u00b7 " + result.days + " day window"),
+        Stat("Avg Entry Score", result.avgEntry != null ? fmtS(result.avgEntry) : "\u2014", "0\u2013100 quality score"),
+        Stat("Avg 10-Day Conf", result.avgConf != null ? fmtS(result.avgConf) : "\u2014", "chance of +4% in 10 sessions"),
+        Stat("Avg 10d Return", result.avgFwd10 != null ? fmtR(result.avgFwd10) : "\u2014", "buy & hold, close\u2192close", retColor(result.avgFwd10))
+      ),
+
+      (result.verdict && (result.verdict.entryGap != null || result.verdict.confSpread != null)) && React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, marginBottom: 16, background: "rgba(6,182,212,.06)", border: "1px solid rgba(6,182,212,.2)", fontSize: 12, color: "var(--text2)", lineHeight: 1.6 } },
+        result.verdict.entryGap != null && React.createElement("div", null,
+          React.createElement("span", { style: { color: "var(--accent)", fontWeight: 700 } }, "Entry Score: "),
+          "top scores (70+) returned avg " + fmtR(result.verdict.hiEntryAvg10) + " over 10 sessions vs " + fmtR(result.verdict.loEntryAvg10) + " for sub-50 scores " +
+          "(\u0394 " + (result.verdict.entryGap > 0 ? "+" : "") + fmt2(result.verdict.entryGap) + "pts)" +
+          (result.corrEntry != null ? " \u00b7 correlation r = " + fmt2(result.corrEntry) : "") + "."
+        ),
+        result.verdict.confSpread != null && React.createElement("div", { style: { marginTop: 4 } },
+          React.createElement("span", { style: { color: "var(--accent)", fontWeight: 700 } }, "10-Day Confidence: "),
+          "confidence \u226570 hit +4% in " + fmtPct(result.verdict.hiConfTouch) + " of sessions vs " + fmtPct(result.verdict.loConfTouch) + " for <30 " +
+          "(spread " + (result.verdict.confSpread > 0 ? "+" : "") + fmtS(result.verdict.confSpread) + "pts)" +
+          (result.corrTouch != null ? " \u00b7 point-biserial r = " + fmt2(result.corrTouch) + " (touch), " + fmt2(result.corrClose) + " (close)" : "") + "."
+        )
+      ),
+
+      React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", marginBottom: 10 } }, "Entry Score Accuracy"),
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } },
+          "Scores recomputed as-of each date (H/D/W) \u00b7 forward returns measured from that day's close"
+        ),
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null,
+              React.createElement("tr", null,
+                cell("Score Bucket", tdL), cell("N", td), cell("Avg Score", td), cell("Avg 5d", td), cell("Avg 10d", td), cell("Avg 20d", td), cell("+4% Touch", td), cell("+4% Close", td), cell("\u2264 -3% Loss", td)
+              )
+            ),
+            React.createElement("tbody", null,
+              result.entryBuckets.map(function (b) {
+                return React.createElement("tr", { key: b.label },
+                  cell(b.label, tdL),
+                  cell(b.n),
+                  cell(b.avgScore != null ? fmtS(b.avgScore) : "\u2014"),
+                  cell(b.avg5 != null ? React.createElement("span", { style: { color: retColor(b.avg5) } }, fmtR(b.avg5)) : "\u2014"),
+                  cell(b.avg10 != null ? React.createElement("span", { style: { color: retColor(b.avg10), fontWeight: 700 } }, fmtR(b.avg10)) : "\u2014"),
+                  cell(b.avg20 != null ? React.createElement("span", { style: { color: retColor(b.avg20) } }, fmtR(b.avg20)) : "\u2014"),
+                  cell(fmtPct(b.touchRate)),
+                  cell(fmtPct(b.closeRate)),
+                  cell(fmtPct(b.lossRate))
+                );
+              })
+            )
+          )
+        )
+      ),
+
+      React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", marginBottom: 10 } }, "10-Day Confidence Accuracy"),
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } },
+          "Confidence recomputed as-of each date \u00b7 Touch = intraday high reaches +4% \u00b7 Close = closing price reaches +4% within 10 sessions"
+        ),
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null,
+              React.createElement("tr", null,
+                cell("Confidence Bucket", tdL), cell("N", td), cell("Avg Conf", td), cell("+4% Touch Hit", td), cell("+4% Close Hit", td)
+              )
+            ),
+            React.createElement("tbody", null,
+              result.confBuckets.map(function (b) {
+                return React.createElement("tr", { key: b.label },
+                  cell(b.label, tdL),
+                  cell(b.n),
+                  cell(b.avgConf != null ? fmtS(b.avgConf) : "\u2014"),
+                  cell(React.createElement("span", { style: { color: b.touchRate != null && b.touchRate >= 0.5 ? "#22c55e" : "var(--text2)", fontWeight: b.touchRate != null && b.touchRate >= 0.5 ? 700 : 400 } }, fmtPct(b.touchRate))),
+                  cell(fmtPct(b.closeRate))
+                );
+              })
+            )
+          )
+        )
+      ),
+
+      React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", lineHeight: 1.6, padding: "0 2px" } },
+        "Methodology: at each date D the daily / hourly / weekly / Nifty series are sliced to end at D (no lookahead) and the production Entry Score & 10-Day Confidence engines run on that exact snapshot. " +
+        "Entry = close at D. Target = +4% within the next 10 trading sessions. Only dates with a full 10-session forward window are graded (earlier dates in the window are included even if the hourly history only reaches a limited depth)." +
+        (result.sampleNote ? " To keep long windows fast, " + result.sampleNote + " spread evenly across the period (the full date range is still covered)." : "") +
+        (result.confCovered != null && result.confCovered < result.matured ? " Note: the 10-Day Confidence engine requires hourly bars and Yahoo 1h history spans ~2 years \u2014 for this window the confidence columns cover " + result.confCovered + " of " + result.matured + " dates (the Entry Score still evaluates every date on daily + weekly)." : "")
+      )
+    ),
+
+    result && result.matured === 0 && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
+      "No scorable sessions in this window \u2014 need at least 10 trading days of forward data for each backtested date."
+    ),
+
+    !result && !running && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
+      "Enter a ticker and run a backtest to see how the Entry Score and 10-Day Confidence Score actually performed over the last 30\u2013180 days."
     )
   );
 };
@@ -5711,7 +6200,14 @@ function StockScreener(props) {
       var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
       if (result) result.lastClose = lc;
-      var entry = { id: Date.now(), ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), indicators: { weekly: indW, daily: indD, hourly: indH } };
+      var conf10d = null;
+      try {
+        var idxD = null;
+        try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch (e) {}
+        var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, idxD);
+        if (_conf && _conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10;
+      } catch (e) {}
+      var entry = { id: Date.now(), ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d: conf10d, indicators: { weekly: indW, daily: indD, hourly: indH } };
       entries.unshift(entry);
       await dbSetSetting("mm_entry_scores", entries);
       window.dispatchEvent(new CustomEvent("stox:data-changed"));
@@ -7297,6 +7793,7 @@ function PulsePage({ holdings }) {
     { key: "entryscore", label: "Entry Score", icon: Icons.trendingUp },
     { key: "confidencescore", label: "Confidence Score", icon: Icons.eye },
     { key: "singlestock", label: "Single Stock Analysis", icon: Icons.search },
+    { key: "backtest", label: "Backtesting", icon: Icons.clock },
   ];
 
   return React.createElement("div", null,
@@ -7324,7 +7821,8 @@ function PulsePage({ holdings }) {
       activeTab === "screener" && React.createElement(StockScreener, { onOpenStock: openStock }),
       activeTab === "entryscore" && React.createElement(EntryScorePanel, { shares: holdings || [] }),
       activeTab === "confidencescore" && React.createElement(ConfidenceTracker, null),
-      activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker })
+      activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker }),
+      activeTab === "backtest" && React.createElement(BacktestPanel, null)
     )
   );
 }
