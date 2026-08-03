@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.2";
+window.__STOX_APP_VERSION = "2.10.3";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -5400,15 +5400,23 @@ async function _btRun(bundle, daysBack, onProgress, onDone, onErr, isCancelled) 
 }
 
 var _btBundleCache = {};
+var _btLastResult = null;
+var LS_BT_RESULT = "stox_bt_result";
+var LS_BT_INPUT = "stox_bt_input";
 
 const BacktestPanel = () => {
   const DF = window.OHLCVFetcher;
-  const [ticker, setTicker] = useState("");
-  const [days, setDays] = useState(60);
+  const [ticker, setTicker] = useState(function () { try { var t = JSON.parse(localStorage.getItem(LS_BT_INPUT)); return (t && t.ticker) || ""; } catch (e) { return ""; } });
+  const [days, setDays] = useState(function () { try { var t = JSON.parse(localStorage.getItem(LS_BT_INPUT)); return (t && t.days) || 60; } catch (e) { return 60; } });
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(null);
   const [err, setErr] = useState("");
-  const [result, setResult] = useState(null);
+  const [result, setResultState] = useState(function () {
+    if (_btLastResult) return _btLastResult;
+    try { var v = JSON.parse(localStorage.getItem(LS_BT_RESULT)); if (v && v.log && v.log.length) return v; } catch (e) {}
+    return null;
+  });
+  const setResult = (v) => { _btLastResult = v; try { localStorage.setItem(LS_BT_RESULT, JSON.stringify(v)); } catch (e) {} setResultState(v); };
   const cancelRef = useRef(false);
   const RANGES = [30, 60, 90, 180, 270, 365, 500, 730];
 
@@ -5416,6 +5424,7 @@ const BacktestPanel = () => {
     const tk = (ticker || "").trim().toUpperCase();
     if (!tk) { setErr("Enter a ticker first, e.g. RELIANCE."); return; }
     if (running) return;
+    try { localStorage.setItem(LS_BT_INPUT, JSON.stringify({ ticker: tk, days: days })); } catch (e) {}
     setErr(""); setResult(null);
     setProgress({ phase: "Fetching 1h / 1d / 1wk + Nifty history\u2026", done: 0, total: 0 });
     setRunning(true); cancelRef.current = false;
