@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.8.5";
+window.__STOX_APP_VERSION = "2.8.8";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -4774,6 +4774,348 @@ const EntryScorePanel = ({ shares }) => {
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
+   COMPONENT: 10 Days Confidence Score Performance Tracker (Pulse sub-tab)
+   Tracks whether the 10-day confidence score actually pays off. Each added
+   stock freezes Date Added, Confidence Score (next 10 days), Entry Score and
+   Price at add time; Days is computed live from the added date; Current Price
+   & % Change update whenever the table is refreshed.
+   ══════════════════════════════════════════════════════════════════════════ */
+const LS_CONF_TRACKER = "stox_conf_tracker";
+const LS_CONF_PERF_PRICES = "stox_conf_tracker_prices";
+
+const ConfidenceTracker = () => {
+  const TI = window.TechIndicators;
+  const DF = window.OHLCVFetcher;
+  const [tracked, setTracked] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [pricesBackfilled, setPricesBackfilled] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addTicker, setAddTicker] = useState("");
+  const [addPrice, setAddPrice] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addErr, setAddErr] = useState("");
+  const [prices, setPrices] = useState({});
+  const [refreshing, setRefreshing] = useState(false);
+  const [selected, setSelected] = useState({});
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const val = await dbGetSetting(LS_CONF_TRACKER);
+        if (val && Array.isArray(val)) setTracked(val);
+      } catch (e) {}
+      try {
+        const p = await dbGetSetting(LS_CONF_PERF_PRICES);
+        if (p && typeof p === "object" && Object.keys(p).length) { setPrices(p); setPricesBackfilled(true); }
+      } catch (e) {}
+      setLoaded(true);
+    })();
+  }, []);
+
+  const saveTracked = (arr) => {
+    setTracked(arr);
+    setSelected((prev) => {
+      const ids = new Set(arr.map((t) => t.id));
+      const next = {};
+      Object.keys(prev).forEach((id) => { if (ids.has(Number(id))) next[id] = true; });
+      return next;
+    });
+    dbSetSetting(LS_CONF_TRACKER, arr);
+    window.dispatchEvent(new CustomEvent("stox:data-changed"));
+  };
+
+  const savePrices = (p) => { setPrices(p); dbSetSetting(LS_CONF_PERF_PRICES, p); };
+
+  /* Backfill current prices on first load when none cached */
+  useEffect(() => {
+    if (!loaded || pricesBackfilled || !tracked.length || !DF || refreshing) return;
+    (async () => {
+      setRefreshing(true);
+      const p = {};
+      for (let i = 0; i < tracked.length; i++) {
+        try {
+          const d = await fetchTickerPrice(tracked[i].ticker);
+          if (d && d.price > 0) p[tracked[i].ticker] = d.price;
+        } catch (e) {}
+      }
+      savePrices(p);
+      setPricesBackfilled(true);
+      setRefreshing(false);
+    })();
+  }, [loaded]);
+
+  const refreshPrices = async () => {
+    if (!tracked.length || refreshing) return;
+    setRefreshing(true);
+    const oldPrices = { ...prices };
+    const p = {};
+    for (let i = 0; i < tracked.length; i++) {
+      try {
+        const d = await fetchTickerPrice(tracked[i].ticker);
+        if (d && d.price > 0) p[tracked[i].ticker] = d.price;
+      } catch (e) {}
+    }
+    savePrices(p);
+    try { if (window.__fsa && window.__fsa.writeNow) await window.__fsa.writeNow(); } catch (e) {}
+    setRefreshing(false);
+    const changes = [];
+    const noChanges = [];
+    tracked.forEach((tr) => {
+      const oldPrice = oldPrices[tr.ticker];
+      const newPrice = p[tr.ticker];
+      const base = tr.currentPrice || 0;
+      if (!oldPrice || !newPrice || !base) { noChanges.push(tr.ticker); return; }
+      const oldPct = (oldPrice - base) / base * 100;
+      const newPct = (newPrice - base) / base * 100;
+      const diff = Math.round((newPct - oldPct) * 100) / 100;
+      const label = tr.ticker.replace(".NS", "");
+      if (Math.abs(diff) >= 0.01) {
+        changes.push(label + " " + (diff > 0 ? "+" : "") + diff.toFixed(2) + "% (" + oldPct.toFixed(1) + "% \u2192 " + newPct.toFixed(1) + "%)");
+      } else {
+        noChanges.push(label);
+      }
+    });
+    if (changes.length > 0) {
+      let msg = "\u2713 " + changes.length + " % change" + (changes.length !== 1 ? "s" : "") + " updated: " + changes.join(", ");
+      if (noChanges.length > 0) msg += " \u00b7 " + noChanges.length + " unchanged";
+      showToast(msg, 0);
+    } else {
+      showToast("Prices refreshed \u2014 no % change updates", 0);
+    }
+  };
+
+  const addAndTrack = async () => {
+    if (!addTicker.trim()) { setAddErr("Enter a ticker."); return; }
+    if (!TI || !DF) { setAddErr("Analysis engine not ready."); return; }
+    setAdding(true); setAddErr("");
+    try {
+      const tk = addTicker.trim().toUpperCase().replace(/\.NS$|\.BO$/, "");
+      if (!tk) { setAddErr("Enter a valid ticker."); setAdding(false); return; }
+      const [resW, resD, resH] = await Promise.all([
+        DF.fetchOHLCVCached(tk, "weekly"),
+        DF.fetchOHLCVCached(tk, "daily"),
+        DF.fetchOHLCVCached(tk, "1h"),
+      ]);
+      if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
+        setAddErr("Insufficient data for " + tk); setAdding(false); return;
+      }
+      const lastDailyClose = resD.data[resD.data.length - 1].c;
+      const price = parseFloat(addPrice) || lastDailyClose || 0;
+      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+      let confidence = null;
+      try {
+        const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data);
+        if (conf && conf.confidence != null) confidence = conf.confidence;
+      } catch (e) {}
+      const row = {
+        id: Date.now(),
+        ticker: tk,
+        addedAt: new Date().toISOString(),
+        confidence: confidence != null ? Math.round(confidence * 10) / 10 : null,
+        entryScore: result && result.finalScore != null ? result.finalScore : null,
+        entryDecision: result && result.decision ? result.decision.label : null,
+        currentPrice: price
+      };
+      saveTracked([row, ...tracked]);
+      if (price > 0) savePrices(Object.assign({}, prices, { [tk]: price }));
+      setAddTicker(""); setAddPrice(""); setShowAdd(false);
+      showToast("Added " + tk + " to the Confidence tracker" + (confidence != null ? " \u00b7 Conf " + confidence + "/100" : ""), 3000);
+    } catch (e) { setAddErr("Error: " + (e.message || "Failed")); }
+    setAdding(false);
+  };
+
+  const deleteTracked = async (id) => {
+    const row = tracked.find((t) => t.id === id);
+    if (row && !(await showConfirm("Remove " + row.ticker + " from the Confidence Score tracker?"))) return;
+    saveTracked(tracked.filter((t) => t.id !== id));
+  };
+
+  const toggleSelect = (id) => {
+    setSelected((prev) => {
+      const next = Object.assign({}, prev);
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected((prev) => {
+      const next = Object.assign({}, prev);
+      const allChecked = sorted.length > 0 && sorted.every((t) => next[t.id]);
+      sorted.forEach((t) => { if (allChecked) delete next[t.id]; else next[t.id] = true; });
+      return next;
+    });
+  };
+
+  const deleteSelected = async () => {
+    const ids = Object.keys(selected).filter((id) => selected[id]).map(Number);
+    if (!ids.length) return;
+    const names = tracked.filter((t) => ids.indexOf(t.id) >= 0).map((t) => t.ticker);
+    if (!(await showConfirm("Remove " + names.length + " stock" + (names.length !== 1 ? "s" : "") + " from the Confidence Score tracker? (" + names.join(", ") + ")"))) return;
+    saveTracked(tracked.filter((t) => ids.indexOf(t.id) < 0));
+  };
+
+  const exportConfCSV = () => {
+    var rows = [["Stock", "Date Added", "Confidence 10D", "Entry Score", "Price on Add", "Days", "Current Price", "% Change"]];
+    var now = new Date();
+    tracked.forEach(function (tr) {
+      var addedDate = new Date(tr.addedAt);
+      var _startMs = Date.UTC(addedDate.getFullYear(), addedDate.getMonth(), addedDate.getDate());
+      var _endMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+      var days = 0;
+      for (var _t = _startMs; _t < _endMs; _t += 86400000) { var _day = new Date(_t).getUTCDay(); if (_day !== 0 && _day !== 6) days++; }
+      var current = prices[tr.ticker] || "";
+      var pct = tr.currentPrice > 0 && current > 0 ? ((current - tr.currentPrice) / tr.currentPrice * 100).toFixed(2) : "";
+      var dateStr = addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      function esc(v) { var s = String(v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
+      rows.push([esc(tr.ticker), esc(dateStr), tr.confidence != null ? tr.confidence : "", tr.entryScore != null ? tr.entryScore : "", tr.currentPrice || "", days, current, pct].join(","));
+    });
+    var csv = rows.join("\r\n");
+    var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "stox-confidence-tracker-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Exported " + tracked.length + " tracked stocks to CSV", 3000);
+  };
+
+  var sorted = tracked.slice().sort(function (a, b) { return new Date(b.addedAt) - new Date(a.addedAt); });
+  var now = new Date();
+  var selectedCount = Object.keys(selected).filter(function(id) { return selected[id]; }).length;
+  var thStyle = { padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" };
+  var thRight = Object.assign({}, thStyle, { textAlign: "right" });
+  var tdStyle = { padding: "8px 10px", fontSize: 11, borderBottom: "1px solid var(--border)" };
+  var tdRight = Object.assign({}, tdStyle, { textAlign: "right" });
+
+  return React.createElement("div", null,
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "10 Days Confidence Score Performance Tracker"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } },
+          "Tracks whether the 10-day confidence score pays off \u00b7 Confidence, Entry Score & Price frozen at add \u00b7 Current Price & % Change refresh live"
+        )
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+        tracked.length > 0 && React.createElement("button", {
+          onClick: refreshPrices, disabled: refreshing,
+          className: "stx-btn",
+          style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: refreshing ? "var(--text6)" : "var(--accent)", cursor: refreshing ? "wait" : "pointer" }
+        }, refreshing ? "Refreshing..." : "\u21bb Refresh Prices"),
+        tracked.length > 0 && React.createElement("button", {
+          onClick: exportConfCSV,
+          className: "stx-btn",
+          style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
+        }, "\u2b06 CSV"),
+        React.createElement("button", {
+          onClick: () => { setShowAdd(!showAdd); setAddErr(""); },
+          className: "stx-btn stx-btn-primary",
+          style: { fontSize: 12, padding: "8px 16px" }
+        }, showAdd ? "Cancel" : "+ Add Entry")
+      )
+    ),
+    showAdd && React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+      React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 4 } }, "Add Stock to Tracker"),
+      React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } },
+        "Freezes Date Added, 10-day Confidence Score, Entry Score and price at this moment."
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" } },
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Ticker"),
+          React.createElement("input", { className: "inp", type: "text", placeholder: "e.g. RELIANCE", value: addTicker, onChange: (e) => setAddTicker(e.target.value.toUpperCase()), style: { width: 140 } })
+        ),
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Current Price (\u20b9) (optional)"),
+          React.createElement("input", { className: "inp", type: "number", placeholder: "Optional \u2014 uses last close", value: addPrice, onChange: (e) => setAddPrice(e.target.value), style: { width: 120 } })
+        ),
+        React.createElement("button", {
+          onClick: addAndTrack, disabled: adding, className: "stx-btn stx-btn-primary",
+          style: { padding: "8px 18px", fontSize: 12, opacity: adding ? 0.6 : 1, cursor: adding ? "wait" : "pointer" }
+        }, adding ? "Adding..." : "Add & Freeze")
+      ),
+      addErr && React.createElement("div", { style: { marginTop: 8, fontSize: 11, color: addErr.indexOf("Error") === 0 ? "#ef4444" : "#eab308" } }, addErr)
+    ),
+    !tracked.length && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
+      "No tracked stocks yet. Click \"+ Add Entry\" to start tracking a stock's 10-day confidence score."
+    ),
+    selectedCount > 0 && React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(6,182,212,.08)", border: "1px solid rgba(6,182,212,.25)" } },
+      React.createElement("span", { style: { fontSize: 11, color: "var(--text)", fontWeight: 600 } }, selectedCount + " selected"),
+      React.createElement("button", {
+        onClick: deleteSelected,
+        className: "stx-btn",
+        style: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, padding: "5px 12px", border: "1px solid rgba(239,68,68,.3)", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer", fontFamily: "inherit" }
+      }, Icons.trash(12), " Delete " + selectedCount),
+      React.createElement("button", {
+        onClick: () => setSelected({}),
+        className: "stx-btn",
+        style: { fontSize: 10, padding: "5px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
+      }, "Clear")
+    ),
+    tracked.length > 0 && React.createElement("div", { style: { overflowX: "auto", marginTop: 4 } },
+      React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } },
+        React.createElement("thead", null,
+          React.createElement("tr", null,
+            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center", width: 36 }) },
+              React.createElement("input", { type: "checkbox", checked: sorted.length > 0 && sorted.every(function(t) { return selected[t.id]; }), onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 13, height: 13 } })
+            ),
+            React.createElement("th", { style: thStyle }, "Stock"),
+            React.createElement("th", { style: thStyle }, "Date Added"),
+            React.createElement("th", { style: thStyle }, "Conf 10D"),
+            React.createElement("th", { style: thStyle }, "Entry Score"),
+            React.createElement("th", { style: thRight }, "Price on Add"),
+            React.createElement("th", { style: thRight }, "Days"),
+            React.createElement("th", { style: thRight }, "Current Price"),
+            React.createElement("th", { style: thRight }, "% Change"),
+            React.createElement("th", { style: Object.assign({}, thStyle, { width: 40 }) })
+          )
+        ),
+        React.createElement("tbody", null,
+          sorted.map(function (tr) {
+            var addedDate = new Date(tr.addedAt);
+            var _startMs = Date.UTC(addedDate.getFullYear(), addedDate.getMonth(), addedDate.getDate());
+            var _endMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+            var daysElapsed = 0;
+            for (var _t = _startMs; _t < _endMs; _t += 86400000) { var _day = new Date(_t).getUTCDay(); if (_day !== 0 && _day !== 6) daysElapsed++; }
+            var priceOnAdd = tr.currentPrice || 0;
+            var currentPrice = prices[tr.ticker] || 0;
+            var pctChange = priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100) : null;
+            var pctColor = pctChange === null ? "var(--text6)" : pctChange >= 0 ? "#22c55e" : "#ef4444";
+            var confColor = tr.confidence == null ? "var(--text6)" : tr.confidence >= 70 ? "#16a34a" : tr.confidence >= 40 ? "#d97706" : "#dc2626";
+            var esColor = "var(--text6)";
+            if (tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision]) esColor = SCREENER_DECISION_MAP[tr.entryDecision].color;
+            var rowBg = "rgba(220, 170, 190, 0.10)";
+            return React.createElement("tr", { key: tr.id, style: { borderBottom: "1px solid var(--border)", background: selected[tr.id] ? "rgba(6,182,212,.12)" : rowBg } },
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", width: 36 }) },
+                React.createElement("input", { type: "checkbox", checked: !!selected[tr.id], onChange: function() { toggleSelect(tr.id); }, style: { accentColor: "var(--accent)", cursor: "pointer", width: 13, height: 13 } })
+              ),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap" }) }, tr.ticker),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { color: "var(--text3)", whiteSpace: "nowrap" }) }, addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", color: confColor }) }, tr.confidence != null ? Number(tr.confidence).toFixed(0) : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", color: esColor }) }, tr.entryScore != null ? tr.entryScore : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text2)", fontFamily: "var(--font-mono)" }) }, priceOnAdd > 0 ? INR(priceOnAdd) : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text4)" }) }, daysElapsed),
+              React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text2)", fontFamily: "var(--font-mono)" }) }, currentPrice > 0 ? INR(currentPrice) : (refreshing ? "..." : "\u2014")),
+              React.createElement("td", { style: Object.assign({}, tdRight, { fontWeight: 700, color: pctColor, fontFamily: "var(--font-mono)" }) }, pctChange !== null ? (pctChange >= 0 ? "+" : "") + pctChange.toFixed(2) + "%" : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                React.createElement("button", {
+                  onClick: () => deleteTracked(tr.id),
+                  title: "Remove from tracker",
+                  style: { border: "none", background: "transparent", cursor: "pointer", padding: 2, color: "var(--text6)" }
+                }, Icons.trash(13))
+              )
+            );
+          })
+        )
+      )
+    )
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
    NIFTY_100 TICKER LIST
    ══════════════════════════════════════════════════════════════════════════ */
 var NIFTY_100 = [
@@ -4919,6 +5261,10 @@ function StockScreener(props) {
   var addingToES = _s11[0], setAddingToES = _s11[1];
   var _s12 = useState({});
   var addedToES = _s12[0], setAddedToES = _s12[1];
+  var _s18b = useState({});
+  var addingToCS = _s18b[0], setAddingToCS = _s18b[1];
+  var _s18c = useState({});
+  var addedToCS = _s18c[0], setAddedToCS = _s18c[1];
   var _s11 = useState([]);
   var snapshots = _s11[0], setSnapshots = _s11[1];
   var _s13 = useState({});
@@ -5328,6 +5674,57 @@ function StockScreener(props) {
     setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
   };
 
+  var addToConfidence = async function(s) {
+    var tk = s.t.replace(".NS", "");
+    if (!tk || addingToCS[tk]) return;
+    setAddingToCS(function(p) { var c = Object.assign({}, p); c[tk] = true; return c; });
+    try {
+      var existing = await dbGetSetting(LS_CONF_TRACKER);
+      var entries = (Array.isArray(existing) ? existing : []);
+      if (entries.some(function(e) { return e.ticker === tk; })) {
+        setAddedToCS(function(p) { var c = Object.assign({}, p); c[tk] = "exists"; return c; });
+        setAddingToCS(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
+        return;
+      }
+      var [resW, resD, resH] = await Promise.all([
+        DF.fetchOHLCVCached(tk, "weekly"),
+        DF.fetchOHLCVCached(tk, "daily"),
+        DF.fetchOHLCVCached(tk, "1h"),
+      ]);
+      if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
+        setAddingToCS(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
+        return;
+      }
+      var lc = resD.data[resD.data.length - 1].c;
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+      var confidence = null;
+      try {
+        var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data);
+        if (conf && conf.confidence != null) confidence = conf.confidence;
+      } catch (e) {}
+      var row = {
+        id: Date.now(),
+        ticker: tk,
+        addedAt: new Date().toISOString(),
+        confidence: confidence != null ? Math.round(confidence * 10) / 10 : null,
+        entryScore: result && result.finalScore != null ? result.finalScore : null,
+        entryDecision: result && result.decision ? result.decision.label : null,
+        currentPrice: lc || 0
+      };
+      entries.unshift(row);
+      await dbSetSetting(LS_CONF_TRACKER, entries);
+      try {
+        var priceMap = await dbGetSetting(LS_CONF_PERF_PRICES);
+        var p = (priceMap && typeof priceMap === "object") ? Object.assign({}, priceMap) : {};
+        if (lc > 0) p[tk] = lc;
+        await dbSetSetting(LS_CONF_PERF_PRICES, p);
+      } catch (e) {}
+      window.dispatchEvent(new CustomEvent("stox:data-changed"));
+      setAddedToCS(function(p) { var c = Object.assign({}, p); c[tk] = true; return c; });
+    } catch (e) {}
+    setAddingToCS(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
+  };
+
   var startScan = async function() {
     if (scanning || !TI || !DF) return;
     setScanning(true); setResults([]); setScanErr("");
@@ -5514,18 +5911,18 @@ function StockScreener(props) {
         })
       ),
       React.createElement("div", { style: { overflowX: "auto", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg3)" } },
-        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1390 } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1440 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
-              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "finalScore", "weekly", "daily", "hourly", "conf10d", "addToES", "actions"].map(function(k) {
+              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "finalScore", "weekly", "daily", "hourly", "conf10d", "addToES", "addToCS", "actions"].map(function(k) {
                 if (k === "select") {
                   var allFilteredSelected = filtered.length > 0 && filtered.every(function(r) { return selected[r.s.t]; });
                   return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: "default", textAlign: "center", width: 36 }) },
                     React.createElement("input", { type: "checkbox", checked: allFilteredSelected, onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
                   );
                 }
-                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", addToES: "Add to ES", actions: "Last Refreshed" };
-                return React.createElement("th", { key: k, title: k === "conf10d" ? "Confidence Score \u2014 Next 10 Days (chance of +4% from current price within 10 trading days, /100)" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" || k === "addToES" ? "default" : "pointer" }), onClick: k === "actions" || k === "addToES" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" || k === "addToES" ? "" : arrow(k)));
+                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", addToES: "Add to ES", addToCS: "Add to CS", actions: "Last Refreshed" };
+                return React.createElement("th", { key: k, title: k === "conf10d" ? "Confidence Score \u2014 Next 10 Days (chance of +4% from current price within 10 trading days, /100)" : k === "addToCS" ? "Add this stock to the 10 Days Confidence Score Performance Tracker" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" || k === "addToES" || k === "addToCS" ? "default" : "pointer" }), onClick: k === "actions" || k === "addToES" || k === "addToCS" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" || k === "addToES" || k === "addToCS" ? "" : arrow(k)));
               })
             )
           ),
@@ -5594,6 +5991,24 @@ function StockScreener(props) {
                       disabled: isAdding,
                       style: { fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(22,163,74,.3)", background: isAdding ? "var(--bg5)" : "rgba(22,163,74,.08)", color: "#16a34a", cursor: isAdding ? "wait" : "pointer", fontFamily: "inherit", opacity: isAdding ? 0.6 : 1 }
                     }, isAdding ? "\u27f3 ..." : "+ Add");
+                  })()
+                ),
+                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                  (function() {
+                    var tk = r.s.t.replace(".NS", "");
+                    var isAddingCS = addingToCS[tk];
+                    var wasAddedCS = addedToCS[tk];
+                    if (wasAddedCS === true) {
+                      return React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#06b6d4", background: "rgba(6,182,212,.1)", padding: "3px 8px", borderRadius: 4 } }, "\u2713 Added");
+                    }
+                    if (wasAddedCS === "exists") {
+                      return React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", padding: "3px 8px" } }, "In List");
+                    }
+                    return React.createElement("button", {
+                      onClick: function() { addToConfidence(r.s); },
+                      disabled: isAddingCS,
+                      style: { fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(6,182,212,.3)", background: isAddingCS ? "var(--bg5)" : "rgba(6,182,212,.08)", color: "#06b6d4", cursor: isAddingCS ? "wait" : "pointer", fontFamily: "inherit", opacity: isAddingCS ? 0.6 : 1 }
+                    }, isAddingCS ? "\u27f3 ..." : "+ Add");
                   })()
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { whiteSpace: "nowrap" }) },
@@ -6825,6 +7240,7 @@ function PulsePage({ holdings }) {
   const TABS = [
     { key: "screener", label: "Stock Screener", icon: Icons.chart },
     { key: "entryscore", label: "Entry Score", icon: Icons.trendingUp },
+    { key: "confidencescore", label: "Confidence Score", icon: Icons.eye },
     { key: "singlestock", label: "Single Stock Analysis", icon: Icons.search },
   ];
 
@@ -6852,6 +7268,7 @@ function PulsePage({ holdings }) {
     React.createElement("div", null,
       activeTab === "screener" && React.createElement(StockScreener, { onOpenStock: openStock }),
       activeTab === "entryscore" && React.createElement(EntryScorePanel, { shares: holdings || [] }),
+      activeTab === "confidencescore" && React.createElement(ConfidenceTracker, null),
       activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker })
     )
   );

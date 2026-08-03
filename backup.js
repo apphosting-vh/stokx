@@ -99,7 +99,7 @@ function _readFsaFile() {
             var parsed = JSON.parse(text);
             var d = parsed && parsed.data ? parsed.data : null;
             if (d) {
-              var keys = ["holdings", "soldShareSnapshots", "watchlist", "entryScores", "entrySnapshots", "entryPerfPrices", "screenerData", "screenerSnapshots", "screenerBookmarks", "singleStockSnapshots", "notes"];
+              var keys = ["holdings", "soldShareSnapshots", "watchlist", "entryScores", "entrySnapshots", "entryPerfPrices", "screenerData", "screenerSnapshots", "screenerBookmarks", "singleStockSnapshots", "confTracker", "confTrackerPrices", "notes"];
               var sections = [], secTotal = 0;
               keys.forEach(function(k) { var b = _estBytes(d[k]); sections.push({ key: k, bytes: b }); secTotal += b; });
               info.sections = sections;
@@ -123,6 +123,8 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   var screenerSnapshots = [];
   var screenerBookmarks = {};
   var singleStockSnapshots = [];
+  var confTracker = [];
+  var confTrackerPrices = {};
   var notes = [];
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch(e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch(e) {}
@@ -131,6 +133,8 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   try { screenerSnapshots = (await dbGetSetting("stox_screener_snapshots")) || []; } catch(e) {}
   try { screenerBookmarks = (await dbGetSetting("stox_screener_bookmarks")) || {}; } catch(e) {}
   try { singleStockSnapshots = (await dbGetSetting("stox_single_stock_snapshots")) || []; } catch(e) {}
+  try { confTracker = (await dbGetSetting("stox_conf_tracker")) || []; } catch(e) {}
+  try { confTrackerPrices = (await dbGetSetting("stox_conf_tracker_prices")) || {}; } catch(e) {}
   try { notes = (await dbGetSetting("stox_notes")) || []; } catch(e) {}
   return {
     app: "StoX",
@@ -147,6 +151,8 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       screenerSnapshots: screenerSnapshots.length,
       screenerBookmarks: Object.keys(screenerBookmarks).length,
       singleStockSnapshots: singleStockSnapshots.length,
+      confTracker: confTracker.length,
+      confTrackerPrices: Object.keys(confTrackerPrices).length,
       notes: notes.length
     },
     data: {
@@ -160,6 +166,8 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       screenerSnapshots: screenerSnapshots,
       screenerBookmarks: screenerBookmarks,
       singleStockSnapshots: singleStockSnapshots,
+      confTracker: confTracker,
+      confTrackerPrices: confTrackerPrices,
       notes: notes
     }
   };
@@ -218,6 +226,8 @@ async function restoreStoxBackup(fileText) {
   if (d.screenerSnapshots) { try { await dbSetSetting("stox_screener_snapshots", d.screenerSnapshots); } catch(e) {} }
   if (d.screenerBookmarks && typeof d.screenerBookmarks === "object") { try { await dbSetSetting("stox_screener_bookmarks", d.screenerBookmarks); } catch(e) {} }
   if (d.singleStockSnapshots) { try { await dbSetSetting("stox_single_stock_snapshots", d.singleStockSnapshots); } catch(e) {} }
+  if (d.confTracker) { try { await dbSetSetting("stox_conf_tracker", d.confTracker); } catch(e) {} }
+  if (d.confTrackerPrices && typeof d.confTrackerPrices === "object") { try { await dbSetSetting("stox_conf_tracker_prices", d.confTrackerPrices); } catch(e) {} }
   if (d.notes) { try { await dbSetSetting("stox_notes", d.notes); } catch(e) {} }
   var snaps = d.soldShareSnapshots || {};
   Object.keys(snaps).forEach(function(fyKey) {
@@ -329,6 +339,8 @@ function DataBackupSection(props) {
   var [notes, setNotes] = React.useState([]);
   var [entryPerfPrices, setEntryPerfPrices] = React.useState({});
   var [screenerBookmarks, setScreenerBookmarks] = React.useState({});
+  var [confTracker, setConfTracker] = React.useState([]);
+  var [confTrackerPrices, setConfTrackerPrices] = React.useState({});
 
   React.useEffect(function() {
     (async function() {
@@ -340,6 +352,8 @@ function DataBackupSection(props) {
       try { var nt = await dbGetSetting("stox_notes"); if (nt) setNotes(nt); } catch(e) {}
       try { var epp = await dbGetSetting("mm_entry_perf_prices"); if (epp) setEntryPerfPrices(epp); } catch(e) {}
       try { var sbm = await dbGetSetting("stox_screener_bookmarks"); if (sbm) setScreenerBookmarks(sbm); } catch(e) {}
+      try { var ct = await dbGetSetting("stox_conf_tracker"); if (ct) setConfTracker(ct); } catch(e) {}
+      try { var ctp = await dbGetSetting("stox_conf_tracker_prices"); if (ctp) setConfTrackerPrices(ctp); } catch(e) {}
     })();
   }, []);
 
@@ -371,14 +385,16 @@ function DataBackupSection(props) {
     var sbmB = sz(screenerBookmarks);
     var sssB = sz(singleStockSnapshots);
     var ntB = sz(notes);
+    var ctfB = sz(confTracker);
+    var ctfpB = sz(confTrackerPrices);
     return {
       holdingsB: holdingsB, snapsB: snapsB, watchB: watchB,
       esB: esB, esnB: esnB, eppB: eppB,
       scB: scB, scnB: scnB, sbmB: sbmB,
-      sssB: sssB, ntB: ntB,
-      totalB: holdingsB + snapsB + watchB + esB + esnB + eppB + scB + scnB + sbmB + sssB + ntB
+      sssB: sssB, ntB: ntB, ctfB: ctfB, ctfpB: ctfpB,
+      totalB: holdingsB + snapsB + watchB + esB + esnB + eppB + scB + scnB + sbmB + sssB + ntB + ctfB + ctfpB
     };
-  }, [holdings, soldShareSnapshots, watchlist, entryScores, entrySnapshots, entryPerfPrices, screenerData, screenerSnapshots, screenerBookmarks, singleStockSnapshots, notes]);
+  }, [holdings, soldShareSnapshots, watchlist, entryScores, entrySnapshots, entryPerfPrices, screenerData, screenerSnapshots, screenerBookmarks, singleStockSnapshots, notes, confTracker, confTrackerPrices]);
 
   var pastTradeCount = Object.values(soldShareSnapshots).reduce(function(s, a) { return s + a.length; }, 0);
 
@@ -453,7 +469,7 @@ function DataBackupSection(props) {
     if (mb >= 1) return mb.toFixed(2) + " MB";
     return mb.toFixed(3) + " MB";
   };
-  var totalCount = holdings.length + pastTradeCount + watchlist.length + entryScores.length + entrySnapshots.length + Object.keys(entryPerfPrices).length + screenerCount + screenerSnapshots.length + Object.keys(screenerBookmarks).length + singleStockSnapshots.length + notes.length;
+  var totalCount = holdings.length + pastTradeCount + watchlist.length + entryScores.length + entrySnapshots.length + Object.keys(entryPerfPrices).length + screenerCount + screenerSnapshots.length + Object.keys(screenerBookmarks).length + singleStockSnapshots.length + confTracker.length + Object.keys(confTrackerPrices).length + notes.length;
   var sectionList = [
     { label: "Holdings", val: holdings.length, bytes: storageInfo.holdingsB, color: "#10b981" },
     { label: "Past Trades", val: pastTradeCount, bytes: storageInfo.snapsB, color: "#6d28d9" },
@@ -465,6 +481,8 @@ function DataBackupSection(props) {
     { label: "Screener Snaps", val: screenerSnapshots.length, bytes: storageInfo.scnB, color: "#ec4899" },
     { label: "Screener Bkmk", val: Object.keys(screenerBookmarks).length, bytes: storageInfo.sbmB, color: "#c084fc" },
     { label: "Analysis Snaps", val: singleStockSnapshots.length, bytes: storageInfo.sssB, color: "#a78bfa" },
+    { label: "Conf Tracker", val: confTracker.length, bytes: storageInfo.ctfB, color: "#22d3ee" },
+    { label: "Conf Prices", val: Object.keys(confTrackerPrices).length, bytes: storageInfo.ctfpB, color: "#2dd4bf" },
     { label: "Notes", val: notes.length, bytes: storageInfo.ntB, color: "#f59e0b" }
   ];
   var stats = sectionList.concat([{ label: "Total", val: totalCount, bytes: storageInfo.totalB, color: "var(--text)" }]);
@@ -489,7 +507,8 @@ function DataBackupSection(props) {
     holdings: "Holdings", soldShareSnapshots: "Past Trades", watchlist: "Watchlist",
     entryScores: "Entry Scores", entrySnapshots: "Entry Snaps", entryPerfPrices: "Perf Prices",
     screenerData: "Screener", screenerSnapshots: "Screener Snaps", screenerBookmarks: "Screener Bkmk",
-    singleStockSnapshots: "Analysis Snaps", notes: "Notes"
+    singleStockSnapshots: "Analysis Snaps", confTracker: "Conf Tracker", confTrackerPrices: "Conf Prices",
+    notes: "Notes"
   };
 
   var est = ss.est || null;
