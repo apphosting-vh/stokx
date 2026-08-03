@@ -1,6 +1,6 @@
 # StoX — Detailed Calculation Specification
 
-**App version:** 2.7.0 · **Cache:** stox-v81 · **Last updated:** 2026-08-01
+**App version:** 2.7.2 · **Cache:** stox-v83 · **Last updated:** 2026-08-01
 
 This is the companion deep-dive to `SPEC.md`. `SPEC.md` summarises the API and
 the rules; this document explains exactly how every number is produced, down to
@@ -753,6 +753,15 @@ Exit is **higher = worse** (a score is "exit pressure"). Pillars are capped at
 | 6 | `beta > 1.5 && indexTrendScore < 40` | +3 |
 | 7 | `c < chandelierLong && c < pivotS1` | +3 |
 | 8 | KVO bearish cross (`kvoL < kvoSig && kvoPrev >= kvoSigPrev`) | +3 |
+| 9 | **Guard E1 (golden exit):** `todaySpike` **and** `sessionReturnPct > 0` **and** `c >= ema21` **and** profit from entry `3.0 ≤ p < 4.0`% (spike carried us near the 4% target) | +5 |
+| 9a | same, profit `2.0 ≤ p < 3.0`% | +3 |
+| 10 | **Guard E2:** `stabilityScore < 0.35` **and** `distDayRatio < 0.6` **and** `not todaySpike` (erratic whipsaw) | +3 |
+
+**No-overlap rules (exit side, same guard as §6.5):**
+- **E1** nudges the user to bank the gain when a sudden up-spike brings the position near the 4% target (2.0–4.0% profit), before the hard target rule fires at ≥ 4%. The near-target profit context is derived from `entry_price`, which no pillar (12.x–15.x) or bonus uses (the only entry-price bonus, "Price < 97% entry", is for losses), so it is genuinely additive. RSI exhaustion (§13.1) is an independent momentum signal and stacks legitimately; `c >= ema21` keeps 12.x downtrend breakdowns from being simultaneously active. Profit ≥ 4% is excluded because the hard target rule already exits there.
+- **E2** fires only when `distDayRatio < 0.6` — heavy distribution (≥ 0.6) is already scored by §14.3 and bonus row 2. It is also suppressed on a spike day so it never stacks with E1.
+- **No down-spike bonus by design:** a panic (down) spike day already fires §13.2 (ROC/Mom/FI < 0), §14.1 (OBV/PVT/KVO decline) and §15.1 (BB/DC/Chandelier breaks) — adding an extra bonus for the same crash would double-count.
+- The guard bonuses are computed once on the primary (Daily) snapshot with `ctx.guard = computeSpikeGuard(dailyCandles)` in both single-TF and multi-TF paths; they never touch the raw pillar points.
 
 ---
 
@@ -819,7 +828,8 @@ multiTF = totalScore / totalWeight               # renormalised weighted mean
 # single modifier pass on the PRIMARY (Daily) snapshot:
 primarySn = first TF whose weight == 0.50 (D), else first TF
 ctx = { indexTrendScore: computeEntryScore(indexCandles).entry_score,
-        entryPrice, currentPrice: primarySn.c, holdingDays, entryScore }
+        entryPrice, currentPrice: primarySn.c, holdingDays, entryScore,
+        guard: computeSpikeGuard(primary.candles) }   # daily-only exit guard
 penalties/bonuses = buildExitPenaltyItems(primarySn, ctx) / buildExitBonusItems(primarySn, ctx)
 finalScore = clamp(multiTF + penalties + bonuses, 0, 100)
 ```

@@ -416,8 +416,13 @@ where:
 | 7 | Beta > 1.5 AND `index_trend_score` < 40 | +3 |
 | 8 | Price < Chandelier long AND < pivot S1 | +3 |
 | 9 | KVO bearish cross (line < signal, prior bar above) | +3 |
+| 10 | Golden exit (blow-off): `today_spike` + up-session + price ≥ 21-EMA + profit from entry 3.0–4.0% (spike near the 4% target) | +5 |
+| 10a | same, profit 2.0–3.0% | +3 |
+| 11 | Stability collapse: stability score < 0.35 + distribution ratio < 0.6 + not a spike day | +3 |
 
 Note: bonuses 3 and 4 are mutually exclusive (only the higher applies).
+
+**Exit-side no-double-count rules:** the guard bonuses (10, 11) fire only when the equivalent pre-existing exit signal is *not* already scoring the event. E1's near-target profit context (from `entry_price`) is unused by any pillar or bonus, so it is genuinely additive; it is suppressed once profit ≥ 4% because the hard target rule already exits there, and requires price ≥ 21-EMA so 12.x breakdowns are not simultaneously active. E2 requires distribution ratio < 0.6 (14.3 + bonus 2 cover heavy distribution) and no spike today. There is deliberately **no down-spike bonus**: a panic day already fires 13.2 (ROC/Mom/FI), 14.1 (OBV/PVT/KVO) and 15.1 (BB/DC/Chandelier), so an extra bonus would double-count the crash. Both rules run once on the primary Daily snapshot in single- and multi-TF exit; they add urgency only, never pillar points.
 
 ### 4.7 Return Shape
 
