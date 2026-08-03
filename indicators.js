@@ -3201,21 +3201,31 @@ window.TechIndicators = (function () {
         dayDrift = dS / nS;
       }
       var driftS = Math.max(-1, Math.min(1, driftPct / 2));
-      var volS = Math.max(-1, Math.min(1, (volConfirm - 0.5) * 2));
+      /* volFlowS = volume-FLOW sentiment (NOT volatility): recent up-bar volume
+         share mapped to [−1,1] (+1 = all volume on up-bars, i.e. accumulation).
+         It is derived from the same hourly window as hourDrift, so like that
+         term it is regime-GATED — up-flow is trusted more in a clean trend and
+         damped in chop — but half its weight stays unconditional so a genuine
+         breakout on heavy up-volume still registers before the daily R² has
+         caught up. Not horizon-decayed: volConfirm is a multi-session flow
+         balance, not a short-lived momentum level. */
+      var volFlowS = Math.max(-1, Math.min(1, (volConfirm - 0.5) * 2));
+      var volQual = regimeQuality != null ? regimeQuality : 1;
+      var volGate = 0.5 + 0.5 * volQual;
       /* regimeMult gates the CROSS-TIMEFRAME momentum terms (hourly, RS, window
          drift) whose reliability depends on daily trend quality. dayDrift (daily
          EMA/MACD stack) is left OUTSIDE the multiplier: it is built from the
          same daily bars ADX/R² judge, so amplifying it again would double-count
-         the daily trend. Volume conviction also stays outside. */
+         the daily trend. Volume flow is gate-adjusted via volGate instead. */
       var driftScore;
       if (rsScore != null) {
         driftScore = Math.max(-1, Math.min(1,
           regimeMult * (0.20 * hourDrift + 0.20 * rsScore + 0.10 * driftS) +
-          0.35 * dayDrift + 0.15 * volS));
+          0.35 * dayDrift + 0.15 * volFlowS * volGate));
       } else {
         driftScore = Math.max(-1, Math.min(1,
           regimeMult * (0.25 * hourDrift + 0.10 * driftS) +
-          0.45 * dayDrift + 0.20 * volS));
+          0.45 * dayDrift + 0.20 * volFlowS * volGate));
       }
       base.components.driftPct = round(driftPct, 2);
       base.components.volConfirm = round(volConfirm, 2);
