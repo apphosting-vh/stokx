@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.8.4";
+window.__STOX_APP_VERSION = "2.8.5";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -4890,7 +4890,9 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
   return out;
 }
 
-function StockScreener() {
+function StockScreener(props) {
+  props = props || {};
+  var onOpenStock = props.onOpenStock;
   var TI = window.TechIndicators;
   var DF = window.OHLCVFetcher;
   var _s = useState([]);
@@ -5099,6 +5101,8 @@ function StockScreener() {
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+      var conf10d = null;
+      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -5109,8 +5113,8 @@ function StockScreener() {
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       setResults(function(p) {
         var idx = p.findIndex(function(r) { return r.s.t === s.t; });
-        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg }; return copy; }
-        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg }]);
+        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, conf10d: conf10d }; return copy; }
+        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, conf10d: conf10d }]);
       });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[s.t] = Date.now(); return c; });
     } catch(e) {}
@@ -5143,6 +5147,8 @@ function StockScreener() {
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+      var conf10d = null;
+      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -5151,7 +5157,7 @@ function StockScreener() {
       var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
       var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
-      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg }]); });
+      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, conf10d: conf10d }]); });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[stockObj.t] = Date.now(); return c; });
     } catch(e) { setScanErr("Failed to fetch " + tk); }
     setManualLoading(false); setManualTicker("");
@@ -5233,6 +5239,8 @@ function StockScreener() {
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+          var conf10d = null;
+          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -5242,7 +5250,7 @@ function StockScreener() {
           var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
           var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
           var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
-          if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg };
+          if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, conf10d: conf10d };
           bg.timestamps[stk.t] = Date.now();
         }
       } catch(e) {}
@@ -5347,6 +5355,8 @@ function StockScreener() {
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+          var conf10d = null;
+          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -5355,7 +5365,7 @@ function StockScreener() {
           var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
           var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
           var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
-          return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg };
+          return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, conf10d: conf10d };
         } catch(e) { return null; }
       });
       var batchResults = await Promise.all(promises);
@@ -5392,6 +5402,7 @@ function StockScreener() {
     else if (sortKey === "weekly") { av = a.result.weekly ? a.result.weekly.total : 0; bv = b.result.weekly ? b.result.weekly.total : 0; }
     else if (sortKey === "daily") { av = a.result.daily ? a.result.daily.total : 0; bv = b.result.daily ? b.result.daily.total : 0; }
     else if (sortKey === "hourly") { av = a.result.hourly ? a.result.hourly.total : 0; bv = b.result.hourly ? b.result.hourly.total : 0; }
+    else if (sortKey === "conf10d") { av = a.conf10d != null ? a.conf10d : -1; bv = b.conf10d != null ? b.conf10d : -1; }
     else { av = a.result.finalScore; bv = b.result.finalScore; }
     return sortDir === "asc" ? av - bv : bv - av;
   });
@@ -5503,18 +5514,18 @@ function StockScreener() {
         })
       ),
       React.createElement("div", { style: { overflowX: "auto", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg3)" } },
-        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1320 } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1390 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
-              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "finalScore", "weekly", "daily", "hourly", "addToES", "actions"].map(function(k) {
+              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "finalScore", "weekly", "daily", "hourly", "conf10d", "addToES", "actions"].map(function(k) {
                 if (k === "select") {
                   var allFilteredSelected = filtered.length > 0 && filtered.every(function(r) { return selected[r.s.t]; });
                   return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: "default", textAlign: "center", width: 36 }) },
                     React.createElement("input", { type: "checkbox", checked: allFilteredSelected, onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
                   );
                 }
-                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", addToES: "Add to ES", actions: "Last Refreshed" };
-                return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: k === "actions" || k === "addToES" ? "default" : "pointer" }), onClick: k === "actions" || k === "addToES" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" || k === "addToES" ? "" : arrow(k)));
+                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", addToES: "Add to ES", actions: "Last Refreshed" };
+                return React.createElement("th", { key: k, title: k === "conf10d" ? "Confidence Score \u2014 Next 10 Days (chance of +4% from current price within 10 trading days, /100)" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" || k === "addToES" ? "default" : "pointer" }), onClick: k === "actions" || k === "addToES" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" || k === "addToES" ? "" : arrow(k)));
               })
             )
           ),
@@ -5537,7 +5548,11 @@ function StockScreener() {
                         transition: "all .15s"
                       }
                     }, Icons.star(14, !!bookmarks[r.s.t])),
-                    React.createElement("span", { style: { fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap" } }, r.s.t.replace(".NS", ""))
+                    React.createElement("button", {
+                      onClick: function(e) { e.stopPropagation(); if (onOpenStock) onOpenStock(r.s.t.replace(".NS", "")); },
+                      title: "Open in Single Stock Analysis",
+                      style: { border: "none", background: "transparent", cursor: "pointer", padding: 0, fontWeight: 700, fontSize: 11, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap", textAlign: "left" }
+                    }, r.s.t.replace(".NS", ""))
                   )
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { color: "var(--text4)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }, r.s.n),
@@ -5558,6 +5573,11 @@ function StockScreener() {
                 React.createElement("td", { style: tdStyle }, r.result.weekly ? React.createElement("span", { style: { fontWeight: 700, color: r.result.weekly.decision.color } }, r.result.weekly.total) : "\u2014"),
                 React.createElement("td", { style: tdStyle }, r.result.daily ? React.createElement("span", { style: { fontWeight: 700, color: r.result.daily.decision.color } }, r.result.daily.total) : "\u2014"),
                 React.createElement("td", { style: tdStyle }, r.result.hourly ? React.createElement("span", { style: { fontWeight: 700, color: r.result.hourly.decision.color } }, r.result.hourly.total) : "\u2014"),
+                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                  r.conf10d != null
+                    ? React.createElement("span", { title: "Confidence Score \u2014 Next 10 Days (" + Number(r.conf10d).toFixed(0) + "/100)", style: { fontWeight: 800, fontFamily: "var(--font-heading)", color: r.conf10d >= 70 ? "#16a34a" : r.conf10d >= 40 ? "#d97706" : "#dc2626" } }, Number(r.conf10d).toFixed(0))
+                    : React.createElement("span", { title: "Confidence Score \u2014 Next 10 Days", style: { fontSize: 10, color: "var(--text6)" } }, "\u2014")
+                ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
                   (function() {
                     var tk = r.s.t.replace(".NS", "");
@@ -5746,14 +5766,15 @@ function ScreenerSnapshots(props) {
 /* ══════════════════════════════════════════════════════════════════════════
    COMPONENT: Single Stock Analysis (Pulse sub-tab)
    ══════════════════════════════════════════════════════════════════════════ */
-function SingleStockAnalysis() {
+function SingleStockAnalysis({ requestedTicker }) {
   var TI = window.TechIndicators;
   var DF = window.OHLCVFetcher;
 
   var _LS_KEY = "stox_single_stock";
   var _saved = (function () { try { return JSON.parse(localStorage.getItem(_LS_KEY)) || {}; } catch (e) { return {}; } })();
+  var _initial = requestedTicker || _saved.ticker || "";
 
-  var _a = useState(_saved.ticker || ""), ticker = _a[0], setTicker = _a[1];
+  var _a = useState(_initial), ticker = _a[0], setTicker = _a[1];
   var _b = useState(_saved.timeframe || "daily"), timeframe = _b[0], setTimeframe = _b[1];
   var _c = useState(null), candles = _c[0], setCandles = _c[1];
   var _d = useState(false), loading = _d[0], setLoading = _d[1];
@@ -5765,7 +5786,7 @@ function SingleStockAnalysis() {
   var _j = useState(_saved.category || "all"), category = _j[0], setCategory = _j[1];
   var _k = useState(0), refreshTick = _k[0], setRefreshTick = _k[1];
   var _l = useState(null), dataSource = _l[0], setDataSource = _l[1];
-  var _m = useState(_saved.ticker || ""), inputVal = _m[0], setInputVal = _m[1];
+  var _m = useState(_initial), inputVal = _m[0], setInputVal = _m[1];
   var timerRef = useRef(null);
   var fetchIdRef = useRef(0);
   var _n = useState("none"), oscPane = _n[0], setOscPane = _n[1];
@@ -5783,6 +5804,14 @@ function SingleStockAnalysis() {
   useEffect(function () {
     try { localStorage.setItem(_LS_KEY, JSON.stringify({ ticker: ticker, timeframe: timeframe, category: category, autoRefresh: autoRefresh })); } catch (e) {}
   }, [ticker, timeframe, category, autoRefresh]);
+
+  useEffect(function () {
+    if (requestedTicker && requestedTicker !== ticker) {
+      setTicker(requestedTicker);
+      setInputVal(requestedTicker);
+      DF.clearCache();
+    }
+  }, [requestedTicker]);
 
   var TF_DEFS = [
     { key: "daily", label: "Daily" },
@@ -6789,6 +6818,9 @@ function SingleStockAnalysis() {
    ══════════════════════════════════════════════════════════════════════════ */
 function PulsePage({ holdings }) {
   const [activeTab, setActiveTab] = useState("screener");
+  const [pendingTicker, setPendingTicker] = useState("");
+
+  const openStock = (tk) => { setPendingTicker(tk); setActiveTab("singlestock"); };
 
   const TABS = [
     { key: "screener", label: "Stock Screener", icon: Icons.chart },
@@ -6818,9 +6850,9 @@ function PulsePage({ holdings }) {
     ),
 
     React.createElement("div", null,
-      activeTab === "screener" && React.createElement(StockScreener, null),
+      activeTab === "screener" && React.createElement(StockScreener, { onOpenStock: openStock }),
       activeTab === "entryscore" && React.createElement(EntryScorePanel, { shares: holdings || [] }),
-      activeTab === "singlestock" && React.createElement(SingleStockAnalysis, null)
+      activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker })
     )
   );
 }
