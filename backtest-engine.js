@@ -322,13 +322,21 @@ window.BacktestEngine = (function () {
       var step = opts.sampleEvery || 1;
       var skip = opts.skipBars || {};
       var symbol = opts.symbol || candles._symbol || '';
+      var minTH = opts.minTrendHealth != null ? opts.minTrendHealth : -Infinity;
+      var minPQ = opts.minPullbackQuality != null ? opts.minPullbackQuality : -Infinity;
+      var minP4 = opts.minProb4 != null ? opts.minProb4 : -Infinity;
+      var minRaw = opts.minRawScore != null ? opts.minRawScore : -Infinity;
       for (var i = startIdx; i <= endIdx; i++) {
         if (skip[i]) { if (onBar) onBar(i - startIdx + 1, endIdx - startIdx + 1); continue; }
         if ((i - startIdx) % step !== 0) { if (onBar) onBar(i - startIdx + 1, endIdx - startIdx + 1); continue; }
         var r = scoreAt(candles, i, symbol);
         if (r && r.entryScore != null) {
           sc.push(r);
-          if (r.entryScore >= threshold) {
+          if (r.entryScore >= threshold
+              && (r.trendHealth == null || r.trendHealth >= minTH)
+              && (r.pullbackQuality == null || r.pullbackQuality >= minPQ)
+              && (r.prob4 == null || r.prob4 >= minP4)
+              && (r.raw_score == null || r.raw_score >= minRaw)) {
             var trade = simulateTrade(candles, i, r, opts);
             trade.symbol = symbol;
             t.push(trade);
@@ -368,7 +376,6 @@ window.BacktestEngine = (function () {
       if (!candles || candles.length < warmup + 2) {
         return { symbol: symbol, error: "Need at least " + (warmup + 2) + " candles for backtesting" };
       }
-      // Attach symbol to candles for cache key
       candles._symbol = symbol;
 
       var L = candles.length;
@@ -380,6 +387,10 @@ window.BacktestEngine = (function () {
       var step = opts.sampleEvery || 1;
       var scoredBars = 0, totalBars = endIdx - startIdx + 1;
       var trades = [], scored = [];
+      var minTH = opts.minTrendHealth != null ? opts.minTrendHealth : -Infinity;
+      var minPQ = opts.minPullbackQuality != null ? opts.minPullbackQuality : -Infinity;
+      var minP4 = opts.minProb4 != null ? opts.minProb4 : -Infinity;
+      var minRaw = opts.minRawScore != null ? opts.minRawScore : -Infinity;
       for (var i = startIdx; i <= endIdx; i++) {
         if ((i - startIdx) % step === 0) {
           var r = scoreAt(candles, i, symbol);
@@ -390,7 +401,11 @@ window.BacktestEngine = (function () {
             r.fwdReturn = fwd.finalReturnPct;
             scored.push(r);
             scoredBars++;
-            if (r.entryScore >= threshold) {
+            if (r.entryScore >= threshold
+                && (r.trendHealth == null || r.trendHealth >= minTH)
+                && (r.pullbackQuality == null || r.pullbackQuality >= minPQ)
+                && (r.prob4 == null || r.prob4 >= minP4)
+                && (r.raw_score == null || r.raw_score >= minRaw)) {
               fwd.symbol = symbol;
               trades.push(fwd);
             }
@@ -622,6 +637,241 @@ window.BacktestEngine = (function () {
       scoreErrors = [];
     }
 
+    /* ── Entry Score Sweep Utilities ────────────────────────────────────── */
+
+    /**
+     * sweepEntryScore — Sensitivity analysis.
+     * Runs batch backtest at different minEntryScore thresholds and optionally
+     * varies individual pillar thresholds. Returns a table of (threshold → metrics).
+     *
+     * opts:
+     *   dataMap       : { symbol: candles[] }
+     *   scoreThresholds : number[] (default [40, 50, 55, 60, 65, 70, 75, 80])
+     *   pillarSweep   : { trendHealth?: number[], pullbackQuality?: number[], prob4?: number[] }
+     *                   If set, for each threshold in scoreThresholds, also sweeps
+     *                   each pillar independently while holding others at -Infinity.
+     *   symbols       : string[] subset of dataMap keys
+     *   sampleEvery   : number (default 2)
+     *   hooks         : { onProgress: fn(completed, total, label) }
+     *
+     * Returns:
+     *   { thresholdSweep: [...], pillarSweep: { trendHealth: [...], ... } }
+     */
+    async function sweepEntryScore(dataMap, opts, hooks) {
+      opts = opts || {};
+      hooks = hooks || {};
+      var symbols = opts.symbols || Object.keys(dataMap || {});
+      var thRange = opts.scoreThresholds || [40, 50, 55, 60, 65, 70, 75, 80];
+      var pillarSweep = opts.pillarSweep || null;
+
+      // Build a sub-dataMap for the requested symbols
+      var subMap = {};
+      symbols.forEach(function (s) { if (dataMap[s]) subMap[s] = dataMap[s]; });
+
+      // ── 1. Total score threshold sweep ──
+      var thResults = [];
+      for (var ti = 0; ti < thRange.length; ti++) {
+        var th = thRange[ti];
+        if (hooks.onProgress) hooks.onProgress(ti, thRange.length + (pillarSweep ? 3 : 0), "Sweeping total score ≥ " + th);
+        var eng = create(Object.assign({}, { threshold: th, scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays }, opts));
+        var batch = await eng.runBatch(subMap, { symbols: symbols, sampleEvery: opts.sampleEvery || 2 });
+        var sm = batch.summary;
+        thResults.push({
+          threshold: th,
+          signals: sm.totalSignals,
+          winRate: sm.overallWinRate,
+          avgReturn: sm.avgReturn,
+          avgProfitFactor: sm.avgProfitFactor,
+          symbolsTested: sm.symbolsWithSignals
+        });
+        await yieldToUI();
+      }
+
+      // ── 2. Pillar-level sweeps ──
+      var pResults = {};
+      if (pillarSweep) {
+        var pillars = [
+          { key: 'trendHealth', optKey: 'minTrendHealth', label: 'Trend Health', max: 30, values: pillarSweep.trendHealth || [10, 15, 20, 25, 28] },
+          { key: 'pullbackQuality', optKey: 'minPullbackQuality', label: 'Pullback Quality', max: 30, values: pillarSweep.pullbackQuality || [10, 15, 20, 25, 28] },
+          { key: 'prob4', optKey: 'minProb4', label: '4% Probability', max: 40, values: pillarSweep.prob4 || [15, 20, 25, 30, 35] }
+        ];
+        for (var pi = 0; pi < pillars.length; pi++) {
+          var p = pillars[pi];
+          var pRows = [];
+          for (var vi = 0; vi < p.values.length; vi++) {
+            var pv = p.values[vi];
+            var label = p.label + " ≥ " + pv;
+            if (hooks.onProgress) hooks.onProgress(thRange.length + pi * p.values.length + vi, thRange.length + pillars.length * p.values.length, label);
+            var filterOpts = {};
+            filterOpts[p.optKey] = pv;
+            var eng2 = create(Object.assign({}, { threshold: threshold, scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays }, opts, filterOpts));
+            var batch2 = await eng2.runBatch(subMap, { symbols: symbols, sampleEvery: opts.sampleEvery || 2 });
+            var sm2 = batch2.summary;
+            pRows.push({
+              pillar: p.key,
+              minValue: pv,
+              maxValue: p.max,
+              signals: sm2.totalSignals,
+              winRate: sm2.overallWinRate,
+              avgReturn: sm2.avgReturn,
+              avgProfitFactor: sm2.avgProfitFactor,
+              symbolsTested: sm2.symbolsWithSignals
+            });
+            await yieldToUI();
+          }
+          pResults[p.key] = pRows;
+        }
+      }
+
+      if (hooks.onProgress) hooks.onProgress(1, 1, "Done");
+      return { thresholdSweep: thResults, pillarSweep: pResults };
+    }
+
+    /**
+     * analyzeComponentPower — Measures how well each individual score component
+     * predicts forward returns across the scored bars.
+     *
+     * dataMap: { symbol: candles[] }
+     * opts: { symbols, sampleEvery }
+     *
+     * Returns for each component (trendHealth, pullbackQuality, prob4):
+     *   { correlation, bucketWinRates: [{min, max, signals, winRate, avgReturn}], infoValue }
+     */
+    async function analyzeComponentPower(dataMap, opts, hooks) {
+      opts = opts || {};
+      hooks = hooks || {};
+      var symbols = opts.symbols || Object.keys(dataMap || {});
+      var warmupBars = cfg.warmup != null ? cfg.warmup : 60;
+
+      // Collect all scored bars with their forward returns
+      var allScored = [];
+      for (var si = 0; si < symbols.length; si++) {
+        var sym = symbols[si];
+        var candles = dataMap[sym];
+        if (!candles || candles.length < warmupBars + 10) continue;
+        candles._symbol = sym;
+        var L = candles.length;
+        var endIdx = Math.min(L - 1, L - 2);
+        var step = opts.sampleEvery || 2;
+        for (var i = warmupBars; i <= endIdx; i += step) {
+          var r = scoreAt(candles, i, sym);
+          if (r && r.entryScore != null) {
+            var fwd = simulateTrade(candles, i, r, opts);
+            allScored.push({
+              symbol: sym,
+              entryScore: r.entryScore,
+              trendHealth: r.trendHealth != null ? r.trendHealth : null,
+              pullbackQuality: r.pullbackQuality != null ? r.pullbackQuality : null,
+              prob4: r.prob4 != null ? r.prob4 : null,
+              hit: fwd.hitTarget,
+              fwdReturn: fwd.finalReturnPct
+            });
+          }
+        }
+        if (hooks.onSymbol) {
+          hooks.onSymbol(si + 1, symbols.length);
+          await yieldToUI();
+        }
+      }
+
+      var components = ['trendHealth', 'pullbackQuality', 'prob4', 'entryScore'];
+      var result = {};
+
+      components.forEach(function (comp) {
+        var valid = allScored.filter(function (s) { return s[comp] != null; });
+        if (valid.length < 10) { result[comp] = { error: 'insufficient data' }; return; }
+
+        // Sort by component value
+        valid.sort(function (a, b) { return a[comp] - b[comp]; });
+
+        // Simple correlation (point-biserial with hit flag)
+        var meanX = valid.reduce(function (s, v) { return s + v[comp]; }, 0) / valid.length;
+        var meanY = valid.reduce(function (s, v) { return s + (v.hit ? 1 : 0); }, 0) / valid.length;
+        var sumXY = 0, sumX2 = 0, sumY2 = 0;
+        valid.forEach(function (v) {
+          var dx = v[comp] - meanX;
+          var dy = (v.hit ? 1 : 0) - meanY;
+          sumXY += dx * dy;
+          sumX2 += dx * dx;
+          sumY2 += dy * dy;
+        });
+        var correlation = (sumX2 > 0 && sumY2 > 0) ? sumXY / Math.sqrt(sumX2 * sumY2) : 0;
+
+        // Information value: bucket into quintiles
+        var bucketSize = Math.max(1, Math.floor(valid.length / 5));
+        var buckets = [];
+        for (var bi = 0; bi < valid.length; bi += bucketSize) {
+          var bEnd = Math.min(bi + bucketSize, valid.length);
+          var bucket = valid.slice(bi, bEnd);
+          var wins = bucket.filter(function (v) { return v.hit; }).length;
+          var minVal = bucket[0][comp];
+          var maxVal = bucket[bucket.length - 1][comp];
+          buckets.push({
+            min: Math.round(minVal * 10) / 10,
+            max: Math.round(maxVal * 10) / 10,
+            signals: bucket.length,
+            winRate: Math.round((wins / bucket.length) * 1000) / 10,
+            avgReturn: Math.round((bucket.reduce(function (s, v) { return s + v.fwdReturn; }, 0) / bucket.length) * 100) / 100
+          });
+        }
+
+        // Info value = sum of (winRate_bucket - overallWinRate) * log(winRate_bucket / overallWinRate)
+        var overallWR = valid.filter(function (v) { return v.hit; }).length / valid.length;
+        var infoValue = 0;
+        buckets.forEach(function (b) {
+          var wr = b.winRate / 100;
+          if (wr > 0 && overallWR > 0 && overallWR < 1) {
+            infoValue += (b.signals / valid.length) * (wr - overallWR) * Math.log(wr / overallWR);
+          }
+        });
+
+        result[comp] = {
+          n: valid.length,
+          correlation: Math.round(correlation * 1000) / 1000,
+          infoValue: Math.round(infoValue * 1000) / 1000,
+          bucketWinRates: buckets
+        };
+      });
+
+      return { components: result, totalScored: allScored.length };
+    }
+
+    /**
+     * exportSweepCSV — Export sweep results to CSV.
+     * type: 'threshold' | 'pillar' | 'component'
+     */
+    function exportSweepCSV(sweepResult, type) {
+      if (type === 'threshold') {
+        var headers = ["Threshold", "Signals", "Win Rate %", "Avg Return %", "Avg Profit Factor", "Symbols w/ Signals"];
+        var rows = (sweepResult.thresholdSweep || []).map(function (r) {
+          return [r.threshold, r.signals, r.winRate, r.avgReturn, r.avgProfitFactor, r.symbolsTested];
+        });
+        return csvRows(headers, rows);
+      }
+      if (type === 'pillar') {
+        var headers2 = ["Pillar", "Min Value", "Max Value", "Signals", "Win Rate %", "Avg Return %", "Avg Profit Factor", "Symbols w/ Signals"];
+        var rows2 = [];
+        var ps = sweepResult.pillarSweep || {};
+        Object.keys(ps).forEach(function (k) {
+          (ps[k] || []).forEach(function (r) {
+            rows2.push([r.pillar, r.minValue, r.maxValue, r.signals, r.winRate, r.avgReturn, r.avgProfitFactor, r.symbolsTested]);
+          });
+        });
+        return csvRows(headers2, rows2);
+      }
+      if (type === 'component') {
+        var headers3 = ["Component", "Correlation", "Info Value", "N"];
+        var rows3 = [];
+        var cs = sweepResult.components || {};
+        Object.keys(cs).forEach(function (k) {
+          var c = cs[k];
+          if (c && !c.error) rows3.push([k, c.correlation, c.infoValue, c.n]);
+        });
+        return csvRows(headers3, rows3);
+      }
+      return "";
+    }
+
     return {
       scoreAt: scoreAt,
       simulateTrade: simulateTrade,
@@ -630,9 +880,12 @@ window.BacktestEngine = (function () {
       runSingle: runSingle,
       runWalkForward: runWalkForward,
       runBatch: runBatch,
+      sweepEntryScore: sweepEntryScore,
+      analyzeComponentPower: analyzeComponentPower,
       exportSingleCSV: exportSingleCSV,
       exportBatchCSV: exportBatchCSV,
       exportWalkForwardCSV: exportWalkForwardCSV,
+      exportSweepCSV: exportSweepCSV,
       clearScoreCache: function () { scoreCache.clear(); cacheOrder = []; },
       getScoreErrors: getScoreErrors,
       clearScoreErrors: clearScoreErrors

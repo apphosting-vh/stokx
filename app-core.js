@@ -6167,8 +6167,273 @@ const BacktestSuitePanel = () => {
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
-   STOCK SCREENER (Nifty 200 multi-TF entry score)
+   SCORE TUNER — Entry Score sensitivity & component analysis
    ══════════════════════════════════════════════════════════════════════════ */
+const ScoreTunerPanel = () => {
+  const DF = window.OHLCVFetcher;
+  const TI = window.TechIndicators;
+  const BE = window.BacktestEngine;
+
+  const [universe, setUniverse] = useState("nifty50");
+  const [target, setTarget] = useState(4);
+  const [holding, setHolding] = useState(14);
+  const [threshold, setThreshold] = useState(65);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [err, setErr] = useState("");
+  const [result, setResult] = useState(null);
+  const [activeResultTab, setActiveResultTab] = useState("threshold");
+  const cancelRef = useRef(false);
+
+  const UNIVERSES = [
+    { key: "random10", label: "Random 10", desc: "Random 10 large+mid cap (~30 sec)", filter: function(s) { return true; }, limit: 10, random: true },
+    { key: "random20", label: "Random 20", desc: "Random 20 large+mid cap (~1 min)", filter: function(s) { return true; }, limit: 20, random: true },
+    { key: "nifty50", label: "NIFTY 50", desc: "Large cap only (~50 stocks, ~2 min)", filter: function(s) { return s.cap === "L"; } },
+    { key: "random50", label: "Random 50", desc: "Random 50 large+mid cap (~2 min)", filter: function(s) { return true; }, limit: 50, random: true },
+    { key: "nifty100", label: "NIFTY 100", desc: "Large + mid cap (~100 stocks, ~5 min)", filter: function(s) { return true; }, limit: 100 },
+    { key: "random100", label: "Random 100", desc: "Random 100 large+mid cap (~5 min)", filter: function(s) { return true; }, limit: 100, random: true },
+    { key: "nifty200", label: "NIFTY 200", desc: "Full universe (~200 stocks, ~15 min)", filter: function(s) { return true; } },
+  ];
+
+  function shuffleArray(arr) {
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+    }
+    return a;
+  }
+
+  const getUniverseConfig = function() {
+    return UNIVERSES.find(function(u) { return u.key === universe; }) || UNIVERSES[0];
+  };
+
+  const buildScoreFn = (idxCandles) => (candles, idx) => {
+    const bar = candles[idx];
+    if (!bar) return null;
+    const ts = bar.t;
+    let idxSlice = null;
+    if (idxCandles && idxCandles.length && ts != null) {
+      let lo = 0, hi = idxCandles.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (idxCandles[mid].t <= ts) lo = mid + 1; else hi = mid; }
+      if (lo > 0) idxSlice = idxCandles.slice(0, lo);
+    }
+    let res;
+    try { res = TI.computeEntryScore(candles.slice(0, idx + 1), idxSlice && idxSlice.length ? idxSlice : null); } catch (e) { return null; }
+    if (!res || res.entry_score == null) return null;
+    return { entryScore: res.entry_score, raw_score: res.raw_score, classification: res.classification, trendHealth: res.trendHealth, pullbackQuality: res.pullbackQuality, prob4: res.prob4, modifiers: res.modifiers };
+  };
+
+  const runSweep = async () => {
+    setRunning(true); setErr(""); setResult(null); setProgress({ phase: "Fetching data...", done: 0, total: 0 }); cancelRef.current = false;
+    try {
+      const ucfg = getUniverseConfig();
+      var stockList = NIFTY_200.filter(ucfg.filter);
+      if (ucfg.random) stockList = shuffleArray(stockList);
+      if (ucfg.limit) stockList = stockList.slice(0, ucfg.limit);
+      const symbols = stockList.map(s => s.t);
+
+      // Adaptive sampling: larger universes sample more aggressively
+      const sampleEvery = symbols.length > 150 ? 4 : symbols.length > 80 ? 3 : 2;
+
+      setProgress({ phase: "Fetching candles for " + symbols.length + " stocks (sampling every " + sampleEvery + " bars)...", done: 0, total: symbols.length });
+      const dataMap = {};
+      const idxSym = "^NSEI";
+      let idxCandles = null;
+      try { idxCandles = await DF.fetchOHLCV(idxSym, "2y"); } catch (e) {}
+      for (let i = 0; i < symbols.length; i++) {
+        if (cancelRef.current) throw new Error("cancelled");
+        try {
+          const c = await DF.fetchOHLCV(symbols[i], "2y");
+          if (c && c.length >= 80) dataMap[symbols[i]] = c;
+        } catch (e) {}
+        setProgress({ phase: "Fetching candles...", done: i + 1, total: symbols.length });
+        await new Promise(r => setTimeout(r, 0));
+      }
+      const validCount = Object.keys(dataMap).length;
+      if (validCount === 0) throw new Error("No valid data fetched");
+
+      setProgress({ phase: "Running sweep on " + validCount + " stocks...", done: 0, total: 1 });
+
+      const engine = BE.create({
+        scoreFn: buildScoreFn(idxCandles),
+        targetProfitPct: target,
+        holdingPeriodDays: holding,
+        threshold: threshold
+      });
+
+      const sweepResult = await engine.sweepEntryScore(dataMap, {
+        symbols: Object.keys(dataMap),
+        scoreThresholds: [40, 45, 50, 55, 60, 65, 70, 75, 80],
+        pillarSweep: { trendHealth: [10, 15, 20, 25, 28], pullbackQuality: [10, 15, 20, 25, 28], prob4: [15, 20, 25, 30, 35] },
+        sampleEvery: sampleEvery
+      }, {
+        onProgress: (done, total, label) => { if (!cancelRef.current) setProgress({ phase: label, done, total }); }
+      });
+
+      setProgress({ phase: "Analyzing components...", done: 0, total: 1 });
+      const componentResult = await engine.analyzeComponentPower(dataMap, {
+        symbols: Object.keys(dataMap),
+        sampleEvery: sampleEvery
+      }, {
+        onSymbol: (done, total) => { if (!cancelRef.current) setProgress({ phase: "Component analysis...", done, total }); }
+      });
+
+      setResult({ sweep: sweepResult, components: componentResult, engine: engine, universeLabel: ucfg.label, stockCount: validCount });
+      setProgress(null);
+    } catch (e) {
+      setErr((e && e.message) || String(e));
+      setProgress(null);
+    }
+    setRunning(false);
+  };
+
+  const exportCSV = (type) => {
+    if (!result || !result.engine) return;
+    const csv = result.engine.exportSweepCSV(result.sweep, type);
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "stox_sweep_" + type + ".csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const th = { fontSize: 11, fontWeight: 600, color: "var(--text3)", padding: "6px 8px", textAlign: "left", borderBottom: "1px solid var(--border)" };
+  const td = { fontSize: 11, color: "var(--text)", padding: "6px 8px", borderBottom: "1px solid var(--border)" };
+  const tdR = Object.assign({}, td, { textAlign: "right" });
+
+  return React.createElement("div", null,
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Score Tuner"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, "Sweep entry score thresholds to find optimal filters. Tests each pillar independently to measure predictive power.")
+      )
+    ),
+
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+      React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" } },
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Universe"),
+          React.createElement("div", { style: { display: "flex", gap: 4 } },
+            UNIVERSES.map(u => React.createElement("button", {
+              key: u.key, onClick: () => setUniverse(u.key),
+              title: u.desc,
+              style: { padding: "7px 12px", fontSize: 11, fontWeight: 700, borderRadius: 6, cursor: "pointer", border: "1px solid " + (universe === u.key ? "var(--accent)" : "var(--border)"), background: universe === u.key ? "rgba(6,182,212,.12)" : "var(--bg4)", color: universe === u.key ? "var(--accent)" : "var(--text5)" }
+            }, u.label))
+          ),
+          React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 2 } }, getUniverseConfig().desc)
+        ),
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Target %"),
+          React.createElement("input", { className: "inp", type: "number", value: target, onChange: e => setTarget(parseFloat(e.target.value) || 4), style: { width: 70 } })
+        ),
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Hold Days"),
+          React.createElement("input", { className: "inp", type: "number", value: holding, onChange: e => setHolding(parseInt(e.target.value) || 14), style: { width: 70 } })
+        ),
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Base Threshold"),
+          React.createElement("input", { className: "inp", type: "number", value: threshold, onChange: e => setThreshold(parseInt(e.target.value) || 65), style: { width: 70 } })
+        ),
+        React.createElement("button", { onClick: runSweep, disabled: running, className: "stx-btn stx-btn-primary", style: { padding: "8px 18px", fontSize: 12, opacity: running ? 0.6 : 1, cursor: running ? "wait" : "pointer" } },
+          running ? "Running..." : "Run Sweep"
+        ),
+        running && React.createElement("button", { onClick: () => { cancelRef.current = true; }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "#eab308", cursor: "pointer" } }, "Cancel")
+      ),
+      err && React.createElement("div", { style: { marginTop: 10, fontSize: 11, color: err.indexOf("cancelled") >= 0 ? "#eab308" : "#ef4444" } }, err),
+      progress && React.createElement("div", { style: { marginTop: 12 } },
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 6, fontFamily: "var(--font-mono)" } },
+          progress.phase + (progress.total ? " " + progress.done + " / " + progress.total : "")
+        ),
+        React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--bg4)", overflow: "hidden" } },
+          React.createElement("div", { style: { height: "100%", width: progress.total ? Math.round(progress.done / progress.total * 100) + "%" : "100%", background: "var(--accent)", transition: "width .2s" } })
+        )
+      )
+    ),
+
+    result && React.createElement("div", null,
+      React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 12, borderBottom: "1px solid var(--border)", paddingBottom: 0 } },
+        [["threshold", "Threshold Sweep"], ["pillar", "Pillar Sweep"], ["component", "Component Power"]].map(([k, label]) =>
+          React.createElement("button", {
+            key: k, onClick: () => setActiveResultTab(k),
+            style: { padding: "8px 14px", fontSize: 11, fontWeight: activeResultTab === k ? 700 : 600, background: "transparent", border: "none", borderBottom: "2px solid " + (activeResultTab === k ? "var(--accent)" : "transparent"), color: activeResultTab === k ? "var(--accent)" : "var(--text5)", cursor: "pointer" }
+          }, label)
+        ),
+        React.createElement("div", { style: { flex: 1 } }),
+        React.createElement("button", { onClick: () => exportCSV(activeResultTab), className: "stx-btn", style: { fontSize: 10, padding: "6px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer", marginBottom: 4 } }, "Export CSV")
+      ),
+
+      activeResultTab === "threshold" && React.createElement("div", { className: "stx-card", style: { padding: 12, overflowX: "auto" } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 8, color: "var(--text)" } }, "Total Score Threshold Sweep"),
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } }, "How changing the minEntryScore filter affects win rate, avg return, and profit factor across the universe."),
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+          React.createElement("thead", null, React.createElement("tr", null,
+            ["Threshold", "Signals", "Win Rate", "Avg Return", "Avg PF", "Symbols"].map(h => React.createElement("th", { key: h, style: th }, h))
+          )),
+          React.createElement("tbody", null, (result.sweep.thresholdSweep || []).map(r =>
+            React.createElement("tr", { key: r.threshold },
+              React.createElement("td", { style: td }, React.createElement("strong", null, ">= " + r.threshold)),
+              React.createElement("td", { style: tdR }, r.signals),
+              React.createElement("td", { style: Object.assign({}, tdR, { color: r.winRate >= 50 ? "#22c55e" : r.winRate >= 40 ? "#eab308" : "#ef4444", fontWeight: 700 }) }, r.winRate != null ? r.winRate + "%" : "--"),
+              React.createElement("td", { style: Object.assign({}, tdR, { color: (r.avgReturn || 0) >= 0 ? "#22c55e" : "#ef4444" }) }, r.avgReturn != null ? r.avgReturn.toFixed(2) + "%" : "--"),
+              React.createElement("td", { style: tdR }, r.avgProfitFactor != null ? r.avgProfitFactor.toFixed(2) : "--"),
+              React.createElement("td", { style: tdR }, r.symbolsTested)
+            )
+          ))
+        )
+      ),
+
+      activeResultTab === "pillar" && React.createElement("div", { className: "stx-card", style: { padding: 12, overflowX: "auto" } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 8, color: "var(--text)" } }, "Pillar-Level Sweep"),
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } }, "Each pillar tested independently (while total score stays >= threshold). Higher correlation with win rate = more predictive."),
+        Object.keys(result.sweep.pillarSweep || {}).map(pillar =>
+          React.createElement("div", { key: pillar, style: { marginBottom: 16 } },
+            React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", marginBottom: 4, textTransform: "capitalize" } }, pillar.replace(/([A-Z])/g, " $1").trim()),
+            React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+              React.createElement("thead", null, React.createElement("tr", null,
+                ["Min Value", "Signals", "Win Rate", "Avg Return", "Avg PF"].map(h => React.createElement("th", { key: h, style: th }, h))
+              )),
+              React.createElement("tbody", null, (result.sweep.pillarSweep[pillar] || []).map(r =>
+                React.createElement("tr", { key: r.minValue },
+                  React.createElement("td", { style: td }, ">= " + r.minValue),
+                  React.createElement("td", { style: tdR }, r.signals),
+                  React.createElement("td", { style: Object.assign({}, tdR, { color: r.winRate >= 50 ? "#22c55e" : r.winRate >= 40 ? "#eab308" : "#ef4444", fontWeight: 700 }) }, r.winRate != null ? r.winRate + "%" : "--"),
+                  React.createElement("td", { style: Object.assign({}, tdR, { color: (r.avgReturn || 0) >= 0 ? "#22c55e" : "#ef4444" }) }, r.avgReturn != null ? r.avgReturn.toFixed(2) + "%" : "--"),
+                  React.createElement("td", { style: tdR }, r.avgProfitFactor != null ? r.avgProfitFactor.toFixed(2) : "--")
+                )
+              ))
+            )
+          )
+        )
+      ),
+
+      activeResultTab === "component" && React.createElement("div", { className: "stx-card", style: { padding: 12, overflowX: "auto" } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 8, color: "var(--text)" } }, "Component Predictive Power"),
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } }, "Point-biserial correlation of each component with forward hit rate. Higher abs(correlation) = more predictive. Info Value > 0.1 = meaningful."),
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+          React.createElement("thead", null, React.createElement("tr", null,
+            ["Component", "Correlation", "Info Value", "N", "Win Rate by Quintile"].map(h => React.createElement("th", { key: h, style: th }, h))
+          )),
+          React.createElement("tbody", null, Object.keys((result.components && result.components.components) || {}).map(k => {
+            const c = result.components.components[k];
+            if (!c || c.error) return null;
+            const quintiles = (c.bucketWinRates || []).map(b => b.winRate + "%").join(" > ");
+            return React.createElement("tr", { key: k },
+              React.createElement("td", { style: td }, React.createElement("strong", null, k === "entryScore" ? "Total Score" : k.replace(/([A-Z])/g, " $1").trim())),
+              React.createElement("td", { style: Object.assign({}, tdR, { color: Math.abs(c.correlation) >= 0.1 ? "#22c55e" : Math.abs(c.correlation) >= 0.05 ? "#eab308" : "var(--text5)", fontWeight: 700 }) }, c.correlation.toFixed(3)),
+              React.createElement("td", { style: Object.assign({}, tdR, { color: c.infoValue >= 0.1 ? "#22c55e" : "var(--text5)" }) }, c.infoValue.toFixed(3)),
+              React.createElement("td", { style: tdR }, c.n),
+              React.createElement("td", { style: Object.assign({}, td, { fontSize: 10, fontFamily: "var(--font-mono)" }) }, quintiles || "--")
+            );
+          }))
+        )
+      )
+    ),
+
+    !result && !running && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
+      "Run a sweep to find the optimal entry score threshold. Tests 9 thresholds (40-80) and 5 values per pillar across the selected universe. NIFTY 50: ~2 min, NIFTY 100: ~5 min, NIFTY 200: ~15 min."
+    )
+  );
+};
 var SCREENER_DECISION_MAP = {
   STRONG_BUY: { label: 'STRONG_BUY', color: '#22c55e' },
   BUY:         { label: 'BUY',         color: '#16a34a' },
@@ -8269,6 +8534,7 @@ function PulsePage({ holdings }) {
     { key: "confidencescore", label: "Confidence Score", icon: Icons.eye },
     { key: "singlestock", label: "Single Stock Analysis", icon: Icons.search },
     { key: "backtest", label: "Backtesting", icon: Icons.clock },
+    { key: "scoretuner", label: "Score Tuner", icon: Icons.settings },
   ];
 
   return React.createElement("div", null,
@@ -8297,7 +8563,8 @@ function PulsePage({ holdings }) {
       activeTab === "entryscore" && React.createElement(EntryScorePanel, { shares: holdings || [] }),
       activeTab === "confidencescore" && React.createElement(ConfidenceTracker, null),
       activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker }),
-      React.createElement("div", { style: { display: activeTab === "backtest" ? "" : "none" } }, React.createElement(BacktestSuitePanel, null))
+      React.createElement("div", { style: { display: activeTab === "backtest" ? "" : "none" } }, React.createElement(BacktestSuitePanel, null)),
+      React.createElement("div", { style: { display: activeTab === "scoretuner" ? "" : "none" } }, React.createElement(ScoreTunerPanel, null))
     )
   );
 }
