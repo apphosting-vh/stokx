@@ -1806,10 +1806,11 @@ window.TechIndicators = (function () {
     return out;
   }
   function classifyScore(s) {
-    if (s >= 80) return { classification: 'STRONG_BUY', signal: 'STRONG_BUY', allocation_pct: 100 };
-    if (s >= 65) return { classification: 'BUY', signal: 'BUY', allocation_pct: 70 };
-    if (s >= 50) return { classification: 'WATCHLIST', signal: 'WATCHLIST', allocation_pct: 40 };
-    if (s >= 35) return { classification: 'NEUTRAL', signal: 'NEUTRAL', allocation_pct: 0 };
+    var t = SCORE_CONFIG.classification;
+    if (s >= t.strongBuy) return { classification: 'STRONG_BUY', signal: 'STRONG_BUY', allocation_pct: 100 };
+    if (s >= t.buy) return { classification: 'BUY', signal: 'BUY', allocation_pct: 70 };
+    if (s >= t.watchlist) return { classification: 'WATCHLIST', signal: 'WATCHLIST', allocation_pct: 40 };
+    if (s >= t.neutral) return { classification: 'NEUTRAL', signal: 'NEUTRAL', allocation_pct: 0 };
     return { classification: 'AVOID', signal: 'AVOID', allocation_pct: 0 };
   }
   function computeIndexTrendScore(indexCandles, indexWeeklyCandles) {
@@ -2738,6 +2739,13 @@ window.TechIndicators = (function () {
       highVolERThreshold: 0.5,
       highVolBonus: 5,
     },
+    /* Classification thresholds */
+    classification: {
+      strongBuy: 80,
+      buy: 65,
+      watchlist: 50,
+      neutral: 35,
+    },
   };
 
   var SCORE_CONFIG_DEFAULTS = JSON.parse(JSON.stringify(SCORE_CONFIG));
@@ -2755,6 +2763,8 @@ window.TechIndicators = (function () {
       });
     }
     merge(SCORE_CONFIG, patch);
+    // Invalidate cached classification for backtest engine
+    if (window.TechIndicators) window.TechIndicators._scoreConfigClassification = null;
   }
 
   /* Pillar 1: Trend Health (max 30).
@@ -2884,7 +2894,7 @@ window.TechIndicators = (function () {
     var prob4 = calcProb4Score(sn, volRegime);
     var rawTotal = trendHealth + pullbackQuality + prob4;
 
-    var spikeDay = sn.spikeLast === true || (sn.gapPct != null && Math.abs(sn.gapPct) > 3);
+    var spikeDay = sn.spikeLast === true || (sn.gapPct != null && Math.abs(sn.gapPct) > SCORE_CONFIG.modifiers.spikeGapThreshold);
     var modifierItems = buildEntryModifiers(sn, { spikeDay: spikeDay, volRegime: volRegime });
 
     var penalties = 0, bonuses = 0, penaltyItems = [], bonusItems = [];
@@ -2982,7 +2992,7 @@ window.TechIndicators = (function () {
 
     var spikeDay = false;
     if (dTF && dTF.candles && perTF.D) {
-      spikeDay = perTF.D.sn.spikeLast === true || (perTF.D.sn.gapPct != null && Math.abs(perTF.D.sn.gapPct) > 3);
+      spikeDay = perTF.D.sn.spikeLast === true || (perTF.D.sn.gapPct != null && Math.abs(perTF.D.sn.gapPct) > SCORE_CONFIG.modifiers.spikeGapThreshold);
     }
     var volRegime = perTF.D && perTF.D.volRegime ? perTF.D.volRegime : (baseSn ? calcVolRegime(baseSn, dTF ? dTF.candles : null) : null);
     var modifierItems = buildEntryModifiers(baseSn, { spikeDay: spikeDay, mtfAlign: mtfAlign, volRegime: volRegime });

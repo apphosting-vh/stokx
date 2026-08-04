@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.20";
+window.__STOX_APP_VERSION = "2.10.21";
 
 /* Apply saved score config on startup */
 (function() {
@@ -6196,7 +6196,16 @@ const ScoreTunerPanel = () => {
   const cancelRef = useRef(false);
   const [showConfig, setShowConfig] = useState(false);
   const [scoreConfig, setScoreConfigState] = useState(function() {
-    try { var saved = JSON.parse(localStorage.getItem("stox_score_config")); return saved || (TI.getScoreConfig ? TI.getScoreConfig() : null); } catch(e) { return TI.getScoreConfig ? TI.getScoreConfig() : {}; }
+    try {
+      var defaults = TI.getScoreConfig ? TI.getScoreConfig() : {};
+      var saved = JSON.parse(localStorage.getItem("stox_score_config"));
+      if (saved) {
+        // Merge with defaults to ensure new sections exist
+        Object.keys(defaults).forEach(function(k) { if (!(k in saved)) saved[k] = defaults[k]; });
+        return saved;
+      }
+      return defaults;
+    } catch(e) { return TI.getScoreConfig ? TI.getScoreConfig() : {}; }
   });
 
   const UNIVERSES = [
@@ -6574,7 +6583,7 @@ const ScoreTunerPanel = () => {
           )
         ),
         /* Modifiers */
-        React.createElement("div", null,
+        React.createElement("div", { style: { marginBottom: 16 } },
           React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Modifiers"),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 8 } },
             [["modifiers.lowBetaThreshold", "Low Beta Threshold", 0, 1], ["modifiers.lowATRPercentile", "Low ATR Pctl", 5, 50],
@@ -6587,6 +6596,21 @@ const ScoreTunerPanel = () => {
               React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
                 React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 155 } }, label),
                 React.createElement("input", { className: "inp", type: "number", step: 0.5, min: min, max: max, value: scoreConfig.modifiers[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 60, fontSize: 11 } })
+              )
+            )
+          )
+        ),
+        /* Classification Thresholds */
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Classification Thresholds"),
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8 } }, "Score boundaries for BUY / WATCHLIST / NEUTRAL signals. Must be in descending order."),
+          React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap" } },
+            [["classification.strongBuy", "STRONG_BUY ≥", 60, 100], ["classification.buy", "BUY ≥", 40, 90],
+             ["classification.watchlist", "WATCHLIST ≥", 25, 80], ["classification.neutral", "NEUTRAL ≥", 10, 60]
+            ].map(([path, label, min, max]) =>
+              React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
+                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 110 } }, label),
+                React.createElement("input", { className: "inp", type: "number", step: 5, min: min, max: max, value: scoreConfig.classification[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 60, fontSize: 11 } })
               )
             )
           )

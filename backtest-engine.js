@@ -22,10 +22,18 @@ window.BacktestEngine = (function () {
 
   function classifyScore(s) {
     if (s == null) return null;
-    if (s >= 80) return "STRONG_BUY";
-    if (s >= 65) return "BUY";
-    if (s >= 50) return "WATCHLIST";
-    if (s >= 35) return "NEUTRAL";
+    var t = null;
+    if (window.TechIndicators && window.TechIndicators._scoreConfigClassification) {
+      t = window.TechIndicators._scoreConfigClassification;
+    } else if (window.TechIndicators && window.TechIndicators.getScoreConfig) {
+      t = window.TechIndicators.getScoreConfig().classification;
+      window.TechIndicators._scoreConfigClassification = t;
+    }
+    var sb = t ? t.strongBuy : 80, b = t ? t.buy : 65, wl = t ? t.watchlist : 50, n = t ? t.neutral : 35;
+    if (s >= sb) return "STRONG_BUY";
+    if (s >= b) return "BUY";
+    if (s >= wl) return "WATCHLIST";
+    if (s >= n) return "NEUTRAL";
     return "AVOID";
   }
 
