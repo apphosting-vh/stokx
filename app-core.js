@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.12";
+window.__STOX_APP_VERSION = "2.10.13";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -1371,8 +1371,8 @@ function scoreMathBlock(r) {
   var f1 = function (v) { return v != null ? Number(v).toFixed(1) : "\u2014"; };
   var f2 = function (v) { return v != null ? Number(v).toFixed(2) : "\u2014"; };
   var order = [
-    { key: "weekly", label: "Weekly", nominal: 0.20 },
-    { key: "daily", label: "Daily", nominal: 0.50 },
+    { key: "weekly", label: "Weekly", nominal: 0.15 },
+    { key: "daily", label: "Daily", nominal: 0.55 },
     { key: "hourly", label: "Hourly", nominal: 0.30 }
   ];
   var present = order.filter(function (t) { var s = r[t.key]; return s && s.total != null; });
@@ -1487,8 +1487,8 @@ function EntryScoreAnalysis({ entry, onBack }) {
   };
 
   const TF_DEFS = [
-    { key: "weekly", label: "Weekly", weight: "20%" },
-    { key: "daily", label: "Daily", weight: "50%" },
+    { key: "weekly", label: "Weekly", weight: "15%" },
+    { key: "daily", label: "Daily", weight: "55%" },
     { key: "hourly", label: "Hourly", weight: "30%" },
   ];
 
@@ -1754,10 +1754,9 @@ function EntryScoreAnalysis({ entry, onBack }) {
       ),
       activeScore && React.createElement("div", null,
         React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, marginBottom: 14 } },
-          factorBar("Trend", activeScore.trendScore, activeScore.trendMax, "#4a8fe0"),
-          factorBar("Momentum", activeScore.momentumScore, activeScore.momentumMax, "#a855f7"),
-          factorBar("Volume", activeScore.volumeScore, activeScore.volumeMax, "#06b6d4"),
-          factorBar("Structure", activeScore.structureScore, activeScore.structureMax, "#ec4899"),
+          factorBar("Trend Health", activeScore.trendHealthScore, activeScore.trendHealthMax, "#4a8fe0"),
+          factorBar("Pullback", activeScore.pullbackScore, activeScore.pullbackMax, "#a855f7"),
+          factorBar("4% Prob", activeScore.prob4Score, activeScore.prob4Max, "#06b6d4"),
           stabVal != null && factorBar("Stability", -stabVal, 10, "#22c55e"),
           spikeVal != null && factorBar("Spike", -spikeVal, 10, "#f97316")
         ),
@@ -1837,7 +1836,7 @@ function EntryScoreAnalysis({ entry, onBack }) {
                   _sc("darvasBox", price >= activeInd.darvasBox.boxTop)
                 ),
                 React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)", fontSize: 9, color: "var(--text6)" } },
-                  "Signals are rule-based (price vs indicator). Scores aggregate across Trend, Momentum, Volume, Structure pillars. Switch timeframes above for multi-TF context."
+                  "Signals are rule-based (price vs indicator). Scores aggregate across the Trend Health, Pullback, and 4% Probability pillars. Switch timeframes above for multi-TF context."
                 )
               )
             )
@@ -1866,7 +1865,7 @@ function EntryScoreAnalysis({ entry, onBack }) {
           React.createElement("span", { style: { fontWeight: 700, color: r.efficiencyRatio10 != null && r.efficiencyRatio10 > 0.6 ? "#20c46a" : "var(--text3)", fontFamily: "var(--font-mono)" } }, _fmt(r.efficiencyRatio10))
         )
       ) : React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", lineHeight: 1.5 } },
-        "Disabled \u2014 no daily timeframe. The spike gate, dominance, and efficiency checks run on daily candles only; without daily data they are turned off (per-TF spike/stability sub-scores still apply on the available timeframes)."
+        "Disabled \u2014 no daily timeframe. The spike gate, dominance, and efficiency checks run on daily candles only; without daily data they are turned off (per-TF spike/stability modifiers still apply on the available timeframes)."
       )
     ),
     r.hardFilters && r.hardFilters.length > 0 && React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
@@ -3949,8 +3948,9 @@ const EntryScorePanel = ({ shares }) => {
       const tfKeys = ['weekly', 'daily', 'hourly'];
       for (let k = 0; k < tfKeys.length; k++) {
         const t = e.result[tfKeys[k]];
-        if (t && t.total != null && t.trendScore != null) {
-          const pillarSum = (t.trendScore || 0) + (t.momentumScore || 0) + (t.volumeScore || 0) + (t.structureScore || 0);
+        if (t && t.total != null && (t.trendHealthScore != null || t.trendScore != null)) {
+          if (t.trendScore != null) return true;
+          const pillarSum = (t.trendHealthScore || 0) + (t.pullbackScore || 0) + (t.prob4Score || 0);
           if (Math.abs(pillarSum - t.total) > 0.5) return true;
         }
       }
@@ -4249,10 +4249,9 @@ const EntryScorePanel = ({ shares }) => {
         )
       ),
       React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 3 } },
-        factorBar("Trend", score.trendScore, score.trendMax, "#3b82f6", false),
-        factorBar("Momentum", score.momentumScore, score.momentumMax, "#a855f7", false),
-        factorBar("Volume", score.volumeScore, score.volumeMax, "#06b6d4", false),
-        factorBar("Structure", score.structureScore, score.structureMax, "#ec4899", false),
+        factorBar("Trend Health", score.trendHealthScore, score.trendHealthMax, "#3b82f6", false),
+        factorBar("Pullback", score.pullbackScore, score.pullbackMax, "#a855f7", false),
+        factorBar("4% Prob", score.prob4Score, score.prob4Max, "#06b6d4", false),
         sv != null && factorBar("Stability", -sv, 10, "#22c55e", false),
         pv != null && factorBar("Spike", -pv, 10, "#f97316", false)
       )
@@ -4289,10 +4288,9 @@ const EntryScorePanel = ({ shares }) => {
           React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: score.decision.color, fontFamily: "var(--font-heading)" } }, score.total + " · " + score.decision.label)
         ),
         React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 2 } },
-          snapFactorBar("Trend", score.trendScore, score.trendMax, "#3b82f6"),
-          snapFactorBar("Momentum", score.momentumScore, score.momentumMax, "#a855f7"),
-          snapFactorBar("Volume", score.volumeScore, score.volumeMax, "#06b6d4"),
-          snapFactorBar("Structure", score.structureScore, score.structureMax, "#ec4899"),
+          snapFactorBar("Trend Health", score.trendHealthScore, score.trendHealthMax, "#3b82f6"),
+          snapFactorBar("Pullback", score.pullbackScore, score.pullbackMax, "#a855f7"),
+          snapFactorBar("4% Prob", score.prob4Score, score.prob4Max, "#06b6d4"),
           sv != null && snapFactorBar("Stability", -sv, 10, "#22c55e"),
           pv != null && snapFactorBar("Spike", -pv, 10, "#f97316")
         )
@@ -4399,8 +4397,8 @@ const EntryScorePanel = ({ shares }) => {
         )
       ),
       isExp && React.createElement("div", { style: { marginTop: 8, padding: "6px 0" } },
-        r.daily && snapTfSection("Daily (50%)", r.daily),
-        r.weekly && snapTfSection("Weekly (20%)", r.weekly),
+        r.daily && snapTfSection("Daily (55%)", r.daily),
+        r.weekly && snapTfSection("Weekly (15%)", r.weekly),
         r.hourly && snapTfSection("Hourly (30%)", r.hourly),
         r.hardFilters && r.hardFilters.length > 0 && React.createElement("div", { style: { marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.15)" } },
           React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--text3)", marginBottom: 3 } }, "Penalties & Bonuses"),
@@ -4495,7 +4493,7 @@ const EntryScorePanel = ({ shares }) => {
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Entry Score"),
-        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, "Momentum Trading Entry Engine \u00b7 Weekly(20%) + Daily(50%) + Hourly(30%)")
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, "Momentum Trading Entry Engine \u00b7 Daily(55%) + Hourly(30%) + Weekly(15%)")
       ),
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
         React.createElement("button", {
@@ -4574,7 +4572,7 @@ const EntryScorePanel = ({ shares }) => {
       var renderEntryCard = function(entry) {
         var r = entry.result;
         var isExpanded = !!expandedIds[entry.id];
-        var capStock = NIFTY_100_UNIQUE.find(function(s) { return s.t === entry.ticker.replace(/\.NS$|\.BO$/, "") + ".NS"; });
+        var capStock = NIFTY_200_UNIQUE.find(function(s) { return s.t === entry.ticker.replace(/\.NS$|\.BO$/, "") + ".NS"; });
         return React.createElement("div", { key: entry.id, className: "stx-card", style: { border: "2px solid " + r.decision.color + "33" } },
           React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 } },
             React.createElement("div", null,
@@ -4602,7 +4600,7 @@ const EntryScorePanel = ({ shares }) => {
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 } },
             ["weekly", "daily", "hourly"].map(function(tf) {
               var s = r[tf];
-              var label = tf === "weekly" ? "Weekly (20%)" : tf === "daily" ? "Daily (50%)" : "Hourly (30%)";
+              var label = tf === "weekly" ? "Weekly (15%)" : tf === "daily" ? "Daily (55%)" : "Hourly (30%)";
               return React.createElement("div", { key: tf, style: { padding: "6px 8px", borderRadius: 8, background: "var(--bg4)", textAlign: "center" } },
                 React.createElement("div", { style: { fontSize: 9, fontWeight: 600, color: "var(--text5)", marginBottom: 2 } }, label),
                 React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: s ? s.decision.color : "var(--text6)", fontFamily: "var(--font-heading)" } }, s ? s.total : "N/A"),
@@ -5655,9 +5653,9 @@ const BacktestPanel = () => {
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
-   NIFTY_100 TICKER LIST
+   NIFTY_200 TICKER LIST
    ══════════════════════════════════════════════════════════════════════════ */
-var NIFTY_100 = [
+var NIFTY_200 = [
   {t:"360ONE.NS",n:"360 One",cap:"M"},{t:"ABB.NS",n:"ABB India",cap:"L"},{t:"APLAPOLLO.NS",n:"APL Apollo Tubes",cap:"M"},{t:"AUBANK.NS",n:"AU Small Finance Bank",cap:"M"},{t:"ADANIENSOL.NS",n:"Adani Energy Solutions",cap:"L"},
   {t:"ADANIENT.NS",n:"Adani Enterprises",cap:"L"},{t:"ADANIGREEN.NS",n:"Adani Green Energy",cap:"L"},{t:"ADANIPORTS.NS",n:"Adani Ports & SEZ",cap:"L"},{t:"ADANIPOWER.NS",n:"Adani Power",cap:"L"},{t:"ATGL.NS",n:"Adani Total Gas",cap:"M"},
   {t:"ABCAPITAL.NS",n:"Aditya Birla Capital",cap:"M"},{t:"ALKEM.NS",n:"Alkem Laboratories",cap:"M"},{t:"AMBUJACEM.NS",n:"Ambuja Cements",cap:"L"},{t:"APOLLOHOSP.NS",n:"Apollo Hospitals",cap:"L"},{t:"ASHOKLEY.NS",n:"Ashok Leyland",cap:"M"},
@@ -5700,7 +5698,473 @@ var NIFTY_100 = [
   {t:"VOLTAS.NS",n:"Voltas",cap:"M"},{t:"WAAREEENER.NS",n:"Waaree Energies",cap:"M"},{t:"WIPRO.NS",n:"Wipro",cap:"L"},{t:"YESBANK.NS",n:"Yes Bank",cap:"M"},{t:"ZYDUSLIFE.NS",n:"Zydus Lifesciences",cap:"L"}
 ];
 var _nseen = new Set();
-var NIFTY_100_UNIQUE = NIFTY_100.filter(function(s) { if (_nseen.has(s.t)) return false; _nseen.add(s.t); return true; });
+var NIFTY_200_UNIQUE = NIFTY_200.filter(function(s) { if (_nseen.has(s.t)) return false; _nseen.add(s.t); return true; });
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BACKTEST SUITE — StoX Backtesting Engine UI
+   Option 1  Single-symbol detailed analysis
+   Option 2  Batch backtest across the NIFTY 200 universe
+   Option 3  Walk-forward out-of-sample analysis
+   Engine: backtest-engine.js (window.BacktestEngine), scoring via the same
+   production computeEntryScore (Trend 30 / Pullback 30 / 4% Prob 40).
+   ══════════════════════════════════════════════════════════════════════════ */
+var _bt2LastResult = null;
+var LS_BT2_RESULT = "stox_bt2_result";
+var LS_BT2_INPUT = "stox_bt2_input";
+
+const BacktestSuitePanel = () => {
+  const DF = window.OHLCVFetcher;
+  const TI = window.TechIndicators;
+  const BE = window.BacktestEngine;
+
+  const [mode, setMode] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.mode) || "single"; } catch (e) { return "single"; } });
+  const [ticker, setTicker] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.ticker) || ""; } catch (e) { return ""; } });
+  const [target, setTarget] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.target) || 4; } catch (e) { return 4; } });
+  const [holding, setHolding] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.holding) || 14; } catch (e) { return 14; } });
+  const [threshold, setThreshold] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.threshold) || 65; } catch (e) { return 65; } });
+  const [batchCap, setBatchCap] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.batchCap) || "20"; } catch (e) { return "20"; } });
+  const [folds, setFolds] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.folds) || 4; } catch (e) { return 4; } });
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [err, setErr] = useState("");
+  const [result, setResultState] = useState(function () {
+    if (_bt2LastResult) return _bt2LastResult;
+    try { var v = JSON.parse(localStorage.getItem(LS_BT2_RESULT)); if (v && v.data) return v; } catch (e) {}
+    return null;
+  });
+  const setResult = (v) => { _bt2LastResult = v; try { localStorage.setItem(LS_BT2_RESULT, JSON.stringify(v)); } catch (e) {} setResultState(v); };
+  const cancelRef = useRef(false);
+
+  const persist = () => { try { localStorage.setItem(LS_BT2_INPUT, JSON.stringify({ mode: mode, ticker: ticker, target: target, holding: holding, threshold: threshold, batchCap: batchCap, folds: folds })); } catch (e) {} };
+
+  /* Score adapter: grades bar idx with NO lookahead — candles + Nifty index
+     are both sliced to end at the entry bar before running the production
+     Entry Score engine. */
+  const buildScoreFn = (idxCandles) => (candles, idx) => {
+    const bar = candles[idx];
+    if (!bar) return null;
+    const ts = bar.t;
+    let idxSlice = null;
+    if (idxCandles && idxCandles.length && ts != null) {
+      let lo = 0, hi = idxCandles.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (idxCandles[mid].t <= ts) lo = mid + 1; else hi = mid; }
+      if (lo > 0) idxSlice = idxCandles.slice(0, lo);
+    }
+    let res;
+    try { res = TI.computeEntryScore(candles.slice(0, idx + 1), idxSlice && idxSlice.length ? idxSlice : null); } catch (e) { return null; }
+    if (!res || res.entry_score == null) return null;
+    return {
+      entryScore: res.entry_score,
+      raw_score: res.raw_score,
+      classification: res.classification,
+      trendHealth: res.trendHealth,
+      pullbackQuality: res.pullbackQuality,
+      prob4: res.prob4,
+      modifiers: res.modifiers
+    };
+  };
+
+  const makeEngine = (idxCandles) => BE.create({
+    scoreFn: buildScoreFn(idxCandles),
+    targetProfitPct: Number(target) || 4,
+    holdingPeriodDays: Number(holding) || 14,
+    threshold: Number(threshold) || 65,
+    warmup: 60
+  });
+
+  const normTicker = (t) => (t || "").trim().toUpperCase().replace(/\.NS$/, "");
+
+  const runSingle = async () => {
+    const tk = normTicker(ticker);
+    if (!tk) { setErr("Enter a ticker first, e.g. RELIANCE."); return; }
+    persist();
+    if (running) return;
+    setErr(""); setResult(null); cancelRef.current = false;
+    setProgress({ phase: "Fetching daily + Nifty history\u2026", done: 0, total: 0 });
+    setRunning(true);
+    try {
+      const [stockRes, idxRes] = await Promise.all([
+        DF.fetchOHLCVCached(tk, "daily"),
+        DF.fetchOHLCVCached("^NSEI", "daily")
+      ]);
+      const candles = stockRes && stockRes.data ? stockRes.data : null;
+      const idx = idxRes && idxRes.data ? idxRes.data : null;
+      if (!candles || candles.length < 60) { setErr("Insufficient daily history for " + tk + " (need ~60+ bars)."); return; }
+      const eng = makeEngine(idx);
+      const res = await eng.runSingle(candles, { symbol: tk }, {
+        onBar: (d, t) => setProgress({ phase: "Scoring " + t + " sessions as-of-date (no lookahead)\u2026", done: d, total: t })
+      });
+      if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
+      setResult({ mode: "single", data: res });
+    } catch (e) { setErr((e && e.message) || String(e)); }
+    finally { setRunning(false); setProgress(null); }
+  };
+
+  const runBatch = async () => {
+    persist();
+    if (running) return;
+    setErr(""); setResult(null); cancelRef.current = false;
+    setProgress({ phase: "Fetching Nifty index history\u2026", done: 0, total: 1 });
+    setRunning(true);
+    try {
+      const idxRes = await DF.fetchOHLCVCached("^NSEI", "daily");
+      const idx = idxRes && idxRes.data ? idxRes.data : null;
+      let syms = NIFTY_200.map(s => s.t);
+      const cap = batchCap === "all" ? syms.length : Math.min(parseInt(batchCap, 10) || 20, syms.length);
+      syms = syms.slice(0, cap);
+      const total = syms.length;
+      const dataMap = {};
+      for (let i = 0; i < syms.length; i += 5) {
+        if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
+        const chunk = syms.slice(i, i + 5);
+        await Promise.all(chunk.map(async (s) => {
+          try {
+            const r = await DF.fetchOHLCVCached(s, "daily");
+            if (r && r.data && r.data.length >= 60) dataMap[s] = r.data;
+          } catch (e) {}
+        }));
+        await new Promise((r) => setTimeout(r, 60));
+        setProgress({ phase: "Fetching daily history \u2026", done: Math.min(i + 5, total), total: total });
+      }
+      if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
+      const ready = Object.keys(dataMap);
+      if (!ready.length) { setErr("Could not fetch daily history for any symbol."); return; }
+      const eng = makeEngine(idx);
+      const res = await eng.runBatch(dataMap, { symbols: ready }, {
+        onSymbol: (d, t) => setProgress({ phase: "Backtesting " + t + " symbols\u2026", done: d, total: t })
+      });
+      res.targetProfitPct = Number(target) || 4;
+      res.holdingPeriodDays = Number(holding) || 14;
+      res.threshold = Number(threshold) || 65;
+      if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
+      setResult({ mode: "batch", data: res });
+    } catch (e) { setErr((e && e.message) || String(e)); }
+    finally { setRunning(false); setProgress(null); }
+  };
+
+  const runWalkForward = async () => {
+    const tk = normTicker(ticker);
+    if (!tk) { setErr("Enter a ticker first, e.g. RELIANCE."); return; }
+    persist();
+    if (running) return;
+    setErr(""); setResult(null); cancelRef.current = false;
+    setProgress({ phase: "Fetching daily + Nifty history\u2026", done: 0, total: 0 });
+    setRunning(true);
+    try {
+      const [stockRes, idxRes] = await Promise.all([
+        DF.fetchOHLCVCached(tk, "daily"),
+        DF.fetchOHLCVCached("^NSEI", "daily")
+      ]);
+      const candles = stockRes && stockRes.data ? stockRes.data : null;
+      const idx = idxRes && idxRes.data ? idxRes.data : null;
+      if (!candles || candles.length < 120) { setErr("Walk-forward needs longer history (120+ daily bars)."); return; }
+      const eng = makeEngine(idx);
+      const res = await eng.runWalkForward(candles, { symbol: tk, folds: Number(folds) || 4, minInSample: 120 }, {
+        onFold: (f, t) => setProgress({ phase: "Evaluating out-of-sample fold " + f + " / " + t + "\u2026", done: f, total: t })
+      });
+      if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
+      setResult({ mode: "walkforward", data: res });
+    } catch (e) { setErr((e && e.message) || String(e)); }
+    finally { setRunning(false); setProgress(null); }
+  };
+
+  const exportCSV = () => {
+    if (!result || !result.data || !BE) return;
+    let csv = "", name = "stox-bt2-";
+    if (result.mode === "single") { csv = BE.exportSingleCSV(result.data); name += "single-" + (result.data.symbol || ""); }
+    else if (result.mode === "batch") { csv = BE.exportBatchCSV(result.data); name += "batch"; }
+    else { csv = BE.exportWalkForwardCSV(result.data); name += "walkforward-" + (result.data.symbol || ""); }
+    if (!csv) return;
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name + "-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    showToast("Exported backtest CSV", 3000);
+  };
+
+  var fmt2 = function (v) { return v == null || isNaN(v) ? "\u2014" : v.toFixed(1); };
+  var fmtR = function (v) { return v == null || isNaN(v) ? "\u2014" : (v > 0 ? "+" : "") + v.toFixed(1) + "%"; };
+  var fmtPct = function (v) { return v == null || isNaN(v) ? "\u2014" : Math.round(v * 10) / 10 + "%"; };
+  var fmtPF = function (v) { return v == null || isNaN(v) ? "\u2014" : v === "\u221e" || v === Infinity ? "\u221e" : Number(v).toFixed(2); };
+  var fmtS = function (v) { return v == null || isNaN(v) ? "\u2014" : Math.round(v); };
+  var fmtInr = function (v) { return v == null || isNaN(v) ? "\u2014" : "\u20b9" + Number(v).toFixed(2); };
+  var symName = function (t) { return String(t || "").replace(/\.NS$/, ""); };
+  var retColor = function (v) { return v == null || isNaN(v) ? "var(--text2)" : v > 0 ? "#22c55e" : v < 0 ? "#ef4444" : "var(--text2)"; };
+  var th = { padding: "8px 10px", textAlign: "left", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--text5)", fontWeight: 700, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+  var td = { padding: "8px 10px", fontSize: 12, color: "var(--text2)", borderBottom: "1px solid var(--border)", textAlign: "right", fontFamily: "var(--font-mono)", whiteSpace: "nowrap" };
+  var tdL = Object.assign({}, td, { textAlign: "left", fontFamily: "var(--font-body)", fontWeight: 700, color: "var(--text)" });
+
+  const Stat = (label, val, sub, color) =>
+    React.createElement("div", { style: { flex: 1, minWidth: 130, padding: "12px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)" } },
+      React.createElement("div", { style: { fontSize: 9, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text6)", fontWeight: 700 } }, label),
+      React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: color || "var(--text)", marginTop: 3 } }, val),
+      sub ? React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, sub) : null
+    );
+
+  const cell = (txt, style) => React.createElement("td", { style: style || td }, txt);
+  const card = (title, sub, children) => React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+    React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", marginBottom: 10 } }, title),
+    sub ? React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } }, sub) : null,
+    children
+  );
+  const field = (label, child) => React.createElement("div", null,
+    React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, label),
+    child
+  );
+  const numInput = (v, setV, w) => React.createElement("input", { className: "inp", type: "number", value: v, min: 1, onChange: (e) => setV(parseFloat(e.target.value) || 0), style: { width: w || 80 } });
+
+  const renderSingle = (d) => {
+    const st = d.stats || {};
+    const buckets = (st.scoreBrackets || {});
+    const ORDER = ["STRONG_BUY", "BUY", "WATCHLIST", "NEUTRAL", "AVOID"];
+    return React.createElement("div", null,
+      (d.currentScore) && React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, marginBottom: 16, background: "rgba(6,182,212,.06)", border: "1px solid rgba(6,182,212,.2)", fontSize: 12, color: "var(--text2)", lineHeight: 1.6 } },
+        React.createElement("span", { style: { color: "var(--accent)", fontWeight: 700 } }, "Current session: "),
+        "Entry Score " + fmtS(d.currentScore.entryScore) + " (" + (d.currentScore.classification || "\u2014") + ")" +
+        " \u00b7 Trend " + fmt2(d.currentScore.trendHealth) + "/30 \u00b7 Pullback " + fmt2(d.currentScore.pullbackQuality) + "/30 \u00b7 4% Prob " + fmt2(d.currentScore.prob4) + "/40" +
+        (d.currentScore.modifiers != null ? " \u00b7 modifiers " + (d.currentScore.modifiers >= 0 ? "+" : "") + fmt2(d.currentScore.modifiers) : "") +
+        ". Data is as-of the last close \u2014 this is the score you would have seen."
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } },
+        Stat("Signals", fmtS(st.totalSignals), d.symbol + " \u00b7 " + (d.rangeStart || "") + " \u2192 " + (d.rangeEnd || "")),
+        Stat("Win Rate", st.totalSignals ? fmtPct(st.winRate) : "\u2014", "+" + fmt2(d.targetProfitPct) + "% target within " + d.holdingPeriodDays + " sessions", st.totalSignals ? retColor(st.winRate - 50) : undefined),
+        Stat("Avg Return", st.totalSignals ? React.createElement("span", { style: { color: retColor(st.avgReturnPct) } }, fmtR(st.avgReturnPct)) : "\u2014", "per trade, close\u2192close"),
+        Stat("Avg Win / Loss", st.totalSignals ? fmtR(st.avgWinPct) + " / " + fmtR(st.avgLossPct) : "\u2014", "hit target vs timed-out trades"),
+        Stat("Avg Days to Target", st.totalSignals && st.avgDaysToTarget != null ? fmt2(st.avgDaysToTarget) : "\u2014", "winning trades only"),
+        Stat("Profit Factor", st.totalSignals ? fmtPF(st.profitFactor) : "\u2014", "gross profit \u00f7 gross loss"),
+        Stat("Max Consecutive", st.totalSignals ? st.maxConsecutiveWins + "W / " + st.maxConsecutiveLosses + "L" : "\u2014", "winning / losing streaks")
+      ),
+      st.totalSignals === 0 && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 24, color: "var(--text6)", fontSize: 12, marginBottom: 16 } },
+        (st.message || "No trade signals generated") + " \u2014 try lowering the min score or a longer window."
+      ),
+      card("Score Lift", "Every scored session grouped by classification, measured against the same +" + fmt2(d.targetProfitPct) + "% / " + d.holdingPeriodDays + "-session target. Shows whether higher scores actually raised the +4% hit rate.",
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null, cell("Score Bucket", tdL), cell("N", td), cell("Win Rate", td), cell("Avg Forward Return", td))),
+            React.createElement("tbody", null, (st.lift || []).map((b) => React.createElement("tr", { key: b.bucket },
+              cell(b.bucket, tdL), cell(b.n),
+              cell(b.winRate != null ? React.createElement("span", { style: { color: retColor(b.winRate - 50), fontWeight: 700 } }, fmtPct(b.winRate)) : "\u2014"),
+              cell(b.avgReturn != null ? React.createElement("span", { style: { color: retColor(b.avgReturn) } }, fmtR(b.avgReturn)) : "\u2014")
+            )))
+          )
+        )
+      ),
+      card("Score Brackets", "Trades only (signals \u2265 " + fmtS(d.threshold) + ") split by classification.",
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null, cell("Bracket", tdL), cell("Trades", td), cell("Win Rate", td), cell("Avg Return", td))),
+            React.createElement("tbody", null, ORDER.filter((k) => buckets[k]).map((k) => {
+              const b = buckets[k];
+              return React.createElement("tr", { key: k }, cell(k, tdL), cell(b.trades),
+                cell(React.createElement("span", { style: { color: retColor(b.winRate - 50), fontWeight: 700 } }, fmtPct(b.winRate))),
+                cell(React.createElement("span", { style: { color: retColor(b.avgReturn) } }, fmtR(b.avgReturn))));
+            }))
+          )
+        )
+      ),
+      (st.monthlyBreakdown && st.monthlyBreakdown.length) && card("Monthly Breakdown", "Aggregate by entry month.",
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null, cell("Month", tdL), cell("Trades", td), cell("Win Rate", td), cell("Avg Return", td), cell("Avg Score", td))),
+            React.createElement("tbody", null, st.monthlyBreakdown.map((b) => React.createElement("tr", { key: b.month },
+              cell(b.month, tdL), cell(b.trades),
+              cell(b.winRate != null ? React.createElement("span", { style: { color: retColor(b.winRate - 50) } }, fmtPct(b.winRate)) : "\u2014"),
+              cell(b.avgReturn != null ? React.createElement("span", { style: { color: retColor(b.avgReturn) } }, fmtR(b.avgReturn)) : "\u2014"),
+              cell(b.avgScore != null ? fmtS(b.avgScore) : "\u2014")
+            )))
+          )
+        )
+      ),
+      card("Trades (" + (st.trades || []).length + ")", "Most recent first.",
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null,
+              cell("Entry", tdL), cell("Exit", tdL), cell("Score", td), cell("Signal", tdL), cell("Entry", td), cell("Exit", td), cell("Days", td), cell("Return", td), cell("Hit", td)
+            )),
+            React.createElement("tbody", null, (st.trades || []).slice(0, 30).map((t, i) => React.createElement("tr", { key: t.entryDate + "-" + i },
+              cell(t.entryDate, tdL), cell(t.exitDate, tdL), cell(fmtS(t.entryScore)), cell(t.signal, tdL),
+              cell(fmtInr(t.entryPrice)), cell(fmtInr(t.exitPrice)), cell(t.daysToTarget != null ? t.daysToTarget : "\u2014"),
+              cell(React.createElement("span", { style: { color: retColor(t.finalReturnPct), fontWeight: 700 } }, fmtR(t.finalReturnPct))),
+              cell(t.hitTarget ? React.createElement("span", { style: { color: "#22c55e", fontWeight: 700 } }, "YES") : React.createElement("span", { style: { color: "#eab308" } }, "no"))
+            )))
+          )
+        )
+      )
+    );
+  };
+
+  const renderBatch = (d) => {
+    const s = d.summary || {};
+    const errors = (d.allResults || []).filter(r => r.error).length;
+    return React.createElement("div", null,
+      React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } },
+        Stat("Symbols Tested", fmtS(s.symbolsTested), errors > 0 ? errors + " fetch/score failures skipped" : "NIFTY 200 universe"),
+        Stat("With Signals", fmtS(s.symbolsWithSignals), fmtS(s.symbolsNoSignals) + " had no qualifying signals"),
+        Stat("Total Signals", fmtS(s.totalSignals), "across all symbols"),
+        Stat("Overall Win Rate", s.overallWinRate != null ? fmtPct(s.overallWinRate) : "\u2014", "all pooled signals", s.overallWinRate != null ? retColor(s.overallWinRate - 50) : undefined),
+        Stat("Avg Symbol Win Rate", s.avgWinRate != null ? fmtPct(s.avgWinRate) : "\u2014", "per-symbol average"),
+        Stat("Avg Return", s.avgReturn != null ? React.createElement("span", { style: { color: retColor(s.avgReturn) } }, fmtR(s.avgReturn)) : "\u2014", "per trade, close\u2192close"),
+        Stat("Avg Profit Factor", s.avgProfitFactor != null ? fmtPF(s.avgProfitFactor) : "\u2014", "across profitable symbols")
+      ),
+      s.bestByWinRate && React.createElement("div", { style: { padding: "10px 14px", borderRadius: 10, marginBottom: 16, background: "rgba(6,182,212,.06)", border: "1px solid rgba(6,182,212,.2)", fontSize: 12, color: "var(--text2)", lineHeight: 1.6 } },
+        React.createElement("span", { style: { color: "#22c55e", fontWeight: 700 } }, "Best by win rate: " + symName(s.bestByWinRate) + " (" + fmtPct(s.bestWinRate) + ")"),
+        s.worstByWinRate ? React.createElement("span", { style: { color: "#ef4444", fontWeight: 700 } }, " \u00b7 Worst: " + symName(s.worstByWinRate) + " (" + fmtPct(s.worstWinRate) + ")") : null,
+        s.bestByReturn ? React.createElement("span", null, " \u00b7 Highest avg return: " + symName(s.bestByReturn) + " (" + fmtR(s.bestReturn) + ")") : null
+      ),
+      card("Ranking by Win Rate", (d.results || []).length + " symbols with qualifying signals \u00b7 +" + fmt2(d.targetProfitPct) + "% / " + d.holdingPeriodDays + "d.",
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null,
+              cell("Symbol", tdL), cell("Signals", td), cell("Wins", td), cell("Losses", td), cell("Win Rate", td), cell("Avg Return", td), cell("Profit Factor", td)
+            )),
+            React.createElement("tbody", null, (d.results || []).map((r) => React.createElement("tr", { key: r.symbol },
+              cell(symName(r.symbol), tdL), cell(r.totalSignals), cell(r.winningTrades), cell(r.losingTrades),
+              cell(React.createElement("span", { style: { color: retColor(r.winRate - 50), fontWeight: 700 } }, fmtPct(r.winRate))),
+              cell(React.createElement("span", { style: { color: retColor(r.avgReturnPct) } }, fmtR(r.avgReturnPct))),
+              cell(fmtPF(r.profitFactor))
+            )))
+          )
+        )
+      ),
+      React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", lineHeight: 1.6, padding: "0 2px" } },
+        "Each symbol is scored on its full daily history as-of-date (no lookahead); a trade is opened whenever the Entry Score \u2265 " + fmtS(d.threshold) + " and closed at +" + fmt2(d.targetProfitPct) + "% or after " + d.holdingPeriodDays + " sessions."
+      )
+    );
+  };
+
+  const renderWalkForward = (d) => {
+    const a = d.aggregate || {};
+    return React.createElement("div", null,
+      a.verdict && React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, marginBottom: 16, background: "rgba(6,182,212,.06)", border: "1px solid rgba(6,182,212,.2)", fontSize: 12, color: "var(--text2)", lineHeight: 1.6 } }, a.verdict),
+      React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } },
+        Stat("Folds", fmtS(a.folds), fmtS(a.foldsWithSignals) + " with out-of-sample signals"),
+        Stat("OOS Signals", fmtS(a.totalOosSignals), "+" + fmt2(d.targetProfitPct) + "% / " + d.holdingPeriodDays + "d target"),
+        Stat("OOS Win Rate", a.overallWinRate != null ? fmtPct(a.overallWinRate) : "\u2014", "pooled across folds", a.overallWinRate != null ? retColor(a.overallWinRate - 50) : undefined),
+        Stat("Avg Fold Win Rate", a.avgFoldWinRate != null ? fmtPct(a.avgFoldWinRate) : "\u2014", "unweighted mean of folds"),
+        Stat("Avg OOS Return", a.avgOosReturn != null ? React.createElement("span", { style: { color: retColor(a.avgOosReturn) } }, fmtR(a.avgOosReturn)) : "\u2014", "per trade, close\u2192close"),
+        Stat("Consistency", a.consistency != null ? fmtPct(a.consistency) : "\u2014", "% of folds with win rate \u2265 40%"),
+        Stat("Train\u2013Test Gap", a.avgTrainTestGap != null ? fmt2(a.avgTrainTestGap) + "pts" : "\u2014", "OOS win rate \u2212 in-sample win rate"),
+        Stat("Positive Folds", a.positiveFolds + " / " + fmtS(a.folds), "folds with positive avg return")
+      ),
+      card("Folds", "Each fold: in-sample (everything before the window) vs out-of-sample (the window itself).",
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null,
+              cell("Fold", tdL), cell("Period", tdL), cell("IS Signals", td), cell("IS Win Rate", td), cell("OOS Signals", td), cell("OOS Win Rate", td), cell("OOS Avg Return", td), cell("OOS PF", td)
+            )),
+            React.createElement("tbody", null, (d.folds || []).map((f) => React.createElement("tr", { key: f.fold },
+              cell("Fold " + f.fold, tdL), cell(f.period[0] + " \u2192 " + f.period[1], tdL),
+              cell(f.inSample.totalSignals), cell(f.inSample.winRate != null ? fmtPct(f.inSample.winRate) : "\u2014"),
+              cell(f.oos.totalSignals), cell(f.oos.winRate != null ? React.createElement("span", { style: { color: retColor(f.oos.winRate - 50), fontWeight: 700 } }, fmtPct(f.oos.winRate)) : "\u2014"),
+              cell(f.oos.avgReturnPct != null ? React.createElement("span", { style: { color: retColor(f.oos.avgReturnPct) } }, fmtR(f.oos.avgReturnPct)) : "\u2014"),
+              cell(f.oos.profitFactor != null ? fmtPF(f.oos.profitFactor) : "\u2014")
+            )))
+          )
+        )
+      )
+    );
+  };
+
+  const runFn = () => { if (mode === "single") return runSingle(); if (mode === "batch") return runBatch(); return runWalkForward(); };
+  const runLabel = mode === "single" ? "\u25b6 Run Analysis" : mode === "batch" ? "\u25b6 Run Batch" : "\u25b6 Run Walk-Forward";
+
+  return React.createElement("div", null,
+
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Backtesting"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } },
+          "StoX engine \u00b7 grades the Entry Score (Trend 30 / Pullback 30 / 4% Prob 40 + modifiers) as-of-date against a +" + fmt2(target) + "% target over " + fmtS(holding) + " sessions"
+        )
+      )
+    ),
+
+    React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" } },
+      [["single", "Single Symbol"], ["batch", "Batch Backtest"], ["walkforward", "Walk-Forward"]].map(function (m) {
+        return React.createElement("button", {
+          key: m[0], onClick: function () { setMode(m[0]); setResult(null); },
+          style: {
+            padding: "8px 14px", fontSize: 12, fontWeight: 700, borderRadius: 8, cursor: "pointer",
+            border: "1px solid " + (mode === m[0] ? "var(--accent)" : "var(--border)"),
+            background: mode === m[0] ? "rgba(6,182,212,.12)" : "var(--bg4)",
+            color: mode === m[0] ? "var(--accent)" : "var(--text5)"
+          }
+        }, m[1]);
+      })
+    ),
+
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+      React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" } },
+        mode !== "batch" && field("Stock Ticker",
+          React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
+            React.createElement("input", { className: "inp", list: "bt2-symbols", type: "text", placeholder: "e.g. RELIANCE", value: ticker, onChange: (e) => setTicker(e.target.value.toUpperCase()), style: { width: 170 } }),
+            React.createElement("datalist", { id: "bt2-symbols" }, NIFTY_200.map((s) => React.createElement("option", { key: s.t, value: s.t.replace(".NS", "") }, s.n)))
+          )
+        ),
+        mode === "batch" && field("Universe Size",
+          React.createElement("div", { style: { display: "flex", gap: 4 } },
+            ["10", "20", "50", "100", "200", "all"].map(function (c) {
+              return React.createElement("button", {
+                key: c, onClick: function () { setBatchCap(c); },
+                style: {
+                  padding: "7px 12px", fontSize: 11, fontWeight: 700, borderRadius: 6, cursor: "pointer",
+                  border: "1px solid " + (String(batchCap) === c ? "var(--accent)" : "var(--border)"),
+                  background: String(batchCap) === c ? "rgba(6,182,212,.12)" : "var(--bg4)",
+                  color: String(batchCap) === c ? "var(--accent)" : "var(--text5)"
+                }
+              }, c === "all" ? "All" : c);
+            })
+          )
+        ),
+        field("Target %", numInput(target, setTarget, 80)),
+        field("Hold (sessions)", numInput(holding, setHolding, 80)),
+        field("Min Score", numInput(threshold, setThreshold, 80)),
+        mode === "walkforward" && field("Folds",
+          React.createElement("div", { style: { display: "flex", gap: 4 } },
+            [2, 3, 4, 5, 6].map(function (f) {
+              return React.createElement("button", {
+                key: f, onClick: function () { setFolds(f); },
+                style: {
+                  padding: "7px 12px", fontSize: 11, fontWeight: 700, borderRadius: 6, cursor: "pointer",
+                  border: "1px solid " + (folds === f ? "var(--accent)" : "var(--border)"),
+                  background: folds === f ? "rgba(6,182,212,.12)" : "var(--bg4)",
+                  color: folds === f ? "var(--accent)" : "var(--text5)"
+                }
+              }, f);
+            })
+          )
+        ),
+        React.createElement("button", { onClick: runFn, disabled: running, className: "stx-btn stx-btn-primary", style: { padding: "8px 18px", fontSize: 12, opacity: running ? 0.6 : 1, cursor: running ? "wait" : "pointer" } },
+          running ? "Running\u2026" : runLabel
+        ),
+        running && React.createElement("button", { onClick: function () { cancelRef.current = true; }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "#eab308", cursor: "pointer" } }, "Cancel"),
+        result && !running && React.createElement("button", { onClick: exportCSV, className: "stx-btn", style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "\u2b06 CSV")
+      ),
+      err && React.createElement("div", { style: { marginTop: 10, fontSize: 11, color: err.indexOf("cancelled") >= 0 ? "#eab308" : "#ef4444" } }, err),
+      progress && React.createElement("div", { style: { marginTop: 12 } },
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 6, fontFamily: "var(--font-mono)" } },
+          progress.phase + (progress.total ? " " + progress.done + " / " + progress.total : "")
+        ),
+        React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--bg4)", overflow: "hidden" } },
+          React.createElement("div", { style: { height: "100%", width: progress.total ? Math.round(progress.done / progress.total * 100) + "%" : "100%", background: "var(--accent)", transition: "width .2s" } })
+        )
+      )
+    ),
+
+    result && !running && (result.mode === "single" ? renderSingle(result.data) : result.mode === "batch" ? renderBatch(result.data) : result.mode === "walkforward" ? renderWalkForward(result.data) : null),
+
+    result && !running && React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", lineHeight: 1.6, padding: "0 2px" } },
+      "Methodology: at each entry date D the daily series (and the Nifty index used for beta / relative strength) are sliced to end at D \u2014 no lookahead \u2014 and the production Entry Score engine runs on that exact snapshot. " +
+      "A trade opens when the score \u2265 " + fmtS(threshold) + ", priced at D's close, and closes at +" + fmt2(target) + "% (target touched intraday) or at the close of the " + fmtS(holding) + "th session. " +
+      "Periods with a full " + fmtS(holding) + "-session forward window are graded only."
+    ),
+
+    !result && !running && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
+      "Pick a mode and run a backtest. Single Symbol replays every session on one stock; Batch ranks the NIFTY 200 universe; Walk-Forward tests out-of-sample consistency fold by fold."
+    )
+  );
+};
 
 /* ══════════════════════════════════════════════════════════════════════════
    STOCK SCREENER (Nifty 200 multi-TF entry score)
@@ -5747,10 +6211,10 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
     var scoreObj = {
       total: d.entryScore,
       decision: toDec(d.classification),
-      trendScore: d.trend, trendMax: 30,
-      momentumScore: d.momentum, momentumMax: 30,
-      volumeScore: d.volume, volumeMax: 20,
-      structureScore: d.structure, structureMax: 20,
+      trendHealthScore: d.trendHealth, trendHealthMax: 30,
+      pullbackScore: d.pullbackQuality, pullbackMax: 30,
+      prob4Score: d.prob4, prob4Max: 40,
+      modifiersScore: d.modifiers != null ? d.modifiers : 0, modifiersMax: 15,
       penalties: d.penalties, bonuses: d.bonuses, raw_score: d.raw_score,
       spike: d.spike != null ? d.spike : null, stability: d.stability != null ? d.stability : null
     };
@@ -6014,7 +6478,7 @@ function StockScreener(props) {
     var existing = results.find(function(r) { return r.s.t === tk + ".NS"; });
     if (existing) { setScanErr(tk + " already in results"); setManualTicker(""); return; }
     setManualLoading(true); setScanErr("");
-    var found = NIFTY_100_UNIQUE.find(function(s) { return s.t === tk + ".NS"; });
+    var found = NIFTY_200_UNIQUE.find(function(s) { return s.t === tk + ".NS"; });
     var stockObj = found ? found : { t: tk + ".NS", n: tk };
     try {
       var indexDaily = null;
@@ -6283,7 +6747,7 @@ function StockScreener(props) {
   var startScan = async function() {
     if (scanning || !TI || !DF) return;
     setScanning(true); setResults([]); setScanErr("");
-    var stocks = NIFTY_100_UNIQUE;
+    var stocks = NIFTY_200_UNIQUE;
     var total = stocks.length;
     setProgress({ done: 0, total: total, current: "Starting..." });
     var out = [];
@@ -6443,7 +6907,7 @@ function StockScreener(props) {
     scanning && React.createElement("div", { style: { marginBottom: 12, padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)" } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 6 } },
         React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "var(--text3)" } },
-          "Progress: " + progress.done + "/" + (progress.total || NIFTY_100_UNIQUE.length) + " stocks"),
+          "Progress: " + progress.done + "/" + (progress.total || NIFTY_200_UNIQUE.length) + " stocks"),
         React.createElement("span", { style: { fontSize: 10, color: "var(--text5)" } }, progress.current)
       ),
       React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--bg5)", overflow: "hidden" } },
@@ -7833,7 +8297,7 @@ function PulsePage({ holdings }) {
       activeTab === "entryscore" && React.createElement(EntryScorePanel, { shares: holdings || [] }),
       activeTab === "confidencescore" && React.createElement(ConfidenceTracker, null),
       activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker }),
-      activeTab === "backtest" && React.createElement(BacktestPanel, null)
+      activeTab === "backtest" && React.createElement(BacktestSuitePanel, null)
     )
   );
 }
@@ -7886,7 +8350,7 @@ function InfoPage() {
     React.createElement("div", { className: "stx-card", style: { marginBottom: 20 } },
       React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--text)" } }, "Methodology"),
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
-        React.createElement("p", null, "All scoring uses SMAClub\u2019s proprietary multi-timeframe technical analysis system. Scores range 0\u2013100 and are computed from 50+ indicators across 4 pillars."),
+        React.createElement("p", null, "All scoring uses SMAClub\u2019s proprietary multi-timeframe technical analysis system. Scores range 0\u2013100 and are computed from 50+ indicators across three pillars (Trend Health, Pullback Quality, 4% Probability) plus penalty/bonus modifiers."),
         React.createElement("p", { style: { marginTop: 6 } }, "Select a section below for full detail.")
       ),
       React.createElement("div", { style: { marginTop: 12, display: "flex", flexDirection: "column", gap: 4 } },
@@ -7909,56 +8373,36 @@ function InfoPage() {
         // ENTRY SCORE
         React.createElement(MethSection, { label: "Entry Score (100 raw pts)", stateKey: "entry" }),
         React.createElement(MethContent, { stateKey: "entry" },
-          React.createElement("p", { style: subH }, "4 Pillars \u2014 Trend(30) | Momentum(30) | Volume(20) | Structure(20)"),
-          React.createElement("p", { style: subSub }, "7.1 MA Stack (10 pts)"),
-          React.createElement("p", null, "Price vs EMA(9,21,50) + SMA(100) stacking, SMA(20,50,100) triple bull, fast MA cluster (HMA, KAMA, WMA) count, HMA rising, RS Mansfield positive & rising."),
-          React.createElement("p", { style: subSub }, "7.2 MACD + TSI + STC + AO (10 pts)"),
-          React.createElement("p", null, "MACD above signal & zero, histogram rising, TSI >0 & rising, TSI zero cross, STC >50 & rising & >75, STC cross above 25, AO >0 & rising & zero cross, 3-of-4 confluence bonus."),
-          React.createElement("p", { style: subSub }, "7.3 ADX + ST + PSAR + VI + Aroon (10 pts)"),
-          React.createElement("p", null, "ADX >=35 strong / >=25 developing, +DI > -DI, ADX rising with +DI lead, price > SuperTrend, ST flip, PSAR bullish, VI+ > VI-, VI+ rising & VI- falling, Aroon >50 / >0 & rising, all-bull confluence."),
-          React.createElement("p", { style: subSub }, "8.1 RSI + StochRSI + WillR (10 pts)"),
-          React.createElement("p", null, "RSI sweet spot 58\u201372 (+2), 55\u201358 (+1), 72\u201378 (+1), 50\u201355 (+0.5). RSI > prev & >50, RSI cross above 50. StochRSI K > D, K 50\u201380, K rising. Williams %R -45 to -15, -80 to -45, rising > -45, > -15."),
-          React.createElement("p", { style: subSub }, "8.2 CCI + ROC + Mom + FI (10 pts)"),
-          React.createElement("p", null, "CCI 80\u2013160 (+1.5), 50\u201380 (+1), 0\u201350 (+0.5). CCI rising >0. ROC(12) >0 & rising, >2%. Mom(10) >0 & rising. FI(13) >0 & rising, zero cross. 4-of-4 confluence."),
-          React.createElement("p", { style: subSub }, "8.3 MFI + CMF (10 pts)"),
-          React.createElement("p", null, "MFI 60\u201380 (+2.5), 50\u201360 (+1.5), 40\u201350 (+1), >80 (+1). MFI > prev & >50, cross above 50. CMF >0.10 (+2), >0.05 (+1.5), >0 (+1). CMF rising >0. MFI+CMF both positive."),
-          React.createElement("p", { style: subSub }, "9.1 OBV + PVT + KVO (8 pts)"),
-          React.createElement("p", null, "OBV > SMA(10), OBV slope >0 & rising. PVT > SMA(10), PVT slope >0 & rising. KVO > signal, >0, > prev, signal cross."),
-          React.createElement("p", { style: subSub }, "9.2 Rolling VWAP + Anchored VWAP (6 pts)"),
-          React.createElement("p", null, "Price > VWAP(10) (+1.5), VWAP pct 0.3\u20132.0% (+0.5), VWAP rising. Price > Anchored VWAP (+1.5), AVWAP rising. Both VWAPs beat (+1)."),
-          React.createElement("p", { style: subSub }, "9.3 VP + Squeeze + Accum/Dist (6 pts)"),
-          React.createElement("p", null, "Price > POC, > VAH (value area high), POC rising. Squeeze release, squeeze momentum positive & rising, squeeze on. Accum/Dist = ACCUMULATION."),
-          React.createElement("p", { style: subSub }, "10.1 BB + KC + DC + Chandelier (8 pts)"),
-          React.createElement("p", null, "BB position 0.5\u20130.8 (+1) / 0.3\u20130.5 (+0.5), BB width expanding. Price > KC mid, > KC upper. DC upper touch, > DC midpoint. Price > Chandelier Long, CL rising. BB inside KC (squeeze). ATR% 1.2\u20132.2%. DC breakout + BB expansion."),
-          React.createElement("p", { style: subSub }, "10.2 Ichimoku (6 pts)"),
-          React.createElement("p", null, "Price above cloud top (+2) / inside cloud (+0.5). Tenkan > Kijun (+1), cross within 3 bars (+0.5). Senkou A > B (+1). Chikou > prev close (+0.5). All-bull confluence (+1)."),
-          React.createElement("p", { style: subSub }, "10.3 Darvas + HMA + KAMA + Fib + Pivot + ZigZag + Chop + MTF (6 pts)"),
-          React.createElement("p", null, "Darvas breakout (+1.5) / above mid (+0.5). Price > HMA(16), HMA rising. Price > KAMA(10), KAMA rising. Fib close to 0.382/0.5/0.618 + rising. Price > Pivot P, > R1. Choppiness <38.2. ZigZag UP. MTF Alignment >=80 / >=60."),
-          React.createElement("p", { style: subH }, "Penalties (-max)"),
-          React.createElement("p", null, "RSI >80 (-5). Price rising + volume declining 5d (-8). Weekly bearish + daily bullish clash (-10). Near resistance <1% (-5). Squeeze >10 bars (-3). High beta + high ATR (-3). Spike sub-score >=7 / >=4 / >=2 (-15 / -8 / -4). Stability sub-score >=7 / >=5 (-10 / -5). Dominance >0.6 (-12, suppressed when spike sub-score >=4)."),
-          React.createElement("p", { style: subH }, "Bonuses (+max)"),
-          React.createElement("p", null, "Donchian breakout + high volume (+5, not on spike day). All TFs bullish D/W/H (+5). Index trend score >60 (+3). Accumulation + MTF>80 (+3). RS Mansfield>5 + Aroon>50 (+3). Above pivot R1 + fib 0.618 (+2). ROC(12) rising momentum (+3). Smooth steady climb (efficiency >0.6, not spike day, +3)."),
+          React.createElement("p", { style: subH }, "3 Pillars \u2014 Trend Health(30) | Pullback Quality(30) | 4% Probability(40)"),
+          React.createElement("p", { style: subSub }, "1. Trend Health (30 pts)"),
+          React.createElement("p", null, "Price > SMA(50) (+5). SMA(20) > SMA(50) (+5). Price > SMA(20) OR > Anchored VWAP (+5). ADX(14) >=25 AND +DI > -DI (+5). Mansfield RS(52w) > -5 (+5). MACD(12,26,9) above signal (+5). Weekly Heikin-Ashi bullish, synthesized from daily for the D timeframe (+2.5). SMA(20) 5-bar slope >0 AND price > SMA(20) (+2.5). Cap 30."),
+          React.createElement("p", { style: subSub }, "2. Pullback / Setup Quality (30 pts)"),
+          React.createElement("p", null, "Price within \u00b12% of the buy reference \u2014 SMA(20) support, else lower Bollinger band (+10). Bullish candle c > o (+5). Bollinger width < 5 bars ago (+5). StochRSI K < 20 OR RSI(14) < 40 (+5). Volume > 1.5\u00d7 20-bar average AND c > o (+5). Cap 30."),
+          React.createElement("p", { style: subSub }, "3. 4% Probability (40 pts)"),
+          React.createElement("p", null, "(0.04 \u00d7 c) / ATR(14) > 1.5 \u2014 the 4% move fits in \u2248 2.67\u00d7 daily ATR (+15). Price 0.5\u20134.0% below target4 = buyRef \u00d7 1.04 (+10) \u2014 the window is wide enough to survive shallow 1\u20131.5% dips toward support, but breaking below support exits it. ATR(10) between 1.5% and 3.5% of price (+10). Efficiency ratio 10 > 0.4 (+5). Cap 40."),
+          React.createElement("p", { style: subH }, "Modifiers (penalties / bonuses)"),
+          React.createElement("p", null, "Low beta trap \u2014 Beta < 0.5 AND ATR(10) < 1.5% (unlikely to deliver the 4% move) (-10). Spike day \u2014 open gap > 3% or latest-bar volatility-adaptive spike (never chase a spike) (-10). Stability risk \u2014 calcStabilityScore(20) < 0.3 (erratic action) (-15). Multi-TF confirmation \u2014 weekly + daily raw both >=65 from this same model (+10)."),
           React.createElement("p", { style: subH }, "Classification"),
           React.createElement("p", null, "80+ STRONG_BUY (100% alloc) | 65+ BUY (70%) | 50+ WATCHLIST (40%) | 35+ NEUTRAL (0%) | <35 AVOID (0%)"),
           React.createElement("p", { style: subH }, "MTF Weights"),
-          React.createElement("p", null, "Daily 50% | Weekly 20% | Hourly 30%")
+          React.createElement("p", null, "Daily 55% | Hourly 30% | Weekly 15%")
         ),
 
         // SPIKE / STABILITY GUARD
         React.createElement(MethSection, { label: "Spike & Stability Guard", stateKey: "spike" }),
         React.createElement(MethContent, { stateKey: "spike" },
-          React.createElement("p", { style: subH }, "Daily anti-chase filter (computed once per session, on top of the per-TF sub-scores)"),
-          React.createElement("p", null, "Daily-only: the hard gate, dominance ratio, and efficiency bonus are computed on daily candles. When no daily timeframe is present the guard is disabled entirely (the per-TF H/W spike/stability sub-scores above still apply)."),
-          React.createElement("p", { style: subSub }, "Spike sub-score (per TF)"),
-          React.createElement("p", null, "Volatility-adaptive spike detection (calcDetectSpike): latest-bar spike +5, prior-bar spike +3, any spike in the last 20 bars +2 (cap 10). Penalty -15 / -8 / -4 at sub-score >=7 / >=4 / >=2."),
-          React.createElement("p", { style: subSub }, "Stability sub-score (per TF)"),
-          React.createElement("p", null, "(1 - stability score) x 10. Penalty -10 / -5 at >=7 / >=5. A smooth steady climb has zero variance and is scored as fully stable - no penalty."),
+          React.createElement("p", { style: subH }, "Daily anti-chase filter (computed once per session, on top of the per-TF modifiers)"),
+          React.createElement("p", null, "Daily-only: the hard gate, dominance ratio, and efficiency ratio are computed on daily candles. When no daily timeframe is present the guard is disabled entirely (the per-TF spike/stability modifiers still apply on the available timeframes)."),
+          React.createElement("p", { style: subSub }, "Spike modifier (per TF)"),
+          React.createElement("p", null, "Latest bar is a volatility-adaptive spike (calcDetectSpike) or the open gap > 3% \u2192 -10. Covers the old spike sub-score tiers in a single, simpler penalty."),
+          React.createElement("p", { style: subSub }, "Stability modifier (per TF)"),
+          React.createElement("p", null, "calcStabilityScore(20) < 0.3 (erratic price action) \u2192 -15. A smooth steady climb has zero variance and is fully stable \u2014 no penalty."),
           React.createElement("p", { style: subSub }, "Hard Gate \u2014 todaySpike"),
           React.createElement("p", null, "Latest daily bar is a volatility-adaptive spike (|move| > 2.5x rolling std(20) AND > 2.5x ATR14%) or an open gap > max(3.5%, 1.5x ATR%). Caps the final score at 49 (NEUTRAL) after all penalties/bonuses - never chase an abnormal single-session print."),
-          React.createElement("p", { style: subSub }, "Dominance Ratio"),
-          React.createElement("p", null, "Largest single-day |move| / |net 5-day move| (1.0 if |net| < 0.5%). Penalty -12 when > 0.6. Suppressed when the spike sub-score is >=4: the latest/prior-bar spike tiers already penalize that session, so one abnormal session is never double-penalized."),
-          React.createElement("p", { style: subSub }, "Efficiency Bonus"),
-          React.createElement("p", null, "Efficiency ratio 10 = |close - close[10]| / sum|daily diffs| (the KAMA ratio). Bonus +3 when > 0.6 and not a spike day (smooth steady climb). Choppy paths are covered by the stability sub-score, so there is no separate ER penalty."),
+          React.createElement("p", { style: subSub }, "Dominance Ratio (informational)"),
+          React.createElement("p", null, "Largest single-day |move| / |net 5-day move| (1.0 if |net| < 0.5%). Displayed on the guard card for context; no longer a separate penalty \u2014 the spike modifier and hard gate already handle abnormal sessions."),
+          React.createElement("p", { style: subSub }, "Efficiency Ratio 10"),
+          React.createElement("p", null, "Efficiency ratio 10 = |close - close[10]| / sum|daily diffs| (the KAMA ratio). Feeds the 4% Probability pillar: +5 when > 0.4 (a direct, efficient path to the target). Choppy paths are covered by the stability modifier."),
           React.createElement("p", { style: subSub }, "Exit side (bonus only, no double-count)"),
           React.createElement("p", null, "Golden exit nudge: an up-spike while holding that carries you near the 4% target (+5 at 3.0\u20134.0% profit, +3 at 2.0\u20133.0%) \u2014 the spike is often the top before a sharp reversal, so bank the gain. Suppressed past 4% (hard target rule exits there) and below 2% (too far from target). Stability collapse +3 when distribution ratio < 0.6 and not a spike day. No down-spike bonus: a panic day already fires the 13.2 / 14.1 / 15.1 pillars.")
         ),
@@ -8026,9 +8470,9 @@ function InfoPage() {
           React.createElement("p", { style: subSub }, "Variable Extraction"),
           React.createElement("p", null, "Each scoring function re-computes all indicators from raw OHLCV using last 2 closing values for cross-detection. Periods hardcoded per spec."),
           React.createElement("p", { style: subSub }, "Scoring Formula"),
-          React.createElement("p", null, "Raw score = sum of sub-function scores (capped per section). Final = clamp(raw + penalties + bonuses, 0, 100). Penalties reduce urgency, bonuses increase it."),
+          React.createElement("p", null, "Raw score = sum of the three pillars (Trend Health + Pullback Quality + 4% Probability), each capped at its max. Final = clamp(raw + modifiers, 0, 100), where modifiers are the penalty/bonus items. The todaySpike hard gate can cap the final at 49."),
           React.createElement("p", { style: subSub }, "Multi-Timeframe Aggregation"),
-          React.createElement("p", null, "Each timeframe scored independently. Weighted average applied: entry D=50%/W=20%/H=30%, exit D=50%/W=25%/H=25%. Scores, pillars, penalties, bonuses all weighted."),
+          React.createElement("p", null, "Each timeframe scored independently. Weighted average applied: entry D=55%/W=15%/H=30%, exit D=50%/W=25%/H=25%. Entry pillars aggregate per-pillar and are renormalized over the available timeframes, capped at their pillar max at the combined level; modifiers run once on the Daily snapshot only."),
           React.createElement("p", { style: subSub }, "Position Monitoring"),
           React.createElement("p", null, "Auto-runs every 15 min during market hours (09:15\u201315:30 IST). Fetches daily candles per holding, computes exit score + integrated decision. Toast alert for each new score >=55. Deduplicated per session.")
         )
@@ -8148,7 +8592,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally. No data is sent to any server."),
         React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.25"),
-        React.createElement("p", { style: { marginTop: 4, color: "var(--text5)" } }, "Latest: Spike & Stability Guard \u2014 todaySpike hard gate (cap 49), dominance penalty, smooth-climb efficiency bonus on entry; blow-off/stability-collapse urgency bonuses on exit. No double-counted penalties."),
+        React.createElement("p", { style: { marginTop: 4, color: "var(--text5)" } }, "Latest: Entry score rebuilt on three pillars \u2014 Trend Health(30) + Pullback Quality(30) + 4% Probability(40) \u2014 with spike/stability/reversal modifiers and the todaySpike hard gate (cap 49). Blow-off/stability-collapse urgency bonuses remain on exit. No double-counted penalties."),
         React.createElement("p", null, "Data: Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),

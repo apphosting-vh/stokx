@@ -2468,7 +2468,402 @@ window.TechIndicators = (function () {
     } catch (e) { return 0; }
   }
 
+  /* ══════════════════════════════════════════════════════════════════════════
+     NEW ENTRY ENGINE — 3-pillar model (0-100):
+     Trend Health (30) + Pullback Quality (30) + 4% Probability (40),
+     then ±15 modifiers. Designed to keep scores stable on shallow 1-1.5%
+     dips toward support (pillar inputs are dip-insensitive, pullback pillar
+     even gains on a dip to SMA20/lower-BB support).
+     ══════════════════════════════════════════════════════════════════════════ */
+
+  /* Weekly Heikin-Ashi trend (higher timeframe), synthesized from daily bars
+     when no weekly timeframe is provided. Returns { bullish } or null. */
+  function _isoWeekKey(t) {
+    var d = new Date(String(t).slice(0, 10) + 'T00:00:00Z');
+    if (isNaN(d.getTime())) return null;
+    var day = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - day);
+    var y = d.getUTCFullYear();
+    var first = new Date(Date.UTC(y, 0, 1));
+    var week = Math.ceil((((d - first) / 86400000) + 1) / 7);
+    return y + '-W' + week;
+  }
+  function _mergeCandles(group) {
+    var o = group[0].o, h = -Infinity, l = Infinity, c = group[group.length - 1].c, v = 0, t = group[0].t;
+    for (var i = 0; i < group.length; i++) { if (group[i].h > h) h = group[i].h; if (group[i].l < l) l = group[i].l; v += group[i].v || 0; }
+    return { t: t, o: o, h: h, l: l, c: c, v: v };
+  }
+  function synthWeeklyCandles(candles) {
+    try {
+      if (!candles || !candles.length) return null;
+      var hasDates = candles.some(function (x) { return x && x.t != null; });
+      var out = [];
+      if (hasDates) {
+        var groups = {}, keys = [];
+        candles.forEach(function (x) {
+          var k = _isoWeekKey(x.t);
+          if (k === null) return;
+          if (!groups[k]) { groups[k] = []; keys.push(k); }
+          groups[k].push(x);
+        });
+        keys.forEach(function (k) { out.push(_mergeCandles(groups[k])); });
+      } else {
+        for (var i = 0; i < candles.length; i += 5) out.push(_mergeCandles(candles.slice(i, i + 5)));
+      }
+      return out.length >= 2 ? out : null;
+    } catch (e) { return null; }
+  }
+  function calcWeeklyHA(candles, isWeekly) {
+    try {
+      var bars = isWeekly ? candles : synthWeeklyCandles(candles);
+      if (!bars || bars.length < 2) return null;
+      var ha = calcHeikinAshi(bars);
+      var L = ha.close.length;
+      var close = ha.close[L - 1], open = ha.open[L - 1];
+      if (close == null || open == null) return null;
+      return { close: close, open: open, bullish: close > open };
+    } catch (e) { return null; }
+  }
+
+  /* Slim entry snapshot: only the fields the 3 pillars + modifiers consume.
+     (Exit scoring keeps the full buildTFSnapshot.) `tf` controls the weekly-HA
+     component: real weekly candles for W, synthesized weekly from daily for D,
+     none for H. */
+  function buildEntrySnapshot(candles, indexCandles, tf) {
+    try {
+      var cl = closes(candles), hi = highs(candles), lo = lows(candles), op = opens(candles), vo = volumes(candles);
+      var L = cl.length;
+      if (!L) return null;
+      var L1 = L - 1;
+      function gv(arr) { return arr !== null && arr !== undefined && arr.length > L1 ? arr[L1] : null; }
+      var c = cl[L1];
+
+      var sma20_s = calcSMA(candles, 20), sma20 = gv(sma20_s);
+      var sma50 = gv(calcSMA(candles, 50));
+      var anchoredVwap = gv(calcAnchoredVWAP(candles));
+      var adxRes = calcADX(candles);
+      var adxL = gv(adxRes.adx), plusDI = gv(adxRes.plusDI), minusDI = gv(adxRes.minusDI);
+      var macdRes = calcMACD(candles);
+      var macdL = gv(macdRes.macd), sigL = gv(macdRes.signal);
+
+      var rsMansfield = null;
+      if (indexCandles && indexCandles.length > 10) {
+        try { var rsSeries = calcMansfieldRS(candles, indexCandles, 52); if (rsSeries) rsMansfield = lastVals(rsSeries, 1)[0] || null; } catch (e) {}
+      }
+
+      var bbRes = calcBollingerBands(candles);
+      var bbLower = gv(bbRes.lower);
+      var bbWidthArr = [];
+      for (var i = 0; i < bbRes.upper.length; i++) {
+        if (bbRes.middle[i] !== null && bbRes.middle[i] > 0 && bbRes.upper[i] !== null && bbRes.lower[i] !== null) {
+          bbWidthArr.push((bbRes.upper[i] - bbRes.lower[i]) / bbRes.middle[i]);
+        } else { bbWidthArr.push(null); }
+      }
+      var bbWidth = gv(bbWidthArr);
+      var bbWidthPrev5 = bbWidthArr.length > L1 - 5 ? bbWidthArr[L1 - 5] : null;
+
+      var stochRsiK = gv(calcStochasticRSI(candles).k);
+      var rsi14 = gv(calcRSI(candles, 14));
+      var atr14 = gv(calcATR(candles, 14));
+      var atr10 = gv(calcATR(candles, 10));
+
+      var efficiencyRatio10 = null;
+      if (L >= 11) {
+        var dir = Math.abs(c - cl[L - 11]);
+        var path = 0;
+        for (var j = L - 10; j < L; j++) path += Math.abs(cl[j] - cl[j - 1]);
+        efficiencyRatio10 = path > 0 ? dir / path : 0;
+      }
+
+      var avgVol = 0, vc = 0;
+      for (var j = Math.max(0, L - 20); j < L; j++) { avgVol += vo[j]; vc++; }
+      avgVol = vc > 0 ? avgVol / vc : 0;
+      var volRatio = avgVol > 0 ? vo[L1] / avgVol : null;
+
+      var beta = null;
+      if (indexCandles && indexCandles.length > 10) {
+        try { beta = last(calcBeta(candles, indexCandles)); } catch (e) {}
+      }
+
+      var stability20 = calcStabilityScore(candles, 20);
+      var spikeArr = calcDetectSpike(candles, 20, 2.5, 2.5);
+      var spikeLast = null;
+      if (spikeArr && spikeArr.length) {
+        for (var i = spikeArr.length - 1; i >= 0; i--) { if (spikeArr[i] === true || spikeArr[i] === false) { spikeLast = spikeArr[i]; break; } }
+      }
+
+      var gapPct = null;
+      if (L >= 2) {
+        var prevC = cl[L1 - 1], openL = op[L1] != null ? op[L1] : c;
+        if (prevC != null && prevC > 0) gapPct = (openL - prevC) / prevC * 100;
+      }
+
+      var weeklyHABullish = null;
+      var wha = tf === 'W' ? calcWeeklyHA(candles, true) : (tf === 'D' ? calcWeeklyHA(candles, false) : null);
+      if (wha) weeklyHABullish = wha.bullish;
+
+      var sma20Slope5 = sma20_s ? slope(sma20_s, 5) : null;
+
+      return {
+        c: c, pc: L >= 2 ? cl[L1 - 1] : null, o: op[L1] != null ? op[L1] : c, h: hi[L1], l: lo[L1],
+        cl: cl, vo: vo, volRatio: volRatio,
+        sma20: sma20, sma50: sma50, sma20Slope5: sma20Slope5, anchoredVwap: anchoredVwap,
+        adxL: adxL, plusDI: plusDI, minusDI: minusDI, macdL: macdL, sigL: sigL, rsMansfield: rsMansfield,
+        bbLower: bbLower, bbWidth: bbWidth, bbWidthPrev5: bbWidthPrev5,
+        stochRsiK: stochRsiK, rsi14: rsi14, atr14: atr14, atr10: atr10,
+        efficiencyRatio10: efficiencyRatio10,
+        beta: beta, stability20: stability20, spikeLast: spikeLast, gapPct: gapPct,
+        weeklyHABullish: weeklyHABullish,
+        buyRef: sma20 != null ? sma20 : (bbLower != null ? bbLower : null)
+      };
+    } catch (e) { return null; }
+  }
+
+  /* Pillar 1: Trend Health (max 30). */
+  function calcTrendHealthScore(sn) {
+    var s = 0;
+    if (sn.c != null && sn.sma50 != null && sn.c > sn.sma50) s += 5;
+    if (sn.sma20 != null && sn.sma50 != null && sn.sma20 > sn.sma50) s += 5;
+    if (sn.c != null && sn.sma20 != null && sn.c > sn.sma20) s += 5;
+    else if (sn.c != null && sn.anchoredVwap != null && sn.c > sn.anchoredVwap) s += 5;
+    if (sn.adxL != null && sn.plusDI != null && sn.minusDI != null && sn.adxL >= 25 && sn.plusDI > sn.minusDI) s += 5;
+    if (sn.rsMansfield != null && sn.rsMansfield > -5) s += 5;
+    if (sn.macdL != null && sn.sigL != null && sn.macdL > sn.sigL) s += 5;
+    if (sn.weeklyHABullish === true) s += 2.5;
+    if (sn.sma20Slope5 != null && sn.sma20Slope5 > 0 && sn.c != null && sn.sma20 != null && sn.c > sn.sma20) s += 2.5;
+    return Math.min(s, 30);
+  }
+
+  /* Pillar 2: Pullback / Setup Quality (max 30). */
+  function calcPullbackScore(sn) {
+    var s = 0;
+    if (sn.c != null && sn.buyRef != null && sn.buyRef > 0) {
+      var dist = (sn.c - sn.buyRef) / sn.buyRef * 100;
+      if (dist >= -2 && dist <= 2) s += 10;
+    }
+    if (sn.c != null && sn.o != null && sn.c > sn.o) s += 5;
+    if (sn.bbWidth != null && sn.bbWidthPrev5 != null && sn.bbWidth < sn.bbWidthPrev5) s += 5;
+    if ((sn.stochRsiK != null && sn.stochRsiK < 20) || (sn.rsi14 != null && sn.rsi14 < 40)) s += 5;
+    if (sn.volRatio != null && sn.volRatio > 1.5 && sn.c != null && sn.o != null && sn.c > sn.o) s += 5;
+    return Math.min(30, s);
+  }
+
+  /* Pillar 3: 4% Probability (max 40). Target = 4% above the buy reference
+     (SMA20 support, else lower Bollinger band); price 0.5-4% below that target
+     (i.e. roughly at-to-3.5% above support) keeps the component intact through
+     shallow 1-1.5% dips toward support. Breaking below support exits the window. */
+  function calcProb4Score(sn) {
+    var s = 0;
+    if (sn.c != null && sn.c > 0 && sn.atr14 != null && sn.atr14 > 0) {
+      if ((0.04 * sn.c) / sn.atr14 > 1.5) s += 15;
+    }
+    if (sn.c != null && sn.c > 0 && sn.buyRef != null && sn.buyRef > 0) {
+      var target4 = sn.buyRef * 1.04;
+      var dist = (target4 - sn.c) / sn.c * 100;
+      if (dist >= 0.5 && dist <= 4.0) s += 10;
+    }
+    if (sn.c != null && sn.c > 0 && sn.atr10 != null) {
+      var atr10pct = sn.atr10 / sn.c * 100;
+      if (atr10pct >= 1.5 && atr10pct <= 3.5) s += 10;
+    }
+    if (sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > 0.4) s += 5;
+    return Math.min(s, 40);
+  }
+
+  /* Modifiers (±15 each): low-expansion, spike day, stability, MTF alignment.
+     Earnings-date +5 bonus was dropped (no reliable in-app source). */
+  function buildEntryModifiers(sn, opts) {
+    opts = opts || {};
+    var items = [];
+    if (sn && sn.beta != null && sn.beta < 0.5 && sn.atr10 != null && sn.c > 0 && (sn.atr10 / sn.c * 100) < 1.5) {
+      items.push({ reason: "Low beta + low ATR (no expansion)", amount: -10 });
+    }
+    if (opts.spikeDay) items.push({ reason: "Spike day (gap or abnormal move)", amount: -10 });
+    if (sn && sn.stability20 != null && sn.stability20 < 0.3) {
+      items.push({ reason: "Unstable price action (stability < 0.3)", amount: -15 });
+    }
+    if (opts.mtfAlign) items.push({ reason: "Weekly + daily both \u2265 65 (MTF alignment)", amount: 10 });
+    return items;
+  }
+
+  /* Per-timeframe 3-pillar scoring. `tf` is 'H' | 'D' | 'W'. */
+  function scoreEntryPillarsForTF(candles, indexCandles, tf) {
+    var sn = buildEntrySnapshot(candles, indexCandles, tf);
+    if (!sn) return null;
+    return {
+      trendHealth: calcTrendHealthScore(sn),
+      pullbackQuality: calcPullbackScore(sn),
+      prob4: calcProb4Score(sn),
+      spike: sn.spikeLast === true ? 5 : 0,
+      stability: round(Math.max(0, Math.min(10, (1 - (sn.stability20 != null ? sn.stability20 : 1)) * 10)), 1),
+      sn: sn
+    };
+  }
+
+  /* Entry Score (single timeframe, daily) — new 3-pillar model. */
   function computeEntryScore(candles, indexCandles) {
+    if (!candles || candles.length < 50) return { entry_score: null, reason: 'insufficient_data', need: 50, got: candles ? candles.length : 0 };
+    var sn = buildEntrySnapshot(candles, indexCandles, 'D');
+    if (!sn || sn.c == null) return { entry_score: null, reason: 'insufficient_data' };
+
+    var trendHealth = calcTrendHealthScore(sn);
+    var pullbackQuality = calcPullbackScore(sn);
+    var prob4 = calcProb4Score(sn);
+    var rawTotal = trendHealth + pullbackQuality + prob4;
+
+    var spikeDay = sn.spikeLast === true || (sn.gapPct != null && Math.abs(sn.gapPct) > 3);
+    var modifierItems = buildEntryModifiers(sn, { spikeDay: spikeDay });
+
+    var penalties = 0, bonuses = 0, penaltyItems = [], bonusItems = [];
+    modifierItems.forEach(function (it) {
+      if (it.amount < 0) { penalties += it.amount; penaltyItems.push(it); } else { bonuses += it.amount; bonusItems.push(it); }
+    });
+    var modifiers = penalties + bonuses;
+
+    var finalScore = Math.max(0, Math.min(100, rawTotal + modifiers));
+    var cls = classifyScore(finalScore);
+    var guard = computeSpikeGuard(candles);
+
+    return {
+      entry_score: round(finalScore, 1),
+      raw_score: round(rawTotal, 1),
+      trendHealth: round(trendHealth, 1), trendHealthMax: 30,
+      pullbackQuality: round(pullbackQuality, 1), pullbackQualityMax: 30,
+      prob4: round(prob4, 1), prob4Max: 40,
+      modifiers: round(modifiers, 1),
+      penalties: round(penalties, 1), bonuses: round(bonuses, 1),
+      penalty_items: penaltyItems, bonus_items: bonusItems,
+      classification: cls.classification, signal: cls.signal, allocation_pct: cls.allocation_pct,
+      todaySpike: guard.todaySpike, sessionReturnPct: guard.sessionReturnPct, gapPct: guard.gapPct,
+      dominanceRatio: guard.dominanceRatio, efficiencyRatio10: guard.efficiencyRatio10,
+      details: {
+        trendHealth: round(trendHealth, 2), pullbackQuality: round(pullbackQuality, 2), prob4: round(prob4, 2),
+        spike: sn.spikeLast === true ? 5 : 0,
+        stability: round(Math.max(0, Math.min(10, (1 - (sn.stability20 != null ? sn.stability20 : 1)) * 10)), 1)
+      }
+    };
+  }
+
+  /* Multi-timeframe Entry Score — new 3-pillar model:
+     each pillar is computed per timeframe, then each pillar is aggregated across
+     timeframes as D*0.55 + H*0.30 + W*0.15 (renormalized over available timeframes
+     via wSum division) and capped at its pillar max (30 / 30 / 40) at the combined
+     level. Modifiers run once on the Daily snapshot only (the primary decision
+     frame); the MTF +10 needs weekly+daily ≥ 65. */
+  function computeMultiTFEntryScore(tfResults, indexCandles, indexWeeklyCandles) {
+    if (!tfResults || tfResults.length === 0) return { multiTF_score: null, reason: 'no_timeframes' };
+
+    function findTF(label) {
+      var aliases = { H: ['H', 'h', '1h', 'hourly', '1H'], D: ['D', 'd', '1d', 'day', 'daily', '1D'], W: ['W', 'w', '1w', 'week', 'weekly', '1W'] };
+      for (var i = 0; i < tfResults.length; i++) {
+        var t = tfResults[i].timeframe;
+        if (aliases[label] && aliases[label].indexOf(t) !== -1) return tfResults[i];
+      }
+      return null;
+    }
+
+    var hTF = findTF('H'), dTF = findTF('D'), wTF = findTF('W');
+    var baseTF = (dTF && dTF.candles && dTF.candles.length >= 50) ? dTF
+               : (wTF && wTF.candles && wTF.candles.length >= 50) ? wTF
+               : (hTF && hTF.candles && hTF.candles.length >= 50) ? hTF
+               : tfResults[0] || null;
+    if (!baseTF || !baseTF.candles || baseTF.candles.length < 50) return { multiTF_score: null, reason: 'no_valid_scores' };
+
+    var perTF = {};
+    perTF.H = (hTF && hTF.candles && hTF.candles.length >= 50) ? scoreEntryPillarsForTF(hTF.candles, indexCandles, 'H') : null;
+    perTF.D = (dTF && dTF.candles && dTF.candles.length >= 50) ? scoreEntryPillarsForTF(dTF.candles, indexCandles, 'D') : null;
+    perTF.W = (wTF && wTF.candles && wTF.candles.length >= 50) ? scoreEntryPillarsForTF(wTF.candles, indexWeeklyCandles || indexCandles, 'W') : null;
+    if (!perTF.H && !perTF.D && !perTF.W) return { multiTF_score: null, reason: 'no_valid_scores' };
+
+    var weights = { D: 0.55, H: 0.30, W: 0.15 };
+    var PILLARS = [
+      { key: 'trendHealth', max: 30 },
+      { key: 'pullbackQuality', max: 30 },
+      { key: 'prob4', max: 40 }
+    ];
+    var agg = {};
+    PILLARS.forEach(function (pillar) {
+      var wSum = 0, acc = 0;
+      ['D', 'H', 'W'].forEach(function (label) {
+        var p = perTF[label];
+        if (p && p[pillar.key] !== null && p[pillar.key] !== undefined) { var w = weights[label]; acc += w * p[pillar.key]; wSum += w; }
+      });
+      agg[pillar.key] = wSum > 0 ? Math.min(pillar.max, acc / wSum) : 0;
+    });
+    var rawTotal = agg.trendHealth + agg.pullbackQuality + agg.prob4;
+
+    var baseSn = null;
+    if (dTF && dTF.candles && dTF.candles.length >= 50) {
+      baseSn = (perTF.D && perTF.D.sn) || buildEntrySnapshot(dTF.candles, indexCandles, 'D');
+    }
+    if (!baseSn) {
+      var fbLabel = (wTF && wTF.candles && wTF.candles.length >= 50) ? 'W' : 'H';
+      var fbTF = (wTF && wTF.candles && wTF.candles.length >= 50) ? wTF : hTF;
+      baseSn = (perTF[fbLabel] && perTF[fbLabel].sn) || buildEntrySnapshot(fbTF.candles, indexCandles, fbLabel);
+    }
+
+    var wRaw = perTF.W ? (perTF.W.trendHealth + perTF.W.pullbackQuality + perTF.W.prob4) : null;
+    var dRaw = perTF.D ? (perTF.D.trendHealth + perTF.D.pullbackQuality + perTF.D.prob4) : null;
+    var mtfAlign = wRaw !== null && dRaw !== null && wRaw >= 65 && dRaw >= 65;
+
+    var spikeDay = false;
+    if (dTF && dTF.candles && perTF.D) {
+      spikeDay = perTF.D.sn.spikeLast === true || (perTF.D.sn.gapPct != null && Math.abs(perTF.D.sn.gapPct) > 3);
+    }
+    var modifierItems = buildEntryModifiers(baseSn, { spikeDay: spikeDay, mtfAlign: mtfAlign });
+
+    var penalties = 0, bonuses = 0, penaltyItems = [], bonusItems = [];
+    modifierItems.forEach(function (it) {
+      if (it.amount < 0) { penalties += it.amount; penaltyItems.push(it); } else { bonuses += it.amount; bonusItems.push(it); }
+    });
+    var modifiers = penalties + bonuses;
+
+    var finalScore = Math.max(0, Math.min(100, rawTotal + modifiers));
+    var cls = classifyScore(finalScore);
+
+    var tfDetails = [];
+    ['D', 'H', 'W'].forEach(function (label) {
+      var tf = findTF(label);
+      var p = perTF[label];
+      if (tf && p) {
+        var tRaw = p.trendHealth + p.pullbackQuality + p.prob4;
+        var tCls = classifyScore(tRaw);
+        tfDetails.push({
+          timeframe: tf.timeframe,
+          weight: String(Math.round(weights[label] * 100)) + '%',
+          entryScore: round(tRaw, 1),
+          trendHealth: round(p.trendHealth, 1), trendHealthMax: 30,
+          pullbackQuality: round(p.pullbackQuality, 1), pullbackQualityMax: 30,
+          prob4: round(p.prob4, 1), prob4Max: 40,
+          modifiers: 0,
+          penalties: 0, bonuses: 0,
+          raw_score: round(tRaw, 1),
+          spike: round(p.spike, 1), stability: round(p.stability, 1),
+          classification: tCls.classification,
+          allocation_pct: tCls.allocation_pct
+        });
+      }
+    });
+
+    var guard = dTF && dTF.candles ? computeSpikeGuard(dTF.candles) : { todaySpike: false, sessionReturnPct: null, gapPct: null, dominanceRatio: null, efficiencyRatio10: null };
+
+    return {
+      multiTF_score: round(finalScore, 1),
+      raw_score: round(rawTotal, 1),
+      trendHealth: round(agg.trendHealth, 1), trendHealthMax: 30,
+      pullbackQuality: round(agg.pullbackQuality, 1), pullbackQualityMax: 30,
+      prob4: round(agg.prob4, 1), prob4Max: 40,
+      modifiers: round(modifiers, 1),
+      penalties: round(penalties, 1), bonuses: round(bonuses, 1),
+      penalty_items: penaltyItems, bonus_items: bonusItems,
+      classification: cls.classification, signal: cls.signal, allocation_pct: cls.allocation_pct,
+      todaySpike: guard.todaySpike, sessionReturnPct: guard.sessionReturnPct, gapPct: guard.gapPct,
+      dominanceRatio: guard.dominanceRatio, efficiencyRatio10: guard.efficiencyRatio10,
+      timeframesUsed: tfDetails.length, details: tfDetails
+    };
+  }
+
+  function computeEntryScoreLegacy(candles, indexCandles) {
     if (!candles || candles.length < 50) return { entry_score: null, reason: 'insufficient_data', need: 50, got: candles ? candles.length : 0 };
     var comps = scoreEntryComponentsForTF(candles, indexCandles);
     var sn = comps.sn;
@@ -2546,12 +2941,11 @@ window.TechIndicators = (function () {
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
-     Multi-timeframe Entry Score — spec Sections 7-11 model:
-     ALL 12 sub-scores (7.1-10.3) plus spike/stability are computed per
-     timeframe and aggregated H*0.30 + D*0.50 + W*0.20, renormalized over the
-     available timeframes. Section 11 penalties/bonuses use real H/D/W data.
+     LEGACY Multi-timeframe Entry Score — old 12-sub-score model (7.1-10.3).
+     Kept only for regression/back-compat harnesses. Production entry scoring
+     uses the new 3-pillar computeMultiTFEntryScore above.
      ══════════════════════════════════════════════════════════════════════════ */
-  function computeMultiTFEntryScore(tfResults, indexCandles, indexWeeklyCandles) {
+  function computeMultiTFEntryScoreLegacy(tfResults, indexCandles, indexWeeklyCandles) {
     if (!tfResults || tfResults.length === 0) return { multiTF_score: null, reason: 'no_timeframes' };
 
     function findTF(label) {

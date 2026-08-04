@@ -265,272 +265,115 @@ prevDistDayRatio = same computed over window ending one bar earlier
 
 ---
 
-## 6. Entry scoring (SPEC Sections 7–11)
+## 6. Entry scoring (three-pillar model)
 
 ### 6.1 Architecture
 
 `computeEntryScore(candles, indexCandles)` (single TF):
 
 ```
-sn          = buildTFSnapshot(candles, indexCandles)
-comps       = scoreEntryComponentsForTF(sn)      # 12 sub-scores + spike + stability
-trendScore    = 7.1 + 7.2 + 7.3          (max 30)
-momentumScore = 8.1 + 8.2 + 8.3          (max 30)
-volumeScore   = 9.1 + 9.2 + 9.3          (max 20)
-structureScore= 10.1 + 10.2 + 10.3       (max 20)
-rawTotal      = trendScore + momentumScore + volumeScore + structureScore   (max 100)
+sn            = buildEntrySnapshot(candles, indexCandles, 'D')  # slim snapshot
+trendHealth    = calcTrendHealthScore(sn)    (max 30)
+pullbackQuality= calcPullbackScore(sn)       (max 30)
+prob4          = calcProb4Score(sn)          (max 40)
+rawTotal       = trendHealth + pullbackQuality + prob4    (max 100)
 
-penalties = Σ buildEntryPenaltyItems(...)
-bonuses   = Σ buildEntryBonusItems(...)
-finalScore = clamp(rawTotal + penalties + bonuses, 0, 100)
+modifierItems  = buildEntryModifiers(sn, { spikeDay })   # penalties + bonuses
+modifiers      = Σ modifierItems
+finalScore     = clamp(rawTotal + modifiers, 0, 100)
 ```
 
-The pillars are **not** additionally capped in single-TF entry; each sub-score
-caps itself. Note the totals (30+30+20+20 = 100) — the caps give a natural 0–100
-raw scale.
+Each pillar caps itself, giving a natural 0–100 raw scale (30+30+40 = 100).
+The framework uses exactly four modifiers (three penalties, one bonus) applied
+as-is; the final clamp bounds the result.
 
-### 6.2 Sub-score tables
+### 6.2 Pillar tables
 
-**7.1 MA Stack (max 10)**
-
-| # | Condition | Pts |
-|---|---|---|
-| 1 | `c > ema9` | 0.5 |
-| 2 | `c > ema21` | 0.5 |
-| 3 | `c > ema50` | 0.5 |
-| 4 | `sma200 != null && c > sma200` | 0.5 |
-| 5 | `ema9 > ema21 && ema21 > ema50` | 2.0 |
-| 5a | else `ema9 > ema21 || ema21 > ema50` | 1.0 |
-| 6 | `sma20 > sma50 && sma50 > sma200` | 2.0 |
-| 6a | else `sma20 > sma50` | 1.0 |
-| 7 | `min((c>hma16 ? 1:0)+(c>kama10?1:0)+(c>wma20?1:0)·0.67, 2.0)` | ≤2.0 |
-| 8 | `hma16 > prevHma16` | 0.5 |
-| 9 | `rsMansfield > 0` | 0.5 |
-| 10 | `rsMansfield > rsMansfieldPrev` | 0.5 |
-
-**7.2 MACD + TSI + STC + AO (max 10)**
+**Pillar 1 — Trend Health (max 30)** — `calcTrendHealthScore(sn)`
 
 | # | Condition | Pts |
 |---|---|---|
-| 1 | `macdL > sigL` | 1.0 |
-| 2 | `macdL > 0` | 0.5 |
-| 3 | `histL > 0 && histL > histPrev` | 0.5 |
-| 4 | `macd crossed above signal in last 3 bars` | 0.5 |
-| 5 | `tsiL > 0` | 0.5 |
-| 6 | `tsiL > tsiPrev && tsiL > 0` | 0.5 |
-| 7 | `tsi crossed above 0 in last 3 bars` | 0.5 |
-| 8 | `stcL > 50` | 0.5 |
-| 9 | `stcL > stcPrev` | 0.5 |
-| 10 | `stcL > 75` | 0.5 |
-| 11 | `stc crossed above 25 in last 3 bars` | 0.5 |
-| 12 | `aoL > 0` | 0.5 |
-| 13 | `aoL > aoPrev` | 0.5 |
-| 14 | `aoL > 0 && aoPrev <= 0` | 0.5 |
-| 15 | confluence: ≥3 of {macd>sig, tsi>0, stc>50, ao>0} | 1.0 |
+| 1 | `c > sma50` | 5 |
+| 2 | `sma20 != null && sma50 != null && sma20 > sma50` | 5 |
+| 3 | `c > sma20`, else `c > anchoredVwap` | 5 |
+| 4 | `adxL >= 25 && plusDI > minusDI` | 5 |
+| 5 | `rsMansfield > -5` | 5 |
+| 6 | `macdL > sigL` | 5 |
+| 7 | `weeklyHABullish === true` — weekly Heikin-Ashi `close > open`, synthesized from daily candles (`synthWeeklyCandles` groups by ISO week, then `calcHeikinAshi`); D timeframe only | 2.5 |
+| 8 | `sma20Slope5 > 0 && c > sma20` (`sma20Slope5` = 5-bar SMA20 slope) | 2.5 |
 
-**7.3 ADX + Supertrend + PSAR + Vortex + Aroon (max 10)**
+**Pillar 2 — Pullback / Setup Quality (max 30)** — `calcPullbackScore(sn)`
 
 | # | Condition | Pts |
 |---|---|---|
-| 1 | `adxL >= 40` / `>= 25` | 1.0 / 0.5 |
-| 2 | `plusDI > minusDI` | 0.5 |
-| 3 | `adxL > adxPrev && plusDI > minusDI` | 0.5 |
-| 4 | `c > stL` | 1.0 |
-| 5 | `pc <= stPrev && c > stL` (supertrend flip up) | 0.5 |
-| 6 | `c > psar` | 0.5 |
-| 7 | `pc <= psarPrev && c > psar` (PSAR flip up) | 0.5 |
-| 8 | `viPlus > viMinus` | 1.0 |
-| 9 | `viPlus > viPlusPrev && viMinus < viMinusPrev` | 0.5 |
-| 10 | `aroonOsc > 50` / `> 0` | 1.0 / 0.5 |
-| 11 | `aroonOsc > aroonOscPrev && aroonOsc > 0` | 0.5 |
-| 12 | all five bullish {c>st, c>psar, +DI>−DI, VI+>VI−, aroonOsc>0} | 1.0 |
+| 1 | `buyRef != null && -2 <= (c - buyRef)/buyRef*100 <= 2` — at-to-near support | 10 |
+| 2 | `c > o` (bullish candle) | 5 |
+| 3 | `bbWidth < bbWidthPrev5` (5-bar Bollinger-width compression) | 5 |
+| 4 | `stochRsiK < 20` OR `rsi14 < 40` (oversold near support) | 5 |
+| 5 | `volRatio > 1.5 && c > o` (volume > 1.5× 20-bar avg on an up bar) | 5 |
 
-**8.1 RSI + StochRSI + Williams %R (max 10)**
+**Pillar 3 — 4% Probability (max 40)** — `calcProb4Score(sn)`
 
 | # | Condition | Pts |
 |---|---|---|
-| 1 | `60 ≤ rsi ≤ 75` | 2.0 |
-| 1a | `55 ≤ rsi < 60` | 1.0 |
-| 1b | `75 < rsi ≤ 80` | 1.0 |
-| 1c | `50 ≤ rsi < 55` | 0.5 |
-| 2 | `rsi > rsiPrev && rsi > 50` | 1.0 |
-| 3 | `rsiPrev ≤ 50 && rsi > 50` (cross above mid) | 0.5 |
-| 4 | `stochRsiK > stochRsiD` | 1.0 |
-| 5 | `50 ≤ stochRsiK ≤ 80` | 0.5 |
-| 6 | `stochRsiK > stochRsiKPrev` | 0.5 |
-| 7 | `−50 ≤ willr ≤ −20` | 1.0 |
-| 7a | `−80 ≤ willr < −50` | 0.5 |
-| 8 | `willr > willrPrev && willr > −50` | 0.5 |
-| 9 | `willr > −20` | 0.5 |
-| 10 | confluence: `rsi>55 && K>D && willr>−50` | 0.5 |
+| 1 | `(0.04·c) / atr14 > 1.5` — a 4% move fits in ≈ 2.67× daily ATR | 15 |
+| 2 | `target4 = buyRef·1.04`; `0.5 <= (target4 - c)/c*100 <= 4.0` — close enough to the target, window wide enough to survive shallow 1–1.5% dips toward support | 10 |
+| 3 | `atr10pct = atr10/c·100`; `1.5 <= atr10pct <= 3.5` (healthy volatility) | 10 |
+| 4 | `efficiencyRatio10 > 0.4` (direct, low-noise path) | 5 |
 
-**8.2 CCI + ROC + Momentum + Force Index (max 10)**
+**Snapshot helpers (`buildEntrySnapshot`)**
+
+| Field | Formula |
+|---|---|
+| `buyRef` | SMA20 when present, else lower Bollinger band |
+| `weeklyHABullish` | close of synthesized weekly HA bar > HA open (D TF only) |
+| `spikeLast` | latest-bar volatility-adaptive spike (`calcDetectSpike`) |
+| `stability20` | `calcStabilityScore(candles, 20)` — 0 (erratic) to 1 (stable) |
+
+### 6.3 Spike & stability (modifier inputs)
+
+| Snapshot field | Formula | Use |
+|---|---|---|
+| `spikeLast` | latest-bar spike via `calcDetectSpike(candles, 20, 2.5, 2.5)` | spike-day modifier (−10) when true or `|gapPct| > 3` |
+| `stability20` | `calcStabilityScore(candles, 20)` — 0 (erratic) to 1 (stable); a zero-variance path returns 1 (most stable), a non-positive mean returns 0 | stability modifier (−15) when `< 0.3` |
+
+The old graded spike sub-score (0–10 with three penalty tiers) and stability
+sub-score (0–10 with two penalty tiers) are replaced by the two flat modifiers
+above. The per-TF `details.spike`/`details.stability` fields still report the
+0–10 (higher = worse) views for the UI bars.
+
+### 6.4 Modifiers (`buildEntryModifiers`)
+
+The framework uses exactly four modifiers — three penalties and one bonus. The
+spike-day and MTF-confirmation flags are passed in as options:
 
 | # | Condition | Pts |
 |---|---|---|
-| 1 | `100 ≤ cci ≤ 200` | 1.5 |
-| 1a | `50 ≤ cci < 100` | 1.0 |
-| 1b | `0 ≤ cci < 50` | 0.5 |
-| 2 | `cci > cciPrev && cci > 0` | 0.5 |
-| 3 | `roc > 0 && roc > rocPrev` | 1.5 |
-| 3a | else `roc > 0` | 0.5 |
-| 4 | `roc > 2` | 0.5 |
-| 5 | `mom > 0 && mom > momPrev` | 1.5 |
-| 5a | else `mom > 0` | 0.5 |
-| 6 | `fi > 0 && fi > fiPrev` | 1.5 |
-| 6a | else `fi > 0` | 0.5 |
-| 7 | `fi > 0 && fiPrev <= 0` | 0.5 |
-| 8 | all four > 0 {cci, roc, mom, fi} | 1.0 |
+| 1 | Low beta trap — `beta < 0.5` and `atr10/c·100 < 1.5` (unlikely to deliver the 4% move in 2 weeks) | −10 |
+| 2 | Spike day — `spikeLast === true` OR `|gapPct| > 3` (never chase a spike) | −10 |
+| 3 | Stability risk — `stability20 < 0.3` (erratic action, unsuitable for a measured 4% target) | −15 |
+| 4 | Multi-TF confirmation — weekly raw ≥ 65 AND daily raw ≥ 65 from this same model (multi-TF only, appended by `computeMultiTFEntryScore`) | +10 |
 
-**8.3 MFI + CMF (max 10)**
+Penalty/bonus items are summed into `modifiers`; the final score is clamped to
+[0, 100]. No earnings-date bonus exists (dropped — no reliable in-app source).
 
-| # | Condition | Pts |
-|---|---|---|
-| 1 | `60 ≤ mfi ≤ 80` | 2.5 |
-| 1a | `50 ≤ mfi < 60` | 1.5 |
-| 1b | `40 ≤ mfi < 50` | 1.0 |
-| 1c | `mfi > 80` | 1.0 |
-| 2 | `mfi > mfiPrev && mfi > 50` | 1.5 |
-| 3 | `mfiPrev ≤ 50 && mfi > 50` | 1.0 |
-| 4 | `cmf > 0.10` / `> 0.05` / `> 0` | 2.0 / 1.5 / 1.0 |
-| 5 | `cmf > cmfPrev && cmf > 0` | 1.0 |
-| 6 | `mfi > 50 && cmf > 0` | 0.5 |
-
-**9.1 OBV + PVT + KVO (max 8)**
-
-| # | Condition | Pts |
-|---|---|---|
-| 1 | `obv > obvSma20` | 1.0 |
-| 2 | `obvSlopeVal > 0` | 0.5 |
-| 3 | `obvSlopeVal > obvSlopePrev` | 0.5 |
-| 4 | `pvt > pvtSma20` | 1.0 |
-| 5 | `pvtSlopeVal > 0` | 1.0 |
-| 6 | `pvtSlopeVal > pvtSlopePrev` | 0.5 |
-| 7 | `kvoL > kvoSig` | 1.5 |
-| 8 | `kvoL > 0` | 0.5 |
-| 9 | `kvoL > kvoPrev` | 0.5 |
-| 10 | KVO crossed above signal in last 3 bars | 1.0 |
-
-**9.2 VWAP + Anchored VWAP (max 6)**
-
-| # | Condition | Pts |
-|---|---|---|
-| 1 | `c > vwap10` | 1.5 |
-| 1a | plus `0.5% ≤ (c−vwap10)/vwap10 ≤ 3%` | +0.5 |
-| 2 | `vwap10 > prevVwap10` | 0.5 |
-| 3 | `c > anchoredVwap` | 1.5 |
-| 4 | `anchoredVwap > prevAnchoredVwap` | 0.5 |
-| 5 | `c > vwap10 && c > anchoredVwap` | 1.0 |
-
-**9.3 VP + TTM Squeeze + Accum/Dist (max 6)**
-
-| # | Condition | Pts |
-|---|---|---|
-| 1 | `c > poc` | 1.0 |
-| 2 | `c > vah` | 0.5 |
-| 3 | `poc > prevPoc` | 0.5 |
-| 4 | squeeze just released (`!squeezeOn && squeezeOnPrev`) | 1.0 |
-| 4a | else squeeze on (`squeezeOn`) | 0.5 |
-| 5 | `squeezeMom > 0 && squeezeMom > squeezeMomPrev` | 1.5 |
-| 5a | else `squeezeMom > 0` | 0.5 |
-| 6 | `accumDistLabel == 'ACCUMULATION'` | 1.5 |
-
-**10.1 BB + KC + DC + Chandelier (max 8)**
-
-| # | Condition | Pts |
-|---|---|---|
-| 1 | `bbPos = (c−bbLower)/(bbUpper−bbLower) ∈ [0.5, 0.8]` | 1.0 |
-| 1a | `∈ [0.3, 0.5)` | 0.5 |
-| 2 | `bbWidth > bbWidthPrev` | 0.5 |
-| 3 | `c > kcMid` | 0.5 |
-| 4 | `c > kcUpper` | 0.5 |
-| 5 | `c >= 0.99·dcUpper` | 1.0 |
-| 5a | else `c > (dcUpper+dcLower)/2` | 0.5 |
-| 6 | `c > chandelierLong` | 1.0 |
-| 7 | `chandelierLong > chandelierLongPrev` | 0.5 |
-| 8 | squeeze shape (BB inside KC) | 0.5 |
-| 9 | `2% ≤ ATR% = atr14/c ≤ 4%` | 0.5 |
-| 10 | `c > dcUpper && bbWidth > bbWidthPrev` | 1.0 |
-
-**10.2 Ichimoku (max 6)**
-
-| # | Condition | Pts |
-|---|---|---|
-| 1 | `c > cloudTop` | 2.0 |
-| 1a | else `c > cloudBottom` | 0.5 |
-| 2 | `tenkan > kijun` | 1.0 |
-| 3 | tenkan crossed above kijun in last 3 bars | 0.5 |
-| 4 | `senkouA > senkouB` | 1.0 |
-| 5 | `c > chikou` (close[t] > close[t−26]; live Chikou confirmation) | 0.5 |
-| 6 | confluence: `c>cloudTop && tenkan>kijun && senkouA>senkouB && c>chikou` | 1.0 |
-
-**10.3 Darvas + HMA + KAMA + Fib + Pivot + ZigZag + Choppiness + MTF (max 6)**
-
-| # | Condition | Pts |
-|---|---|---|
-| 1 | `c >= darvasTop` | 1.5 |
-| 1a | else `c > (darvasTop+darvasBottom)/2` | 0.5 |
-| 2 | `c > hma16` | 0.25 |
-| 3 | `hma16 > prevHma16` | 0.25 |
-| 4 | `c > kama10` | 0.25 |
-| 5 | `kama10 > prevKama10` | 0.25 |
-| 6 | within 0.5% of fib 0.382/0.5/0.618 and `c > pc` | 0.5 |
-| 7 | `c > pivotP` | 0.25 |
-| 8 | `c > pivotR1` | 0.25 |
-| 9 | `chopIndex < 38.2` / `< 50` | 0.5 / 0.25 |
-| 10 | `zigzagDirection == 'UP'` | 0.5 |
-| 11 | `mtfAlign >= 80` / `>= 60` | 1.0 / 0.5 |
-
-### 6.3 Spike & stability sub-scores (penalising)
-
-| Sub-score | Calculation | Range |
-|---|---|---|
-| `spike` | spike detected on latest bar → +5; on prior bar → +3; any spike in last 20 bars → +2 (capped 10) | 0–10, higher = worse |
-| `stability` | `(1 − calcStabilityScore(candles, lookback)) · 10` (lookback 10 for H/D, 6 for W) | 0–10, higher = worse |
-
-### 6.4 Section 11 modifiers
-
-**Penalties (`buildEntryPenaltyItems`)** — evaluated in order:
-
-| # | Condition | Pts |
-|---|---|---|
-| 1 | `rsi14 > 80` (overbought) | −5 |
-| 2 | last 5 bars all rising **and** all on falling volume | −8 |
-| 3 | weekly bearish **and** daily bullish (multi-TF: `weeklyClose < weeklyEMA21` && `dailyClose > dailyEMA21`; single-TF proxies: weekly = `c < sma50`, daily = `c > hma16`) | −10 |
-| 4 | price within 1% below pivot R1 (`0 ≤ (R1−c)/c < 0.01`) | −5 |
-| 5 | squeeze on for more than 10 consecutive bars | −3 |
-| 6 | `beta > 1.5` and `ATR% = atr14/c > 3%` | −3 |
-| 7 | spike sub-score ≥ 7 / ≥ 4 / ≥ 2 | −15 / −8 / −4 |
-| 8 | stability sub-score ≥ 7 / ≥ 5 | −10 / −5 |
-| 9 | `dominanceRatio > 0.6` and spike sub-score < 4 (see §6.5) | −12 |
-
-**Bonuses (`buildEntryBonusItems`):**
-
-| # | Condition | Pts |
-|---|---|---|
-| 1 | `c > dcUpper` and last-bar volume > 1.5 × 20-bar average (only when `todaySpike` is false) | +5 |
-| 2 | all three TFs bullish (single-TF proxies: H = `c>hma16`, D = `c>ema21`, W = `c>sma50`) | +5 |
-| 3 | `indexTrendScore > 60` | +3 |
-| 4 | `accumDistLabel == 'ACCUMULATION'` and `mtfAlign > 80` | +3 |
-| 5 | `rsMansfield > 5` and `aroonOsc > 50` | +3 |
-| 6 | `c > pivotR1` and `c > fib 0.618` | +2 |
-| 7 | `efficiencyRatio10 > 0.6` and `not todaySpike` (smooth steady climb) | +3 |
-
-### 6.5 Spike / Stability Guard (hybrid anti-chase filter)
+### 6.5 Spike / Stability Guard (hard gate)
 
 Computed once per session on the **daily** candles by `computeSpikeGuard(candles)`:
 
 | Metric | Formula | Use |
 |---|---|---|
 | `todaySpike` | latest-bar detection (`calcDetectSpike`: `|ret| > 2.5·rollingStd(20)` **and** `> 2.5·ATR14%`) **or** open-gap trigger `|gap%| > max(3.5, 1.5·ATR%)` | **hard gate**: `final = min(final, 49)` → never above NEUTRAL on the day of an abnormal print |
-| `dominanceRatio` | largest single-day `|move%|` ÷ `|net 5-day move%|` (1.0 if `|net| < 0.5%`) | penalty **−12** when `> 0.6` **and spike sub-score < 4** |
-| `efficiencyRatio10` | `|close − close[10]|` ÷ Σ`|diffs|` over 10 (identical to the KAMA efficiency ratio) | bonus **+3** when `> 0.6` and `not todaySpike` |
+| `dominanceRatio` | largest single-day `|move%|` ÷ `|net 5-day move%|` (1.0 if `|net| < 0.5%`) | informational — shown on the guard card; no longer a scored penalty (the spike modifier −10 and the hard gate already cover abnormal sessions) |
+| `efficiencyRatio10` | `|close − close[10]|` ÷ Σ`|diffs|` over 10 (identical to the KAMA efficiency ratio) | feeds the 4% Probability pillar (+5 when `> 0.4`) |
 
-The gate is applied after all penalties/bonuses in both `computeEntryScore` and `computeMultiTFEntryScore`; classification is re-derived from the capped score. The graded spike/stability sub-scores (6.3) remain per-timeframe and weighted across H/D/W; dominance/ER/gate are daily-only.
+The gate is applied after all modifiers in both `computeEntryScore` and
+`computeMultiTFEntryScore`; classification is re-derived from the capped score.
+The spike/stability **modifiers** (6.4) remain per-timeframe on the base
+snapshot; dominance/ER/gate are daily-only.
 
 **No-overlap rules (anti-double-count):**
-- The dominance penalty **does not fire** when the spike sub-score is ≥ 4: in that case the dominant session is the latest or prior bar, which the spike tiers (−15/−8) already penalize. Dominance fires only for a dominant session that is *not* the latest/prior bar (spike sub-score < 4), so one abnormal session is never penalized twice.
-- The gate (hard cap) and the spike penalty are complementary: the cap stops BUY on a strong-pillar spike day; the −15 tier keeps a moderate spike day at ≈ 45 (NEUTRAL or below) even when pillars are weak. Both rely on the same `todaySpike` detection, so they never conflict.
+- The spike modifier (−10) and the hard gate are complementary: the cap stops BUY on a strong-pillar spike day; the −10 keeps a moderate spike day lower even when pillars are weak. Both rely on the same `todaySpike` detection, so they never conflict.
 - `calcStabilityScore`: a zero-variance path (`stdRet === 0`, e.g. perfectly smooth climb) returns **1** (most stable → no stability penalty). A non-positive mean still returns 0.
 
 ---
@@ -792,43 +635,43 @@ Note: rows 1 (Darvas bottom break) and 13/13c (stop breach) can fire **simultane
 ### 8.1 Entry — `computeMultiTFEntryScore(tfResults, indexCandles, indexWeeklyCandles)`
 
 ```
-weights = { H: 0.30, D: 0.50, W: 0.20 }
+weights = { D: 0.55, H: 0.30, W: 0.15 }
 
-for each of the 14 component keys (12 sub-scores + spike + stability):
+for each of the 3 pillar keys (trendHealth, pullbackQuality, prob4):
     wSum = 0, acc = 0
-    for label in H, D, W:
+    for label in D, H, W:
         if perTF[label] has a value: acc += weight[label]·value;  wSum += weight[label]
-    comps[key] = acc / wSum                     # renormalised over available TFs
+    agg[key] = min(pillarMax, acc / wSum)        # renormalised over available TFs, cap at combined level
 
-trendScore = comps.7.1 + comps.7.2 + comps.7.3
-... (same pillar structure as single-TF)
-rawTotal   = sum of 4 pillars
+rawTotal = agg.trendHealth + agg.pullbackQuality + agg.prob4   # pillars cap at 30/30/40 here
 
-# Section 11 modifiers run ONCE on the base snapshot:
-baseSn = (perTF.D || perTF.H || perTF.W).sn        # D preferred, then H, then W
-weeklyBearish = weeklyClose < weeklyEMA21  (real W candles)
-dailyBullish  = dailyClose  > dailyEMA21   (real D candles, else baseTF)
-hourlyBullish = hourlyClose > hourlyEMA21  (real H candles)
-penalties/bonuses = buildEntryPenaltyItems(baseSn, { weeklyTrend, dailyBullish,
-                     spikeSub: comps.spike, stabSub: comps.stability }) etc.
-indexTrendScore = computeIndexTrendScore(indexCandles, indexWeeklyCandles)
+# Modifiers run ONCE on the Daily snapshot only (daily is the primary decision frame):
+baseSn   = perTF.D.sn                                   # daily only
+spikeDay = (perTF.D present) && (perTF.D.sn.spikeLast === true || |gapPct| > 3)
+items    = buildEntryModifiers(baseSn, { spikeDay, mtfAlign })
+mtfAlign = (perTF.W.raw >= 65) && (perTF.D.raw >= 65)   # both genuinely present & strong
 
-finalScore = clamp(rawTotal + penalties + bonuses, 0, 100)
+finalScore = clamp(rawTotal + Σ items, 0, 100)
 ```
 
 Notes:
-- Missing timeframes are simply omitted and weights renormalised (e.g. only D+W
-  available → wSum = 0.70, both scaled up by 1/0.7).
-- Spike/stability are aggregated with the same weights (H/D lookback 10, W
-  lookback 6) and feed the Section 11 spike/stability penalties.
+- Missing timeframes are simply omitted and weights renormalised over the
+  available ones (e.g. only D+W available → wSum = 0.70, so D = 0.55/0.70 =
+  78.6% and W = 0.15/0.70 = 21.4%).
+- Pillars aggregate **per-pillar** (not per old sub-score); the three pillar
+  values are each the renormalised weighted average across D/H/W.
+- Pillar caps apply at the **combined level**: each aggregated pillar is clamped
+  to its max (Trend Health ≤ 30, Pullback Quality ≤ 30, 4% Probability ≤ 40)
+  before summing into `rawTotal`.
+- Modifiers run **once**, on the Daily snapshot only — never per timeframe.
+  The +10 bonus is the only modifier that needs both weekly and daily raw ≥ 65.
+- `todaySpike` hard gate (cap 49) runs once on the daily candles.
 - Output adds `timeframesUsed` and a per-TF `details` array. Each row's
-  `entryScore` is that TF's **raw** pillar sum (`trend + momentum + volume +
-  structure`) — i.e. it always equals the sum of the breakdown bars displayed
-  beside it — classified with `classifyScore` on that raw sum. Per-TF
-  `penalties`/`bonuses` are 0: Section 11 modifiers are applied once at the
-  combined level, never per timeframe. (This is deliberate: re-running the
-  single-TF score with single-TF proxy bullishness used to clamp per-TF totals
-  to 0 despite positive breakdowns.)
+  `entryScore` is that TF's **raw** pillar sum (`trendHealth + pullbackQuality +
+  prob4`) — i.e. it always equals the sum of the breakdown bars displayed beside
+  it — classified with `classifyScore` on that raw sum. Per-TF
+  `penalties`/`bonuses`/`modifiers` are 0: modifiers are applied once at the
+  combined level, never per timeframe.
 
 ### 8.2 Exit — `computeMultiTFExitScore(tfResults, position, indexCandles)`
 
@@ -929,16 +772,20 @@ etc., then each pillar re-capped at 25 for the breakdown.
 ## 11. Edge cases & guarantees
 
 - **Short data:** < 50 candles → `insufficient_data` (need 50, got n); MTF with
-  no valid TF → `no_valid_scores`; no TF results → `no_timeframes`.
-- **Missing index:** `computeExitScore`/MTF skip index-derived fields (`beta`,
-  `rsMansfield`, `indexTrendScore`), leaving `null`; score functions check
+  no valid TF → `no_valid_scores`; no TF results → `no_timeframes`. Entry
+  snapshots require 50 bars (`buildEntrySnapshot`); exit requires 50 too.
+- **Missing index:** entry/exit skip index-derived fields (`beta`,
+  `rsMansfield`), leaving `null`; pillar and modifier functions check
   `!= null` before every index-dependent condition.
-- **Index used as "stock":** `indexTrendScore` reuses `computeEntryScore` on the
-  index candles — cheap, no extra state.
+- **Index used as "stock":** exit `indexTrendScore` reuses `computeEntryScore`
+  on the index candles — cheap, no extra state. Entry no longer scores the index
+  directly; RS/beta only.
 - **In-progress bar:** included as-is in every series (no trimming, entry or
   exit).
 - **Clamping:** final score always `clamp(..., 0, 100)` after modifiers.
-- **Rounding:** sub-scores accumulate unrounded internally (0.5 steps from
-  conditions), capped per sub-score, summed to pillars, then rounded at output.
+- **Hard gate:** when `todaySpike` is true the final entry score is capped at 49
+  (NEUTRAL) after modifiers, in both single-TF and MTF entry.
+- **Rounding:** pillar sub-scores accumulate unrounded internally, capped per
+  pillar, summed to `rawTotal`, then rounded at output (1 dp).
 - **Determinism:** all series are pure functions of the candle array; snapshot
   caching is per-call, no shared mutable state.
