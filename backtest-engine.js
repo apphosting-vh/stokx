@@ -256,6 +256,7 @@ window.BacktestEngine = (function () {
           if (cur.o >= targetPrice) {
             hitTarget = true;
             daysToTarget = j;
+            exitDate = String(cur.t).slice(0, 10);
             exitPrice = cur.o * (1 - slip / 100) * (1 - broker / 100);
             break;
           }
@@ -263,6 +264,7 @@ window.BacktestEngine = (function () {
           if (cur.h >= targetPrice) {
             hitTarget = true;
             daysToTarget = j;
+            exitDate = String(cur.t).slice(0, 10);
             exitPrice = targetPrice * (1 - slip / 100) * (1 - broker / 100);
             break;
           }
@@ -271,6 +273,7 @@ window.BacktestEngine = (function () {
           if (cur.h >= targetPrice) {
             hitTarget = true;
             daysToTarget = j;
+            exitDate = String(cur.t).slice(0, 10);
             exitPrice = targetPrice;
             break;
           }
