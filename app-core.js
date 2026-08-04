@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.21";
+window.__STOX_APP_VERSION = "2.10.22";
 
 /* Apply saved score config on startup */
 (function() {
@@ -5928,11 +5928,13 @@ const BacktestSuitePanel = () => {
     const st = d.stats || {};
     const buckets = (st.scoreBrackets || {});
     const ORDER = ["STRONG_BUY", "BUY", "WATCHLIST", "NEUTRAL", "AVOID"];
+    const _scRS = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
+    const _pmRS = _scRS.pillarMax || {};
     return React.createElement("div", null,
       (d.currentScore) && React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, marginBottom: 16, background: "rgba(6,182,212,.06)", border: "1px solid rgba(6,182,212,.2)", fontSize: 12, color: "var(--text2)", lineHeight: 1.6 } },
         React.createElement("span", { style: { color: "var(--accent)", fontWeight: 700 } }, "Current session: "),
         "Entry Score " + fmtS(d.currentScore.entryScore) + " (" + (d.currentScore.classification || "\u2014") + ")" +
-        " \u00b7 Trend " + fmt2(d.currentScore.trendHealth) + "/30 \u00b7 Pullback " + fmt2(d.currentScore.pullbackQuality) + "/30 \u00b7 4% Prob " + fmt2(d.currentScore.prob4) + "/40" +
+        " \u00b7 Trend " + fmt2(d.currentScore.trendHealth) + "/" + (_pmRS.trendHealth != null ? _pmRS.trendHealth : 30) + " \u00b7 Pullback " + fmt2(d.currentScore.pullbackQuality) + "/" + (_pmRS.pullbackQuality != null ? _pmRS.pullbackQuality : 30) + " \u00b7 4% Prob " + fmt2(d.currentScore.prob4) + "/" + (_pmRS.prob4 != null ? _pmRS.prob4 : 40) +
         (d.currentScore.modifiers != null ? " \u00b7 modifiers " + (d.currentScore.modifiers >= 0 ? "+" : "") + fmt2(d.currentScore.modifiers) : "") +
         ". Data is as-of the last close \u2014 this is the score you would have seen."
       ),
@@ -6646,7 +6648,10 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
   function toDec(cls) {
     return SCREENER_DECISION_MAP[cls] || { label: cls, color: 'var(--text6)' };
   }
-  var out = {
+    var _sc = (TI.getScoreConfig && TI.getScoreConfig()) || {};
+    var _pm = _sc.pillarMax || {};
+    var _modCfg = _sc.modifiers || {};
+    var out = {
     finalScore: multi.multiTF_score,
     decision: toDec(multi.classification),
     baseScore: multi.raw_score != null ? multi.raw_score : multi.multiTF_score,
@@ -6665,10 +6670,10 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
     var scoreObj = {
       total: d.entryScore,
       decision: toDec(d.classification),
-      trendHealthScore: d.trendHealth, trendHealthMax: 30,
-      pullbackScore: d.pullbackQuality, pullbackMax: 30,
-      prob4Score: d.prob4, prob4Max: 40,
-      modifiersScore: d.modifiers != null ? d.modifiers : 0, modifiersMax: 15,
+      trendHealthScore: d.trendHealth, trendHealthMax: _pm.trendHealth != null ? _pm.trendHealth : 30,
+      pullbackScore: d.pullbackQuality, pullbackMax: _pm.pullbackQuality != null ? _pm.pullbackQuality : 30,
+      prob4Score: d.prob4, prob4Max: _pm.prob4 != null ? _pm.prob4 : 40,
+      modifiersScore: d.modifiers != null ? d.modifiers : 0, modifiersMax: _modCfg.max != null ? _modCfg.max : 15,
       penalties: d.penalties, bonuses: d.bonuses, raw_score: d.raw_score,
       spike: d.spike != null ? d.spike : null, stability: d.stability != null ? d.stability : null
     };
@@ -7279,16 +7284,19 @@ function StockScreener(props) {
     return sortDir === "asc" ? av - bv : bv - av;
   });
 
+  var _cfg = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig().classification : null;
+  var _buyTh = _cfg ? _cfg.buy : 65, _wlTh = _cfg ? _cfg.watchlist : 50;
+
   var filtered = filter === "all" ? sorted : sorted.filter(function(r) {
-    if (filter === "buy") return r.result.finalScore >= 65;
-    if (filter === "watch") return r.result.finalScore >= 50 && r.result.finalScore < 65;
-    if (filter === "avoid") return r.result.finalScore < 50;
+    if (filter === "buy") return r.result.finalScore >= _buyTh;
+    if (filter === "watch") return r.result.finalScore >= _wlTh && r.result.finalScore < _buyTh;
+    if (filter === "avoid") return r.result.finalScore < _wlTh;
     return true;
   });
 
-  var countBuy = results.filter(function(r) { return r.result.finalScore >= 65; }).length;
-  var countWatch = results.filter(function(r) { return r.result.finalScore >= 50 && r.result.finalScore < 65; }).length;
-  var countAvoid = results.filter(function(r) { return r.result.finalScore < 50; }).length;
+  var countBuy = results.filter(function(r) { return r.result.finalScore >= _buyTh; }).length;
+  var countWatch = results.filter(function(r) { return r.result.finalScore >= _wlTh && r.result.finalScore < _buyTh; }).length;
+  var countAvoid = results.filter(function(r) { return r.result.finalScore < _wlTh; }).length;
 
   var arrow = function(key) {
     if (sortKey !== key) return "";
@@ -8291,13 +8299,15 @@ function SingleStockAnalysis({ requestedTicker }) {
             [["W", mtf.entry.weekly], ["D", mtf.entry.daily], ["H", mtf.entry.hourly]].map(function (t) {
               var s = t[1];
               var total = s && s.total != null ? s.total : null;
+              var _cbCfg = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig().classification : null;
+              var _cbSB = _cbCfg ? _cbCfg.strongBuy : 80, _cbB = _cbCfg ? _cbCfg.buy : 65, _cbW = _cbCfg ? _cbCfg.watchlist : 50, _cbN = _cbCfg ? _cbCfg.neutral : 35;
               return React.createElement("div", { key: t[0], style: { flex: 1 } },
                 React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 8, color: "var(--text6)", fontFamily: "var(--font-mono)" } },
                   React.createElement("span", null, t[0]),
                   React.createElement("span", null, total != null ? total : "\u2014")
                 ),
                 React.createElement("div", { style: { height: 4, borderRadius: 2, background: "var(--bg5)", marginTop: 2, overflow: "hidden" } },
-                  total != null && React.createElement("div", { style: { width: Math.min(100, Math.max(0, total)) + "%", height: "100%", background: total >= 80 ? "var(--profit)" : total >= 65 ? "#22c55e" : total >= 50 ? "#fbbf24" : total >= 35 ? "#fb923c" : "var(--loss)", borderRadius: 2 } })
+                  total != null && React.createElement("div", { style: { width: Math.min(100, Math.max(0, total)) + "%", height: "100%", background: total >= _cbSB ? "var(--profit)" : total >= _cbB ? "#22c55e" : total >= _cbW ? "#fbbf24" : total >= _cbN ? "#fb923c" : "var(--loss)", borderRadius: 2 } })
                 )
               );
             })
@@ -9427,6 +9437,8 @@ function App() {
 /* 19.1 Entry Scan — run daily after market close (15:30 IST) */
 async function scanEntries(universe) {
   if (!universe || !universe.length) return [];
+  var _scCfg = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig().classification : null;
+  var _scanBuyTh = _scCfg ? _scCfg.buy : 65;
   var idxD = await DF.fetchOHLCVCached('^NSEI', 'daily');
   var idxW = await DF.fetchOHLCVCached('^NSEI', 'weekly');
   var results = [];
@@ -9444,10 +9456,10 @@ async function scanEntries(universe) {
       ];
       var score = TI.computeMultiTFEntryScore(tfResults, idxD, idxW);
       var entryScore = score && score.multiTF_score != null ? score.multiTF_score : (score && score.entry_score != null ? score.entry_score : null);
-      if (entryScore != null && entryScore >= 65) {
+      if (entryScore != null && entryScore >= _scanBuyTh) {
         results.push({
           symbol: sym, score: Math.round(entryScore * 10) / 10,
-          classification: score.classification || (entryScore >= 80 ? 'STRONG_BUY' : 'BUY'),
+          classification: score.classification || 'BUY',
           details: score
         });
       }

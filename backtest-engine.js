@@ -704,10 +704,11 @@ window.BacktestEngine = (function () {
       // ── 2. Pillar-level sweeps ──
       var pResults = {};
       if (pillarSweep) {
+        var pillarSweepCfg = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig().pillarMax : null;
         var pillars = [
-          { key: 'trendHealth', optKey: 'minTrendHealth', label: 'Trend Health', max: 30, values: pillarSweep.trendHealth || [0, 5, 10, 15, 20, 25] },
-          { key: 'pullbackQuality', optKey: 'minPullbackQuality', label: 'Pullback Quality', max: 30, values: pillarSweep.pullbackQuality || [0, 5, 10, 15, 20, 25] },
-          { key: 'prob4', optKey: 'minProb4', label: '4% Probability', max: 40, values: pillarSweep.prob4 || [0, 5, 10, 15, 20, 25, 30, 35] }
+          { key: 'trendHealth', optKey: 'minTrendHealth', label: 'Trend Health', max: pillarSweepCfg ? pillarSweepCfg.trendHealth : 30, values: pillarSweep.trendHealth || [0, 5, 10, 15, 20, 25] },
+          { key: 'pullbackQuality', optKey: 'minPullbackQuality', label: 'Pullback Quality', max: pillarSweepCfg ? pillarSweepCfg.pullbackQuality : 30, values: pillarSweep.pullbackQuality || [0, 5, 10, 15, 20, 25] },
+          { key: 'prob4', optKey: 'minProb4', label: '4% Probability', max: pillarSweepCfg ? pillarSweepCfg.prob4 : 40, values: pillarSweep.prob4 || [0, 5, 10, 15, 20, 25, 30, 35] }
         ];
         // Single engine with threshold=0 — scores are cached and reused across all pillar values
         var pillarEng = create({ scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: 0 });
