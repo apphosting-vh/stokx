@@ -8297,7 +8297,7 @@ function PulsePage({ holdings }) {
       activeTab === "entryscore" && React.createElement(EntryScorePanel, { shares: holdings || [] }),
       activeTab === "confidencescore" && React.createElement(ConfidenceTracker, null),
       activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker }),
-      activeTab === "backtest" && React.createElement(BacktestSuitePanel, null)
+      React.createElement("div", { style: { display: activeTab === "backtest" ? "" : "none" } }, React.createElement(BacktestSuitePanel, null))
     )
   );
 }
