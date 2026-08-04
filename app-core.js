@@ -6240,11 +6240,12 @@ const ScoreTunerPanel = () => {
       const dataMap = {};
       const idxSym = "^NSEI";
       let idxCandles = null;
-      try { idxCandles = await DF.fetchOHLCV(idxSym, "2y"); } catch (e) {}
+      try { const r = await DF.fetchOHLCVCached(idxSym, "daily"); idxCandles = (r && r.data) || null; } catch (e) {}
       for (let i = 0; i < symbols.length; i++) {
         if (cancelRef.current) throw new Error("cancelled");
         try {
-          const c = await DF.fetchOHLCV(symbols[i], "2y");
+          const r = await DF.fetchOHLCVCached(symbols[i], "daily");
+          const c = (r && r.data) || null;
           if (c && c.length >= 80) dataMap[symbols[i]] = c;
         } catch (e) {}
         setProgress({ phase: "Fetching candles...", done: i + 1, total: symbols.length });
