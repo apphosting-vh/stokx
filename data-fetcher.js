@@ -124,7 +124,8 @@ window.OHLCVFetcher = (function () {
      Returns { price, change, changePercent } or null
      ═══════════════════════════════════════════════════════════════════════ */
   async function fetchQuote(ticker) {
-    var symbols = [ticker.toUpperCase() + ".NS", ticker.toUpperCase() + ".BO", ticker.toUpperCase()];
+    var cleanTicker = (ticker || "").trim().toUpperCase().replace(/\.(NS|BO)$/i, "");
+    var symbols = [cleanTicker + ".NS", cleanTicker + ".BO", cleanTicker];
     for (var s = 0; s < symbols.length; s++) {
       for (var h = 0; h < Y_HOSTS.length; h++) {
         for (var p = 0; p < Y_PROXY_FNS.length; p++) {
@@ -195,6 +196,9 @@ window.OHLCVFetcher = (function () {
     ticker = (ticker || "").trim().toUpperCase();
     if (!ticker) return null;
 
+    /* Strip .NS / .BO suffix if present — fetchFromYahooIntraday re-appends them */
+    var cleanTicker = ticker.replace(/\.(NS|BO)$/i, "");
+
     var yfInterval, yfRange;
     switch (timeframe) {
       case "daily": yfInterval = "1d"; yfRange = "2y"; break;
@@ -207,7 +211,7 @@ window.OHLCVFetcher = (function () {
       case "weekly": yfInterval = "1wk"; yfRange = "5y"; break;
       default: yfInterval = "5m"; yfRange = "1mo"; break;
     }
-    var yfData = await fetchFromYahooIntraday(ticker, yfInterval, yfRange);
+    var yfData = await fetchFromYahooIntraday(cleanTicker, yfInterval, yfRange);
     return { candles: yfData, source: "Yahoo Finance" };
   }
 

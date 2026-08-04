@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.15";
+window.__STOX_APP_VERSION = "2.10.16";
 
 /* Apply saved score config on startup */
 (function() {
@@ -6273,18 +6273,27 @@ const ScoreTunerPanel = () => {
       const idxSym = "^NSEI";
       let idxCandles = null;
       try { const r = await DF.fetchOHLCVCached(idxSym, "daily"); idxCandles = (r && r.data) || null; } catch (e) {}
+      var fetchErrors = [];
       for (let i = 0; i < symbols.length; i++) {
         if (cancelRef.current) throw new Error("cancelled");
         try {
           const r = await DF.fetchOHLCVCached(symbols[i], "daily");
           const c = (r && r.data) || null;
-          if (c && c.length >= 80) dataMap[symbols[i]] = c;
-        } catch (e) {}
+          if (c && c.length >= 80) {
+            dataMap[symbols[i]] = c;
+          } else {
+            fetchErrors.push(symbols[i] + ": " + (c ? c.length + " bars" : "no data"));
+          }
+        } catch (e) { fetchErrors.push(symbols[i] + ": " + (e.message || e)); }
         setProgress({ phase: "Fetching candles...", done: i + 1, total: symbols.length });
         await new Promise(r => setTimeout(r, 0));
       }
       const validCount = Object.keys(dataMap).length;
-      if (validCount === 0) throw new Error("No valid data fetched");
+      if (validCount === 0) {
+        var debugMsg = "No valid data fetched. " + fetchErrors.length + " failures.";
+        if (fetchErrors.length > 0) debugMsg += " First 5: " + fetchErrors.slice(0, 5).join("; ");
+        throw new Error(debugMsg);
+      }
 
       setProgress({ phase: "Running sweep on " + validCount + " stocks...", done: 0, total: 1 });
 
