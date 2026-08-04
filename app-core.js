@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.18";
+window.__STOX_APP_VERSION = "2.10.20";
 
 /* Apply saved score config on startup */
 (function() {
@@ -6307,7 +6307,7 @@ const ScoreTunerPanel = () => {
       const sweepResult = await engine.sweepEntryScore(dataMap, {
         symbols: Object.keys(dataMap),
         scoreThresholds: [40, 45, 50, 55, 60, 65, 70, 75, 80],
-        pillarSweep: { trendHealth: [10, 15, 20, 25, 28], pullbackQuality: [10, 15, 20, 25, 28], prob4: [15, 20, 25, 30, 35] },
+        pillarSweep: { trendHealth: [0, 5, 10, 15, 20, 25], pullbackQuality: [0, 5, 10, 15, 20, 25], prob4: [0, 5, 10, 15, 20, 25, 30, 35] },
         sampleEvery: sampleEvery
       }, {
         onProgress: (done, total, label) => { if (!cancelRef.current) setProgress({ phase: label, done, total }); }
@@ -6432,7 +6432,7 @@ const ScoreTunerPanel = () => {
 
       result && activeResultTab === "pillar" && React.createElement("div", { className: "stx-card", style: { padding: 12, overflowX: "auto" } },
         React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 8, color: "var(--text)" } }, "Pillar-Level Sweep"),
-        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 10 } }, "Each pillar tested independently (while total score stays >= threshold). Higher correlation with win rate = more predictive."),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 10 } }, "Each pillar tested independently across all scored bars (no total score filter). Higher correlation with win rate = more predictive."),
         Object.keys(result.sweep.pillarSweep || {}).map(pillar =>
           React.createElement("div", { key: pillar, style: { marginBottom: 16 } },
             React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", marginBottom: 4, textTransform: "capitalize" } }, pillar.replace(/([A-Z])/g, " $1").trim()),

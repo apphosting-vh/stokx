@@ -669,11 +669,17 @@ window.BacktestEngine = (function () {
       symbols.forEach(function (s) { if (dataMap[s]) subMap[s] = dataMap[s]; });
 
       // ── 1. Total score threshold sweep ──
+      var totalPillarSteps = pillarSweep
+        ? (pillarSweep.trendHealth || [0,5,10,15,20,25]).length
+          + (pillarSweep.pullbackQuality || [0,5,10,15,20,25]).length
+          + (pillarSweep.prob4 || [0,5,10,15,20,25,30,35]).length
+        : 0;
+      var totalSteps = thRange.length + totalPillarSteps;
       var thResults = [];
       for (var ti = 0; ti < thRange.length; ti++) {
         var th = thRange[ti];
-        if (hooks.onProgress) hooks.onProgress(ti, thRange.length + (pillarSweep ? 3 : 0), "Sweeping total score ≥ " + th);
-        var eng = create(Object.assign({}, { threshold: th, scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays }, opts));
+        if (hooks.onProgress) hooks.onProgress(ti, totalSteps, "Sweeping total score ≥ " + th);
+        var eng = create({ threshold: th, scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays });
         var batch = await eng.runBatch(subMap, { symbols: symbols, sampleEvery: opts.sampleEvery || 2 });
         var sm = batch.summary;
         thResults.push({
@@ -691,21 +697,23 @@ window.BacktestEngine = (function () {
       var pResults = {};
       if (pillarSweep) {
         var pillars = [
-          { key: 'trendHealth', optKey: 'minTrendHealth', label: 'Trend Health', max: 30, values: pillarSweep.trendHealth || [10, 15, 20, 25, 28] },
-          { key: 'pullbackQuality', optKey: 'minPullbackQuality', label: 'Pullback Quality', max: 30, values: pillarSweep.pullbackQuality || [10, 15, 20, 25, 28] },
-          { key: 'prob4', optKey: 'minProb4', label: '4% Probability', max: 40, values: pillarSweep.prob4 || [15, 20, 25, 30, 35] }
+          { key: 'trendHealth', optKey: 'minTrendHealth', label: 'Trend Health', max: 30, values: pillarSweep.trendHealth || [0, 5, 10, 15, 20, 25] },
+          { key: 'pullbackQuality', optKey: 'minPullbackQuality', label: 'Pullback Quality', max: 30, values: pillarSweep.pullbackQuality || [0, 5, 10, 15, 20, 25] },
+          { key: 'prob4', optKey: 'minProb4', label: '4% Probability', max: 40, values: pillarSweep.prob4 || [0, 5, 10, 15, 20, 25, 30, 35] }
         ];
+        // Single engine with threshold=0 — scores are cached and reused across all pillar values
+        var pillarEng = create({ scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: 0 });
+        var pillarOffset = 0;
         for (var pi = 0; pi < pillars.length; pi++) {
           var p = pillars[pi];
           var pRows = [];
           for (var vi = 0; vi < p.values.length; vi++) {
             var pv = p.values[vi];
             var label = p.label + " ≥ " + pv;
-            if (hooks.onProgress) hooks.onProgress(thRange.length + pi * p.values.length + vi, thRange.length + pillars.length * p.values.length, label);
+            if (hooks.onProgress) hooks.onProgress(thRange.length + pillarOffset + vi, thRange.length + totalPillarSteps, label);
             var filterOpts = {};
             filterOpts[p.optKey] = pv;
-            var eng2 = create(Object.assign({}, { threshold: threshold, scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays }, opts, filterOpts));
-            var batch2 = await eng2.runBatch(subMap, { symbols: symbols, sampleEvery: opts.sampleEvery || 2 });
+            var batch2 = await pillarEng.runBatch(subMap, Object.assign({ symbols: symbols, sampleEvery: opts.sampleEvery || 2 }, filterOpts));
             var sm2 = batch2.summary;
             pRows.push({
               pillar: p.key,
@@ -720,6 +728,7 @@ window.BacktestEngine = (function () {
             await yieldToUI();
           }
           pResults[p.key] = pRows;
+          pillarOffset += p.values.length;
         }
       }
 
