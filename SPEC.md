@@ -104,7 +104,7 @@ Wilder smoothing (ATR, RSI, ADX, MFI internals) is `ema` with `alpha = 1/period`
 | `calcOBV(candles)` | - | `number[]` |
 | `calcPVT(candles)` | Price-Volume Trend, rounded to 2dp | `number[]` |
 | `calcKVO(candles, fast=34, slow=55, signal=13)` | Klinger Volume Oscillator | `{ line, signal }` |
-| `calcAnchoredVWAP(candles, anchorIdx=0)` | - | `number[]` |
+| `calcAnchoredVWAP(candles, anchorIdx?)` | anchorIdx defaults to the start of the trailing 252 sessions (`max(0, len−252)`), null-prefixed before the anchor | `number[]` |
 | `calcVolumeProfile(candles, numBins=24, lookback=60)` | - | `{ bins, poc, pocVolume, vah, val, valueAreaHigh, valueAreaLow }` |
 | `calcTTMSqueeze(candles, bbPeriod=20, bbMult=2, kcMult=1.5)` | - | `boolean[]` |
 | `calcSqueezeMomentum(candles)` | Linear-regression slope × bars | `{ values, squeeze }` |
@@ -121,11 +121,11 @@ Wilder smoothing (ATR, RSI, ADX, MFI internals) is `ema` with `alpha = 1/period`
 | `calcBollingerBands(candles, period=20, mult=2)` | std with ddof=1 | `{ upper, middle, lower, bandwidth }` |
 | `calcKeltnerChannels(candles, period=20, mult=1.5)` | uses `ATR(period)` | `{ upper, middle, lower }` |
 | `calcDonchianChannels(candles, period=20)` | - | `{ upper, middle, lower }` |
-| `calcDarvasBox(candles, boxPeriod=20, confirmBars=3)` | recentLow over last `confirmBars` | `{ boxTop, boxBottom, top, bottom, boxRange, position, breakout, pctFromTop }` |
+| `calcDarvasBox(candles, boxPeriod=20, confirmBars=3)` | box top = most recent `boxPeriod`-bar swing high that **held** `confirmBars` (fallback: rolling max); box bottom = lowest low since that high | `{ boxTop, boxBottom, top, bottom, boxRange, position, breakout, pctFromTop }` |
 | `calcFibonacci(candles)` | Last 50 bars | `{ swingHigh, swingLow, retrace, extension }` |
 | `calcPivotPoints(candles)` | Previous day | `{ classic: { P, R1–R3, S1–S3 }, camarilla: {…} }` |
 | `calcWilliamsFractals(candles)` | - | `{ up, down }` |
-| `calcZigZag(candles, pct=5%)` | Pivot threshold | `{ highs, lows }` (pivot indices) |
+| `calcZigZag(candles, pct=5%)` | Pivot threshold; multi-TF entry path scales per timeframe (H=2%, D=3%, W=5%) | `{ highs, lows }` (pivot indices) |
 | `calcChoppinessIndex(candles, period=14)` | - | `number[]` |
 | `calcSmartMoney(candles)` | Order blocks, BOS, CHOCH | `{ orderBlocks, bos, choch, swings }` |
 | `calcMTFAlignment(candles)` | EMA9/21/50, SMA100/200 vs close | `number` (0–100%) |
@@ -224,9 +224,9 @@ where:
 | 11 | Stability sub-score ≥ 5 (moderately erratic, weighted) | −5 |
 | 12 | `dominance_ratio` > 0.6 **and spike sub-score < 4** (one session = >60% of the net 5-day move) | −12 |
 
-**Spike sub-score (0–10, higher = worse):** per TF, `calcDetectSpike(candles, 20, 2.5, 2.5)` → latest spike +5, prior-bar spike +3, any spike in the last 20 bars +2 (capped 10). **Stability sub-score (0–10, higher = worse):** `(1 − calcStabilityScore(candles, lookback)) × 10`, lookback 10 for H/D and 6 for W. Both are weighted `H×0.20 + D×0.50 + W×0.30` (renormalized over available TFs) before the thresholds above are applied.
+**Spike sub-score (0–10, higher = worse):** per TF, `calcDetectSpike(candles, 20, 2.5, 2.5)` → latest spike +5, prior-bar spike +3, any spike in the last 20 bars +2 (capped 10). **Stability sub-score (0–10, higher = worse):** `(1 − calcStabilityScore(candles, lookback)) × 10`, lookback 10 for H/D and 6 for W. Both are weighted `H×0.30 + D×0.50 + W×0.20` (renormalized over available TFs) before the thresholds above are applied.
 
-**Spike/Stability Guard (daily, once per session):** `computeSpikeGuard(dailyCandles)` returns `todaySpike`, `dominance_ratio`, `efficiency_ratio_10`.
+**Spike/Stability Guard (daily, once per session):** `computeSpikeGuard(dailyCandles)` returns `todaySpike`, `dominance_ratio`, `efficiency_ratio_10`, `sessionReturnPct` (latest-session `(c − prevClose)/prevClose·100`, used by exit Guard E1), and `gapPct`. When daily candles are absent, the guard falls back to the base timeframe's candles (weekly → hourly) so the hard gate still runs on the best available data — it is never computed on the aggregated series.
 - `todaySpike` = latest-bar spike (volatility-adaptive, see above) **or** open-gap trigger `|gap%| > max(3.5, 1.5·ATR%)`. When true, a **hard gate** caps the final score at **49 (NEUTRAL)** after all penalties/bonuses — never chase an abnormal single-session print.
 - `dominance_ratio` = largest single-day `|move%|` ÷ `|net 5-day move%|` (1.0 if `|net| < 0.5%`); penalty −12 when > 0.6. Suppressed when the spike sub-score ≥ 4 (latest/prior-bar spike tiers already penalize the same session — no double-count); it fires only when the dominant session is *not* the latest/prior bar.
 - `efficiency_ratio_10` = `|close − close[10]|` ÷ Σ`|diffs|` over 10 (the KAMA ER); bonus **+3** when > 0.6 and `not todaySpike` (smooth steady climb). Choppy paths are covered by the stability sub-score, so no separate ER penalty.
@@ -261,7 +261,7 @@ The single-TF function proxies weekly trend with `close < SMA50` and daily bulli
 | 6 | EMA9 > EMA21 OR EMA21 > EMA50 (partial) | 1.0 |
 | 7 | SMA20 > SMA50 > SMA200 | 2.0 |
 | 8 | SMA20 > SMA50 (partial) | 1.0 |
-| 9 | Fast MAs bullish (close > HMA16, KAMA10, WMA20) × 0.67 each | cap 2.0 |
+| 9 | Fast MAs bullish (sum of close > HMA16, KAMA10, WMA20 flags) × 0.67 | cap 2.0 |
 | 10 | HMA16 > prev HMA16 | 0.5 |
 | 11 | RS Mansfield (52) > 0 | 0.5 |
 | 12 | RS Mansfield > prev RS Mansfield | 0.5 |
@@ -286,9 +286,9 @@ Capped at 10.
 
 **10.1 BB + KC + Donchian + Chandelier (8 pts)** — BB position 0.5–0.8 (1.0) or 0.3–0.5 (0.5); BB width expanding (0.5); close > KC mid (0.5); close > KC upper (0.5); close ≥ 99% of Donchian upper (1.0) or > DC mid (0.5); close > Chandelier long (1.0); Chandelier rising (0.5); BB inside KC (0.5); ATR% 2–4% (0.5); Donchian breakout with BB width expanding (1.0).
 
-**10.2 Ichimoku (6 pts)** — close above cloud top (2.0) or above cloud bottom (0.5); Tenkan > Kijun (1.0); Tenkan crossed Kijun within 3 bars (0.5); SenkouA > SenkouB (1.0); Chikou > prev close (0.5); full confluence (1.0).
+**10.2 Ichimoku (6 pts)** — close above cloud top (2.0) or above cloud bottom (0.5); Tenkan > Kijun (1.0); Tenkan crossed Kijun within 3 bars (0.5); SenkouA > SenkouB (1.0); Chikou confirmation close > Chikou, i.e. `close[t] > close[t-26]` (0.5); full confluence (1.0).
 
-**10.3 Darvas + HMA + KAMA + Fib + Pivot + ZigZag + Choppiness + MTF (6 pts)** — close ≥ Darvas top (1.5) or > box mid (0.5); close > HMA16 (0.25); HMA16 rising (0.25); close > KAMA10 (0.25); KAMA10 rising (0.25); fib bounce at 0.382/0.5/0.618 within 0.5% with close rising (0.5); close > pivot P (0.25); close > pivot R1 (0.25); Choppiness < 38.2 (0.5) or < 50 (0.25); ZigZag direction UP (0.5); MTF Alignment ≥ 80 (1.0) or ≥ 60 (0.5).
+**10.3 Darvas + HMA + KAMA + Fib + Pivot + ZigZag + Choppiness + MTF (6 pts)** — close ≥ Darvas top (confirmed holding high, 1.5) or > box mid (0.5); close > HMA16 (0.25); HMA16 rising (0.25); close > KAMA10 (0.25); KAMA10 rising (0.25); fib bounce at 0.382/0.5/0.618 within 0.5% with close rising (0.5); close > pivot P (0.25); close > pivot R1 (0.25); Choppiness < 38.2 (0.5) or < 50 (0.25); ZigZag direction UP (0.5); MTF Alignment ≥ 80 (1.0) or ≥ 60 (0.5).
 
 ### 3.7 Return Shape
 
@@ -468,9 +468,9 @@ Every sub-score — all 12 spec components (7.1–10.3) **and** the spike/stabil
 
 | Timeframe | Weight |
 |-----------|--------|
-| Hourly (H) | **20%** |
+| Hourly (H) | **30%** |
 | Daily (D) | **50%** |
-| Weekly (W) | **30%** |
+| Weekly (W) | **20%** |
 
 ```
 comp[tf]   = scoreEntryComponentsForTF(tf.candles, index_tf, stabLookback(tf))
@@ -486,6 +486,7 @@ finalScore = clamp(rawTotal + penalties + bonuses, 0, 100)
 - The weekly-trend penalty (rule 3 in 3.4) uses the **real weekly close vs weekly EMA21** and **real daily close vs daily EMA21**.
 - The all-TF bullish bonus uses **actual H/D/W closes vs their own EMA21**.
 - Spike/stability penalty thresholds (rules 7–11 in 3.4) consume the **weighted** sub-scores.
+- The remaining Section 11 modifiers that read a snapshot (RSI overbought, rising-price/fading-volume, near-pivot-resistance, squeeze-duration, beta/ATR, plus the Section 11 bonus items reading pivots/Fib/RS/Aroon) run once on the **base snapshot** `baseSn = (perTF.D || perTF.H || perTF.W).sn` — daily semantics when daily data exists.
 - The per-TF snapshot's RS contribution uses the matching index timeframe where available (daily index for D, weekly index for W, none for H).
 - `index_trend_score` is computed from the daily **and** weekly index (`indexWeeklyCandles`).
 - When only some timeframes are available, the weights are renormalized over those present (e.g. D-only → 100% D).
@@ -541,7 +542,7 @@ For each timeframe (H/D/W with weight w):
 
 multiTF_raw = Σ(score[tf] × w[tf]) / Σ(w[tf])              // renormalized over available TFs
 
-Section 16 modifiers are applied ONCE on the primary (Daily) snapshot:
+Section 16 modifiers are applied ONCE on the primary (Daily) snapshot (the weight-0.50 timeframe; when daily is absent the primary falls back to the first available timeframe, weekly → hourly):
   finalScore = clamp(multiTF_raw + penalties + bonuses, 0, 100)
 ```
 

@@ -169,7 +169,7 @@ bars.
 | `calcOBV` | `OBV[i] = OBV[i−1] + v` (up close), `− v` (down close), `0` (flat) |
 | `calcPVT` | `PVT[i] = PVT[i−1] + v · (cl[i]−cl[i−1])/cl[i−1]` |
 | `calcKVO(c, 34, 55, 13)` | `DM=|h−l|`; `CM=(h+l+c)/3`; `trend=sign(CM−CMPrev)`; `VF = v·|2·(DM/CM)−1|·trend·100`; `line = ema(VF,34) − ema(VF,55)`; `signal = ema(line,13)` |
-| `calcAnchoredVWAP(c, anchor=0)` | cumulative `ΣTP·v / Σv` from anchor |
+| `calcAnchoredVWAP(c, anchor?)` | cumulative `ΣTP·v / Σv` from anchor; anchor defaults to `max(0, len−252)` (trailing ~1 year, reproducible regardless of fetch depth), null-prefixed before the anchor |
 | `calcVolumeProfile(c, 24 bins, 60 bars)` | closes binned into 24 equal-price bins; POC = midpoint of max-volume bin; value area = bins from the top by volume until ≥70% of total volume; `VAH = priceTo` of highest included bin, `VAL = priceFrom` of lowest included bin |
 | `calcTTMSqueeze(c, 20, 2, 1.5)` | `bbUpper < kcUpper && bbLower > kcLower` (Bollinger inside Keltner) |
 | `calcSqueezeMomentum` | series `close − (HH20+LL20)/2`; least-squares line over 20 bars; value = fitted line at the last bar (`slope·20 + intercept`) |
@@ -182,11 +182,11 @@ bars.
 | `calcBollingerBands(c, 20, 2)` | `mid=SMA20`; `std=sqrt(Σ(cl−mid)²/(20−1))`; `upper=mid+2std`, `lower=mid−2std`; `bandwidth=(upper−lower)/mid` |
 | `calcKeltnerChannels(c, 20, 1.5)` | `mid=EMA20`; `upper=mid+1.5·ATR(20)`; `lower=mid−1.5·ATR(20)` |
 | `calcDonchianChannels(c, 20)` | `upper=max(h,20)`, `lower=min(l,20)`, `middle=(upper+lower)/2` |
-| `calcDarvasBox(c, 20, 3)` | `boxTop=max(h, last 20)`; `boxBottom=min(l, last 3)`; position/breakout vs last close; `pctFromTop=(boxTop−c)/range·100` |
+| `calcDarvasBox(c, 20, 3)` | box top = most recent 20-bar swing high that held 3 bars (fallback: rolling 20-bar max); box bottom = lowest low since that high; position/breakout vs last close; `pctFromTop=(boxTop−c)/range·100` |
 | `calcFibonacci` | swing high/low over last `min(len,50)` bars; retracements 0.236/0.382/0.5/0.618/0.786 from high; extensions 1.272/1.618 above high |
 | `calcPivotPoints` | Classic (from **previous** bar `H,L,C`): `P=(H+L+C)/3`, `R1=2P−L`, `R2=P+(H−L)`, `R3=P+2(H−L)`, `S1=2P−H`, `S2=P−(H−L)`, `S3=P−2(H−L)`. Camarilla (from **current** close `C` and previous range `rng`): `R1=C+rng·1.1/12`, `R2=C+rng·1.1/6`, `R3=C+rng·1.1/4`, `R4=C+rng·1.1/2` (mirrored for S1..S4) |
 | `calcWilliamsFractals` | 5-bar pattern (bar `i` is max of `i−2..i+2` highs / min of lows); last 10 each direction |
-| `calcZigZag(c, 5%)` | pivots on ≥5% swings; last 12 |
+| `calcZigZag(c, 5%)` | pivots on ≥pct swings; last 12; multi-TF entry passes H=2%, D=3%, W=5% |
 | `calcChoppinessIndex(c, 14)` | `100 · log10(ΣTR / (maxH−minL)) / log10(14)` |
 | `calcSmartMoney` | order blocks: bar body `> 2·ATR(14)` with the prior bar opposite-colored; swing highs/lows = 5-bar extremes; `bos` = close above last swing high / below last swing low; `choch` uses the previous two swings' sequence |
 | `calcMTFAlignment` | score of 6 conditions: `ema9>ema21`, `ema21>ema50`, `c>ema50`, `ema50>sma100`, `sma100>sma200`, `c>sma200`; `alignment = met/available·100` |
@@ -446,8 +446,8 @@ raw scale.
 | 2 | `tenkan > kijun` | 1.0 |
 | 3 | tenkan crossed above kijun in last 3 bars | 0.5 |
 | 4 | `senkouA > senkouB` | 1.0 |
-| 5 | `chikou > pc` | 0.5 |
-| 6 | confluence: `c>cloudTop && tenkan>kijun && senkouA>senkouB && chikou>pc` | 1.0 |
+| 5 | `c > chikou` (close[t] > close[t−26]; live Chikou confirmation) | 0.5 |
+| 6 | confluence: `c>cloudTop && tenkan>kijun && senkouA>senkouB && c>chikou` | 1.0 |
 
 **10.3 Darvas + HMA + KAMA + Fib + Pivot + ZigZag + Choppiness + MTF (max 6)**
 
@@ -724,6 +724,7 @@ Exit is **higher = worse** (a score is "exit pressure"). Pillars are capped at
 | 13 | Risk/Reward: `stop = entry − 1.5·ATR`, `target = entry·1.04`; `rr = (target−c)/(c−stop)`; `rr < 1.0` | 1.5 |
 | 13a | `1.0 ≤ rr < 1.5` | 0.5 |
 | 13b | `target − c <= 0` (already beyond target) | 1.0 |
+| 13c | `c <= stop` (price at/below stop → maximum exit pressure; RR undefined, so it must not fall through to 0) | 1.5 |
 
 ### 7.3 Section 16 exit modifiers
 
@@ -754,6 +755,8 @@ Exit is **higher = worse** (a score is "exit pressure"). Pillars are capped at
 | 7 | `c < chandelierLong && c < pivotS1` | +3 |
 | 8 | KVO bearish cross (`kvoL < kvoSig && kvoPrev >= kvoSigPrev`) | +3 |
 | 9 | **Guard E1 (golden exit):** `todaySpike` **and** `sessionReturnPct > 0` **and** `c >= ema21` **and** profit from entry `3.0 ≤ p < 4.0`% (spike carried us near the 4% target) | +5 |
+
+  `sessionReturnPct` = latest-session % return `(c − prevClose)/prevClose·100` from `computeSpikeGuard` (null when < 12 candles); the E1 near-target profit context is derived from `entry_price`, which no pillar (12.x–15.x) or bonus uses.
 | 9a | same, profit `2.0 ≤ p < 3.0`% | +3 |
 | 10 | **Guard E2:** `stabilityScore < 0.35` **and** `distDayRatio < 0.6` **and** `not todaySpike` (erratic whipsaw) | +3 |
 
@@ -770,7 +773,7 @@ Exit is **higher = worse** (a score is "exit pressure"). Pillars are capped at
 ### 8.1 Entry — `computeMultiTFEntryScore(tfResults, indexCandles, indexWeeklyCandles)`
 
 ```
-weights = { H: 0.20, D: 0.50, W: 0.30 }
+weights = { H: 0.30, D: 0.50, W: 0.20 }
 
 for each of the 14 component keys (12 sub-scores + spike + stability):
     wSum = 0, acc = 0
@@ -796,7 +799,7 @@ finalScore = clamp(rawTotal + penalties + bonuses, 0, 100)
 
 Notes:
 - Missing timeframes are simply omitted and weights renormalised (e.g. only D+W
-  available → wSum = 0.80, both scaled up by 1/0.8).
+  available → wSum = 0.70, both scaled up by 1/0.7).
 - Spike/stability are aggregated with the same weights (H/D lookback 10, W
   lookback 6) and feed the Section 11 spike/stability penalties.
 - Output adds `timeframesUsed` and a per-TF `details` array. Each row's
@@ -829,7 +832,7 @@ multiTF = totalScore / totalWeight               # renormalised weighted mean
 primarySn = first TF whose weight == 0.50 (D), else first TF
 ctx = { indexTrendScore: computeEntryScore(indexCandles).entry_score,
         entryPrice, currentPrice: primarySn.c, holdingDays, entryScore,
-        guard: computeSpikeGuard(primary.candles) }   # daily-only exit guard
+        guard: computeSpikeGuard(primary.candles) }   # daily guard; falls back to the primary TF's candles when daily is absent
 penalties/bonuses = buildExitPenaltyItems(primarySn, ctx) / buildExitBonusItems(primarySn, ctx)
 finalScore = clamp(multiTF + penalties + bonuses, 0, 100)
 ```
@@ -885,8 +888,7 @@ index candles.
 
 ## 10. Worked example
 
-Synthetic flat drift up with noise (harness at
-`C:\Users\vivek\AppData\Local\Temp\opencode\exit-harness.js`):
+Synthetic flat drift up with noise (harness at `tests/exit-harness.js`):
 
 **Single TF exit** — raw pillar sums 46.5 (trend 10.0 + momentum 12.5 +
 volume 12.0 + structure 12.0). Section 16: index trend score low → +5, price
@@ -897,8 +899,8 @@ volume 12.0 + structure 12.0). Section 16: index trend score low → +5, price
 ```
 multiTF = (0.50·52.0 + 0.25·34.0 + 0.25·22.0) / (0.50+0.25+0.25)
         = (26.0 + 8.5 + 5.5) / 1.0
-        = 40.0        → round 40.1 (raw_score)
-+ 15 modifiers → final 55.1 (PARTIAL_EXIT), timeframesUsed=3
+        = 40.0        → round 40.0 (raw_score)
++ 15 modifiers → final 55.0 (PARTIAL_EXIT), timeframesUsed=3
 ```
 Weighted component averages: `avgC(tf1a) = (0.50·a_D + 0.25·a_W + 0.25·a_H)/1.0`,
 etc., then each pillar re-capped at 25 for the breakdown.

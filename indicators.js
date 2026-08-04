@@ -169,25 +169,29 @@ window.TechIndicators = (function () {
     fast = fast || 2;
     slow = slow || 30;
     var cl = closes(candles);
+    var n = cl.length;
     var fastSC = 2 / (fast + 1);
     var slowSC = 2 / (slow + 1);
     var out = [];
+    for (var i = 0; i < n; i++) out.push(null);
+    if (n < period) return out;
+    var diff = [];
+    diff.push(0);
+    for (var i = 1; i < n; i++) diff.push(Math.abs(cl[i] - cl[i - 1]));
+    var volSum = 0;
+    for (var i = 1; i <= period; i++) volSum += diff[i];
     var prev = null;
-    for (var i = 0; i < cl.length; i++) {
-      if (i < period) { out.push(null); continue; }
+    for (var i = period; i < n; i++) {
       var direction = Math.abs(cl[i] - cl[i - period]);
-      var volatility = 0;
-      for (var j = i - period + 1; j <= i; j++) {
-        volatility += Math.abs(cl[j] - cl[j - 1]);
-      }
-      var er = volatility !== 0 ? direction / volatility : 0;
+      var er = volSum !== 0 ? direction / volSum : 0;
       var sc = Math.pow(er * (fastSC - slowSC) + slowSC, 2);
       if (prev === null) {
         prev = cl[i];
       } else {
         prev = prev + sc * (cl[i] - prev);
       }
-      out.push(round(prev, 4));
+      out[i] = round(prev, 4);
+      if (i < n - 1) { volSum += diff[i + 1]; volSum -= diff[i + 1 - period]; }
     }
     return out;
   }
@@ -309,6 +313,11 @@ window.TechIndicators = (function () {
     return { long: longArr, short: shortArr };
   }
 
+  /* Beta = regression slope of stock returns on the index returns (paired by
+     timestamp), rolling over the trailing `n` (default 60) bars. Benchmark is the
+     index series passed in (daily Nifty in production). In the entry score it only
+     penalizes when combined with ATR% > 3.0, so high-beta names are not penalized
+     unconditionally. */
   function calcBeta(stockCandles, indexCandles, n) {
     n = n || 60;
     if (!stockCandles || !indexCandles || stockCandles.length < n || indexCandles.length < n) return null;
@@ -796,8 +805,12 @@ window.TechIndicators = (function () {
     return { line: line, signal: signalArr };
   }
 
+  /* Anchored VWAP anchored at the START of the trailing 252 sessions (≈1 year) by
+     default, so the value is reproducible regardless of how much history was fetched
+     (previously it anchored at bar 0, making it depend on the caller's fetch depth).
+     Pass an absolute anchorIdx to override. */
   function calcAnchoredVWAP(candles, anchorIdx) {
-    anchorIdx = anchorIdx || 0;
+    if (anchorIdx == null) anchorIdx = Math.max(0, candles.length - 252);
     var out = [];
     var cumTPVol = 0, cumVol = 0;
     for (var i = 0; i < candles.length; i++) {
@@ -809,6 +822,10 @@ window.TechIndicators = (function () {
     return out;
   }
 
+  /* Volume Profile: `numBins` (default 24) equal-width price bins over the trailing
+     `lookback` (default 60) sessions. POC = midpoint of the highest-volume bin.
+     VAH/VAL = bounds of the 70% value area: bins sorted by volume are added until
+     cumulative volume reaches 70% of total volume. */
   function calcVolumeProfile(candles, numBins, lookback) {
     numBins = numBins || 24;
     lookback = lookback || 60;
@@ -889,26 +906,28 @@ window.TechIndicators = (function () {
     return { values: out, squeeze: squeeze };
   }
 
+  /* Classic Chaikin Accumulation/Distribution line: cumulative CLV*volume, where
+     CLV = ((C-L)-(H-C))/(H-L). Label = sign of the 20-bar ADL % change.
+     Built directly from H/L/C/V so it does NOT re-score CMF/OBV/FI/MFI, which the
+     entry engine already counts in the volume & momentum pillars (8.2/8.3/9.1). */
   function calcAccumDistComposite(candles) {
     if (!candles || candles.length < 20) return null;
-    var cmf20 = calcCMF(candles, 20);
-    var obvArr = calcOBV(candles);
-    var fi13 = calcForceIndex(candles, 13);
-    var mfi14 = calcMFI(candles, 14);
-    var obvSlope = [];
-    for (var i = 0; i < obvArr.length; i++) {
-      if (i < 5 || obvArr[i] === null || obvArr[i - 5] === null) { obvSlope.push(null); continue; }
-      obvSlope.push(obvArr[i] - obvArr[i - 5]);
+    var cl = closes(candles), hi = highs(candles), lo = lows(candles), vo = volumes(candles);
+    var adl = [];
+    var acc = 0;
+    for (var i = 0; i < candles.length; i++) {
+      var c = cl[i], h = hi[i], l = lo[i], v = vo[i];
+      var range = (h !== null && l !== null && h !== l) ? h - l : 0;
+      var clv = (range > 0 && c !== null && h !== null && l !== null) ? ((c - l) - (h - c)) / range : 0;
+      acc += (v != null ? v : 0) * clv;
+      adl.push(acc);
     }
     var out = [];
     for (var i = 0; i < candles.length; i++) {
-      if (i < 20 || cmf20[i] === null || obvSlope[i] === null || fi13[i] === null || mfi14[i] === null) { out.push(null); continue; }
-      var bull = 0, bear = 0;
-      if (cmf20[i] > 0.05) bull++; else if (cmf20[i] < -0.05) bear++;
-      if (obvSlope[i] > 0) bull++; else if (obvSlope[i] < 0) bear++;
-      if (fi13[i] > 0) bull++; else if (fi13[i] < 0) bear++;
-      if (mfi14[i] > 55) bull++; else if (mfi14[i] < 45) bear++;
-      out.push(bull >= 3 ? 'ACCUMULATION' : bear >= 3 ? 'DISTRIBUTION' : 'NEUTRAL');
+      if (i < 20) { out.push(null); continue; }
+      var base = Math.abs(adl[i - 20]) > 0 ? Math.abs(adl[i - 20]) : 1;
+      var pct = (adl[i] - adl[i - 20]) / base;
+      out.push(pct >= 0.05 ? 'ACCUMULATION' : pct <= -0.05 ? 'DISTRIBUTION' : 'NEUTRAL');
     }
     return out;
   }
@@ -963,20 +982,45 @@ window.TechIndicators = (function () {
     return { upper: upper, middle: middle, lower: lower };
   }
 
+  /* True Darvas box: box top = the most recent swing high (a `boxPeriod`-bar max at
+     its own bar) that HOLDED for `confirmBars` without being taken out; box bottom =
+     the lowest low printed since that high. This makes the box a discrete, confirmed
+     range rather than a running 20-bar max — which would simply duplicate the
+     Donchian channel already scored in 10.1. Falls back to the rolling 20-bar
+     high / 3-bar low when no holding high exists in the window. */
   function calcDarvasBox(candles, boxPeriod, confirmBars) {
     boxPeriod = boxPeriod || 20;
     confirmBars = confirmBars || 3;
-    if (candles.length < boxPeriod) return null;
-    var recentHigh = -Infinity, recentLow = Infinity;
-    var start = Math.max(0, candles.length - boxPeriod);
-    for (var i = start; i < candles.length; i++) { if (candles[i].h > recentHigh) recentHigh = candles[i].h; }
-    for (var i = Math.max(0, candles.length - confirmBars); i < candles.length; i++) { if (candles[i].l < recentLow) recentLow = candles[i].l; }
-    var lastC = candles[candles.length - 1].c;
-    var position = lastC >= recentHigh ? "at_upper" : lastC <= recentLow ? "at_lower" : "inside";
-    var boxHigh = round(recentHigh, 2); var boxLow = round(recentLow, 2);
-    var boxRange = round(recentHigh - recentLow, 2);
-    var breakout = lastC > recentHigh ? "up" : lastC < recentLow ? "down" : "none";
-    return { boxTop: boxHigh, boxBottom: boxLow, top: boxHigh, bottom: boxLow, boxRange: boxRange, position: position, breakout: breakout, pctFromTop: boxRange > 0 ? round((recentHigh - lastC) / boxRange * 100, 1) : 0 };
+    var n = candles.length;
+    if (n < boxPeriod) return null;
+    var boxTop = null, boxBottom = null, topIdx = -1;
+    for (var i = n - 1; i >= boxPeriod - 1 && boxTop === null; i--) {
+      var isMax = true;
+      for (var j = i - boxPeriod + 1; j <= i; j++) { if (candles[j].h > candles[i].h) { isMax = false; break; } }
+      if (!isMax) continue;
+      var heldBars = Math.min(confirmBars, n - 1 - i);
+      var held = true;
+      for (var j = i + 1; j <= i + heldBars; j++) { if (candles[j].h > candles[i].h) { held = false; break; } }
+      if (!held) continue;
+      boxTop = candles[i].h;
+      topIdx = i;
+      break;
+    }
+    if (boxTop === null) {
+      boxTop = -Infinity;
+      for (var j = n - boxPeriod; j < n; j++) { if (candles[j].h > boxTop) boxTop = candles[j].h; }
+      boxBottom = Infinity;
+      for (var j = Math.max(0, n - confirmBars); j < n; j++) { if (candles[j].l < boxBottom) boxBottom = candles[j].l; }
+    } else {
+      boxBottom = Infinity;
+      for (var j = topIdx; j < n; j++) { if (candles[j].l < boxBottom) boxBottom = candles[j].l; }
+    }
+    var lastC = candles[n - 1].c;
+    var position = lastC >= boxTop ? "at_upper" : lastC <= boxBottom ? "at_lower" : "inside";
+    var boxHigh = round(boxTop, 2); var boxLow = round(boxBottom, 2);
+    var boxRange = round(boxTop - boxBottom, 2);
+    var breakout = lastC > boxTop ? "up" : lastC < boxBottom ? "down" : "none";
+    return { boxTop: boxHigh, boxBottom: boxLow, top: boxHigh, bottom: boxLow, boxRange: boxRange, position: position, breakout: breakout, pctFromTop: boxRange > 0 ? round((boxTop - lastC) / boxRange * 100, 1) : 0 };
   }
 
   function calcFibonacci(candles) {
@@ -1594,8 +1638,8 @@ window.TechIndicators = (function () {
     if (sn.bbWidth > sn.bbWidthPrev && sn.c < sn.bbMid) s += 0.5;
     if (sn.c < sn.kcMid && sn.pc >= sn.kcMidPrev) s += 1.0; else if (sn.c < sn.kcMid) s += 0.5;
     if (sn.c <= sn.dcLower * 1.01) s += 1.0;
-    if (sn.c < sn.chandelierLong) s += 1.0;
-    if (sn.chandelierLong < sn.chandelierLongPrev) s += 0.5;
+    if (sn.chandelierLong !== null && sn.c < sn.chandelierLong) s += 1.0;
+    if (sn.chandelierLong !== null && sn.chandelierLongPrev !== null && sn.chandelierLong < sn.chandelierLongPrev) s += 0.5;
     if (sn.atr14 !== null && sn.c > 0) { var atrPct = sn.atr14 / sn.c * 100; if (atrPct > 5.0) s += 0.5; }
     return Math.min(s, 9);
   }
@@ -1638,6 +1682,7 @@ window.TechIndicators = (function () {
       var risk = currentPrice - stopLoss;
       var reward = target - currentPrice;
       if (risk > 0 && reward > 0) { var rr = reward / risk; if (rr < 1.0) s += 1.5; else if (rr < 1.5) s += 0.5; }
+      else if (risk <= 0) s += 1.5;
       else if (reward <= 0) s += 1.0;
     }
     return Math.min(s, 10);
@@ -1791,7 +1836,7 @@ window.TechIndicators = (function () {
   }
   /* Builds all indicator values for one timeframe in a single pass. Every
      score_* component and the Section-11 modifiers consume this snapshot. */
-  function buildTFSnapshot(candles, indexCandles) {
+  function buildTFSnapshot(candles, indexCandles, zigzagPct) {
     var cl = closes(candles), hi = highs(candles), lo = lows(candles), vo = volumes(candles);
     var L = cl.length, L1 = L - 1, L2 = L - 2;
 
@@ -1921,7 +1966,10 @@ window.TechIndicators = (function () {
     var darvasTop = darvasRes ? darvasRes.top : null;
     var darvasBottom = darvasRes ? darvasRes.bottom : null;
 
-    var zigzagArr = calcZigZag(candles);
+    /* ZigZag reversal threshold scaled by timeframe: a fixed 5% is far too large
+       for hourly bars (almost never triggers), so the multi-TF path passes 2/3/5
+       for H/D/W. Default stays 5 for single-TF/display callers. */
+    var zigzagArr = calcZigZag(candles, zigzagPct);
     var zigzagDirection = null;
     if (zigzagArr && zigzagArr.length >= 2) {
       var lastPivot = zigzagArr[zigzagArr.length - 1], prevPivot = zigzagArr[zigzagArr.length - 2];
@@ -1974,6 +2022,7 @@ window.TechIndicators = (function () {
     return {
       cl: cl, vo: vo, c: c, pc: pc,
       sma20: sma20, sma50: sma50, ema9: ema9, ema9Prev: ema9Prev, ema21: ema21, ema50: ema50, wma20: wma20,
+      ema9_s: ema9_s, ema21_s: ema21_s, rsi14_s: rsi14_s,
       hma16: hma16, prevHma16: prevHma16, kama10: kama10, prevKama10: prevKama10, sma200: sma200,
       vwap10: vwap10, prevVwap10: prevVwap10, anchoredVwap: anchoredVwap, prevAnchoredVwap: prevAnchoredVwap,
       macdL: macdL, macdPrev: macdPrev, sigL: sigL, sigPrev: sigPrev, histL: histL, histPrev: histPrev,
@@ -2207,22 +2256,25 @@ window.TechIndicators = (function () {
     if (sn.tenkan !== null && sn.kijun !== null && sn.tenkan > sn.kijun) s += 1.0;
     if (sn.tenkan !== null && sn.kijun !== null && justCrossedAbove(sn.ichRes.tenkan, sn.ichRes.kijun, 3)) s += 0.5;
     if (sn.senkouA !== null && sn.senkouB !== null && sn.senkouA > sn.senkouB) s += 1.0;
-    if (sn.chikou !== null && sn.pc !== null && sn.chikou > sn.pc) s += 0.5;
-    if (sn.senkouA !== null && sn.senkouB !== null && sn.tenkan !== null && sn.kijun !== null && sn.chikou !== null && sn.pc !== null &&
-        sn.c > Math.max(sn.senkouA, sn.senkouB) && sn.tenkan > sn.kijun && sn.senkouA > sn.senkouB && sn.chikou > sn.pc) s += 1.0;
+    /* Chikou Span confirmation, real-time computable (no look-ahead): the Chikou
+       at chart position t holds close[t+26]; the live version compares the current
+       close against the close from 26 bars ago, i.e. sn.c > sn.chikou (chikou[i]=close[i-26]).
+       The old `chikou > prev_close` compared close[t-26] vs close[t-1], which fired
+       bullish while price was actually falling for 25 bars. */
+    if (sn.chikou !== null && sn.c !== null && sn.c > sn.chikou) s += 0.5;
+    if (sn.senkouA !== null && sn.senkouB !== null && sn.tenkan !== null && sn.kijun !== null && sn.chikou !== null &&
+        sn.c > Math.max(sn.senkouA, sn.senkouB) && sn.tenkan > sn.kijun && sn.senkouA > sn.senkouB && sn.c > sn.chikou) s += 1.0;
     return Math.min(s, 6);
   }
 
-  /* ── 10.3 Darvas + HMA + KAMA + Fib + Pivot + ZigZag + Choppiness + MTF (0-6) ── */
+  /* ── 10.3 Darvas + Fib + Pivot + ZigZag + Choppiness + MTF (0-6) ──
+     HMA & KAMA are deliberately NOT re-scored here: they already count in the
+     MA Stack (7.1), so scoring them again would double-count the same fast-MA data. */
   function scoreDarvasStructure(sn) {
     var s = 0;
     if (sn.darvasTop !== null && sn.darvasBottom !== null) {
       if (sn.c >= sn.darvasTop) s += 1.5; else if (sn.c > (sn.darvasTop + sn.darvasBottom) / 2) s += 0.5;
     }
-    if (sn.hma16 !== null && sn.c > sn.hma16) s += 0.25;
-    if (sn.hma16 !== null && sn.prevHma16 !== null && sn.hma16 > sn.prevHma16) s += 0.25;
-    if (sn.kama10 !== null && sn.c > sn.kama10) s += 0.25;
-    if (sn.kama10 !== null && sn.prevKama10 !== null && sn.kama10 > sn.prevKama10) s += 0.25;
     if (sn.fibLevels !== null && sn.pc !== null) {
       for (var key in sn.fibLevels) { if (key === '0.382' || key === '0.5' || key === '0.618') { if (Math.abs(sn.c - sn.fibLevels[key]) / sn.c < 0.005 && sn.c > sn.pc) { s += 0.5; break; } } }
     }
@@ -2259,9 +2311,10 @@ window.TechIndicators = (function () {
     } catch (e) { return 0; }
   }
 
-  /* Runs all 12 spec sub-scores (plus spike/stability) for one timeframe. */
-  function scoreEntryComponentsForTF(candles, indexCandles, stabLookback) {
-    var sn = buildTFSnapshot(candles, indexCandles);
+  /* Runs all 12 spec sub-scores (plus spike/stability) for one timeframe.
+     `zigzagPct` scales the ZigZag reversal threshold (H=2, D=3, W=5). */
+  function scoreEntryComponentsForTF(candles, indexCandles, stabLookback, zigzagPct) {
+    var sn = buildTFSnapshot(candles, indexCandles, zigzagPct);
     return {
       maStack: scoreMaStackForTF(sn),
       macdTsiStcAo: scoreMacdTsiStcAo(sn),
@@ -2331,13 +2384,98 @@ window.TechIndicators = (function () {
   /* ══════════════════════════════════════════════════════════════════════════
      Entry Score (single timeframe) — Full spec Sections 7-11
      ══════════════════════════════════════════════════════════════════════════ */
+  /* Money-flow family cap (Concern 1): MFI+CMF (8.3) and OBV+PVT+KVO (9.1) are all
+     volume-price flow measures (typical pairwise correlation > 0.7), so a strong
+     accumulation day can stack +10 to +14 raw points from one underlying signal.
+     Cap their joint contribution so genuine accumulation still scores, but a
+     single signal can't inflate the entry score 5-8 points on its own. */
+  var MF_CLUSTER_CAP = 9;
+
+  function applyMoneyFlowCap(comps) {
+    var cluster = (comps.mfiCmf || 0) + (comps.obvPvtKvo || 0);
+    if (cluster > MF_CLUSTER_CAP && cluster > 0) {
+      var scale = MF_CLUSTER_CAP / cluster;
+      comps.mfiCmf = round(comps.mfiCmf * scale, 4);
+      comps.obvPvtKvo = round(comps.obvPvtKvo * scale, 4);
+    }
+    return comps;
+  }
+
+  /* Confluence persistence (Concern 3): count consecutive recent bars holding the
+     core bullish alignment close > EMA9 > EMA21 with MACD > signal and RSI 50-80.
+     Rewards setups that built up gradually over time instead of flipping in a
+     single bar. */
+  function calcConfluencePersistence(sn) {
+    try {
+      if (!sn || !sn.cl || sn.cl.length < 40) return 0;
+      var bars = 0;
+      for (var i = sn.cl.length - 1; i >= 0; i--) {
+        if (sn.cl[i] == null || sn.ema9_s[i] == null || sn.ema21_s[i] == null ||
+            sn.macd_s[i] == null || sn.sig_s[i] == null || sn.rsi14_s[i] == null) break;
+        if (!(sn.cl[i] > sn.ema9_s[i] && sn.ema9_s[i] > sn.ema21_s[i] &&
+              sn.macd_s[i] > sn.sig_s[i] && sn.rsi14_s[i] >= 50 && sn.rsi14_s[i] <= 80)) break;
+        bars++;
+      }
+      return bars;
+    } catch (e) { return 0; }
+  }
+
+  /* Reversal-risk counterfactual (Concern 2): scores 0-10 for hidden-bearish
+     signals that the bullish score can't see - RSI divergence at new highs,
+     volume climax at highs, exhaustion gaps, key-reversal bars. Higher = the
+     breakout is more likely a blow-off top. Fed back as a conservative penalty
+     so a strong-looking chart that is actually breaking down doesn't score 90+. */
+  function calcReversalRisk(candles) {
+    try {
+      if (!candles || candles.length < 30) return 0;
+      var cl = closes(candles), hi = highs(candles), lo = lows(candles), op = opens(candles), vo = volumes(candles);
+      var L = cl.length;
+      var c = cl[L - 1], prevC = cl[L - 2], openL = op[L - 1];
+      if (c == null || prevC == null || openL == null || prevC <= 0) return 0;
+      var rsiS = calcRSI(candles, 14);
+      var rsiNow = rsiS[L - 1];
+      var risk = 0;
+      var avgVol = 0, vc = 0;
+      for (var i = Math.max(0, L - 20); i < L; i++) { avgVol += vo[i]; vc++; }
+      avgVol = vc > 0 ? avgVol / vc : 0;
+      var atr14 = calcATR(candles, 14);
+      var atrV = atr14 && atr14[L - 1] != null ? atr14[L - 1] : 0;
+      var hi10 = -Infinity, hi10Idx = -1, hi20 = -Infinity;
+      for (var i = Math.max(0, L - 11); i < L - 1; i++) { if (cl[i] > hi10) { hi10 = cl[i]; hi10Idx = i; } }
+      for (var i = Math.max(0, L - 21); i < L - 11; i++) { if (cl[i] > hi20) hi20 = cl[i]; }
+      var rsiAtHi = hi10Idx >= 0 ? rsiS[hi10Idx] : null;
+      var lastRet = (c - prevC) / prevC * 100;
+      var gapPct = (openL - prevC) / prevC * 100;
+      var priorRun = cl[Math.max(0, L - 11)] != null ? (c - cl[Math.max(0, L - 11)]) / cl[Math.max(0, L - 11)] * 100 : 0;
+
+      /* 1. Hidden bearish divergence: new 10-bar high with RSI >= 6pts lower than at the prior peak */
+      if (rsiNow != null && rsiAtHi != null && c > hi10 && hi20 > 0 && c >= hi20 && rsiNow < rsiAtHi - 6) risk += 5;
+      /* 2. Weak RSI at highs: new/near 20-bar high while RSI already < 50 */
+      if (rsiNow != null && hi20 > 0 && rsiNow < 50 && c >= hi20 * 0.98) risk += 2;
+      /* 3. Volume climax at highs: 2.5x average volume on a >=2% up day at 10-bar highs */
+      if (avgVol > 0 && vo[L - 1] >= 2.5 * avgVol && lastRet >= 2.0 && hi10 > 0 && c >= hi10 * 0.98) risk += 3;
+      /* 4. Exhaustion gap: >=2.5% gap up on 1.8x volume after a >=4% run */
+      if (gapPct >= 2.5 && avgVol > 0 && vo[L - 1] >= 1.8 * avgVol && priorRun >= 4) risk += 2;
+      /* 5. Key-reversal bar: long upper wick (>1.5x body) after an up day */
+      if (c < openL) {
+        var body = Math.abs(openL - c);
+        var wickTop = hi[L - 1] - Math.max(c, openL);
+        if (wickTop > body * 1.5 && body > 0) risk += 2;
+      }
+      /* 6. Bearish engulfing at highs: gap up, close <= prev close, at 10-bar highs */
+      if (hi10 > 0 && c >= hi10 * 0.98 && openL > prevC && c < openL && c <= prevC) risk += 2;
+      return Math.min(risk, 10);
+    } catch (e) { return 0; }
+  }
+
   function computeEntryScore(candles, indexCandles) {
     if (!candles || candles.length < 50) return { entry_score: null, reason: 'insufficient_data', need: 50, got: candles ? candles.length : 0 };
     var comps = scoreEntryComponentsForTF(candles, indexCandles);
     var sn = comps.sn;
     var guard = computeSpikeGuard(candles);
 
-    /* ── compute pillar scores from the 12 sub-scores ── */
+    /* ── compute pillar scores from the 12 sub-scores (money-flow family capped first) ── */
+    applyMoneyFlowCap(comps);
     var trendScore = comps.maStack + comps.macdTsiStcAo + comps.adxStPsarViAroon;
     var momentumScore = comps.rsiStochRsiWillR + comps.cciRocMomFi + comps.mfiCmf;
     var volumeScore = comps.obvPvtKvo + comps.vwapAnchored + comps.vpSqueezeAd;
@@ -2353,6 +2491,11 @@ window.TechIndicators = (function () {
       dominanceRatio: guard.dominanceRatio
     });
 
+    /* ── reversal-risk counterfactual penalty (divergence / climax / exhaustion) ── */
+    var reversalRisk = calcReversalRisk(candles);
+    if (reversalRisk >= 7) penaltyItems.push({ reason: "High reversal risk (divergence/climax)", amount: -8 });
+    else if (reversalRisk >= 5) penaltyItems.push({ reason: "Reversal risk (divergence/climax)", amount: -4 });
+
     /* ── bonuses (Section 11) ── */
     var idxTrendScore = computeIndexTrendScore(indexCandles);
     var bonusItems = buildEntryBonusItems(sn, {
@@ -2363,6 +2506,12 @@ window.TechIndicators = (function () {
       efficiencyRatio10: guard.efficiencyRatio10,
       todaySpike: guard.todaySpike
     });
+
+    /* ── confluence-persistence bonus (built-up alignment vs single-bar flip) ── */
+    var persist = calcConfluencePersistence(sn);
+    if (persist >= 8) bonusItems.push({ reason: "Confluence aligned " + persist + " bars", amount: 3 });
+    else if (persist >= 4) bonusItems.push({ reason: "Confluence aligned " + persist + " bars", amount: 2 });
+    else if (persist >= 2) bonusItems.push({ reason: "Confluence aligned " + persist + " bars", amount: 1 });
 
     var penalties = 0;
     penaltyItems.forEach(function(it) { penalties += it.amount; });
@@ -2399,7 +2548,7 @@ window.TechIndicators = (function () {
   /* ══════════════════════════════════════════════════════════════════════════
      Multi-timeframe Entry Score — spec Sections 7-11 model:
      ALL 12 sub-scores (7.1-10.3) plus spike/stability are computed per
-     timeframe and aggregated H*0.20 + D*0.50 + W*0.30, renormalized over the
+     timeframe and aggregated H*0.30 + D*0.50 + W*0.20, renormalized over the
      available timeframes. Section 11 penalties/bonuses use real H/D/W data.
      ══════════════════════════════════════════════════════════════════════════ */
   function computeMultiTFEntryScore(tfResults, indexCandles, indexWeeklyCandles) {
@@ -2433,17 +2582,17 @@ window.TechIndicators = (function () {
 
     /* ── per-timeframe component snapshots (12 sub-scores + spike/stability) ── */
     var perTF = {};
-    perTF.H = (hTF && hTF.candles && hTF.candles.length >= 50) ? scoreEntryComponentsForTF(hTF.candles, indexCandles, stabLookbackFor('H')) : null;
-    perTF.D = (dTF && dTF.candles && dTF.candles.length >= 50) ? scoreEntryComponentsForTF(dTF.candles, indexCandles, stabLookbackFor('D')) : null;
-    perTF.W = (wTF && wTF.candles && wTF.candles.length >= 50) ? scoreEntryComponentsForTF(wTF.candles, indexWeeklyCandles || indexCandles, stabLookbackFor('W')) : null;
+    perTF.H = (hTF && hTF.candles && hTF.candles.length >= 50) ? scoreEntryComponentsForTF(hTF.candles, indexCandles, stabLookbackFor('H'), 2) : null;
+    perTF.D = (dTF && dTF.candles && dTF.candles.length >= 50) ? scoreEntryComponentsForTF(dTF.candles, indexCandles, stabLookbackFor('D'), 3) : null;
+    perTF.W = (wTF && wTF.candles && wTF.candles.length >= 50) ? scoreEntryComponentsForTF(wTF.candles, indexWeeklyCandles || indexCandles, stabLookbackFor('W'), 5) : null;
     if (!perTF.H && !perTF.D && !perTF.W) return { multiTF_score: null, reason: 'no_valid_scores' };
 
     var SUBKEYS = ['maStack', 'macdTsiStcAo', 'adxStPsarViAroon', 'rsiStochRsiWillR', 'cciRocMomFi', 'mfiCmf',
                    'obvPvtKvo', 'vwapAnchored', 'vpSqueezeAd', 'bbKcDcChandelier', 'ichimoku', 'darvasStructure',
                    'spike', 'stability'];
-    var weights = { H: 0.20, D: 0.50, W: 0.30 };
+    var weights = { H: 0.30, D: 0.50, W: 0.20 };
 
-    /* ── weighted aggregation H*0.20 + D*0.50 + W*0.30 (renormalized) ── */
+    /* ── weighted aggregation H*0.30 + D*0.50 + W*0.20 (renormalized) ── */
     var comps = {};
     SUBKEYS.forEach(function (key) {
       var wSum = 0, acc = 0;
@@ -2454,6 +2603,8 @@ window.TechIndicators = (function () {
       comps[key] = wSum > 0 ? acc / wSum : 0;
     });
 
+    /* ── aggregate pillars from the 12 sub-scores (money-flow family capped first) ── */
+    applyMoneyFlowCap(comps);
     var trendScore = comps.maStack + comps.macdTsiStcAo + comps.adxStPsarViAroon;
     var momentumScore = comps.rsiStochRsiWillR + comps.cciRocMomFi + comps.mfiCmf;
     var volumeScore = comps.obvPvtKvo + comps.vwapAnchored + comps.vpSqueezeAd;
@@ -2477,6 +2628,12 @@ window.TechIndicators = (function () {
       dominanceRatio: guard.dominanceRatio
     });
 
+    /* ── reversal-risk counterfactual penalty on the base/daily candles ── */
+    var baseCandles = (dTF && dTF.candles) || (baseTF && baseTF.candles) || null;
+    var reversalRisk = calcReversalRisk(baseCandles);
+    if (reversalRisk >= 7) penaltyItems.push({ reason: "High reversal risk (divergence/climax)", amount: -8 });
+    else if (reversalRisk >= 5) penaltyItems.push({ reason: "Reversal risk (divergence/climax)", amount: -4 });
+
     /* ── Section 11 bonuses (real H/D/W bullishness + index D+W trend score) ── */
     var hourlyBullish = false, weeklyBullish = false;
     var hCl = lastCloseOf(hTF ? hTF.candles : null), hEma21 = lastEma21Of(hTF ? hTF.candles : null);
@@ -2491,6 +2648,12 @@ window.TechIndicators = (function () {
       efficiencyRatio10: guard.efficiencyRatio10,
       todaySpike: guard.todaySpike
     });
+
+    /* ── confluence-persistence bonus (built-up alignment vs single-bar flip) ── */
+    var persist = calcConfluencePersistence(baseSn);
+    if (persist >= 8) bonusItems.push({ reason: "Confluence aligned " + persist + " bars", amount: 3 });
+    else if (persist >= 4) bonusItems.push({ reason: "Confluence aligned " + persist + " bars", amount: 2 });
+    else if (persist >= 2) bonusItems.push({ reason: "Confluence aligned " + persist + " bars", amount: 1 });
 
     var penalties = 0;
     penaltyItems.forEach(function (it) { penalties += it.amount; });

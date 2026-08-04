@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.3";
+window.__STOX_APP_VERSION = "2.10.10";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -1371,9 +1371,9 @@ function scoreMathBlock(r) {
   var f1 = function (v) { return v != null ? Number(v).toFixed(1) : "\u2014"; };
   var f2 = function (v) { return v != null ? Number(v).toFixed(2) : "\u2014"; };
   var order = [
-    { key: "weekly", label: "Weekly", nominal: 0.30 },
+    { key: "weekly", label: "Weekly", nominal: 0.20 },
     { key: "daily", label: "Daily", nominal: 0.50 },
-    { key: "hourly", label: "Hourly", nominal: 0.20 }
+    { key: "hourly", label: "Hourly", nominal: 0.30 }
   ];
   var present = order.filter(function (t) { var s = r[t.key]; return s && s.total != null; });
   var wSum = present.reduce(function (a, t) { return a + t.nominal; }, 0);
@@ -1487,9 +1487,9 @@ function EntryScoreAnalysis({ entry, onBack }) {
   };
 
   const TF_DEFS = [
-    { key: "weekly", label: "Weekly", weight: "30%" },
+    { key: "weekly", label: "Weekly", weight: "20%" },
     { key: "daily", label: "Daily", weight: "50%" },
-    { key: "hourly", label: "Hourly", weight: "20%" },
+    { key: "hourly", label: "Hourly", weight: "30%" },
   ];
 
   const activeScore = r[activeTF] || null;
@@ -4398,8 +4398,8 @@ const EntryScorePanel = ({ shares }) => {
       ),
       isExp && React.createElement("div", { style: { marginTop: 8, padding: "6px 0" } },
         r.daily && snapTfSection("Daily (50%)", r.daily),
-        r.weekly && snapTfSection("Weekly (30%)", r.weekly),
-        r.hourly && snapTfSection("Hourly (20%)", r.hourly),
+        r.weekly && snapTfSection("Weekly (20%)", r.weekly),
+        r.hourly && snapTfSection("Hourly (30%)", r.hourly),
         r.hardFilters && r.hardFilters.length > 0 && React.createElement("div", { style: { marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.15)" } },
           React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--text3)", marginBottom: 3 } }, "Penalties & Bonuses"),
           r.hardFilters.map((f, i) => {
@@ -4493,7 +4493,7 @@ const EntryScorePanel = ({ shares }) => {
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Entry Score"),
-        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, "Momentum Trading Entry Engine \u00b7 Weekly(30%) + Daily(50%) + Hourly(20%)")
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, "Momentum Trading Entry Engine \u00b7 Weekly(20%) + Daily(50%) + Hourly(30%)")
       ),
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
         React.createElement("button", {
@@ -4600,7 +4600,7 @@ const EntryScorePanel = ({ shares }) => {
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 } },
             ["weekly", "daily", "hourly"].map(function(tf) {
               var s = r[tf];
-              var label = tf === "weekly" ? "Weekly (30%)" : tf === "daily" ? "Daily (50%)" : "Hourly (20%)";
+              var label = tf === "weekly" ? "Weekly (20%)" : tf === "daily" ? "Daily (50%)" : "Hourly (30%)";
               return React.createElement("div", { key: tf, style: { padding: "6px 8px", borderRadius: 8, background: "var(--bg4)", textAlign: "center" } },
                 React.createElement("div", { style: { fontSize: 9, fontWeight: 600, color: "var(--text5)", marginBottom: 2 } }, label),
                 React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: s ? s.decision.color : "var(--text6)", fontFamily: "var(--font-heading)" } }, s ? s.total : "N/A"),
@@ -7939,7 +7939,7 @@ function InfoPage() {
           React.createElement("p", { style: subH }, "Classification"),
           React.createElement("p", null, "80+ STRONG_BUY (100% alloc) | 65+ BUY (70%) | 50+ WATCHLIST (40%) | 35+ NEUTRAL (0%) | <35 AVOID (0%)"),
           React.createElement("p", { style: subH }, "MTF Weights"),
-          React.createElement("p", null, "Daily 50% | Weekly 30% | Hourly 20%")
+          React.createElement("p", null, "Daily 50% | Weekly 20% | Hourly 30%")
         ),
 
         // SPIKE / STABILITY GUARD
@@ -8025,7 +8025,7 @@ function InfoPage() {
           React.createElement("p", { style: subSub }, "Scoring Formula"),
           React.createElement("p", null, "Raw score = sum of sub-function scores (capped per section). Final = clamp(raw + penalties + bonuses, 0, 100). Penalties reduce urgency, bonuses increase it."),
           React.createElement("p", { style: subSub }, "Multi-Timeframe Aggregation"),
-          React.createElement("p", null, "Each timeframe scored independently. Weighted average applied: entry D=50%/W=30%/H=20%, exit D=50%/W=25%/H=25%. Scores, pillars, penalties, bonuses all weighted."),
+          React.createElement("p", null, "Each timeframe scored independently. Weighted average applied: entry D=50%/W=20%/H=30%, exit D=50%/W=25%/H=25%. Scores, pillars, penalties, bonuses all weighted."),
           React.createElement("p", { style: subSub }, "Position Monitoring"),
           React.createElement("p", null, "Auto-runs every 15 min during market hours (09:15\u201315:30 IST). Fetches daily candles per holding, computes exit score + integrated decision. Toast alert for each new score >=55. Deduplicated per session.")
         )
