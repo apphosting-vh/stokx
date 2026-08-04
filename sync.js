@@ -179,6 +179,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
   var confTracker = [];
   var confTrackerPrices = {};
   var notes = [];
+  var scoreConfig = null;
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch (e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch (e) {}
   try { screenerData = (await dbGetSetting("stox_screener_data")) || null; } catch (e) {}
@@ -189,6 +190,10 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
   try { confTracker = (await dbGetSetting("stox_conf_tracker")) || []; } catch (e) {}
   try { confTrackerPrices = (await dbGetSetting("stox_conf_tracker_prices")) || {}; } catch (e) {}
   try { notes = (await dbGetSetting("stox_notes")) || []; } catch (e) {}
+  try {
+    var saved = localStorage.getItem("stox_score_config");
+    if (saved) scoreConfig = JSON.parse(saved);
+  } catch (e) {}
 
   return {
     app: "StoX",
@@ -207,7 +212,8 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       singleStockSnapshots: singleStockSnapshots.length,
       confTracker: confTracker.length,
       confTrackerPrices: Object.keys(confTrackerPrices).length,
-      notes: notes.length
+      notes: notes.length,
+      scoreConfig: !!scoreConfig
     },
     data: {
       holdings: stateData.holdings || [],
@@ -222,7 +228,8 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       singleStockSnapshots: singleStockSnapshots,
       confTracker: confTracker,
       confTrackerPrices: confTrackerPrices,
-      notes: notes
+      notes: notes,
+      scoreConfig: scoreConfig
     }
   };
 };
@@ -273,6 +280,14 @@ window.__stoxRestoreFromPayload = async function(data) {
     if (data.confTracker) await dbSetSetting("stox_conf_tracker", data.confTracker);
     if (data.confTrackerPrices && typeof data.confTrackerPrices === "object") await dbSetSetting("stox_conf_tracker_prices", data.confTrackerPrices);
     if (data.notes) await dbSetSetting("stox_notes", data.notes);
+    if (data.scoreConfig && typeof data.scoreConfig === "object") {
+      try {
+        localStorage.setItem("stox_score_config", JSON.stringify(data.scoreConfig));
+        if (window.TechIndicators && window.TechIndicators.setScoreConfig) {
+          window.TechIndicators.setScoreConfig(data.scoreConfig);
+        }
+      } catch (e) {}
+    }
     if (window.__fsa) window.__fsa.state = {
       holdings: data.holdings || [],
       watchlist: data.watchlist || [],

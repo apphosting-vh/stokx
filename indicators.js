@@ -2660,21 +2660,117 @@ window.TechIndicators = (function () {
     return { atrPct: atrPct, atrPercentile: atrPercentile, regime: regime };
   }
 
+  /* ── Configurable Entry Score Parameters ─────────────────────────────────
+     All thresholds and weights are stored here so the UI can tune them
+     without editing source code. Updated via setScoreConfig(). */
+  var SCORE_CONFIG = {
+    /* Pillar max scores */
+    pillarMax: { trendHealth: 30, pullbackQuality: 30, prob4: 40 },
+    /* MTF weights */
+    tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
+
+    /* Pillar 1: Trend Health */
+    trendHealth: {
+      priceAboveSMA50: 5,
+      SMA20AboveSMA50: 5,
+      priceAboveSMA20_or_VWAP: 5,
+      ADX_DI: 5,
+      adxThreshold: 25,
+      mansfieldRS: 5,
+      mansfieldRSThreshold: 0,
+      macdCross: 5,
+      weeklyHABullish: 2.5,
+      sma20Slope: 2.5,
+      sma20SlopeThreshold: 0,
+    },
+    /* Pillar 2: Pullback Quality */
+    pullbackQuality: {
+      distATR_inner: 10,
+      distATR_innerRange: 1.0,
+      distATR_outer: 5,
+      distATR_outerRange: 1.5,
+      candleColor: 5,
+      bbWidthSqueeze: 5,
+      rsiOversold: 5,
+      stochRSIThreshold: 20,
+      rsiOversoldNormal: 40,
+      rsiOversoldHighVol: 35,
+      volumeConfirm: 5,
+      volRatioThreshold: 1.5,
+    },
+    /* Pillar 3: 4% Probability */
+    prob4: {
+      targetReachable_T1: 15,
+      targetATR_threshold1: 2.0,
+      targetReachable_T2: 12,
+      targetATR_threshold2: 1.5,
+      targetReachable_T3: 8,
+      targetATR_threshold3: 1.0,
+      targetReachable_T4: 3,
+      targetDist_T1: 10,
+      targetDist_range1_lo: 0.25,
+      targetDist_range1_hi: 2.0,
+      targetDist_T2: 5,
+      targetDist_range2_lo: 0,
+      targetDist_range2_hi: 3.0,
+      volSweet_T1: 10,
+      volPercentile_lo: 30,
+      volPercentile_hi: 70,
+      volSweet_T2: 5,
+      volPercentile_lo2: 20,
+      volPercentile_hi2: 80,
+      efficiencyRatio: 5,
+      efficiencyRatioThreshold: 0.4,
+      targetPct: 0.04,
+    },
+    /* Modifiers */
+    modifiers: {
+      lowBetaThreshold: 0.5,
+      lowATRPercentile: 25,
+      lowExpansionPenalty: -10,
+      spikePenalty: -10,
+      spikeGapThreshold: 3,
+      stabilityThreshold: 0.3,
+      stabilityPenalty: -15,
+      mtfAlignBonus: 10,
+      mtfAlignThreshold: 65,
+      highVolATRPercentile: 80,
+      highVolERThreshold: 0.5,
+      highVolBonus: 5,
+    },
+  };
+
+  function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
+  function setScoreConfig(patch) {
+    if (!patch) return;
+    function merge(target, source) {
+      Object.keys(source).forEach(function (k) {
+        if (source[k] && typeof source[k] === 'object' && !Array.isArray(source[k]) && target[k] && typeof target[k] === 'object') {
+          merge(target[k], source[k]);
+        } else if (source[k] !== undefined) {
+          target[k] = source[k];
+        }
+      });
+    }
+    merge(SCORE_CONFIG, patch);
+  }
+
   /* Pillar 1: Trend Health (max 30).
      Volatility-normalized: ADX threshold stays at 25 (already normalized),
      Mansfield RS threshold tightened to > 0 for cleaner signal. */
   function calcTrendHealthScore(sn) {
+    var c = SCORE_CONFIG.trendHealth;
     var s = 0;
-    if (sn.c != null && sn.sma50 != null && sn.c > sn.sma50) s += 5;
-    if (sn.sma20 != null && sn.sma50 != null && sn.sma20 > sn.sma50) s += 5;
-    if (sn.c != null && sn.sma20 != null && sn.c > sn.sma20) s += 5;
-    else if (sn.c != null && sn.anchoredVwap != null && sn.c > sn.anchoredVwap) s += 5;
-    if (sn.adxL != null && sn.plusDI != null && sn.minusDI != null && sn.adxL >= 25 && sn.plusDI > sn.minusDI) s += 5;
-    if (sn.rsMansfield != null && sn.rsMansfield > 0) s += 5;
-    if (sn.macdL != null && sn.sigL != null && sn.macdL > sn.sigL) s += 5;
-    if (sn.weeklyHABullish === true) s += 2.5;
-    if (sn.sma20Slope5 != null && sn.sma20Slope5 > 0 && sn.c != null && sn.sma20 != null && sn.c > sn.sma20) s += 2.5;
-    return Math.min(s, 30);
+    if (sn.c != null && sn.sma50 != null && sn.c > sn.sma50) s += c.priceAboveSMA50;
+    if (sn.sma20 != null && sn.sma50 != null && sn.sma20 > sn.sma50) s += c.SMA20AboveSMA50;
+    if (sn.c != null && sn.sma20 != null && sn.c > sn.sma20) s += c.priceAboveSMA20_or_VWAP;
+    else if (sn.c != null && sn.anchoredVwap != null && sn.c > sn.anchoredVwap) s += c.priceAboveSMA20_or_VWAP;
+    if (sn.adxL != null && sn.plusDI != null && sn.minusDI != null && sn.adxL >= c.adxThreshold && sn.plusDI > sn.minusDI) s += c.ADX_DI;
+    if (sn.rsMansfield != null && sn.rsMansfield > c.mansfieldRSThreshold) s += c.mansfieldRS;
+    if (sn.macdL != null && sn.sigL != null && sn.macdL > sn.sigL) s += c.macdCross;
+    if (sn.weeklyHABullish === true) s += c.weeklyHABullish;
+    if (sn.sma20Slope5 != null && sn.sma20Slope5 > c.sma20SlopeThreshold && sn.c != null && sn.sma20 != null && sn.c > sn.sma20) s += c.sma20Slope;
+    return Math.min(s, SCORE_CONFIG.pillarMax.trendHealth);
   }
 
   /* Pillar 2: Pullback / Setup Quality (max 30).
@@ -2682,21 +2778,19 @@ window.TechIndicators = (function () {
      fixed percentage. For large cap (1.5% ATR), 1.0 ATR ~ 1.5%. For mid cap
      (3% ATR), 1.0 ATR ~ 3%. This naturally adapts to the stock's volatility. */
   function calcPullbackScore(sn, volRegime) {
+    var c = SCORE_CONFIG.pullbackQuality;
     var s = 0;
-    /* ATR-normalized distance to buy reference (SMA20 or BB lower) */
     if (sn.c != null && sn.buyRef != null && sn.buyRef > 0 && sn.atr14 != null && sn.atr14 > 0) {
       var distATR = (sn.c - sn.buyRef) / sn.atr14;
-      /* Within 1.0 ATR of support = good pullback zone */
-      if (distATR >= -1.0 && distATR <= 1.0) s += 10;
-      else if (distATR >= -1.5 && distATR <= 1.5) s += 5;
+      if (distATR >= -c.distATR_innerRange && distATR <= c.distATR_innerRange) s += c.distATR_inner;
+      else if (distATR >= -c.distATR_outerRange && distATR <= c.distATR_outerRange) s += c.distATR_outer;
     }
-    if (sn.c != null && sn.o != null && sn.c > sn.o) s += 5;
-    if (sn.bbWidth != null && sn.bbWidthPrev5 != null && sn.bbWidth < sn.bbWidthPrev5) s += 5;
-    /* RSI thresholds adapt to volatility regime */
-    var rsiOversold = (volRegime && volRegime.regime === 'high') ? 35 : 40;
-    if ((sn.stochRsiK != null && sn.stochRsiK < 20) || (sn.rsi14 != null && sn.rsi14 < rsiOversold)) s += 5;
-    if (sn.volRatio != null && sn.volRatio > 1.5 && sn.c != null && sn.o != null && sn.c > sn.o) s += 5;
-    return Math.min(30, s);
+    if (sn.c != null && sn.o != null && sn.c > sn.o) s += c.candleColor;
+    if (sn.bbWidth != null && sn.bbWidthPrev5 != null && sn.bbWidth < sn.bbWidthPrev5) s += c.bbWidthSqueeze;
+    var rsiOversold = (volRegime && volRegime.regime === 'high') ? c.rsiOversoldHighVol : c.rsiOversoldNormal;
+    if ((sn.stochRsiK != null && sn.stochRsiK < c.stochRSIThreshold) || (sn.rsi14 != null && sn.rsi14 < rsiOversold)) s += c.rsiOversold;
+    if (sn.volRatio != null && sn.volRatio > c.volRatioThreshold && sn.c != null && sn.o != null && sn.c > sn.o) s += c.volumeConfirm;
+    return Math.min(s, SCORE_CONFIG.pillarMax.pullbackQuality);
   }
 
   /* Pillar 3: 4% Probability (max 40).
@@ -2704,39 +2798,32 @@ window.TechIndicators = (function () {
      and target distance is measured in ATR terms. This ensures the same
      scoring works for large cap (low ATR%) and mid cap (high ATR%). */
   function calcProb4Score(sn, volRegime) {
+    var c = SCORE_CONFIG.prob4;
     var s = 0;
     var atrPct = volRegime ? volRegime.atrPct : (sn.atr14 != null && sn.c != null && sn.c > 0 ? sn.atr14 / sn.c * 100 : null);
     var atrPercentile = volRegime ? volRegime.atrPercentile : 50;
 
-    /* Component 1: Is 4% target reachable? (max 15)
-       For low-vol stocks, 4% is a big move (needs strong trend).
-       For high-vol stocks, 4% is routine. Use ATR ratio. */
     if (sn.c != null && sn.c > 0 && sn.atr14 != null && sn.atr14 > 0) {
-      var targetATR = (0.04 * sn.c) / sn.atr14;
-      if (targetATR > 2.0) s += 15;
-      else if (targetATR > 1.5) s += 12;
-      else if (targetATR > 1.0) s += 8;
-      else s += 3;
+      var targetATR = (c.targetPct * sn.c) / sn.atr14;
+      if (targetATR > c.targetATR_threshold1) s += c.targetReachable_T1;
+      else if (targetATR > c.targetATR_threshold2) s += c.targetReachable_T2;
+      else if (targetATR > c.targetATR_threshold3) s += c.targetReachable_T3;
+      else s += c.targetReachable_T4;
     }
 
-    /* Component 2: Distance to 4% target (max 10)
-       Measured in ATR terms: 0.25-2.0 ATR below target is the sweet spot. */
     if (sn.c != null && sn.c > 0 && sn.buyRef != null && sn.buyRef > 0 && sn.atr14 != null && sn.atr14 > 0) {
-      var target4 = sn.buyRef * 1.04;
+      var target4 = sn.buyRef * (1 + c.targetPct);
       var distATR = (target4 - sn.c) / sn.atr14;
-      if (distATR >= 0.25 && distATR <= 2.0) s += 10;
-      else if (distATR >= 0 && distATR <= 3.0) s += 5;
+      if (distATR >= c.targetDist_range1_lo && distATR <= c.targetDist_range1_hi) s += c.targetDist_T1;
+      else if (distATR >= c.targetDist_range2_lo && distATR <= c.targetDist_range2_hi) s += c.targetDist_T2;
     }
 
-    /* Component 3: Volatility sweet spot (max 10)
-       Use ATR percentile: 30-70 percentile is ideal (not too quiet, not too wild). */
-    if (atrPercentile >= 30 && atrPercentile <= 70) s += 10;
-    else if (atrPercentile >= 20 && atrPercentile <= 80) s += 5;
+    if (atrPercentile >= c.volPercentile_lo && atrPercentile <= c.volPercentile_hi) s += c.volSweet_T1;
+    else if (atrPercentile >= c.volPercentile_lo2 && atrPercentile <= c.volPercentile_hi2) s += c.volSweet_T2;
 
-    /* Component 4: Efficiency ratio (max 5) */
-    if (sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > 0.4) s += 5;
+    if (sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > c.efficiencyRatioThreshold) s += c.efficiencyRatio;
 
-    return Math.min(s, 40);
+    return Math.min(s, SCORE_CONFIG.pillarMax.prob4);
   }
 
   /* Modifiers (±15 each): low-expansion, spike day, stability, MTF alignment.
@@ -2746,24 +2833,22 @@ window.TechIndicators = (function () {
     var items = [];
     var volRegime = opts.volRegime || null;
     var atrPercentile = volRegime ? volRegime.atrPercentile : 50;
+    var mc = SCORE_CONFIG.modifiers;
 
-    /* Low expansion penalty: only penalize if BOTH low beta AND low ATR percentile */
-    if (sn && sn.beta != null && sn.beta < 0.5 && atrPercentile < 25) {
-      items.push({ reason: "Low beta + low volatility percentile (no expansion)", amount: -10 });
+    if (sn && sn.beta != null && sn.beta < mc.lowBetaThreshold && atrPercentile < mc.lowATRPercentile) {
+      items.push({ reason: "Low beta + low volatility percentile (no expansion)", amount: mc.lowExpansionPenalty });
     }
 
-    if (opts.spikeDay) items.push({ reason: "Spike day (gap or abnormal move)", amount: -10 });
+    if (opts.spikeDay) items.push({ reason: "Spike day (gap or abnormal move)", amount: mc.spikePenalty });
 
-    if (sn && sn.stability20 != null && sn.stability20 < 0.3) {
-      items.push({ reason: "Unstable price action (stability < 0.3)", amount: -15 });
+    if (sn && sn.stability20 != null && sn.stability20 < mc.stabilityThreshold) {
+      items.push({ reason: "Unstable price action (stability < " + mc.stabilityThreshold + ")", amount: mc.stabilityPenalty });
     }
 
-    if (opts.mtfAlign) items.push({ reason: "Weekly + daily both >= 65 (MTF alignment)", amount: 10 });
+    if (opts.mtfAlign) items.push({ reason: "Weekly + daily both >= " + mc.mtfAlignThreshold + " (MTF alignment)", amount: mc.mtfAlignBonus });
 
-    /* High volatility bonus: stocks in 80+ percentile get a small edge
-       (they have momentum but may be overextended — net neutral) */
-    if (atrPercentile >= 80 && sn && sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > 0.5) {
-      items.push({ reason: "High momentum in high-vol regime", amount: 5 });
+    if (atrPercentile >= mc.highVolATRPercentile && sn && sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > mc.highVolERThreshold) {
+      items.push({ reason: "High momentum in high-vol regime", amount: mc.highVolBonus });
     }
 
     return items;
@@ -2813,9 +2898,9 @@ window.TechIndicators = (function () {
     return {
       entry_score: round(finalScore, 1),
       raw_score: round(rawTotal, 1),
-      trendHealth: round(trendHealth, 1), trendHealthMax: 30,
-      pullbackQuality: round(pullbackQuality, 1), pullbackQualityMax: 30,
-      prob4: round(prob4, 1), prob4Max: 40,
+      trendHealth: round(trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
+      pullbackQuality: round(pullbackQuality, 1), pullbackQualityMax: SCORE_CONFIG.pillarMax.pullbackQuality,
+      prob4: round(prob4, 1), prob4Max: SCORE_CONFIG.pillarMax.prob4,
       modifiers: round(modifiers, 1),
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
       penalty_items: penaltyItems, bonus_items: bonusItems,
@@ -2862,11 +2947,11 @@ window.TechIndicators = (function () {
     perTF.W = (wTF && wTF.candles && wTF.candles.length >= 50) ? scoreEntryPillarsForTF(wTF.candles, indexWeeklyCandles || indexCandles, 'W') : null;
     if (!perTF.H && !perTF.D && !perTF.W) return { multiTF_score: null, reason: 'no_valid_scores' };
 
-    var weights = { D: 0.55, H: 0.30, W: 0.15 };
+    var weights = SCORE_CONFIG.tfWeights;
     var PILLARS = [
-      { key: 'trendHealth', max: 30 },
-      { key: 'pullbackQuality', max: 30 },
-      { key: 'prob4', max: 40 }
+      { key: 'trendHealth', max: SCORE_CONFIG.pillarMax.trendHealth },
+      { key: 'pullbackQuality', max: SCORE_CONFIG.pillarMax.pullbackQuality },
+      { key: 'prob4', max: SCORE_CONFIG.pillarMax.prob4 }
     ];
     var agg = {};
     PILLARS.forEach(function (pillar) {
@@ -2891,7 +2976,7 @@ window.TechIndicators = (function () {
 
     var wRaw = perTF.W ? (perTF.W.trendHealth + perTF.W.pullbackQuality + perTF.W.prob4) : null;
     var dRaw = perTF.D ? (perTF.D.trendHealth + perTF.D.pullbackQuality + perTF.D.prob4) : null;
-    var mtfAlign = wRaw !== null && dRaw !== null && wRaw >= 65 && dRaw >= 65;
+    var mtfAlign = wRaw !== null && dRaw !== null && wRaw >= SCORE_CONFIG.modifiers.mtfAlignThreshold && dRaw >= SCORE_CONFIG.modifiers.mtfAlignThreshold;
 
     var spikeDay = false;
     if (dTF && dTF.candles && perTF.D) {
@@ -2920,9 +3005,9 @@ window.TechIndicators = (function () {
           timeframe: tf.timeframe,
           weight: String(Math.round(weights[label] * 100)) + '%',
           entryScore: round(tRaw, 1),
-          trendHealth: round(p.trendHealth, 1), trendHealthMax: 30,
-          pullbackQuality: round(p.pullbackQuality, 1), pullbackQualityMax: 30,
-          prob4: round(p.prob4, 1), prob4Max: 40,
+          trendHealth: round(p.trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
+          pullbackQuality: round(p.pullbackQuality, 1), pullbackQualityMax: SCORE_CONFIG.pillarMax.pullbackQuality,
+          prob4: round(p.prob4, 1), prob4Max: SCORE_CONFIG.pillarMax.prob4,
           modifiers: 0,
           penalties: 0, bonuses: 0,
           raw_score: round(tRaw, 1),
@@ -2938,9 +3023,9 @@ window.TechIndicators = (function () {
     return {
       multiTF_score: round(finalScore, 1),
       raw_score: round(rawTotal, 1),
-      trendHealth: round(agg.trendHealth, 1), trendHealthMax: 30,
-      pullbackQuality: round(agg.pullbackQuality, 1), pullbackQualityMax: 30,
-      prob4: round(agg.prob4, 1), prob4Max: 40,
+      trendHealth: round(agg.trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
+      pullbackQuality: round(agg.pullbackQuality, 1), pullbackQualityMax: SCORE_CONFIG.pillarMax.pullbackQuality,
+      prob4: round(agg.prob4, 1), prob4Max: SCORE_CONFIG.pillarMax.prob4,
       modifiers: round(modifiers, 1),
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
       penalty_items: penaltyItems, bonus_items: bonusItems,
@@ -4156,6 +4241,8 @@ window.TechIndicators = (function () {
     computeForwardConfidence: computeForwardConfidence,
     computeTenDayForwardConfidence: computeTenDayForwardConfidence,
     computeOptimumEntryPrice: computeOptimumEntryPrice,
-    integratedExitDecision: integratedExitDecision
+    integratedExitDecision: integratedExitDecision,
+    getScoreConfig: getScoreConfig,
+    setScoreConfig: setScoreConfig
   };
 })();

@@ -99,7 +99,7 @@ function _readFsaFile() {
             var parsed = JSON.parse(text);
             var d = parsed && parsed.data ? parsed.data : null;
             if (d) {
-              var keys = ["holdings", "soldShareSnapshots", "watchlist", "entryScores", "entrySnapshots", "entryPerfPrices", "screenerData", "screenerSnapshots", "screenerBookmarks", "singleStockSnapshots", "confTracker", "confTrackerPrices", "notes"];
+              var keys = ["holdings", "soldShareSnapshots", "watchlist", "entryScores", "entrySnapshots", "entryPerfPrices", "screenerData", "screenerSnapshots", "screenerBookmarks", "singleStockSnapshots", "confTracker", "confTrackerPrices", "notes", "scoreConfig"];
               var sections = [], secTotal = 0;
               keys.forEach(function(k) { var b = _estBytes(d[k]); sections.push({ key: k, bytes: b }); secTotal += b; });
               info.sections = sections;
@@ -126,6 +126,7 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   var confTracker = [];
   var confTrackerPrices = {};
   var notes = [];
+  var scoreConfig = null;
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch(e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch(e) {}
   try { entryPerfPrices = (await dbGetSetting("mm_entry_perf_prices")) || {}; } catch(e) {}
@@ -136,6 +137,10 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   try { confTracker = (await dbGetSetting("stox_conf_tracker")) || []; } catch(e) {}
   try { confTrackerPrices = (await dbGetSetting("stox_conf_tracker_prices")) || {}; } catch(e) {}
   try { notes = (await dbGetSetting("stox_notes")) || []; } catch(e) {}
+  try {
+    var saved = localStorage.getItem("stox_score_config");
+    if (saved) scoreConfig = JSON.parse(saved);
+  } catch(e) {}
   return {
     app: "StoX",
     version: 3,
@@ -153,7 +158,8 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       singleStockSnapshots: singleStockSnapshots.length,
       confTracker: confTracker.length,
       confTrackerPrices: Object.keys(confTrackerPrices).length,
-      notes: notes.length
+      notes: notes.length,
+      scoreConfig: !!scoreConfig
     },
     data: {
       holdings: holdings,
@@ -168,7 +174,8 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       singleStockSnapshots: singleStockSnapshots,
       confTracker: confTracker,
       confTrackerPrices: confTrackerPrices,
-      notes: notes
+      notes: notes,
+      scoreConfig: scoreConfig
     }
   };
 }
@@ -229,6 +236,14 @@ async function restoreStoxBackup(fileText) {
   if (d.confTracker) { try { await dbSetSetting("stox_conf_tracker", d.confTracker); } catch(e) {} }
   if (d.confTrackerPrices && typeof d.confTrackerPrices === "object") { try { await dbSetSetting("stox_conf_tracker_prices", d.confTrackerPrices); } catch(e) {} }
   if (d.notes) { try { await dbSetSetting("stox_notes", d.notes); } catch(e) {} }
+  if (d.scoreConfig && typeof d.scoreConfig === "object") {
+    try {
+      localStorage.setItem("stox_score_config", JSON.stringify(d.scoreConfig));
+      if (window.TechIndicators && window.TechIndicators.setScoreConfig) {
+        window.TechIndicators.setScoreConfig(d.scoreConfig);
+      }
+    } catch(e) {}
+  }
   var snaps = d.soldShareSnapshots || {};
   Object.keys(snaps).forEach(function(fyKey) {
     snaps[fyKey].forEach(function(sn) {
