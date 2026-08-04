@@ -6340,6 +6340,7 @@ const ScoreTunerPanel = () => {
   };
 
   const th = { fontSize: 11, fontWeight: 600, color: "var(--text3)", padding: "6px 8px", textAlign: "left", borderBottom: "1px solid var(--border)" };
+  const thR = { fontSize: 11, fontWeight: 600, color: "var(--text3)", padding: "6px 8px", textAlign: "right", borderBottom: "1px solid var(--border)" };
   const td = { fontSize: 11, color: "var(--text)", padding: "6px 8px", borderBottom: "1px solid var(--border)" };
   const tdR = Object.assign({}, td, { textAlign: "right" });
 
@@ -6409,7 +6410,12 @@ const ScoreTunerPanel = () => {
         React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } }, "How changing the minEntryScore filter affects win rate, avg return, and profit factor across the universe."),
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
           React.createElement("thead", null, React.createElement("tr", null,
-            ["Threshold", "Signals", "Win Rate", "Avg Return", "Avg PF", "Symbols"].map(h => React.createElement("th", { key: h, style: th }, h))
+            [React.createElement("th", { key: "h", style: th }, "Threshold"),
+             React.createElement("th", { key: "s", style: thR }, "Signals"),
+             React.createElement("th", { key: "w", style: thR }, "Win Rate"),
+             React.createElement("th", { key: "r", style: thR }, "Avg Return"),
+             React.createElement("th", { key: "p", style: thR }, "Avg PF"),
+             React.createElement("th", { key: "y", style: thR }, "Symbols")]
           )),
           React.createElement("tbody", null, (result.sweep.thresholdSweep || []).map(r =>
             React.createElement("tr", { key: r.threshold },
@@ -6432,7 +6438,11 @@ const ScoreTunerPanel = () => {
             React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", marginBottom: 4, textTransform: "capitalize" } }, pillar.replace(/([A-Z])/g, " $1").trim()),
             React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
               React.createElement("thead", null, React.createElement("tr", null,
-                ["Min Value", "Signals", "Win Rate", "Avg Return", "Avg PF"].map(h => React.createElement("th", { key: h, style: th }, h))
+                [React.createElement("th", { key: "m", style: th }, "Min Value"),
+                 React.createElement("th", { key: "s", style: thR }, "Signals"),
+                 React.createElement("th", { key: "w", style: thR }, "Win Rate"),
+                 React.createElement("th", { key: "r", style: thR }, "Avg Return"),
+                 React.createElement("th", { key: "p", style: thR }, "Avg PF")]
               )),
               React.createElement("tbody", null, (result.sweep.pillarSweep[pillar] || []).map(r =>
                 React.createElement("tr", { key: r.minValue },
@@ -6453,7 +6463,11 @@ const ScoreTunerPanel = () => {
         React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } }, "Point-biserial correlation of each component with forward hit rate. Higher abs(correlation) = more predictive. Info Value > 0.1 = meaningful."),
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
           React.createElement("thead", null, React.createElement("tr", null,
-            ["Component", "Correlation", "Info Value", "N", "Win Rate by Quintile"].map(h => React.createElement("th", { key: h, style: th }, h))
+            [React.createElement("th", { key: "c", style: th }, "Component"),
+             React.createElement("th", { key: "r", style: thR }, "Correlation"),
+             React.createElement("th", { key: "i", style: thR }, "Info Value"),
+             React.createElement("th", { key: "n", style: thR }, "N"),
+             React.createElement("th", { key: "q", style: th }, "Win Rate by Quintile")]
           )),
           React.createElement("tbody", null, Object.keys((result.components && result.components.components) || {}).map(k => {
             const c = result.components.components[k];
