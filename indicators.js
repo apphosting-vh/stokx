@@ -3492,6 +3492,7 @@ window.TechIndicators = (function () {
     var r = sxy / Math.sqrt(sxx * syy);
     return r * r;
   }
+  function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
   /* Relative strength for the horizon model: slope of ln(stock/index) over the
      last ~60 daily bars (relative momentum, in units of its own daily vol) plus
@@ -3563,20 +3564,20 @@ window.TechIndicators = (function () {
      Returns { confidence, reason, components, flags }. */
   function computeHorizonConfidence(hourlyCandles, dailyCandles, cfg) {
     cfg = cfg || {};
-    var horizonDays = cfg.horizonDays != null ? cfg.horizonDays : 5;
-    var windowSessions = cfg.windowSessions != null ? cfg.windowSessions : 10;
+    var horizonDays = cfg.horizonDays != null ? cfg.horizonDays : 10;
+    var windowSessions = cfg.windowSessions != null ? cfg.windowSessions : 40;
+    var targetPct = cfg.target_pct != null ? cfg.target_pct : (cfg.targetPct != null ? cfg.targetPct : 4);
+    var holdingDays = cfg.holding_days != null ? cfg.holding_days : (cfg.holdingDays != null ? cfg.holdingDays : 0);
+    var ctx = cfg.entryScoreContext || {};
     var base = {
       confidence: null, reason: 'insufficient_hourly_data',
-      components: { horizonDays: horizonDays, targetPct: 4, profitPct: null, remainingPct: null, daysHeld: null, sessions: 0, hourlyAdx: null, hourlyPlusDI: null, hourlyMinusDI: null, hourlyVwap: null, hourlyVwapSlope: null, hourlyRsi14: null, roc10: null, ema9: null, ema21: null, dailyEmaBullish: false, dailyMacdBullish: false, dailyMacdAboveZero: false, dailyPriceAboveEma21: false, dailyAdx: null, regimeMult: 1, regimeQuality: null, rsScore: null, rsMomentum: null, rsLevel: null, atrPct: null, horizonReachPct: null, reachRatio: null, driftPct: null, volConfirm: null, realizedVol: null, sigmaDaily: null, muDaily: null, driftScore: null, zScore: null, probTerminal: null, probTouch: null, calP0: 0.40, calK: 32.5 },
+      components: { horizonDays: horizonDays, targetPct: targetPct, profitPct: null, remainingPct: null, daysHeld: holdingDays, sessions: 0, hourlyAdx: null, hourlyPlusDI: null, hourlyMinusDI: null, hourlyVwap: null, hourlyVwapSlope: null, hourlyRsi14: null, roc10: null, ema9: null, ema21: null, dailyEmaBullish: false, dailyMacdBullish: false, dailyMacdAboveZero: false, dailyPriceAboveEma21: false, dailyAdx: null, regimeMult: 1, regimeQuality: null, rsScore: null, atrPct: null, horizonReachPct: null, reachRatio: null, driftPct: null, volConfirm: null, sigmaDaily: null, muDaily: null, driftScore: null, zScore: null, probTerminal: null, probTouch: null, displayScore: null, calP0: 0.38, calK: 38.0, entryScoreUsed: false, entryScore: null, trendHealth: null, pullbackQuality: null, prob4: null, hourDrift: null, dayDrift: null, penalty: null },
       flags: { alreadyAtTarget: false, withinReach: false }
     };
     try {
       if (!hourlyCandles || hourlyCandles.length < 60) return base;
       var entry = cfg.entry_price || cfg.entry || 0;
-      var targetPct = cfg.target_pct != null ? cfg.target_pct : 4;
-      var daysHeld = cfg.holding_days != null ? cfg.holding_days : null;
       if (entry <= 0) { base.reason = 'no_entry_price'; return base; }
-
       var cur = hourlyCandles[hourlyCandles.length - 1];
       var c = cur.c;
       var profitPct = (c - entry) / entry * 100;
@@ -3584,10 +3585,8 @@ window.TechIndicators = (function () {
       base.components.targetPct = targetPct;
       base.components.profitPct = round(profitPct, 2);
       base.components.remainingPct = round(remainingPct, 2);
-      base.components.daysHeld = daysHeld;
       if (remainingPct <= 0) { base.confidence = 100; base.flags.alreadyAtTarget = true; base.reason = 'already_at_target'; return base; }
-
-      /* isolate the last `windowSessions` hourly sessions */
+      var remainingDays = Math.max(1, horizonDays - holdingDays);
       var seen = {}, keys = [];
       for (var i = hourlyCandles.length - 1; i >= 0 && keys.length < windowSessions; i--) {
         var k = String(hourlyCandles[i].t).slice(0, 10);
@@ -3599,9 +3598,6 @@ window.TechIndicators = (function () {
       }
       base.components.sessions = keys.length;
       if (recent.length < 20) { base.reason = 'insufficient_hourly_window'; return base; }
-
-      /* indicators evaluated on the full hourly series (correct warm-up);
-         their latest values lie within the recent session window */
       var adxRes = hourlyCandles.length >= 30 ? calcADX(hourlyCandles, 14) : null;
       var adx = adxRes ? last(adxRes.adx) : null;
       var plusDI = adxRes ? last(adxRes.plusDI) : null;
@@ -3610,13 +3606,10 @@ window.TechIndicators = (function () {
       var roc10 = last(calcROC(hourlyCandles, 10));
       var ema9 = last(calcEMA(hourlyCandles, 9));
       var ema21 = last(calcEMA(hourlyCandles, 21));
-
       var vwapSer = calcSessionVWAP(recent);
       var vwap = last(vwapSer);
       var vwapSlope = null;
       if (vwap != null && recent.length >= 4 && vwapSer[recent.length - 4] != null) vwapSlope = (vwap - vwapSer[recent.length - 4]) / vwap * 100;
-
-      /* daily context: EMA stack, MACD, ATR headroom */
       var dailyEmaBullish = false, dailyMacdBullish = false, atrPct = null, dailyAvailable = false;
       var dailyMacdAboveZero = false, dailyPriceAboveEma21 = false;
       if (dailyCandles && dailyCandles.length >= 30) {
@@ -3632,19 +3625,13 @@ window.TechIndicators = (function () {
         var atrV = last(calcATR(dailyCandles, 14));
         if (prevClose > 0 && atrV != null) atrPct = atrV / prevClose * 100;
       }
-
-      /* regime classifier: ADX gives trend STRENGTH but not trend QUALITY — a
-         stock chopping inside a range with a temporarily positive +DI/−DI reads
-         strong on ADX yet has poor continuation reliability. Gate the ADX boost
-         by how cleanly price marches (R² of a line fit to ln closes over the
-         last ~20 daily bars): clean trending regime → full multiplier; range
-         chop → damped. Continuous multiplier on the trend terms. */
-      var dailyAdx = null, regimeMult = 1;
+      var dailyAdx = null, regimeMult = 1, regimeQuality = null;
       if (dailyAvailable) {
         var dAdxRes = calcADX(dailyCandles, 14);
         if (dAdxRes) dailyAdx = last(dAdxRes.adx);
-        var regimeQuality = null;
-        if (dailyCandles.length >= 25) {
+        if (ctx.trendHealth != null) {
+          regimeQuality = clamp(ctx.trendHealth / 25, 0.2, 1.0);
+        } else if (dailyCandles.length >= 25) {
           var logC = [];
           for (var q = dailyCandles.length - 20; q < dailyCandles.length; q++) logC.push(Math.log(dailyCandles[q].c));
           var r2 = rSquaredFit(logC);
@@ -3657,27 +3644,18 @@ window.TechIndicators = (function () {
               var r2s = rSquaredFit(logC10);
               if (r2s != null) qualShort = Math.max(0, Math.min(1, r2s * 1.2 - 0.2));
             }
-            /* blend long (20d) and short (10d) trend quality so a V-recovery
-               whose current leg is linear is not crushed by a weak 20d line fit */
             regimeQuality = 0.6 * qualLong + 0.4 * qualShort;
           }
-          base.components.regimeQuality = regimeQuality != null ? round(regimeQuality, 2) : null;
         }
-        if (dailyAdx != null) {
-          var qualityGate = regimeQuality != null ? 0.3 + 0.7 * regimeQuality : 1;
-          regimeMult = Math.max(0.4, Math.min(1.25, 0.5 + (dailyAdx / 40) * qualityGate));
-        }
+        base.components.regimeQuality = regimeQuality != null ? round(regimeQuality, 2) : null;
+        var qualityGate = regimeQuality != null ? 0.3 + 0.7 * regimeQuality : 1;
+        if (dailyAdx != null) regimeMult = clamp(0.6 + (dailyAdx / 35) * qualityGate, 0.6, 1.5);
       }
-
-      /* relative strength vs Nifty (optional cfg.indexCandles): relative
-         momentum + position feed the drift estimate. Neutral fill (score null)
-         when index data is unavailable. */
-      var rsRes = cfg.indexCandles ? calcHorizonRS(dailyCandles, cfg.indexCandles) : null;
-      var rsScore = rsRes ? rsRes.score : null;
-
-      /* trend persistence + volume strength over the recent window:
-         driftPct = how far the stock already climbed the gap in the window;
-         volConfirm = share of volume on up-bars (buying dominates selling). */
+      var rsScore = 0;
+      if (dailyCandles && cfg.indexCandles && cfg.indexCandles.length >= 60 && dailyCandles.length >= 60) {
+        var rsRes = calcHorizonRS(dailyCandles, cfg.indexCandles);
+        rsScore = rsRes ? rsRes.score : 0;
+      }
       var startClose = recent[0].o > 0 ? recent[0].o : recent[0].c;
       var driftPct = (c - startClose) / startClose * 100;
       var upVol = 0, dnVol = 0, upCount = 0, dnCount = 0;
@@ -3688,25 +3666,15 @@ window.TechIndicators = (function () {
       var avgUp = upCount > 0 ? upVol / upCount : 0;
       var avgDn = dnCount > 0 ? dnVol / dnCount : 0;
       var volConfirm = (avgUp + avgDn) > 0 ? avgUp / (avgUp + avgDn) : 0.5;
-
-      /* typical N-day reach ≈ daily ATR × √N */
-      var horizonReach = null, reachRatio = null;
-      if (atrPct != null) {
-        horizonReach = atrPct * Math.sqrt(horizonDays);
+      var horizonReach = atrPct != null ? atrPct * Math.sqrt(horizonDays) : null;
+      var reachRatio = horizonReach != null ? horizonReach / Math.max(remainingPct, 0.05) : null;
+      if (horizonReach != null) {
         base.components.atrPct = round(atrPct, 2);
         base.components.horizonReachPct = round(horizonReach, 2);
-        reachRatio = horizonReach / Math.max(remainingPct, 0.05);
         base.components.reachRatio = round(reachRatio, 2);
         base.flags.withinReach = reachRatio >= 1;
       }
-
-      /* real-world daily volatility (σ): realized vol of daily log returns
-         (short/long 70/30 blend, see above) blended 50/50 with ATR-derived vol.
-         calcATR is TRUE-RANGE based, so the correct diffusion conversion is
-         σ ≈ ATR·√(π/8) (E[range] = σ√(8/π) for a Brownian motion) — the common
-         σ ≈ ATR·√(π/2) applies only to mean |open−close| and would double σ.
-         Floored at 0.8%/day so low-vol stocks don't get absurd probabilities. */
-      var realizedVol = null;
+      var sigmaDaily = null;
       if (dailyCandles && dailyCandles.length >= 31) {
         var rets = [];
         for (var r = dailyCandles.length - 1; r > 0 && rets.length < 60; r--) {
@@ -3714,130 +3682,67 @@ window.TechIndicators = (function () {
           if (pc0 > 0 && pc1 > 0) rets.push(Math.log(pc1 / pc0));
         }
         var longVol = sampleStdDev(rets);
-        /* vol mean-reversion: shrink the short-horizon vol toward the long-term
-           vol (70/30) so a recent spike/quiet patch doesn't fully carry forward */
         if (rets.length >= 40) {
           var shortVol = sampleStdDev(rets.slice(0, 20));
-          realizedVol = shortVol != null ? 0.7 * shortVol + 0.3 * longVol : longVol;
-        } else {
-          realizedVol = longVol;
-        }
+          sigmaDaily = shortVol != null ? 0.7 * shortVol + 0.3 * longVol : longVol;
+        } else { sigmaDaily = longVol; }
       }
-      var sigmaDaily = null;
-      if (realizedVol != null) sigmaDaily = realizedVol;
       if (atrPct != null) {
         var atrSigma = atrPct / 100 * Math.sqrt(Math.PI / 8);
         sigmaDaily = sigmaDaily != null ? (sigmaDaily + atrSigma) / 2 : atrSigma;
       }
       if (sigmaDaily != null) sigmaDaily = Math.max(0.008, sigmaDaily);
-
-      /* composite drift estimate → α (daily arithmetic return rate). Trend/
-         structure/momentum signals are blended — NOT assumed-independent votes —
-         into one bounded estimate of expected daily drift. Hourly (intraday)
-         momentum has limited persistence to a multi-day horizon, so its weight
-         decays with horizonDays (full at 5d, ~35% at 10d, floor 10%); the final
-         α mapping (driftScore·0.0025/day) keeps even a maxed signal modest over
-         10 days. */
       var hourDrift = 0;
       if (adx != null && plusDI != null && minusDI != null) {
         var dirH = plusDI > minusDI ? 1 : -1;
-        hourDrift += 0.35 * dirH * Math.max(0, Math.min(1, adx / 35));
+        hourDrift += 0.30 * dirH * clamp(adx / 35, 0, 1);
       }
       if (vwap != null) {
         var dPctH = (c - vwap) / vwap * 100;
-        hourDrift += 0.2 * (dPctH > 0 ? 1 : -1) * Math.max(0, Math.min(1, Math.abs(dPctH) / 1.5));
-        if (vwapSlope != null) hourDrift += 0.15 * Math.max(-1, Math.min(1, vwapSlope / 0.2));
+        hourDrift += 0.25 * (dPctH > 0 ? 1 : -1) * clamp(Math.abs(dPctH) / 1.5, 0, 1);
+        if (vwapSlope != null) hourDrift += 0.20 * clamp(vwapSlope / 0.2, -1, 1);
       }
-      if (ema9 != null && ema21 != null) hourDrift += 0.1 * (ema9 > ema21 ? 1 : -1);
-      if (rsi14 != null) hourDrift += 0.1 * (rsi14 >= 88 ? -0.5 : rsi14 >= 55 && rsi14 <= 78 ? 1 : rsi14 > 78 ? 0.5 : rsi14 < 45 ? -1 : 0);
-      if (roc10 != null) hourDrift += 0.1 * Math.max(-1, Math.min(1, roc10 / 1.5));
-      hourDrift = Math.max(-1, Math.min(1, hourDrift));
-      var hDecay = Math.max(0.1, Math.min(1, Math.pow(5 / horizonDays, 1.5)));
-      hourDrift = hourDrift * hDecay;
-
-      var dayDrift = 0;
-      if (dailyAvailable) {
-        var dS = 0, nS = 0;
-        dS += dailyEmaBullish ? 1 : -1; nS++;
-        dS += dailyPriceAboveEma21 ? 1 : -1; nS++;
-        dS += dailyMacdAboveZero ? 1 : -1; nS++;
-        dayDrift = dS / nS;
-      }
-      var driftS = Math.max(-1, Math.min(1, driftPct / 2));
-      /* volFlowS = volume-FLOW sentiment (NOT volatility): recent up-bar volume
-         share mapped to [−1,1] (+1 = all volume on up-bars, i.e. accumulation).
-         It is derived from the same hourly window as hourDrift, so like that
-         term it is regime-GATED — up-flow is trusted more in a clean trend and
-         damped in chop — but half its weight stays unconditional so a genuine
-         breakout on heavy up-volume still registers before the daily R² has
-         caught up. Not horizon-decayed: volConfirm is a multi-session flow
-         balance, not a short-lived momentum level. */
-      var volFlowS = Math.max(-1, Math.min(1, (volConfirm - 0.5) * 2));
-      var volQual = regimeQuality != null ? regimeQuality : 1;
-      var volGate = 0.5 + 0.5 * volQual;
-      /* regimeMult gates the CROSS-TIMEFRAME momentum terms (hourly, RS, window
-         drift) whose reliability depends on daily trend quality. dayDrift (daily
-         EMA/MACD stack) is left OUTSIDE the multiplier: it is built from the
-         same daily bars ADX/R² judge, so amplifying it again would double-count
-         the daily trend. Volume flow is gate-adjusted via volGate instead. */
+      if (ema9 != null && ema21 != null) hourDrift += 0.15 * (ema9 > ema21 ? 1 : -1);
+      if (rsi14 != null) hourDrift += 0.10 * (rsi14 < 30 ? 0.5 : rsi14 > 70 ? -0.5 : 0);
+      hourDrift = clamp(hourDrift, -1, 1);
+      var hourDecay = clamp(Math.pow(Math.min(1, 10 / horizonDays), 1.2), 0.3, 1.0);
+      hourDrift *= hourDecay;
+      var dayDrift;
+      if (ctx.trendHealth != null) {
+        dayDrift = clamp((ctx.trendHealth - 15) / 15, -1, 1);
+      } else if (dailyAvailable) {
+        var dS = (dailyEmaBullish ? 1 : 0) + (dailyPriceAboveEma21 ? 1 : 0) + (dailyMacdAboveZero ? 1 : 0);
+        dayDrift = dS / 3 * 2 - 1;
+      } else { dayDrift = 0; }
+      var pullbackBoost = 0;
+      if (ctx.pullbackQuality != null) pullbackBoost = clamp((ctx.pullbackQuality - 15) / 15, -0.1, 0.15);
+      var driftS = clamp(driftPct / 2, -1, 1);
+      var volFlowS = clamp((volConfirm - 0.5) * 2, -1, 1);
+      var volGate = 0.5 + 0.5 * (regimeQuality != null ? regimeQuality : 1);
+      var prob4Adjust = 0;
+      if (ctx.prob4 != null) prob4Adjust = clamp((ctx.prob4 - 20) / 200, -0.1, 0.1);
       var driftScore;
-      if (rsScore != null) {
-        driftScore = Math.max(-1, Math.min(1,
-          regimeMult * (0.20 * hourDrift + 0.20 * rsScore + 0.10 * driftS) +
-          0.35 * dayDrift + 0.15 * volFlowS * volGate));
+      if (rsScore !== 0 && !isNaN(rsScore)) {
+        driftScore = regimeMult * (0.15 * hourDrift + 0.15 * rsScore + 0.10 * driftS) +
+                     0.35 * dayDrift + 0.15 * volFlowS * volGate + 0.10 * pullbackBoost + prob4Adjust;
       } else {
-        driftScore = Math.max(-1, Math.min(1,
-          regimeMult * (0.25 * hourDrift + 0.10 * driftS) +
-          0.45 * dayDrift + 0.20 * volFlowS * volGate));
+        driftScore = regimeMult * (0.20 * hourDrift + 0.10 * driftS) +
+                     0.40 * dayDrift + 0.20 * volFlowS * volGate + 0.10 * pullbackBoost + prob4Adjust;
       }
+      driftScore = clamp(driftScore, -1, 1);
       base.components.driftPct = round(driftPct, 2);
       base.components.volConfirm = round(volConfirm, 2);
       base.components.dailyAdx = dailyAdx != null ? round(dailyAdx, 1) : null;
       base.components.regimeMult = round(regimeMult, 2);
       base.components.rsScore = rsScore != null ? round(rsScore, 3) : null;
-      base.components.rsMomentum = rsRes ? round(rsRes.momentum, 3) : null;
-      base.components.rsLevel = rsRes ? round(rsRes.level, 3) : null;
-
-      /* probabilistic core: the N-day forward path is modeled as a diffusion
-         with daily drift μ and daily vol σ, and the question answered is the
-         FIRST-PASSAGE one — "reached +4% at ANY point within N trading days"
-         (running maximum). Touch probability via the reflection principle:
-           P_touch = Φ((μT−b)/σ√N) + exp(2μb/σ²)·Φ((−μT−b)/σ√N)
-         (note the first term is Φ(−z), not Φ(z) — a naive form makes P_touch
-         saturate toward 1 even at zero drift). The terminal probability
-         P(≥target on day N) = 1−Φ(z) is computed for reference; it is always
-         ≤ touch (a path can spike through target and drift back down).
-         b = ln((1+target)/(1+profit)) is the exact log-return still needed
-         from the CURRENT price to the fixed target — the linear (target−profit)
-         subtraction understates b once a position accrues profit.
-         All signals are bounded: driftScore ∈ [−1,1], regimeMult ∈ [0.4,1.25],
-         penalty terms ∈ [0,1], final display clamped to [0,100].
-         μ in the formula is the LOG-drift: driftScore·0.0025 estimates the
-         arithmetic return rate α, so the diffusion uses μ_log = α − σ²/2 (Ito).
-         MODELING CAVEAT: constant-μ/σ lognormal diffusion is a deliberate
-         simplification — it does not model gaps (overnight jumps), circuit
-         limit moves, or regime shifts inside the horizon; it is a ranking
-         score, not a calibrated return forecast. */
-      /* display calibration: touch probabilities cluster around 0.35–0.5 at
-         typical blended NSE vol (~1.4%/day), so P is mapped through a logit
-         scale anchored at cal_p0 (default 0.40 ≈ the ZERO-DRIFT 10-day +4%
-         touch probability at that vol — first-passage odds are VOL-DOMINATED,
-         so naive "expected-return base rate" estimates run far too low). Re-fit
-         from a backtest, cfg-tunable; a neutral stock reads ~50 and the familiar
-         70/40 thresholds keep meaning. Raw probabilities stay in
-         components.probTouch / probTerminal. */
-      var calP0 = cfg.cal_p0 != null ? cfg.cal_p0 : 0.40;
-      var calK = cfg.cal_k != null ? cfg.cal_k : 32.5;
+      base.components.hourDrift = round(hourDrift, 3);
+      base.components.dayDrift = round(dayDrift, 3);
       var displayScore = null, zScore = null, probTerminal = null, probTouch = null, muDaily = null, muLog = null;
+      var calP0 = 0.38, calK = 38.0;
       if (sigmaDaily == null) {
         base.reason = 'insufficient_daily_data';
       } else {
-        var remainingDays = daysHeld != null ? Math.max(1, horizonDays - daysHeld) : horizonDays;
         muDaily = driftScore * 0.0025;
-        /* Ito correction: driftScore·0.0025 estimates the ARITHMETIC return rate
-           α (dS/S). The reflection principle operates on ln S, whose drift is
-           μ_log = α − σ²/2 — without this, touch probabilities are slightly
-           overstated (especially at higher vol). */
         muLog = muDaily - 0.5 * sigmaDaily * sigmaDaily;
         var b = Math.log((1 + targetPct / 100) / (1 + profitPct / 100));
         b = Math.max(b, 0.0005);
@@ -3849,40 +3754,40 @@ window.TechIndicators = (function () {
         probTouch = Math.max(1e-6, Math.min(1 - 1e-6, probTouch));
         probTerminal = Math.max(1e-6, Math.min(1 - 1e-6, probTerminal));
         displayScore = 50 + (Math.log(probTouch / (1 - probTouch)) - Math.log(calP0 / (1 - calP0))) * calK;
-
-        /* Overextension penalty — defensive haircut for stretched entries the
-           bounded drift estimate can't fully express. Scales continuously with
-           hourly RSI (starts at 82, full at ~91) and the price-VWAP stretch.
-           The VWAP threshold scales with the stock's OWN daily ATR (a 3% ATR
-           stock needs +3% above VWAP to start penalizing; a low-vol stock hits
-           the same zone much sooner) but the RAMP width is FIXED (4%), so the
-           penalty gradient is uniform in absolute %-above-VWAP once extended.
-           Amplifies as the position nears target: an overbought stock that only
-           needs a little more room has likely spent its easy upside ("already
-           done"), while the same reading with a large gap still left is less
-           disqualifying. */
         var pen = 0;
-        if (rsi14 != null) pen += 9 * Math.max(0, Math.min(1, (rsi14 - 82) / 9));
-        if (vwap != null) {
-          var d2 = (c - vwap) / vwap * 100;
-          var vwScale = atrPct != null ? Math.max(0.8, Math.min(2.2, atrPct / 1.5)) : 1;
-          pen += 7 * Math.max(0, Math.min(1, (d2 - 1.5 * vwScale) / 4.0));
+        if (rsi14 != null && rsi14 > 85) pen += 5 * clamp((rsi14 - 85) / 10, 0, 1);
+        if (vwap != null && atrPct != null) {
+          var vwScale = atrPct / 100 * c;
+          var vwapExt = vwScale > 0 ? (c - vwap) / vwScale : 0;
+          if (vwapExt > 2.0) pen += 4 * clamp((vwapExt - 2.0) / 3, 0, 1);
         }
-        if (pen > 0 && remainingPct != null) pen *= 1 + 0.6 * Math.max(0, Math.min(1, 1 - remainingPct / 2.5));
-        displayScore -= Math.min(26, pen);
-
-        base.confidence = round(Math.max(0, Math.min(100, displayScore)), 1);
+        if (pen > 0 && remainingPct != null) pen *= (1 + 0.3 * clamp(1 - remainingPct / 2.5, 0, 1));
+        displayScore -= Math.min(15, pen);
+        base.components.penalty = round(pen, 1);
+        var finalScore;
+        if (ctx.entryScore != null) {
+          finalScore = 0.60 * displayScore + 0.40 * ctx.entryScore;
+          if (ctx.entryScore < 50) finalScore = Math.min(finalScore, 45);
+          if (ctx.entryScore < 35) finalScore = Math.min(finalScore, 30);
+          base.components.entryScoreUsed = true;
+          base.components.entryScore = ctx.entryScore;
+          base.components.trendHealth = ctx.trendHealth;
+          base.components.pullbackQuality = ctx.pullbackQuality;
+          base.components.prob4 = ctx.prob4;
+        } else {
+          finalScore = displayScore;
+        }
+        base.confidence = round(Math.max(0, Math.min(100, finalScore)), 1);
       }
       base.components.calP0 = calP0;
       base.components.calK = calK;
-      base.components.primary = 'touch';
-      base.components.realizedVol = realizedVol != null ? round(realizedVol * 100, 2) : null;
       base.components.sigmaDaily = sigmaDaily != null ? round(sigmaDaily * 100, 2) : null;
       base.components.muDaily = muLog != null ? round(muLog * 100, 3) : null;
       base.components.driftScore = round(driftScore, 3);
       base.components.zScore = zScore != null ? round(zScore, 3) : null;
       base.components.probTerminal = probTerminal != null ? round(probTerminal * 100, 1) : null;
       base.components.probTouch = probTouch != null ? round(probTouch * 100, 1) : null;
+      base.components.displayScore = displayScore != null ? round(displayScore, 1) : null;
       base.components.hourlyAdx = adx != null ? round(adx, 1) : null;
       base.components.hourlyPlusDI = plusDI != null ? round(plusDI, 1) : null;
       base.components.hourlyMinusDI = minusDI != null ? round(minusDI, 1) : null;
@@ -3896,6 +3801,22 @@ window.TechIndicators = (function () {
       base.components.dailyMacdBullish = dailyMacdBullish;
       base.components.dailyMacdAboveZero = dailyMacdAboveZero;
       base.components.dailyPriceAboveEma21 = dailyPriceAboveEma21;
+      var classification;
+      if (base.confidence >= 75) classification = 'HIGH_CONVICTION';
+      else if (base.confidence >= 60) classification = 'CONFIDENT';
+      else if (base.confidence >= 45) classification = 'MODERATE';
+      else if (base.confidence >= 30) classification = 'LOW_CONVICTION';
+      else classification = 'UNFAVORABLE';
+      base.classification = classification;
+      var flags = [];
+      if (reachRatio != null && reachRatio < 0.5) flags.push('TARGET_TOO_FAR');
+      if (reachRatio != null && reachRatio > 2.0) flags.push('TARGET_EASILY_REACHABLE');
+      if (regimeQuality != null && regimeQuality < 0.3) flags.push('CHOPPY_REGIME');
+      if (regimeQuality != null && regimeQuality > 0.7) flags.push('STRONG_TREND');
+      if (pen > 5) flags.push('OVEREXTENDED_ENTRY');
+      if (ctx.entryScore != null && ctx.entryScore >= 65) flags.push('HIGH_ENTRY_SCORE');
+      if (ctx.pullbackQuality != null && ctx.pullbackQuality >= 25) flags.push('EXCELLENT_PULLBACK_SETUP');
+      base.components.flags = flags;
       if (displayScore == null) base.reason = 'insufficient_daily_data';
       else base.reason = 'ok';
       return base;
@@ -3913,8 +3834,8 @@ window.TechIndicators = (function () {
     return computeHorizonConfidence(hourlyCandles, dailyCandles, {
       horizonDays: 5, windowSessions: 20,
       entry_price: entry,
-      target_pct: position.target_pct != null ? position.target_pct : 4,
-      holding_days: position.holding_days != null ? position.holding_days : null,
+      targetPct: position.target_pct != null ? position.target_pct : (position.targetPct != null ? position.targetPct : 4),
+      holdingDays: position.holding_days != null ? position.holding_days : (position.holdingDays != null ? position.holdingDays : null),
       indexCandles: position.indexCandles || null
     });
   }
@@ -3922,17 +3843,19 @@ window.TechIndicators = (function () {
   /* Stock-level wrapper: "will THIS stock rise +4% from its CURRENT price within
      the next 10 trading days?" — hourly window = last 40 sessions; optional
      daily ^NSEI candles for RS-vs-Nifty / regime context. */
-  function computeTenDayForwardConfidence(hourlyCandles, dailyCandles, indexCandles) {
+  function computeTenDayForwardConfidence(hourlyCandles, dailyCandles, indexCandles, entryScoreResult) {
+    var entryScoreContext = entryScoreResult || null;
     if (!hourlyCandles || hourlyCandles.length === 0) {
-      return computeHorizonConfidence(hourlyCandles, dailyCandles, { horizonDays: 10, windowSessions: 40, entry_price: 0, indexCandles: indexCandles });
+      return computeHorizonConfidence(hourlyCandles, dailyCandles, { horizonDays: 10, windowSessions: 40, entry_price: 0, indexCandles: indexCandles, entryScoreContext: entryScoreContext });
     }
     var cur = hourlyCandles[hourlyCandles.length - 1];
     return computeHorizonConfidence(hourlyCandles, dailyCandles, {
       horizonDays: 10, windowSessions: 40,
       entry_price: cur.c,
-      target_pct: 4,
-      holding_days: null,
-      indexCandles: indexCandles
+      targetPct: 4,
+      holdingDays: null,
+      indexCandles: indexCandles,
+      entryScoreContext: entryScoreContext
     });
   }
 
@@ -3972,7 +3895,7 @@ window.TechIndicators = (function () {
 
       /* 10-day context from the current market price (entry = C → 0% profit) */
       var ctx = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-        horizonDays: 10, windowSessions: 40, entry_price: c, target_pct: 4, holding_days: 0, indexCandles: indexCandles
+        horizonDays: 10, windowSessions: 40, entry_price: c, targetPct: 4, holdingDays: 0, indexCandles: indexCandles
       });
       if (ctx.reason !== 'ok' || ctx.confidence == null) { base.reason = ctx.reason || base.reason; return base; }
       base.currentConfidence = ctx.confidence;
@@ -4065,7 +3988,7 @@ window.TechIndicators = (function () {
       for (var p2 = 0; p2 < prices.length; p2++) {
         var P = prices[p2];
         var res = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-          horizonDays: 10, windowSessions: 40, entry_price: P, target_pct: 4, holding_days: 0, indexCandles: indexCandles
+          horizonDays: 10, windowSessions: 40, entry_price: P, targetPct: 4, holdingDays: 0, indexCandles: indexCandles
         });
         candData.push({ price: round(P, 2), confidence: res.confidence, tag: cand[P] });
       }
