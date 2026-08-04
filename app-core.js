@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.16";
+window.__STOX_APP_VERSION = "2.10.18";
 
 /* Apply saved score config on startup */
 (function() {
@@ -6230,7 +6230,7 @@ const ScoreTunerPanel = () => {
   }
 
   function resetScoreConfig() {
-    var def = TI.getScoreConfig ? TI.getScoreConfig() : {};
+    var def = TI.getDefaultScoreConfig ? TI.getDefaultScoreConfig() : (TI.getScoreConfig ? TI.getScoreConfig() : {});
     setScoreConfigState(def);
     try { localStorage.removeItem("stox_score_config"); } catch(e) {}
     if (TI.setScoreConfig) TI.setScoreConfig(def);
@@ -6355,7 +6355,7 @@ const ScoreTunerPanel = () => {
     React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
       React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" } },
         React.createElement("div", null,
-          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Universe"),
+          React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Universe"),
           React.createElement("div", { style: { display: "flex", gap: 4 } },
             UNIVERSES.map(u => React.createElement("button", {
               key: u.key, onClick: () => setUniverse(u.key),
@@ -6363,18 +6363,18 @@ const ScoreTunerPanel = () => {
               style: { padding: "7px 12px", fontSize: 11, fontWeight: 700, borderRadius: 6, cursor: "pointer", border: "1px solid " + (universe === u.key ? "var(--accent)" : "var(--border)"), background: universe === u.key ? "rgba(6,182,212,.12)" : "var(--bg4)", color: universe === u.key ? "var(--accent)" : "var(--text5)" }
             }, u.label))
           ),
-          React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 2 } }, getUniverseConfig().desc)
+          React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 2 } }, getUniverseConfig().desc)
         ),
         React.createElement("div", null,
-          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Target %"),
+          React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Target %"),
           React.createElement("input", { className: "inp", type: "number", value: target, onChange: e => setTarget(parseFloat(e.target.value) || 4), style: { width: 70 } })
         ),
         React.createElement("div", null,
-          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Hold Days"),
+          React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Hold Days"),
           React.createElement("input", { className: "inp", type: "number", value: holding, onChange: e => setHolding(parseInt(e.target.value) || 14), style: { width: 70 } })
         ),
         React.createElement("div", null,
-          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Base Threshold"),
+          React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Base Threshold"),
           React.createElement("input", { className: "inp", type: "number", value: threshold, onChange: e => setThreshold(parseInt(e.target.value) || 65), style: { width: 70 } })
         ),
         React.createElement("button", { onClick: runSweep, disabled: running, className: "stx-btn stx-btn-primary", style: { padding: "8px 18px", fontSize: 12, opacity: running ? 0.6 : 1, cursor: running ? "wait" : "pointer" } },
@@ -6402,12 +6402,12 @@ const ScoreTunerPanel = () => {
           }, label)
         ),
         React.createElement("div", { style: { flex: 1 } }),
-        result && activeResultTab !== "config" && React.createElement("button", { onClick: () => exportCSV(activeResultTab), className: "stx-btn", style: { fontSize: 10, padding: "6px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer", marginBottom: 4 } }, "Export CSV")
+        result && activeResultTab !== "config" && React.createElement("button", { onClick: () => exportCSV(activeResultTab), className: "stx-btn", style: { fontSize: 11, padding: "6px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer", marginBottom: 4 } }, "Export CSV")
       ),
 
       result && activeResultTab === "threshold" && React.createElement("div", { className: "stx-card", style: { padding: 12, overflowX: "auto" } },
         React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 8, color: "var(--text)" } }, "Total Score Threshold Sweep"),
-        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } }, "How changing the minEntryScore filter affects win rate, avg return, and profit factor across the universe."),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 10 } }, "How changing the minEntryScore filter affects win rate, avg return, and profit factor across the universe."),
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
           React.createElement("thead", null, React.createElement("tr", null,
             [React.createElement("th", { key: "h", style: th }, "Threshold"),
@@ -6432,7 +6432,7 @@ const ScoreTunerPanel = () => {
 
       result && activeResultTab === "pillar" && React.createElement("div", { className: "stx-card", style: { padding: 12, overflowX: "auto" } },
         React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 8, color: "var(--text)" } }, "Pillar-Level Sweep"),
-        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } }, "Each pillar tested independently (while total score stays >= threshold). Higher correlation with win rate = more predictive."),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 10 } }, "Each pillar tested independently (while total score stays >= threshold). Higher correlation with win rate = more predictive."),
         Object.keys(result.sweep.pillarSweep || {}).map(pillar =>
           React.createElement("div", { key: pillar, style: { marginBottom: 16 } },
             React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", marginBottom: 4, textTransform: "capitalize" } }, pillar.replace(/([A-Z])/g, " $1").trim()),
@@ -6460,7 +6460,7 @@ const ScoreTunerPanel = () => {
 
       result && activeResultTab === "component" && React.createElement("div", { className: "stx-card", style: { padding: 12, overflowX: "auto" } },
         React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 8, color: "var(--text)" } }, "Component Predictive Power"),
-        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } }, "Point-biserial correlation of each component with forward hit rate. Higher abs(correlation) = more predictive. Info Value > 0.1 = meaningful."),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 10 } }, "Point-biserial correlation of each component with forward hit rate. Higher abs(correlation) = more predictive. Info Value > 0.1 = meaningful."),
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
           React.createElement("thead", null, React.createElement("tr", null,
             [React.createElement("th", { key: "c", style: th }, "Component"),
@@ -6478,7 +6478,7 @@ const ScoreTunerPanel = () => {
               React.createElement("td", { style: Object.assign({}, tdR, { color: Math.abs(c.correlation) >= 0.1 ? "#22c55e" : Math.abs(c.correlation) >= 0.05 ? "#eab308" : "var(--text5)", fontWeight: 700 }) }, c.correlation.toFixed(3)),
               React.createElement("td", { style: Object.assign({}, tdR, { color: c.infoValue >= 0.1 ? "#22c55e" : "var(--text5)" }) }, c.infoValue.toFixed(3)),
               React.createElement("td", { style: tdR }, c.n),
-              React.createElement("td", { style: Object.assign({}, td, { fontSize: 10, fontFamily: "var(--font-mono)" }) }, quintiles || "--")
+              React.createElement("td", { style: Object.assign({}, td, { fontSize: 11, fontFamily: "var(--font-mono)" }) }, quintiles || "--")
             );
           }))
         )
@@ -6488,17 +6488,17 @@ const ScoreTunerPanel = () => {
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 } },
           React.createElement("div", null,
             React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, "Score Configuration"),
-            React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, "Adjust weights and thresholds. Changes apply immediately to entry score calculations. Saved to localStorage.")
+            React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, "Adjust weights and thresholds. Changes apply immediately to entry score calculations. Saved to localStorage.")
           ),
-          React.createElement("button", { onClick: resetScoreConfig, className: "stx-btn", style: { fontSize: 10, padding: "6px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "Reset Defaults")
+          React.createElement("button", { onClick: resetScoreConfig, className: "stx-btn", style: { fontSize: 11, padding: "6px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "Reset Defaults")
         ),
         /* Pillar Max Scores */
         React.createElement("div", { style: { marginBottom: 16 } },
-          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar Max Scores"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar Max Scores"),
           React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap" } },
             [["pillarMax.trendHealth", "Trend Health"], ["pillarMax.pullbackQuality", "Pullback Quality"], ["pillarMax.prob4", "4% Probability"]].map(([path, label]) =>
               React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
-                React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", minWidth: 110 } }, label),
+                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 110 } }, label),
                 React.createElement("input", { className: "inp", type: "number", value: scoreConfig.pillarMax[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 60, fontSize: 11 } })
               )
             )
@@ -6506,11 +6506,11 @@ const ScoreTunerPanel = () => {
         ),
         /* MTF Weights */
         React.createElement("div", { style: { marginBottom: 16 } },
-          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Timeframe Weights"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Timeframe Weights"),
           React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap" } },
             [["tfWeights.D", "Daily"], ["tfWeights.H", "Hourly"], ["tfWeights.W", "Weekly"]].map(([path, label]) =>
               React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
-                React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", minWidth: 60 } }, label),
+                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 60 } }, label),
                 React.createElement("input", { className: "inp", type: "number", step: 0.05, min: 0, max: 1, value: scoreConfig.tfWeights[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 60, fontSize: 11 } })
               )
             )
@@ -6518,7 +6518,7 @@ const ScoreTunerPanel = () => {
         ),
         /* Pillar 1: Trend Health */
         React.createElement("div", { style: { marginBottom: 16 } },
-          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 1: Trend Health"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 1: Trend Health"),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 } },
             [["trendHealth.priceAboveSMA50", "Price > SMA50", 0, 10], ["trendHealth.SMA20AboveSMA50", "SMA20 > SMA50", 0, 10], ["trendHealth.priceAboveSMA20_or_VWAP", "Price > SMA20/VWAP", 0, 10],
              ["trendHealth.ADX_DI", "ADX + DI", 0, 10], ["trendHealth.adxThreshold", "ADX Threshold", 10, 40], ["trendHealth.mansfieldRS", "Mansfield RS", 0, 10],
@@ -6526,7 +6526,7 @@ const ScoreTunerPanel = () => {
              ["trendHealth.sma20Slope", "SMA20 Slope", 0, 5], ["trendHealth.sma20SlopeThreshold", "Slope Threshold", -0.1, 0.2]
             ].map(([path, label, min, max]) =>
               React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
-                React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", minWidth: 130 } }, label),
+                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 130 } }, label),
                 React.createElement("input", { className: "inp", type: "number", step: 0.5, min: min, max: max, value: scoreConfig.trendHealth[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 60, fontSize: 11 } })
               )
             )
@@ -6534,7 +6534,7 @@ const ScoreTunerPanel = () => {
         ),
         /* Pillar 2: Pullback Quality */
         React.createElement("div", { style: { marginBottom: 16 } },
-          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 2: Pullback Quality"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 2: Pullback Quality"),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8 } },
             [["pullbackQuality.distATR_inner", "ATR Dist Inner", 0, 15], ["pullbackQuality.distATR_innerRange", "Inner Range (ATR)", 0.5, 3],
              ["pullbackQuality.distATR_outer", "ATR Dist Outer", 0, 10], ["pullbackQuality.distATR_outerRange", "Outer Range (ATR)", 1, 5],
@@ -6544,7 +6544,7 @@ const ScoreTunerPanel = () => {
              ["pullbackQuality.volumeConfirm", "Volume Confirm", 0, 10], ["pullbackQuality.volRatioThreshold", "Vol Ratio Threshold", 0.5, 3]
             ].map(([path, label, min, max]) =>
               React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
-                React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", minWidth: 150 } }, label),
+                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 150 } }, label),
                 React.createElement("input", { className: "inp", type: "number", step: 0.5, min: min, max: max, value: scoreConfig.pullbackQuality[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 60, fontSize: 11 } })
               )
             )
@@ -6552,7 +6552,7 @@ const ScoreTunerPanel = () => {
         ),
         /* Pillar 3: 4% Probability */
         React.createElement("div", { style: { marginBottom: 16 } },
-          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 3: 4% Probability"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 3: 4% Probability"),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 8 } },
             [["prob4.targetPct", "Target %", 0.01, 0.10], ["prob4.targetReachable_T1", "Reachable T1", 0, 20], ["prob4.targetATR_threshold1", "ATR Thresh 1", 0.5, 4],
              ["prob4.targetReachable_T2", "Reachable T2", 0, 20], ["prob4.targetATR_threshold2", "ATR Thresh 2", 0.5, 4],
@@ -6567,7 +6567,7 @@ const ScoreTunerPanel = () => {
              ["prob4.efficiencyRatio", "Efficiency Ratio", 0, 10], ["prob4.efficiencyRatioThreshold", "ER Threshold", 0.1, 0.8]
             ].map(([path, label, min, max]) =>
               React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
-                React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", minWidth: 150 } }, label),
+                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 150 } }, label),
                 React.createElement("input", { className: "inp", type: "number", step: 0.5, min: min, max: max, value: scoreConfig.prob4[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 60, fontSize: 11 } })
               )
             )
@@ -6575,7 +6575,7 @@ const ScoreTunerPanel = () => {
         ),
         /* Modifiers */
         React.createElement("div", null,
-          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Modifiers"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Modifiers"),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 8 } },
             [["modifiers.lowBetaThreshold", "Low Beta Threshold", 0, 1], ["modifiers.lowATRPercentile", "Low ATR Pctl", 5, 50],
              ["modifiers.lowExpansionPenalty", "Low Expansion Penalty", -20, 0], ["modifiers.spikePenalty", "Spike Penalty", -20, 0],
@@ -6585,7 +6585,7 @@ const ScoreTunerPanel = () => {
              ["modifiers.highVolERThreshold", "High Vol ER Thresh", 0.2, 0.9], ["modifiers.highVolBonus", "High Vol Bonus", 0, 15]
             ].map(([path, label, min, max]) =>
               React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
-                React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", minWidth: 155 } }, label),
+                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 155 } }, label),
                 React.createElement("input", { className: "inp", type: "number", step: 0.5, min: min, max: max, value: scoreConfig.modifiers[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 60, fontSize: 11 } })
               )
             )

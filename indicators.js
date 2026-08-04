@@ -2740,7 +2740,9 @@ window.TechIndicators = (function () {
     },
   };
 
+  var SCORE_CONFIG_DEFAULTS = JSON.parse(JSON.stringify(SCORE_CONFIG));
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
+  function getDefaultScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG_DEFAULTS)); }
   function setScoreConfig(patch) {
     if (!patch) return;
     function merge(target, source) {
@@ -4243,6 +4245,7 @@ window.TechIndicators = (function () {
     computeOptimumEntryPrice: computeOptimumEntryPrice,
     integratedExitDecision: integratedExitDecision,
     getScoreConfig: getScoreConfig,
+    getDefaultScoreConfig: getDefaultScoreConfig,
     setScoreConfig: setScoreConfig
   };
 })();
