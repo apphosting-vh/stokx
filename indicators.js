@@ -2619,7 +2619,50 @@ window.TechIndicators = (function () {
     } catch (e) { return null; }
   }
 
-  /* Pillar 1: Trend Health (max 30). */
+  /* ── Volatility Normalization Helpers ──────────────────────────────────────
+     Compute ATR percentile rank over a lookback window to normalize
+     thresholds across different volatility regimes (large cap vs mid cap).
+     ────────────────────────────────────────────────────────────────────────── */
+
+  /* Compute ATR percentile rank: where current ATR% sits vs historical.
+     Returns 0-100 where 50 = median volatility, 90 = very high vol regime. */
+  function calcATRPercentileRank(candles, period) {
+    period = period || 14;
+    var lookback = 100;
+    if (!candles || candles.length < lookback + period) return 50;
+    var cl = closes(candles), hi = highs(candles), lo = lows(candles);
+    var atrVals = [];
+    for (var i = period; i < cl.length; i++) {
+      var tr = Math.max(hi[i] - lo[i], Math.abs(hi[i] - cl[i - 1]), Math.abs(lo[i] - cl[i - 1]));
+      atrVals.push(tr);
+    }
+    if (atrVals.length < 20) return 50;
+    /* Use SMA of ATR values over recent window */
+    var recentWindow = Math.min(50, atrVals.length);
+    var currentATR = 0;
+    for (var i = atrVals.length - recentWindow; i < atrVals.length; i++) currentATR += atrVals[i];
+    currentATR /= recentWindow;
+    /* Count how many historical ATR values are below current */
+    var belowCount = 0;
+    for (var i = 0; i < atrVals.length - recentWindow; i++) {
+      if (atrVals[i] < currentATR) belowCount++;
+    }
+    var baseCount = atrVals.length - recentWindow;
+    return baseCount > 0 ? Math.round(belowCount / baseCount * 100) : 50;
+  }
+
+  /* Compute volatility regime: { atrPct, atrPercentile, regime }
+     regime = 'low' | 'normal' | 'high' based on percentile rank */
+  function calcVolRegime(sn, candles) {
+    var atrPct = (sn.atr14 != null && sn.c != null && sn.c > 0) ? sn.atr14 / sn.c * 100 : null;
+    var atrPercentile = calcATRPercentileRank(candles, 14);
+    var regime = atrPercentile >= 75 ? 'high' : (atrPercentile <= 25 ? 'low' : 'normal');
+    return { atrPct: atrPct, atrPercentile: atrPercentile, regime: regime };
+  }
+
+  /* Pillar 1: Trend Health (max 30).
+     Volatility-normalized: ADX threshold stays at 25 (already normalized),
+     Mansfield RS threshold tightened to > 0 for cleaner signal. */
   function calcTrendHealthScore(sn) {
     var s = 0;
     if (sn.c != null && sn.sma50 != null && sn.c > sn.sma50) s += 5;
@@ -2627,62 +2670,102 @@ window.TechIndicators = (function () {
     if (sn.c != null && sn.sma20 != null && sn.c > sn.sma20) s += 5;
     else if (sn.c != null && sn.anchoredVwap != null && sn.c > sn.anchoredVwap) s += 5;
     if (sn.adxL != null && sn.plusDI != null && sn.minusDI != null && sn.adxL >= 25 && sn.plusDI > sn.minusDI) s += 5;
-    if (sn.rsMansfield != null && sn.rsMansfield > -5) s += 5;
+    if (sn.rsMansfield != null && sn.rsMansfield > 0) s += 5;
     if (sn.macdL != null && sn.sigL != null && sn.macdL > sn.sigL) s += 5;
     if (sn.weeklyHABullish === true) s += 2.5;
     if (sn.sma20Slope5 != null && sn.sma20Slope5 > 0 && sn.c != null && sn.sma20 != null && sn.c > sn.sma20) s += 2.5;
     return Math.min(s, 30);
   }
 
-  /* Pillar 2: Pullback / Setup Quality (max 30). */
-  function calcPullbackScore(sn) {
+  /* Pillar 2: Pullback / Setup Quality (max 30).
+     Volatility-normalized: distance to buyRef measured in ATR terms instead of
+     fixed percentage. For large cap (1.5% ATR), 1.0 ATR ~ 1.5%. For mid cap
+     (3% ATR), 1.0 ATR ~ 3%. This naturally adapts to the stock's volatility. */
+  function calcPullbackScore(sn, volRegime) {
     var s = 0;
-    if (sn.c != null && sn.buyRef != null && sn.buyRef > 0) {
-      var dist = (sn.c - sn.buyRef) / sn.buyRef * 100;
-      if (dist >= -2 && dist <= 2) s += 10;
+    /* ATR-normalized distance to buy reference (SMA20 or BB lower) */
+    if (sn.c != null && sn.buyRef != null && sn.buyRef > 0 && sn.atr14 != null && sn.atr14 > 0) {
+      var distATR = (sn.c - sn.buyRef) / sn.atr14;
+      /* Within 1.0 ATR of support = good pullback zone */
+      if (distATR >= -1.0 && distATR <= 1.0) s += 10;
+      else if (distATR >= -1.5 && distATR <= 1.5) s += 5;
     }
     if (sn.c != null && sn.o != null && sn.c > sn.o) s += 5;
     if (sn.bbWidth != null && sn.bbWidthPrev5 != null && sn.bbWidth < sn.bbWidthPrev5) s += 5;
-    if ((sn.stochRsiK != null && sn.stochRsiK < 20) || (sn.rsi14 != null && sn.rsi14 < 40)) s += 5;
+    /* RSI thresholds adapt to volatility regime */
+    var rsiOversold = (volRegime && volRegime.regime === 'high') ? 35 : 40;
+    if ((sn.stochRsiK != null && sn.stochRsiK < 20) || (sn.rsi14 != null && sn.rsi14 < rsiOversold)) s += 5;
     if (sn.volRatio != null && sn.volRatio > 1.5 && sn.c != null && sn.o != null && sn.c > sn.o) s += 5;
     return Math.min(30, s);
   }
 
-  /* Pillar 3: 4% Probability (max 40). Target = 4% above the buy reference
-     (SMA20 support, else lower Bollinger band); price 0.5-4% below that target
-     (i.e. roughly at-to-3.5% above support) keeps the component intact through
-     shallow 1-1.5% dips toward support. Breaking below support exits the window. */
-  function calcProb4Score(sn) {
+  /* Pillar 3: 4% Probability (max 40).
+     Volatility-normalized: ATR percentile rank replaces fixed ATR% ranges,
+     and target distance is measured in ATR terms. This ensures the same
+     scoring works for large cap (low ATR%) and mid cap (high ATR%). */
+  function calcProb4Score(sn, volRegime) {
     var s = 0;
+    var atrPct = volRegime ? volRegime.atrPct : (sn.atr14 != null && sn.c != null && sn.c > 0 ? sn.atr14 / sn.c * 100 : null);
+    var atrPercentile = volRegime ? volRegime.atrPercentile : 50;
+
+    /* Component 1: Is 4% target reachable? (max 15)
+       For low-vol stocks, 4% is a big move (needs strong trend).
+       For high-vol stocks, 4% is routine. Use ATR ratio. */
     if (sn.c != null && sn.c > 0 && sn.atr14 != null && sn.atr14 > 0) {
-      if ((0.04 * sn.c) / sn.atr14 > 1.5) s += 15;
+      var targetATR = (0.04 * sn.c) / sn.atr14;
+      if (targetATR > 2.0) s += 15;
+      else if (targetATR > 1.5) s += 12;
+      else if (targetATR > 1.0) s += 8;
+      else s += 3;
     }
-    if (sn.c != null && sn.c > 0 && sn.buyRef != null && sn.buyRef > 0) {
+
+    /* Component 2: Distance to 4% target (max 10)
+       Measured in ATR terms: 0.25-2.0 ATR below target is the sweet spot. */
+    if (sn.c != null && sn.c > 0 && sn.buyRef != null && sn.buyRef > 0 && sn.atr14 != null && sn.atr14 > 0) {
       var target4 = sn.buyRef * 1.04;
-      var dist = (target4 - sn.c) / sn.c * 100;
-      if (dist >= 0.5 && dist <= 4.0) s += 10;
+      var distATR = (target4 - sn.c) / sn.atr14;
+      if (distATR >= 0.25 && distATR <= 2.0) s += 10;
+      else if (distATR >= 0 && distATR <= 3.0) s += 5;
     }
-    if (sn.c != null && sn.c > 0 && sn.atr10 != null) {
-      var atr10pct = sn.atr10 / sn.c * 100;
-      if (atr10pct >= 1.5 && atr10pct <= 3.5) s += 10;
-    }
+
+    /* Component 3: Volatility sweet spot (max 10)
+       Use ATR percentile: 30-70 percentile is ideal (not too quiet, not too wild). */
+    if (atrPercentile >= 30 && atrPercentile <= 70) s += 10;
+    else if (atrPercentile >= 20 && atrPercentile <= 80) s += 5;
+
+    /* Component 4: Efficiency ratio (max 5) */
     if (sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > 0.4) s += 5;
+
     return Math.min(s, 40);
   }
 
   /* Modifiers (±15 each): low-expansion, spike day, stability, MTF alignment.
-     Earnings-date +5 bonus was dropped (no reliable in-app source). */
+     Volatility-normalized: use ATR percentile rank instead of fixed ATR%. */
   function buildEntryModifiers(sn, opts) {
     opts = opts || {};
     var items = [];
-    if (sn && sn.beta != null && sn.beta < 0.5 && sn.atr10 != null && sn.c > 0 && (sn.atr10 / sn.c * 100) < 1.5) {
-      items.push({ reason: "Low beta + low ATR (no expansion)", amount: -10 });
+    var volRegime = opts.volRegime || null;
+    var atrPercentile = volRegime ? volRegime.atrPercentile : 50;
+
+    /* Low expansion penalty: only penalize if BOTH low beta AND low ATR percentile */
+    if (sn && sn.beta != null && sn.beta < 0.5 && atrPercentile < 25) {
+      items.push({ reason: "Low beta + low volatility percentile (no expansion)", amount: -10 });
     }
+
     if (opts.spikeDay) items.push({ reason: "Spike day (gap or abnormal move)", amount: -10 });
+
     if (sn && sn.stability20 != null && sn.stability20 < 0.3) {
       items.push({ reason: "Unstable price action (stability < 0.3)", amount: -15 });
     }
-    if (opts.mtfAlign) items.push({ reason: "Weekly + daily both \u2265 65 (MTF alignment)", amount: 10 });
+
+    if (opts.mtfAlign) items.push({ reason: "Weekly + daily both >= 65 (MTF alignment)", amount: 10 });
+
+    /* High volatility bonus: stocks in 80+ percentile get a small edge
+       (they have momentum but may be overextended — net neutral) */
+    if (atrPercentile >= 80 && sn && sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > 0.5) {
+      items.push({ reason: "High momentum in high-vol regime", amount: 5 });
+    }
+
     return items;
   }
 
@@ -2690,12 +2773,14 @@ window.TechIndicators = (function () {
   function scoreEntryPillarsForTF(candles, indexCandles, tf) {
     var sn = buildEntrySnapshot(candles, indexCandles, tf);
     if (!sn) return null;
+    var volRegime = calcVolRegime(sn, candles);
     return {
       trendHealth: calcTrendHealthScore(sn),
-      pullbackQuality: calcPullbackScore(sn),
-      prob4: calcProb4Score(sn),
+      pullbackQuality: calcPullbackScore(sn, volRegime),
+      prob4: calcProb4Score(sn, volRegime),
       spike: sn.spikeLast === true ? 5 : 0,
       stability: round(Math.max(0, Math.min(10, (1 - (sn.stability20 != null ? sn.stability20 : 1)) * 10)), 1),
+      volRegime: volRegime,
       sn: sn
     };
   }
@@ -2706,13 +2791,14 @@ window.TechIndicators = (function () {
     var sn = buildEntrySnapshot(candles, indexCandles, 'D');
     if (!sn || sn.c == null) return { entry_score: null, reason: 'insufficient_data' };
 
+    var volRegime = calcVolRegime(sn, candles);
     var trendHealth = calcTrendHealthScore(sn);
-    var pullbackQuality = calcPullbackScore(sn);
-    var prob4 = calcProb4Score(sn);
+    var pullbackQuality = calcPullbackScore(sn, volRegime);
+    var prob4 = calcProb4Score(sn, volRegime);
     var rawTotal = trendHealth + pullbackQuality + prob4;
 
     var spikeDay = sn.spikeLast === true || (sn.gapPct != null && Math.abs(sn.gapPct) > 3);
-    var modifierItems = buildEntryModifiers(sn, { spikeDay: spikeDay });
+    var modifierItems = buildEntryModifiers(sn, { spikeDay: spikeDay, volRegime: volRegime });
 
     var penalties = 0, bonuses = 0, penaltyItems = [], bonusItems = [];
     modifierItems.forEach(function (it) {
@@ -2736,6 +2822,7 @@ window.TechIndicators = (function () {
       classification: cls.classification, signal: cls.signal, allocation_pct: cls.allocation_pct,
       todaySpike: guard.todaySpike, sessionReturnPct: guard.sessionReturnPct, gapPct: guard.gapPct,
       dominanceRatio: guard.dominanceRatio, efficiencyRatio10: guard.efficiencyRatio10,
+      volRegime: volRegime,
       details: {
         trendHealth: round(trendHealth, 2), pullbackQuality: round(pullbackQuality, 2), prob4: round(prob4, 2),
         spike: sn.spikeLast === true ? 5 : 0,
@@ -2810,7 +2897,8 @@ window.TechIndicators = (function () {
     if (dTF && dTF.candles && perTF.D) {
       spikeDay = perTF.D.sn.spikeLast === true || (perTF.D.sn.gapPct != null && Math.abs(perTF.D.sn.gapPct) > 3);
     }
-    var modifierItems = buildEntryModifiers(baseSn, { spikeDay: spikeDay, mtfAlign: mtfAlign });
+    var volRegime = perTF.D && perTF.D.volRegime ? perTF.D.volRegime : (baseSn ? calcVolRegime(baseSn, dTF ? dTF.candles : null) : null);
+    var modifierItems = buildEntryModifiers(baseSn, { spikeDay: spikeDay, mtfAlign: mtfAlign, volRegime: volRegime });
 
     var penalties = 0, bonuses = 0, penaltyItems = [], bonusItems = [];
     modifierItems.forEach(function (it) {
