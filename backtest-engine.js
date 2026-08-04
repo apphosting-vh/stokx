@@ -1,18 +1,15 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   StoX Backtesting Engine
-   Tests the 3-pillar Entry Score (Trend Health 30 / Pullback Quality 30 /
-   4% Probability 40 + framework modifiers) against a fixed profit target
-   (default +4%) over a fixed holding window (default 14 trading sessions).
+   StoX Backtesting Engine – Fixed & Enhanced
+   Tests the 3‑pillar Entry Score against a fixed profit target over a
+   holding window. Score‑agnostic – caller injects scoreFn.
 
-   Three run modes:
-     Option 1  runSingle        — one symbol, detailed trade-by-trade analysis
-     Option 2  runBatch         — many symbols, aggregated ranking
-     Option 3  runWalkForward   — rolling out-of-sample folds, consistency check
-
-   The engine is scoring-agnostic: the caller injects scoreFn(candles, idx)
-   which grades bar idx with NO lookahead (only bars 0..idx). In the app this
-   wraps window.TechIndicators.computeEntryScore on the sliced series, so the
-   backtest grades the exact production engine.
+   New options (passed to create()):
+     realisticEntry   : boolean (default true)  – use next bar open for entry
+     realisticExit    : boolean (default true)  – exit at open if gap above target
+     slippagePct      : number (default 0.1)   – % slippage on entry/exit
+     brokeragePct     : number (default 0.05)  – % brokerage each side
+     maxCacheSize     : number (default 5)     – LRU cache size for score results
+     errorLogging     : boolean (default true) – store score function errors
    ══════════════════════════════════════════════════════════════════════════ */
 
 window.BacktestEngine = (function () {
@@ -73,6 +70,48 @@ window.BacktestEngine = (function () {
     return out;
   }
 
+  // ── Equity curve ──────────────────────────────────────────────────────────
+  function computeDrawdown(curve) {
+    if (!curve || curve.length < 2) return 0;
+    var peak = curve[0].equity;
+    var maxDD = 0;
+    for (var i = 1; i < curve.length; i++) {
+      if (curve[i].equity > peak) peak = curve[i].equity;
+      var dd = (peak - curve[i].equity) / peak * 100;
+      if (dd > maxDD) maxDD = dd;
+    }
+    return Math.round(maxDD * 100) / 100;
+  }
+
+  function approximateSharpe(trades, riskFreeRate) {
+    riskFreeRate = riskFreeRate || 0;
+    if (!trades || trades.length < 2) return null;
+    var returns = trades.map(function (t) { return t.finalReturnPct; });
+    var mean = returns.reduce(function (s, r) { return s + r; }, 0) / returns.length;
+    var variance = returns.reduce(function (s, r) { return s + (r - mean) * (r - mean); }, 0) / (returns.length - 1);
+    var std = Math.sqrt(variance);
+    if (std === 0) return null;
+    return Math.round(((mean - riskFreeRate) / std) * 100) / 100;
+  }
+
+  function equityCurve(trades) {
+    if (!trades || !trades.length) return null;
+    var sorted = trades.slice().sort(function (a, b) { return a.entryDate.localeCompare(b.entryDate); });
+    var curve = [];
+    var equity = 100;
+    curve.push({ date: sorted[0].entryDate, equity: ROUND2(equity) });
+    sorted.forEach(function (t) {
+      equity *= (1 + t.finalReturnPct / 100);
+      curve.push({ date: t.exitDate, equity: ROUND2(equity), trade: t });
+    });
+    return {
+      curve: curve,
+      finalEquity: ROUND2(equity),
+      maxDrawdown: computeDrawdown(curve),
+      sharpeApprox: approximateSharpe(sorted)
+    };
+  }
+
   function calculateStats(trades, symbol) {
     if (!trades.length) {
       return { symbol: symbol, totalSignals: 0, trades: [], message: "No trade signals generated" };
@@ -88,6 +127,7 @@ window.BacktestEngine = (function () {
     var grossProfit = trades.filter(function (t) { return t.finalReturnPct > 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0);
     var grossLoss = Math.abs(trades.filter(function (t) { return t.finalReturnPct < 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0));
     var profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? Infinity : 0);
+    var eq = equityCurve(trades);
     return {
       symbol: symbol,
       totalSignals: n,
@@ -103,6 +143,10 @@ window.BacktestEngine = (function () {
       maxConsecutiveLosses: maxConsecutive(trades.map(function (t) { return t.hitTarget; }), false),
       scoreBrackets: scoreBrackets(trades),
       monthlyBreakdown: monthlyBreakdown(trades),
+      equityCurve: eq,
+      finalEquity: eq ? eq.finalEquity : null,
+      maxDrawdown: eq ? eq.maxDrawdown : null,
+      sharpeApprox: eq ? eq.sharpeApprox : null,
       trades: trades.slice().sort(function (a, b) { return String(b.entryDate).localeCompare(String(a.entryDate)); })
     };
   }
@@ -115,46 +159,138 @@ window.BacktestEngine = (function () {
     var threshold = cfg.threshold != null ? cfg.threshold : 65;
     var warmup = cfg.warmup != null ? cfg.warmup : 60;
 
-    var scoreCache = new Map();
+    // New config options
+    var realisticEntry = cfg.realisticEntry !== undefined ? cfg.realisticEntry : true;
+    var realisticExit = cfg.realisticExit !== undefined ? cfg.realisticExit : true;
+    var slippagePct = cfg.slippagePct != null ? cfg.slippagePct : 0.1;       // 0.1% default
+    var brokeragePct = cfg.brokeragePct != null ? cfg.brokeragePct : 0.05;    // 0.05% default
+    var maxCacheSize = cfg.maxCacheSize != null ? cfg.maxCacheSize : 5;
+    var errorLogging = cfg.errorLogging !== undefined ? cfg.errorLogging : true;
 
-    function scoreAt(candles, idx) {
-      var per = scoreCache.get(candles);
-      if (per && per.has(idx)) return per.get(idx);
+    var scoreCache = new Map();
+    var cacheOrder = [];
+    var scoreErrors = [];
+
+    function getCacheKey(candles, symbol) {
+      if (!candles || candles.length === 0) return null;
+      // Use symbol if available, else a fingerprint (first/last dates + length)
+      var sym = symbol || candles._symbol || '';
+      if (!sym) {
+        // fallback: combine first and last timestamps with length
+        var first = candles[0] ? candles[0].t : 0;
+        var last = candles[candles.length-1] ? candles[candles.length-1].t : 0;
+        sym = first + '_' + last + '_' + candles.length;
+      }
+      return sym + '_' + threshold + '_' + targetProfitPct + '_' + holdingPeriodDays;
+    }
+
+    function scoreAt(candles, idx, symbol) {
+      var key = getCacheKey(candles, symbol);
+      if (key) {
+        var per = scoreCache.get(key);
+        if (per && per.has(idx)) return per.get(idx);
+      }
+
       var res = null;
       if (scoreFn) {
-        try { res = scoreFn(candles, idx); } catch (e) { res = null; }
+        try {
+          res = scoreFn(candles, idx);
+        } catch (e) {
+          if (errorLogging) {
+            scoreErrors.push({ idx: idx, symbol: symbol || candles._symbol || '', msg: e.message, stack: e.stack });
+          }
+          res = null;
+        }
       }
       if (res && (res.entryScore == null || isNaN(res.entryScore))) res = null;
-      if (!per) { per = new Map(); scoreCache.set(candles, per); }
-      per.set(idx, res);
+
+      if (key) {
+        if (!per) {
+          // Evict oldest if cache is full
+          if (scoreCache.size >= maxCacheSize) {
+            var oldest = cacheOrder.shift();
+            scoreCache.delete(oldest);
+          }
+          per = new Map();
+          scoreCache.set(key, per);
+          cacheOrder.push(key);
+        }
+        per.set(idx, res);
+      }
       return res;
     }
 
-    function simulateTrade(candles, entryIdx, score) {
-      var entryPrice = candles[entryIdx].c;
-      var targetPrice = entryPrice * (1 + targetProfitPct / 100);
-      var entryDate = String(candles[entryIdx].t).slice(0, 10);
-      var hitTarget = false, daysToTarget = null, exitPrice = entryPrice, exitDate = entryDate;
+    function simulateTrade(candles, entryIdx, score, opts) {
+      opts = opts || {};
+      var useRealisticEntry = opts.realisticEntry !== undefined ? opts.realisticEntry : realisticEntry;
+      var useRealisticExit = opts.realisticExit !== undefined ? opts.realisticExit : realisticExit;
+      var slip = opts.slippagePct != null ? opts.slippagePct : slippagePct;
+      var broker = opts.brokeragePct != null ? opts.brokeragePct : brokeragePct;
+
+      var entryPrice, entryDateIdx;
+      if (useRealisticEntry && entryIdx + 1 < candles.length) {
+        entryPrice = candles[entryIdx + 1].o;
+        entryDateIdx = entryIdx + 1;
+      } else {
+        entryPrice = candles[entryIdx].c;
+        entryDateIdx = entryIdx;
+      }
+
+      var entryPriceAdj = entryPrice * (1 + slip / 100);
+      // Exact target: raw price level that yields targetProfitPct net after exit slippage + brokerage
+      // exitProceeds = targetPrice * (1 - slip/100) * (1 - broker/100) = entryPriceAdj * (1 + targetProfitPct/100)
+      var exitCostFactor = (1 - slip / 100) * (1 - broker / 100);
+      var targetPrice = entryPriceAdj * (1 + targetProfitPct / 100) / exitCostFactor;
+
+      var entryDate = String(candles[entryDateIdx].t).slice(0, 10);
+      var hitTarget = false, daysToTarget = null, exitPrice = entryPriceAdj, exitDate = entryDate;
       var maxProfitPct = 0, maxLossPct = 0;
-      var maxHolding = Math.min(holdingPeriodDays, candles.length - entryIdx - 1);
+      var maxHolding = Math.min(holdingPeriodDays, candles.length - entryDateIdx - 1);
+
       for (var j = 1; j <= maxHolding; j++) {
-        var cur = candles[entryIdx + j];
-        if (cur.h >= targetPrice) {
-          hitTarget = true;
-          daysToTarget = j;
-          exitPrice = targetPrice;
-          exitDate = String(cur.t).slice(0, 10);
-          break;
+        var cur = candles[entryDateIdx + j];
+        var prevClose = candles[entryDateIdx + j - 1].c;
+
+        if (useRealisticExit) {
+          // Check gap open above target
+          if (cur.o >= targetPrice) {
+            hitTarget = true;
+            daysToTarget = j;
+            exitPrice = cur.o * (1 - slip / 100) * (1 - broker / 100);
+            break;
+          }
+          // Normal intraday hit
+          if (cur.h >= targetPrice) {
+            hitTarget = true;
+            daysToTarget = j;
+            exitPrice = targetPrice * (1 - slip / 100) * (1 - broker / 100);
+            break;
+          }
+        } else {
+          // Original optimistic: exit at target high without costs
+          if (cur.h >= targetPrice) {
+            hitTarget = true;
+            daysToTarget = j;
+            exitPrice = targetPrice;
+            break;
+          }
         }
-        var pnl = (cur.c - entryPrice) / entryPrice * 100;
+        // Track max profit/loss before exit (based on close, adjusted for costs)
+        var pnl = (cur.c - entryPriceAdj) / entryPriceAdj * 100;
         if (pnl > maxProfitPct) maxProfitPct = pnl;
         if (pnl < maxLossPct) maxLossPct = pnl;
+
         if (j === maxHolding) {
-          exitPrice = cur.c;
+          exitPrice = cur.c * (1 - slip / 100) * (1 - broker / 100);
           exitDate = String(cur.t).slice(0, 10);
         }
       }
-      var finalReturn = (exitPrice - entryPrice) / entryPrice * 100;
+
+      // Final return after all costs
+      var finalReturn = (exitPrice - entryPriceAdj) / entryPriceAdj * 100;
+      // If exit price is not set (shouldn't happen), fallback
+      if (exitPrice === undefined) exitPrice = entryPriceAdj;
+
       return {
         symbol: score.symbol || "",
         entryDate: entryDate,
@@ -182,15 +318,16 @@ window.BacktestEngine = (function () {
       var sc = [];
       var step = opts.sampleEvery || 1;
       var skip = opts.skipBars || {};
+      var symbol = opts.symbol || candles._symbol || '';
       for (var i = startIdx; i <= endIdx; i++) {
         if (skip[i]) { if (onBar) onBar(i - startIdx + 1, endIdx - startIdx + 1); continue; }
         if ((i - startIdx) % step !== 0) { if (onBar) onBar(i - startIdx + 1, endIdx - startIdx + 1); continue; }
-        var r = scoreAt(candles, i);
+        var r = scoreAt(candles, i, symbol);
         if (r && r.entryScore != null) {
           sc.push(r);
           if (r.entryScore >= threshold) {
-            var trade = simulateTrade(candles, i, r);
-            trade.symbol = opts.symbol || "";
+            var trade = simulateTrade(candles, i, r, opts);
+            trade.symbol = symbol;
             t.push(trade);
           }
         }
@@ -228,6 +365,9 @@ window.BacktestEngine = (function () {
       if (!candles || candles.length < warmup + 2) {
         return { symbol: symbol, error: "Need at least " + (warmup + 2) + " candles for backtesting" };
       }
+      // Attach symbol to candles for cache key
+      candles._symbol = symbol;
+
       var L = candles.length;
       var endIdx = Math.min(L - 1, L - holdingPeriodDays - 1);
       var startIdx = Math.min(warmup, endIdx);
@@ -239,18 +379,17 @@ window.BacktestEngine = (function () {
       var trades = [], scored = [];
       for (var i = startIdx; i <= endIdx; i++) {
         if ((i - startIdx) % step === 0) {
-          var r = scoreAt(candles, i);
+          var r = scoreAt(candles, i, symbol);
           if (r && r.entryScore != null) {
-            var fwd = simulateTrade(candles, i, r);
+            var fwd = simulateTrade(candles, i, r, opts);
             r._idx = i;
             r.hit = fwd.hitTarget;
             r.fwdReturn = fwd.finalReturnPct;
             scored.push(r);
             scoredBars++;
             if (r.entryScore >= threshold) {
-              var trade = simulateTrade(candles, i, r);
-              trade.symbol = symbol;
-              trades.push(trade);
+              fwd.symbol = symbol;
+              trades.push(fwd);
             }
           }
         }
@@ -263,7 +402,7 @@ window.BacktestEngine = (function () {
       stats.lift = liftBuckets(liftOnScored(scored));
       var currentScore = null;
       if (L >= warmup) {
-        var cur = scoreAt(candles, L - 1);
+        var cur = scoreAt(candles, L - 1, symbol);
         if (cur) currentScore = { entryScore: ROUND2(cur.entryScore), classification: cur.classification || classifyScore(cur.entryScore), rawScore: cur.raw_score != null ? ROUND2(cur.raw_score) : null, trendHealth: cur.trendHealth != null ? ROUND2(cur.trendHealth) : null, pullbackQuality: cur.pullbackQuality != null ? ROUND2(cur.pullbackQuality) : null, prob4: cur.prob4 != null ? ROUND2(cur.prob4) : null, modifiers: cur.modifiers != null ? ROUND2(cur.modifiers) : null };
       }
       return {
@@ -290,26 +429,34 @@ window.BacktestEngine = (function () {
       if (!candles || candles.length < warmup + holdingPeriodDays + 20) {
         return { symbol: symbol, error: "Not enough history for walk-forward (need ~" + (warmup + holdingPeriodDays + 20) + " candles)" };
       }
+      candles._symbol = symbol;
+
       var L = candles.length;
       var matureEnd = L - holdingPeriodDays - 1;
       var regionStart = Math.min(warmup, matureEnd);
       var regionLen = matureEnd - regionStart + 1;
-      var foldSize = Math.max(1, Math.floor(regionLen / numFolds));
+
+      // Anchored walk-forward: growing in-sample
       var folds = [];
       for (var f = 0; f < numFolds; f++) {
-        var testStart = regionStart + f * foldSize;
-        var testEnd = f === numFolds - 1 ? matureEnd : testStart + foldSize - 1;
+        var splitPoint = regionStart + Math.floor(regionLen * (f + 1) / numFolds);
+        var testStart = splitPoint;
+        var testEnd = Math.min(testStart + Math.floor(regionLen / numFolds) - 1, matureEnd);
         if (testStart > matureEnd) break;
         var inSampleStart = regionStart;
         var inSampleEnd = testStart - 1;
+
         var oos = collectTrades(candles, testStart, testEnd, { symbol: symbol, sampleEvery: sampleEvery });
         var ins = inSampleEnd >= inSampleStart
           ? collectTrades(candles, inSampleStart, inSampleEnd, { symbol: symbol, sampleEvery: sampleEvery })
           : { trades: [], scored: [] };
+
         var oosStats = calculateStats(oos.trades, symbol);
         var isStats = calculateStats(ins.trades, symbol);
+
         var oosCount = 0;
         for (var b = testStart; b <= testEnd; b++) { if (b % sampleEvery === 0) oosCount++; }
+
         folds.push({
           fold: f + 1,
           period: [String(candles[testStart].t).slice(0, 10), String(candles[testEnd].t).slice(0, 10)],
@@ -318,11 +465,13 @@ window.BacktestEngine = (function () {
           inSample: { totalSignals: isStats.totalSignals, winRate: isStats.totalSignals ? isStats.winRate : null, avgReturnPct: isStats.totalSignals ? isStats.avgReturnPct : null, profitFactor: isStats.totalSignals ? isStats.profitFactor : null },
           oos: { totalSignals: oosStats.totalSignals, winRate: oosStats.totalSignals ? oosStats.winRate : null, avgReturnPct: oosStats.totalSignals ? oosStats.avgReturnPct : null, profitFactor: oosStats.totalSignals ? oosStats.profitFactor : null, winningTrades: oosStats.winningTrades, losingTrades: oosStats.losingTrades }
         });
+
         if (hooks.onFold) {
           hooks.onFold(f + 1, folds.length);
           await yieldToUI();
         }
       }
+
       var withSignals = folds.filter(function (fl) { return fl.oos.totalSignals > 0; });
       var oosTradesAll = withSignals.map(function (fl) {
         return { n: fl.oos.totalSignals, wins: fl.oos.winningTrades, avgReturn: fl.oos.avgReturnPct };
@@ -348,22 +497,23 @@ window.BacktestEngine = (function () {
         agg.avgTrainTestGap = Math.round((gapFolds.reduce(function (s, fl) { return s + (fl.oos.winRate - fl.inSample.winRate); }, 0) / gapFolds.length) * 10) / 10;
       }
       agg.verdict = buildWalkForwardVerdict(agg);
+
       return { symbol: symbol, folds: folds, aggregate: agg, threshold: threshold, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays };
     }
 
     function buildWalkForwardVerdict(agg) {
-      if (!agg.totalOosSignals) return "No out-of-sample signals generated \u2014 try a lower threshold or longer history.";
+      if (!agg.totalOosSignals) return "No out-of-sample signals generated — try a lower threshold or longer history.";
       var parts = [];
-      parts.push("Out-of-sample win rate " + (agg.overallWinRate != null ? agg.overallWinRate + "%" : "\u2014") + " across " + agg.totalOosSignals + " signals in " + agg.folds + " folds (" + agg.foldsWithSignals + " with signals).");
+      parts.push("Out-of-sample win rate " + (agg.overallWinRate != null ? agg.overallWinRate + "%" : "—") + " across " + agg.totalOosSignals + " signals in " + agg.folds + " folds (" + agg.foldsWithSignals + " with signals).");
       if (agg.consistency != null) {
         parts.push(agg.consistency >= 60
-          ? "The edge held in " + agg.consistency + "% of folds \u2014 consistent across regimes."
-          : "The edge held in only " + agg.consistency + "% of folds \u2014 regime-dependent.");
+          ? "The edge held in " + agg.consistency + "% of folds — consistent across regimes."
+          : "The edge held in only " + agg.consistency + "% of folds — regime-dependent.");
       }
       if (agg.avgTrainTestGap != null) {
         parts.push(agg.avgTrainTestGap > -10
-          ? "Out-of-sample win rate tracks in-sample (" + (agg.avgTrainTestGap >= 0 ? "+" : "") + agg.avgTrainTestGap + "pts avg gap) \u2014 little sign of overfit."
-          : "Out-of-sample lags in-sample by " + agg.avgTrainTestGap + "pts \u2014 some degradation out-of-sample.");
+          ? "Out-of-sample win rate tracks in-sample (" + (agg.avgTrainTestGap >= 0 ? "+" : "") + agg.avgTrainTestGap + "pts avg gap) — little sign of overfit."
+          : "Out-of-sample lags in-sample by " + agg.avgTrainTestGap + "pts — some degradation out-of-sample.");
       }
       return parts.join(" ");
     }
@@ -461,6 +611,14 @@ window.BacktestEngine = (function () {
       return csvRows(headers, rows);
     }
 
+    function getScoreErrors() {
+      return scoreErrors.slice(); // return copy
+    }
+
+    function clearScoreErrors() {
+      scoreErrors = [];
+    }
+
     return {
       scoreAt: scoreAt,
       simulateTrade: simulateTrade,
@@ -472,7 +630,9 @@ window.BacktestEngine = (function () {
       exportSingleCSV: exportSingleCSV,
       exportBatchCSV: exportBatchCSV,
       exportWalkForwardCSV: exportWalkForwardCSV,
-      clearScoreCache: function () { scoreCache.clear(); }
+      clearScoreCache: function () { scoreCache.clear(); cacheOrder = []; },
+      getScoreErrors: getScoreErrors,
+      clearScoreErrors: clearScoreErrors
     };
   }
 
