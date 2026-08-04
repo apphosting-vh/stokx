@@ -2577,7 +2577,10 @@ window.TechIndicators = (function () {
     }
 
     var hTF = findTF('H'), dTF = findTF('D'), wTF = findTF('W');
-    var baseTF = dTF || wTF || hTF || tfResults[0];
+    var baseTF = (dTF && dTF.candles && dTF.candles.length >= 50) ? dTF
+               : (wTF && wTF.candles && wTF.candles.length >= 50) ? wTF
+               : (hTF && hTF.candles && hTF.candles.length >= 50) ? hTF
+               : tfResults[0] || null;
     if (!baseTF || !baseTF.candles || baseTF.candles.length < 50) return { multiTF_score: null, reason: 'no_valid_scores' };
 
     /* ── per-timeframe component snapshots (12 sub-scores + spike/stability) ── */
@@ -2619,7 +2622,7 @@ window.TechIndicators = (function () {
     var weeklyBearish = weeklyCl !== null && weeklyEma21 !== null && weeklyCl < weeklyEma21;
     var dailyBullish = dailyCl !== null && dailyEma21 !== null && dailyCl > dailyEma21;
     var baseSn = (perTF.D || perTF.H || perTF.W).sn;
-    var guard = computeSpikeGuard((dTF && dTF.candles) || (baseTF && baseTF.candles) || null);
+    var guard = dTF && dTF.candles ? computeSpikeGuard(dTF.candles) : { todaySpike: false, sessionReturnPct: null, gapPct: null, dominanceRatio: null, efficiencyRatio10: null };
     var penaltyItems = buildEntryPenaltyItems(baseSn, {
       weeklyTrend: weeklyBearish ? 'bearish' : 'bullish',
       dailyBullish: dailyBullish,
@@ -2768,11 +2771,14 @@ window.TechIndicators = (function () {
     var idxEntryScoreVal = null;
     try { if (indexCandles && indexCandles.length >= 50) { var idxEntryRes = computeEntryScore(indexCandles); if (idxEntryRes && idxEntryRes.entry_score != null) idxEntryScoreVal = idxEntryRes.entry_score; } } catch(e) {}
     if (primarySn === null) {
-      var primary = tfResults.filter(function(tf) { return weights[tf.timeframe] === 0.50; })[0] || tfResults[0];
+      var primary = tfResults.filter(function(tf) { return weights[tf.timeframe] === 0.50 && tf.candles && tf.candles.length >= 50; })[0]
+                || tfResults.filter(function(tf) { return tf.candles && tf.candles.length >= 50; })[0]
+                || null;
       try { if (primary && primary.candles) primarySn = buildTFSnapshot(primary.candles, indexCandles); } catch(e) {}
     }
     var primaryTF = tfResults.filter(function(tf) { return weights[tf.timeframe] === 0.50; })[0] || tfResults[0];
-    var guard = primaryTF && primaryTF.candles ? computeSpikeGuard(primaryTF.candles) : { todaySpike: false, sessionReturnPct: null, gapPct: null, dominanceRatio: null, efficiencyRatio10: null };
+    var dailyTF = tfResults.filter(function(tf) { return weights[tf.timeframe] === 0.50; })[0] || null;
+    var guard = dailyTF && dailyTF.candles ? computeSpikeGuard(dailyTF.candles) : { todaySpike: false, sessionReturnPct: null, gapPct: null, dominanceRatio: null, efficiencyRatio10: null };
     var penaltyItems = [], bonusItems = [];
     if (primarySn) {
       var ctx = { indexTrendScore: idxEntryScoreVal, entryPrice: position.entry_price || primarySn.c, currentPrice: primarySn.c, holdingDays: position.holding_days || 0, entryScore: position.entry_score != null ? position.entry_score : 50, guard: guard };

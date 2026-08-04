@@ -9,7 +9,7 @@
 
 The codebase at `indicators.js` (2659 lines) implements 40+ technical indicators divided into 5 sections (4.1–4.5), a session/risk-extras section (Section 5), plus two scoring systems for entry (Sections 7–11) and exit decisions. All scoring functions accept raw OHLCV candle arrays and compute indicators internally — no pre-computation required.
 
-**Minimum data requirement:** 50 candles for any scoring function.
+**Minimum data requirement:** 50 candles for any scoring function. Enforced at **every scoring entry point**: `computeEntryScore` / `computeExitScore` return `insufficient_data` below 50; `computeMultiTFEntryScore` / `computeMultiTFExitScore` omit any TF below 50 and return `no_valid_scores` when none qualify; the `computeCompat*` wrappers pre-filter each TF at `>= 50` and return `null`/`no_valid_scores` when nothing qualifies; `integratedExitDecision` inherits the guard transitively. The session/horizon helpers (`computeSessionConfidence`, `computeHorizonConfidence`, `computeForwardConfidence`, `computeTenDayForwardConfidence`, `computeOptimumEntryPrice`) are **not** part of the scoring engines and use their own documented thresholds (hourly ≥ 60 bars; daily context ≥ 30 bars, degrading gracefully to `false`/`null` when absent).
 
 ---
 
@@ -226,7 +226,7 @@ where:
 
 **Spike sub-score (0–10, higher = worse):** per TF, `calcDetectSpike(candles, 20, 2.5, 2.5)` → latest spike +5, prior-bar spike +3, any spike in the last 20 bars +2 (capped 10). **Stability sub-score (0–10, higher = worse):** `(1 − calcStabilityScore(candles, lookback)) × 10`, lookback 10 for H/D and 6 for W. Both are weighted `H×0.30 + D×0.50 + W×0.20` (renormalized over available TFs) before the thresholds above are applied.
 
-**Spike/Stability Guard (daily, once per session):** `computeSpikeGuard(dailyCandles)` returns `todaySpike`, `dominance_ratio`, `efficiency_ratio_10`, `sessionReturnPct` (latest-session `(c − prevClose)/prevClose·100`, used by exit Guard E1), and `gapPct`. When daily candles are absent, the guard falls back to the base timeframe's candles (weekly → hourly) so the hard gate still runs on the best available data — it is never computed on the aggregated series.
+**Spike/Stability Guard (daily, once per session):** `computeSpikeGuard(dailyCandles)` returns `todaySpike`, `dominance_ratio`, `efficiency_ratio_10`, `sessionReturnPct` (latest-session `(c − prevClose)/prevClose·100`, used by exit Guard E1), and `gapPct`. When daily candles are absent the guard is **disabled entirely** (returns neutral values): the hard gate, dominance penalty, and efficiency-ratio bonus are daily-only concepts, and running the 2.5× rolling-std window on 20 hourly/weekly bars would be a materially different (more/less sensitive) signal. Per-TF spike/stability **sub-scores** still run independently on each timeframe's own 20-bar window.
 - `todaySpike` = latest-bar spike (volatility-adaptive, see above) **or** open-gap trigger `|gap%| > max(3.5, 1.5·ATR%)`. When true, a **hard gate** caps the final score at **49 (NEUTRAL)** after all penalties/bonuses — never chase an abnormal single-session print.
 - `dominance_ratio` = largest single-day `|move%|` ÷ `|net 5-day move%|` (1.0 if `|net| < 0.5%`); penalty −12 when > 0.6. Suppressed when the spike sub-score ≥ 4 (latest/prior-bar spike tiers already penalize the same session — no double-count); it fires only when the dominant session is *not* the latest/prior bar.
 - `efficiency_ratio_10` = `|close − close[10]|` ÷ Σ`|diffs|` over 10 (the KAMA ER); bonus **+3** when > 0.6 and `not todaySpike` (smooth steady climb). Choppy paths are covered by the stability sub-score, so no separate ER penalty.
@@ -416,13 +416,13 @@ where:
 | 7 | Beta > 1.5 AND `index_trend_score` < 40 | +3 |
 | 8 | Price < Chandelier long AND < pivot S1 | +3 |
 | 9 | KVO bearish cross (line < signal, prior bar above) | +3 |
-| 10 | Golden exit (blow-off): `today_spike` + up-session + price ≥ 21-EMA + profit from entry 3.0–4.0% (spike near the 4% target) | +5 |
-| 10a | same, profit 2.0–3.0% | +3 |
-| 11 | Stability collapse: stability score < 0.35 + distribution ratio < 0.6 + not a spike day | +3 |
+| 10 | Golden exit (blow-off): `today_spike` + up-session + price ≥ 21-EMA + cumulative profit from entry `p = (c − entry_price)/entry_price·100` in 3.0–4.0% (spike near the 4% target) | +5 |
+| 10a | same, p in 2.0–3.0% | +3 |
+| 11 | Stability collapse: raw `calcStabilityScore` 0–1 (higher = more stable) < 0.35 on the daily snapshot + distribution ratio < 0.6 + not a spike day | +3 |
 
 Note: bonuses 3 and 4 are mutually exclusive (only the higher applies).
 
-**Exit-side no-double-count rules:** the guard bonuses (10, 11) fire only when the equivalent pre-existing exit signal is *not* already scoring the event. E1's near-target profit context (from `entry_price`) is unused by any pillar or bonus, so it is genuinely additive; it is suppressed once profit ≥ 4% because the hard target rule already exits there, and requires price ≥ 21-EMA so 12.x breakdowns are not simultaneously active. E2 requires distribution ratio < 0.6 (14.3 + bonus 2 cover heavy distribution) and no spike today. There is deliberately **no down-spike bonus**: a panic day already fires 13.2 (ROC/Mom/FI), 14.1 (OBV/PVT/KVO) and 15.1 (BB/DC/Chandelier), so an extra bonus would double-count the crash. Both rules run once on the primary Daily snapshot in single- and multi-TF exit; they add urgency only, never pillar points.
+**Exit-side no-double-count rules:** the guard bonuses (10, 11) fire only when the equivalent pre-existing exit signal is *not* already scoring the event. E1's near-target profit context (cumulative `p`, from `entry_price`; `sessionReturnPct > 0` is only the up-spike direction gate) is unused by any pillar or bonus, so it is genuinely additive; it is suppressed once profit ≥ 4% because the hard target rule already exits there, and requires price ≥ 21-EMA so 12.x breakdowns are not simultaneously active. E2 uses the raw `calcStabilityScore` 0–1 (not the 0–10 entry sub-score), requires distribution ratio < 0.6 (14.3 + bonus 2 cover heavy distribution) and no spike today. There is deliberately **no down-spike bonus**: a panic day already fires 13.2 (ROC/Mom/FI), 14.1 (OBV/PVT/KVO) and 15.1 (BB/DC/Chandelier), so an extra bonus would double-count the crash. Both rules run once on the primary Daily snapshot in single- and multi-TF exit (and are disabled entirely when no daily timeframe is present); they add urgency only, never pillar points.
 
 ### 4.7 Return Shape
 

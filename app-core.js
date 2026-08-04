@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.10";
+window.__STOX_APP_VERSION = "2.10.12";
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
@@ -1846,9 +1846,9 @@ function EntryScoreAnalysis({ entry, onBack }) {
       ),
       !activeScore && React.createElement("div", { style: { textAlign: "center", padding: 16, color: "var(--text6)", fontSize: 11 } }, "No score data for " + activeTF)
     ),
-    (r.todaySpike || r.dominanceRatio != null || r.efficiencyRatio10 != null) && React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
+    (r.todaySpike != null || r.sessionReturnPct != null || r.gapPct != null || r.dominanceRatio != null || r.efficiencyRatio10 != null) && React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
       React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text3)", marginBottom: 8 } }, "Spike / Stability Guard"),
-      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
+      (r.todaySpike || r.sessionReturnPct != null || r.gapPct != null || r.dominanceRatio != null || r.efficiencyRatio10 != null) ? React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text5)" } },
           React.createElement("span", null, "Today spike (session \u00b7 gap)"),
           React.createElement("span", { style: { fontWeight: 700, color: r.todaySpike ? "#f97316" : "#22c55e" } }, r.todaySpike ? "\u2717 Capped at Neutral" : "\u2713 Clear")
@@ -1865,6 +1865,8 @@ function EntryScoreAnalysis({ entry, onBack }) {
           React.createElement("span", null, "Efficiency ratio (10d)"),
           React.createElement("span", { style: { fontWeight: 700, color: r.efficiencyRatio10 != null && r.efficiencyRatio10 > 0.6 ? "#20c46a" : "var(--text3)", fontFamily: "var(--font-mono)" } }, _fmt(r.efficiencyRatio10))
         )
+      ) : React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", lineHeight: 1.5 } },
+        "Disabled \u2014 no daily timeframe. The spike gate, dominance, and efficiency checks run on daily candles only; without daily data they are turned off (per-TF spike/stability sub-scores still apply on the available timeframes)."
       )
     ),
     r.hardFilters && r.hardFilters.length > 0 && React.createElement("div", { className: "stx-card", style: { marginBottom: 16 } },
@@ -7946,6 +7948,7 @@ function InfoPage() {
         React.createElement(MethSection, { label: "Spike & Stability Guard", stateKey: "spike" }),
         React.createElement(MethContent, { stateKey: "spike" },
           React.createElement("p", { style: subH }, "Daily anti-chase filter (computed once per session, on top of the per-TF sub-scores)"),
+          React.createElement("p", null, "Daily-only: the hard gate, dominance ratio, and efficiency bonus are computed on daily candles. When no daily timeframe is present the guard is disabled entirely (the per-TF H/W spike/stability sub-scores above still apply)."),
           React.createElement("p", { style: subSub }, "Spike sub-score (per TF)"),
           React.createElement("p", null, "Volatility-adaptive spike detection (calcDetectSpike): latest-bar spike +5, prior-bar spike +3, any spike in the last 20 bars +2 (cap 10). Penalty -15 / -8 / -4 at sub-score >=7 / >=4 / >=2."),
           React.createElement("p", { style: subSub }, "Stability sub-score (per TF)"),

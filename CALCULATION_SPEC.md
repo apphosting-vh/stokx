@@ -45,6 +45,21 @@ A **candle** is `{ o, h, l, c, v, t? }`:
 returns `{ ..., reason: 'insufficient_data' }`. Indicators that cannot be
 computed on short history return `null` at those positions rather than erroring.
 
+Enforcement is uniform across all scoring entry points:
+- `computeEntryScore` / `computeExitScore` — `< 50` → `insufficient_data`.
+- `computeMultiTFEntryScore` / `computeMultiTFExitScore` — any TF with `< 50`
+  candles is omitted; when no TF qualifies → `no_valid_scores` (no results →
+  `no_timeframes`).
+- `computeCompatEntryScore` (app-core) / `computeCompatExitScore` — pre-filter
+  each TF at `>= 50` and return `null` / `no_valid_scores` when none qualify.
+- `integratedExitDecision` — inherits the guard transitively via
+  `computeExitScore` / `computeEntryScore`.
+
+The session/horizon helpers are **not** scoring engines: `computeSessionConfidence`
+(≥ 10 intraday bars, ≥ 6 session bars), `computeHorizonConfidence` / forward /
+optimum-entry (≥ 60 hourly bars; daily context ≥ 30 bars, degrading to
+`false`/`null` when absent).
+
 **No trimming.** Entry and exit scoring both consume the full candle series
 verbatim, including any in-progress (still-forming) bar. Nothing is dropped.
 
@@ -726,6 +741,8 @@ Exit is **higher = worse** (a score is "exit pressure"). Pillars are capped at
 | 13b | `target − c <= 0` (already beyond target) | 1.0 |
 | 13c | `c <= stop` (price at/below stop → maximum exit pressure; RR undefined, so it must not fall through to 0) | 1.5 |
 
+Note: rows 1 (Darvas bottom break) and 13/13c (stop breach) can fire **simultaneously** on a crash through both levels. They measure different things — the box's structural low vs. the trade's stop-loss distance from entry — so stacking is intentional; the section's 10-point cap bounds the total. A Darvas-bottom break often coincides with a stop breach only when entry was near the box low, which is the normal case for entries in the box.
+
 ### 7.3 Section 16 exit modifiers
 
 `indexTrendScore` here = the **entry score of the index** (`computeEntryScore(indexCandles)`), i.e. how bullish the index is. A high index score suppresses exit pressure; a low index score amplifies it.
@@ -754,11 +771,13 @@ Exit is **higher = worse** (a score is "exit pressure"). Pillars are capped at
 | 6 | `beta > 1.5 && indexTrendScore < 40` | +3 |
 | 7 | `c < chandelierLong && c < pivotS1` | +3 |
 | 8 | KVO bearish cross (`kvoL < kvoSig && kvoPrev >= kvoSigPrev`) | +3 |
-| 9 | **Guard E1 (golden exit):** `todaySpike` **and** `sessionReturnPct > 0` **and** `c >= ema21` **and** profit from entry `3.0 ≤ p < 4.0`% (spike carried us near the 4% target) | +5 |
+| 9 | **Guard E1 (golden exit):** `todaySpike` **and** `sessionReturnPct > 0` **and** `c >= ema21` **and** cumulative position profit `p = (c − entry_price)/entry_price·100` in `[3.0, 4.0)` (spike carried us near the 4% target) | +5 |
 
-  `sessionReturnPct` = latest-session % return `(c − prevClose)/prevClose·100` from `computeSpikeGuard` (null when < 12 candles); the E1 near-target profit context is derived from `entry_price`, which no pillar (12.x–15.x) or bonus uses.
+  `sessionReturnPct` = latest-session % return `(c − prevClose)/prevClose·100` from `computeSpikeGuard` (null when < 12 candles) — used **only** as the up-spike direction gate. The profit context `p` is the **cumulative** position profit `(c − entry_price)/entry_price·100` (from `entry_price`), which no pillar (12.x–15.x) or bonus uses — so a stock up +3% total but only +0.5% today still qualifies if `todaySpike` is true, and one up +3% today but −2% from entry does not.
 | 9a | same, profit `2.0 ≤ p < 3.0`% | +3 |
 | 10 | **Guard E2:** `stabilityScore < 0.35` **and** `distDayRatio < 0.6` **and** `not todaySpike` (erratic whipsaw) | +3 |
+
+  `stabilityScore` here is the **raw `calcStabilityScore(candles, 10)` 0–1 value** from the daily snapshot (higher = more stable; 1 = zero-variance, 0 = non-positive mean), so `< 0.35` means poor stability. It is **not** the Section 6.3 stability **sub-score** `(1 − calcStabilityScore)·10` (0–10, higher = worse) used in entry scoring.
 
 **No-overlap rules (exit side, same guard as §6.5):**
 - **E1** nudges the user to bank the gain when a sudden up-spike brings the position near the 4% target (2.0–4.0% profit), before the hard target rule fires at ≥ 4%. The near-target profit context is derived from `entry_price`, which no pillar (12.x–15.x) or bonus uses (the only entry-price bonus, "Price < 97% entry", is for losses), so it is genuinely additive. RSI exhaustion (§13.1) is an independent momentum signal and stacks legitimately; `c >= ema21` keeps 12.x downtrend breakdowns from being simultaneously active. Profit ≥ 4% is excluded because the hard target rule already exits there.
@@ -832,7 +851,7 @@ multiTF = totalScore / totalWeight               # renormalised weighted mean
 primarySn = first TF whose weight == 0.50 (D), else first TF
 ctx = { indexTrendScore: computeEntryScore(indexCandles).entry_score,
         entryPrice, currentPrice: primarySn.c, holdingDays, entryScore,
-        guard: computeSpikeGuard(primary.candles) }   # daily guard; falls back to the primary TF's candles when daily is absent
+        guard: computeSpikeGuard(primary.candles) }   # daily-only guard; DISABLED (neutral) when no daily timeframe is present
 penalties/bonuses = buildExitPenaltyItems(primarySn, ctx) / buildExitBonusItems(primarySn, ctx)
 finalScore = clamp(multiTF + penalties + bonuses, 0, 100)
 ```
