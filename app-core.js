@@ -115,8 +115,13 @@ const OfflineOHLCV = {
         var recs = req.result || [];
         var tickers = recs.map(function(r) { return r.ticker; });
         var downloadedAt = recs.length > 0 ? Math.max.apply(null, recs.map(function(r) { return r.downloadedAt || 0; })) : null;
-        var totalBars = recs.reduce(function(sum, r) { return sum + (r.data ? r.data.length : 0); }, 0);
-        resolve({ count: tickers.length, totalBars: totalBars, downloadedAt: downloadedAt, tickers: tickers });
+        var totalBars = recs.reduce(function(sum, r) {
+          /* v1 schema: r.data; v2 schema: r.daily + r.hourly + r.weekly */
+          var bars = (r.data ? r.data.length : 0) + (r.daily ? r.daily.length : 0) + (r.hourly ? r.hourly.length : 0) + (r.weekly ? r.weekly.length : 0);
+          return sum + bars;
+        }, 0);
+        var hasMultiTF = recs.length > 0 && recs[0].daily != null;
+        resolve({ count: tickers.length, totalBars: totalBars, downloadedAt: downloadedAt, tickers: tickers, multiTF: hasMultiTF });
         db.close();
       };
       req.onerror = function() { reject(req.error); db.close(); };
@@ -6336,7 +6341,7 @@ const BacktestSuitePanel = () => {
     React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: "8px 12px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
       React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)" } }, "Offline Data:"),
       offlineMeta && offlineMeta.count > 0
-        ? React.createElement("span", { style: { fontSize: 10, color: "#22c55e", fontWeight: 600 } }, offlineMeta.count + " stocks (" + offlineMeta.totalBars + " bars) \u2014 downloaded " + (offlineMeta.downloadedAt ? new Date(offlineMeta.downloadedAt).toLocaleDateString() : ""))
+        ? React.createElement("span", { style: { fontSize: 10, color: "#22c55e", fontWeight: 600 } }, offlineMeta.count + " stocks (" + offlineMeta.totalBars + " bars" + (offlineMeta.multiTF ? " D+H+W" : " daily only") + ") \u2014 downloaded " + (offlineMeta.downloadedAt ? new Date(offlineMeta.downloadedAt).toLocaleDateString() : ""))
         : React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "No offline data. Download from Score Tuner to speed up backtest.")
     ),
 
@@ -6433,35 +6438,44 @@ const ScoreTunerPanel = () => {
     OfflineOHLCV.getMeta().then(function(meta) { setOfflineMeta(meta); }).catch(function() {});
   }, []);
 
-  /* ── Download all NIFTY 200 daily candles to JSON file ── */
+  /* ── Download all NIFTY 200 daily+hourly+weekly candles to JSON file ── */
   const downloadAllDaily = async () => {
     setDownloading(true); setDownloadProgress({ phase: "Starting...", done: 0, total: 0 }); cancelRef.current = false;
     try {
       var stockList = NIFTY_200.slice();
       var symbols = stockList.map(function(s) { return s.t; });
-      setDownloadProgress({ phase: "Fetching daily candles for " + symbols.length + " stocks...", done: 0, total: symbols.length });
+      var timeframes = ["daily", "1h", "weekly"];
+      var totalFetches = symbols.length * timeframes.length;
+      setDownloadProgress({ phase: "Fetching " + timeframes.join("+") + " candles for " + symbols.length + " stocks...", done: 0, total: totalFetches });
       var dataMap = {};
       var errors = [];
+      var fetchIdx = 0;
       for (var i = 0; i < symbols.length; i++) {
-        if (cancelRef.current) throw new Error("cancelled");
-        try {
-          var r = await DF.fetchOHLCVCached(symbols[i], "daily");
-          var c = (r && r.data) || null;
-          if (c && c.length >= 80) {
-            dataMap[symbols[i]] = c;
-          } else {
-            errors.push(symbols[i] + ": " + (c ? c.length + " bars" : "no data"));
-          }
-        } catch (e) { errors.push(symbols[i] + ": " + (e.message || e)); }
-        setDownloadProgress({ phase: "Fetching daily candles...", done: i + 1, total: symbols.length });
-        await new Promise(function(r) { setTimeout(r, 0); });
+        dataMap[symbols[i]] = {};
+        for (var ti = 0; ti < timeframes.length; ti++) {
+          if (cancelRef.current) throw new Error("cancelled");
+          var tf = timeframes[ti];
+          try {
+            var r = await DF.fetchOHLCVCached(symbols[i], tf);
+            var c = (r && r.data) || null;
+            var minBars = tf === "daily" ? 80 : tf === "1h" ? 40 : 30;
+            if (c && c.length >= minBars) {
+              dataMap[symbols[i]][tf] = c;
+            } else {
+              errors.push(symbols[i] + " " + tf + ": " + (c ? c.length + " bars" : "no data"));
+            }
+          } catch (e) { errors.push(symbols[i] + " " + tf + ": " + (e.message || e)); }
+          fetchIdx++;
+          setDownloadProgress({ phase: "Fetching " + tf + " candles...", done: fetchIdx, total: totalFetches });
+          await new Promise(function(r) { setTimeout(r, 0); });
+        }
       }
-      var validCount = Object.keys(dataMap).length;
+      var validCount = Object.keys(dataMap).filter(function(t) { return Object.keys(dataMap[t]).length > 0; }).length;
       if (validCount === 0) throw new Error("No valid data fetched. " + errors.length + " failures.");
 
       /* Save to IndexedDB */
       var records = Object.keys(dataMap).map(function(ticker) {
-        return { ticker: ticker, data: dataMap[ticker], downloadedAt: Date.now() };
+        return { ticker: ticker, daily: dataMap[ticker].daily || null, hourly: dataMap[ticker]["1h"] || null, weekly: dataMap[ticker].weekly || null, downloadedAt: Date.now() };
       });
       await OfflineOHLCV.clear();
       await OfflineOHLCV.putBulk(records);
@@ -6469,10 +6483,10 @@ const ScoreTunerPanel = () => {
       setOfflineMeta(meta);
 
       /* Also download as JSON file */
-      var exportObj = { version: 1, downloadedAt: new Date().toISOString(), timeframe: "daily", stockCount: validCount, errors: errors, data: dataMap };
+      var exportObj = { version: 2, downloadedAt: new Date().toISOString(), timeframes: timeframes, stockCount: validCount, errors: errors, data: dataMap };
       var blob = new Blob([JSON.stringify(exportObj)], { type: "application/json" });
       var url = URL.createObjectURL(blob);
-      var a = document.createElement("a"); a.href = url; a.download = "stox-ohlcv-daily-" + TODAY() + ".json"; a.click();
+      var a = document.createElement("a"); a.href = url; a.download = "stox-ohlcv-multi-tf-" + TODAY() + ".json"; a.click();
       URL.revokeObjectURL(url);
 
       setDownloadProgress(null);
@@ -6489,8 +6503,15 @@ const ScoreTunerPanel = () => {
       var content = await readFromFileInput(".json");
       var obj = JSON.parse(content);
       var dataMap = obj.data || obj;
+      var dlAt = obj.downloadedAt ? new Date(obj.downloadedAt).getTime() : Date.now();
       var records = Object.keys(dataMap).map(function(ticker) {
-        return { ticker: ticker, data: dataMap[ticker], downloadedAt: obj.downloadedAt ? new Date(obj.downloadedAt).getTime() : Date.now() };
+        var entry = dataMap[ticker];
+        /* v2 schema: entry is { daily: [...], hourly: [...], weekly: [...] } */
+        if (entry && (entry.daily || entry.hourly || entry.weekly)) {
+          return { ticker: ticker, daily: entry.daily || null, hourly: entry.hourly || null, weekly: entry.weekly || null, downloadedAt: dlAt };
+        }
+        /* v1 schema: entry is raw candle array */
+        return { ticker: ticker, data: entry, downloadedAt: dlAt };
       });
       await OfflineOHLCV.clear();
       await OfflineOHLCV.putBulk(records);
@@ -6511,7 +6532,7 @@ const ScoreTunerPanel = () => {
     return UNIVERSES.find(function(u) { return u.key === universe; }) || UNIVERSES[0];
   };
 
-  const buildScoreFn = (idxCandles) => (candles, idx) => {
+  const buildScoreFn = (idxCandles, multiTFMap) => (candles, idx, symbol) => {
     const bar = candles[idx];
     if (!bar) return null;
     const ts = bar.t;
@@ -6521,6 +6542,28 @@ const ScoreTunerPanel = () => {
       while (lo < hi) { const mid = (lo + hi) >> 1; if (idxCandles[mid].t <= ts) lo = mid + 1; else hi = mid; }
       if (lo > 0) idxSlice = idxCandles.slice(0, lo);
     }
+
+    /* Try multi-TF scoring if data available */
+    var tfData = multiTFMap && symbol ? multiTFMap[symbol] : null;
+    if (tfData && (tfData.daily || tfData.hourly || tfData.weekly)) {
+      var dailySlice = tfData.daily ? tfData.daily.slice(0, tfData.daily.findIndex(function(b) { return b.t > ts; }) || tfData.daily.length) : null;
+      var hourlySlice = tfData.hourly ? tfData.hourly.slice(0, tfData.hourly.findIndex(function(b) { return b.t > ts; }) || tfData.hourly.length) : null;
+      var weeklySlice = tfData.weekly ? tfData.weekly.slice(0, tfData.weekly.findIndex(function(b) { return b.t > ts; }) || tfData.weekly.length) : null;
+      var tfResults = [];
+      if (dailySlice && dailySlice.length >= 50) tfResults.push({ timeframe: "D", candles: dailySlice });
+      if (hourlySlice && hourlySlice.length >= 40) tfResults.push({ timeframe: "H", candles: hourlySlice });
+      if (weeklySlice && weeklySlice.length >= 30) tfResults.push({ timeframe: "W", candles: weeklySlice });
+      if (tfResults.length >= 2) {
+        try {
+          var mtf = TI.computeMultiTFEntryScore(tfResults, idxSlice, null);
+          if (mtf && mtf.multiTF_score != null) {
+            return { entryScore: mtf.multiTF_score, raw_score: mtf.raw_score, classification: mtf.classification, trendHealth: mtf.trendHealth, pullbackQuality: mtf.pullbackQuality, prob4: mtf.prob4, modifiers: mtf.modifiers };
+          }
+        } catch (e) {}
+      }
+    }
+
+    /* Fall back to single-TF daily scoring */
     let res;
     try { res = TI.computeEntryScore(candles.slice(0, idx + 1), idxSlice && idxSlice.length ? idxSlice : null); } catch (e) { return null; }
     if (!res || res.entry_score == null) return null;
@@ -6540,6 +6583,7 @@ const ScoreTunerPanel = () => {
       const sampleEvery = symbols.length > 150 ? 4 : symbols.length > 80 ? 3 : 2;
 
       const dataMap = {};
+      const multiTFMap = {};
       const idxSym = "^NSEI";
       let idxCandles = null;
 
@@ -6554,7 +6598,14 @@ const ScoreTunerPanel = () => {
           if (offlineTickers.has(symbols[i])) {
             try {
               var rec = await OfflineOHLCV.get(symbols[i]);
-              if (rec && rec.data && rec.data.length >= 80) dataMap[symbols[i]] = rec.data;
+              if (rec) {
+                /* v2 schema: rec.daily, rec.hourly, rec.weekly */
+                var dailyCandles = rec.daily || rec.data || null;
+                if (dailyCandles && dailyCandles.length >= 80) {
+                  dataMap[symbols[i]] = dailyCandles;
+                  multiTFMap[symbols[i]] = { daily: rec.daily || null, hourly: rec.hourly || null, weekly: rec.weekly || null };
+                }
+              }
             } catch (e) {}
           }
           setProgress({ phase: "Loading from offline data...", done: i + 1, total: symbols.length });
@@ -6565,7 +6616,7 @@ const ScoreTunerPanel = () => {
       /* Fall back to live fetch if offline had no matching stocks */
       var needLive = Object.keys(dataMap).length === 0;
       if (needLive) {
-        setProgress({ phase: "Fetching candles for " + symbols.length + " stocks (sampling every " + sampleEvery + " bars)...", done: 0, total: symbols.length });
+        setProgress({ phase: "Fetching daily+hourly+weekly for " + symbols.length + " stocks...", done: 0, total: symbols.length });
         try { const r = await DF.fetchOHLCVCached(idxSym, "daily"); idxCandles = (r && r.data) || null; } catch (e) {}
         var fetchErrors = [];
         for (let i = 0; i < symbols.length; i++) {
@@ -6575,6 +6626,16 @@ const ScoreTunerPanel = () => {
             const c = (r && r.data) || null;
             if (c && c.length >= 80) {
               dataMap[symbols[i]] = c;
+              /* Fetch hourly and weekly in parallel */
+              var [hRes, wRes] = await Promise.all([
+                DF.fetchOHLCVCached(symbols[i], "1h").catch(function() { return null; }),
+                DF.fetchOHLCVCached(symbols[i], "weekly").catch(function() { return null; })
+              ]);
+              multiTFMap[symbols[i]] = {
+                daily: c,
+                hourly: hRes && hRes.data ? hRes.data : null,
+                weekly: wRes && wRes.data ? wRes.data : null
+              };
             } else {
               fetchErrors.push(symbols[i] + ": " + (c ? c.length + " bars" : "no data"));
             }
@@ -6598,7 +6659,7 @@ const ScoreTunerPanel = () => {
       setProgress({ phase: "Running sweep on " + validCount + " stocks...", done: 0, total: 1 });
 
       const engine = BE.create({
-        scoreFn: buildScoreFn(idxCandles),
+        scoreFn: buildScoreFn(idxCandles, multiTFMap),
         targetProfitPct: target,
         holdingPeriodDays: holding,
         threshold: threshold
@@ -6697,14 +6758,14 @@ const ScoreTunerPanel = () => {
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
         React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "var(--text3)" } }, "Offline Data:"),
         React.createElement("button", { onClick: downloadAllDaily, disabled: downloading, className: "stx-btn stx-btn-primary", style: { fontSize: 11, padding: "6px 12px", opacity: downloading ? 0.6 : 1, cursor: downloading ? "wait" : "pointer" } },
-          downloading ? "Downloading..." : "Download All Daily"
+          downloading ? "Downloading..." : "Download D+H+W"
         ),
         React.createElement("button", { onClick: loadOfflineData, className: "stx-btn", style: { fontSize: 11, padding: "6px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)" } }, "Load from File"),
         offlineMeta && offlineMeta.count > 0 && React.createElement("button", { onClick: clearOfflineData, className: "stx-btn", style: { fontSize: 11, padding: "6px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "#ef4444" } }, "Clear"),
         React.createElement("div", { style: { fontSize: 10, color: "var(--text5)" } },
           offlineMeta && offlineMeta.count > 0
-            ? React.createElement("span", null, React.createElement("span", { style: { color: "#22c55e", fontWeight: 600 } }, offlineMeta.count + " stocks"), " (" + offlineMeta.totalBars + " bars) downloaded " + (offlineMeta.downloadedAt ? new Date(offlineMeta.downloadedAt).toLocaleDateString() : ""))
-            : React.createElement("span", { style: { color: "var(--text6)" } }, "No offline data. Download to speed up sweep.")
+            ? React.createElement("span", null, React.createElement("span", { style: { color: "#22c55e", fontWeight: 600 } }, offlineMeta.count + " stocks"), " (" + offlineMeta.totalBars + " bars" + (offlineMeta.multiTF ? " D+H+W" : " daily only") + ") downloaded " + (offlineMeta.downloadedAt ? new Date(offlineMeta.downloadedAt).toLocaleDateString() : ""))
+            : React.createElement("span", { style: { color: "var(--text6)" } }, "No offline data. Download D+H+W for multi-timeframe scoring.")
         )
       ),
       downloading && downloadProgress && React.createElement("div", { style: { marginTop: 8 } },

@@ -202,7 +202,7 @@ window.BacktestEngine = (function () {
       var res = null;
       if (scoreFn) {
         try {
-          res = scoreFn(candles, idx);
+          res = scoreFn(candles, idx, symbol);
         } catch (e) {
           if (errorLogging) {
             scoreErrors.push({ idx: idx, symbol: symbol || candles._symbol || '', msg: e.message, stack: e.stack });
@@ -853,7 +853,8 @@ window.BacktestEngine = (function () {
 
       /* Compute pillar consumption stats */
       var pillars = ['trendHealth', 'pullbackQuality', 'prob4'];
-      var pillarMax = (typeof SCORE_CONFIG !== 'undefined' && SCORE_CONFIG.pillarMax) ? SCORE_CONFIG.pillarMax : { trendHealth: 30, pullbackQuality: 30, prob4: 40 };
+      var _sc = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
+      var pillarMax = _sc.pillarMax || { trendHealth: 30, pullbackQuality: 30, prob4: 40 };
       var pillarConsumption = {};
       pillars.forEach(function(p) {
         var maxVal = pillarMax[p] || 0;
