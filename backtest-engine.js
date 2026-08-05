@@ -592,7 +592,7 @@ window.BacktestEngine = (function () {
         totalWins: totalWins,
         overallWinRate: totalSignals ? Math.round((totalWins / totalSignals) * 1000) / 10 : null,
         avgWinRate: Math.round(valid.reduce(function (s, r) { return s + r.winRate; }, 0) / valid.length * 10) / 10,
-        avgReturn: Math.round(valid.reduce(function (s, r) { return s + r.avgReturnPct; }, 0) / valid.length * 100) / 100,
+        avgReturn: Math.round(valid.reduce(function (s, r) { return s + r.avgReturnPct * r.totalSignals; }, 0) / totalSignals * 100) / 100,
         avgProfitFactor: pfN ? Math.round(pfSum / pfN * 100) / 100 : null,
         bestByWinRate: byWinRate.length ? byWinRate[0].symbol : null,
         bestWinRate: byWinRate.length ? byWinRate[0].winRate : null,
