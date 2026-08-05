@@ -30,6 +30,100 @@ const pct = (v, b) => b ? (((v - b) / b) * 100) : 0;
 const pctStr = (v, b) => b ? (((v - b) / b) * 100).toFixed(2) : "0.00";
 const round2 = (v) => Math.round((v || 0) * 100) / 100;
 
+/* ── Offline OHLCV Storage (IndexedDB) ── */
+const OfflineOHLCV = {
+  DB_NAME: "stox_ohlcv_offline",
+  STORE: "candles",
+  VERSION: 1,
+
+  _open() {
+    return new Promise(function(resolve, reject) {
+      var req = indexedDB.open(OfflineOHLCV.DB_NAME, OfflineOHLCV.VERSION);
+      req.onupgradeneeded = function(e) {
+        var db = e.target.result;
+        if (!db.objectStoreNames.contains(OfflineOHLCV.STORE)) {
+          db.createObjectStore(OfflineOHLCV.STORE, { keyPath: "ticker" });
+        }
+      };
+      req.onsuccess = function(e) { resolve(e.target.result); };
+      req.onerror = function(e) { reject(e.target.error); };
+    });
+  },
+
+  async getAll() {
+    var db = await this._open();
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(OfflineOHLCV.STORE, "readonly");
+      var store = tx.objectStore(OfflineOHLCV.STORE);
+      var req = store.getAll();
+      req.onsuccess = function() { resolve(req.result || []); db.close(); };
+      req.onerror = function() { reject(req.error); db.close(); };
+    });
+  },
+
+  async get(ticker) {
+    var db = await this._open();
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(OfflineOHLCV.STORE, "readonly");
+      var store = tx.objectStore(OfflineOHLCV.STORE);
+      var req = store.get(ticker);
+      req.onsuccess = function() { resolve(req.result || null); db.close(); };
+      req.onerror = function() { reject(req.error); db.close(); };
+    });
+  },
+
+  async put(record) {
+    var db = await this._open();
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(OfflineOHLCV.STORE, "readwrite");
+      var store = tx.objectStore(OfflineOHLCV.STORE);
+      var req = store.put(record);
+      req.onsuccess = function() { resolve(); db.close(); };
+      req.onerror = function() { reject(req.error); db.close(); };
+    });
+  },
+
+  async putBulk(records) {
+    var db = await this._open();
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(OfflineOHLCV.STORE, "readwrite");
+      var store = tx.objectStore(OfflineOHLCV.STORE);
+      for (var i = 0; i < records.length; i++) { store.put(records[i]); }
+      tx.oncomplete = function() { resolve(); db.close(); };
+      tx.onerror = function() { reject(tx.error); db.close(); };
+    });
+  },
+
+  async clear() {
+    var db = await this._open();
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(OfflineOHLCV.STORE, "readwrite");
+      var store = tx.objectStore(OfflineOHLCV.STORE);
+      var req = store.clear();
+      req.onsuccess = function() { resolve(); db.close(); };
+      req.onerror = function() { reject(req.error); db.close(); };
+    });
+  },
+
+  async getMeta() {
+    var db = await this._open();
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(OfflineOHLCV.STORE, "readonly");
+      var store = tx.objectStore(OfflineOHLCV.STORE);
+      var req = store.getAll();
+      req.onsuccess = function() {
+        var recs = req.result || [];
+        var tickers = recs.map(function(r) { return r.ticker; });
+        var downloadedAt = recs.length > 0 ? Math.max.apply(null, recs.map(function(r) { return r.downloadedAt || 0; })) : null;
+        var totalBars = recs.reduce(function(sum, r) { return sum + (r.data ? r.data.length : 0); }, 0);
+        resolve({ count: tickers.length, totalBars: totalBars, downloadedAt: downloadedAt, tickers: tickers });
+        db.close();
+      };
+      req.onerror = function() { reject(req.error); db.close(); };
+    });
+  }
+};
+
 const NSE_HOLIDAYS = new Set([
   "2025-01-26","2025-02-19","2025-03-14","2025-03-31",
   "2025-04-10","2025-04-14","2025-04-18",
@@ -5760,6 +5854,11 @@ const BacktestSuitePanel = () => {
   });
   const setModeResult = (v) => { _bt2LastResult = v; try { localStorage.setItem(LS_BT2_RESULT, JSON.stringify(v)); } catch (e) {} if (v.mode === "single") setSingleResult(v.data); else if (v.mode === "batch") setBatchResult(v.data); else if (v.mode === "walkforward") setWfResult(v.data); };
   const cancelRef = useRef(false);
+  const [offlineMeta, setOfflineMeta] = useState(null);
+
+  useEffect(function() {
+    OfflineOHLCV.getMeta().then(function(meta) { setOfflineMeta(meta); }).catch(function() {});
+  }, []);
 
   const persist = () => { try { localStorage.setItem(LS_BT2_INPUT, JSON.stringify({ mode: mode, ticker: ticker, target: target, holding: holding, threshold: threshold, batchCap: batchCap, folds: folds })); } catch (e) {} };
 
@@ -5809,12 +5908,25 @@ const BacktestSuitePanel = () => {
     setProgress({ phase: "Fetching daily + Nifty history\u2026", done: 0, total: 0 });
     setRunning(true);
     try {
-      const [stockRes, idxRes] = await Promise.all([
-        DF.fetchOHLCVCached(tk, "daily"),
-        DF.fetchOHLCVCached("^NSEI", "daily")
-      ]);
-      const candles = stockRes && stockRes.data ? stockRes.data : null;
+      /* Fetch Nifty index (always live) */
+      const idxRes = await DF.fetchOHLCVCached("^NSEI", "daily");
       const idx = idxRes && idxRes.data ? idxRes.data : null;
+
+      /* Try offline data first for the stock */
+      var candles = null;
+      if (offlineMeta && offlineMeta.tickers && offlineMeta.tickers.indexOf(tk) >= 0) {
+        setProgress({ phase: "Loading " + tk + " from offline data\u2026", done: 0, total: 0 });
+        try {
+          var rec = await OfflineOHLCV.get(tk);
+          if (rec && rec.data) candles = rec.data;
+        } catch (e) {}
+      }
+      /* Fall back to live fetch */
+      if (!candles) {
+        setProgress({ phase: "Fetching daily + Nifty history\u2026", done: 0, total: 0 });
+        const stockRes = await DF.fetchOHLCVCached(tk, "daily");
+        candles = stockRes && stockRes.data ? stockRes.data : null;
+      }
       if (!candles || candles.length < 60) { setErr("Insufficient daily history for " + tk + " (need ~60+ bars)."); return; }
       const eng = makeEngine(idx);
       const res = await eng.runSingle(candles, { symbol: tk }, {
@@ -5840,17 +5952,41 @@ const BacktestSuitePanel = () => {
       syms = syms.slice(0, cap);
       const total = syms.length;
       const dataMap = {};
-      for (let i = 0; i < syms.length; i += 5) {
-        if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
-        const chunk = syms.slice(i, i + 5);
-        await Promise.all(chunk.map(async (s) => {
-          try {
-            const r = await DF.fetchOHLCVCached(s, "daily");
-            if (r && r.data && r.data.length >= 60) dataMap[s] = r.data;
-          } catch (e) {}
-        }));
-        await new Promise((r) => setTimeout(r, 60));
-        setProgress({ phase: "Fetching daily history \u2026", done: Math.min(i + 5, total), total: total });
+
+      /* Check if offline data is available */
+      var useOffline = offlineMeta && offlineMeta.count > 0;
+      var offlineTickers = useOffline ? new Set(offlineMeta.tickers) : null;
+
+      if (useOffline) {
+        setProgress({ phase: "Loading from offline data\u2026", done: 0, total: total });
+        for (let i = 0; i < syms.length; i++) {
+          if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
+          if (offlineTickers.has(syms[i])) {
+            try {
+              var rec = await OfflineOHLCV.get(syms[i]);
+              if (rec && rec.data && rec.data.length >= 60) dataMap[syms[i]] = rec.data;
+            } catch (e) {}
+          }
+          setProgress({ phase: "Loading from offline data\u2026", done: i + 1, total: total });
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      }
+
+      /* Fall back to live fetch if offline had no matching stocks */
+      var needLive = Object.keys(dataMap).length === 0;
+      if (needLive) {
+        for (let i = 0; i < syms.length; i += 5) {
+          if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
+          const chunk = syms.slice(i, i + 5);
+          await Promise.all(chunk.map(async (s) => {
+            try {
+              const r = await DF.fetchOHLCVCached(s, "daily");
+              if (r && r.data && r.data.length >= 60) dataMap[s] = r.data;
+            } catch (e) {}
+          }));
+          await new Promise((r) => setTimeout(r, 60));
+          setProgress({ phase: "Fetching daily history \u2026", done: Math.min(i + 5, total), total: total });
+        }
       }
       if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
       const ready = Object.keys(dataMap);
@@ -5877,12 +6013,25 @@ const BacktestSuitePanel = () => {
     setProgress({ phase: "Fetching daily + Nifty history\u2026", done: 0, total: 0 });
     setRunning(true);
     try {
-      const [stockRes, idxRes] = await Promise.all([
-        DF.fetchOHLCVCached(tk, "daily"),
-        DF.fetchOHLCVCached("^NSEI", "daily")
-      ]);
-      const candles = stockRes && stockRes.data ? stockRes.data : null;
+      /* Fetch Nifty index (always live) */
+      const idxRes = await DF.fetchOHLCVCached("^NSEI", "daily");
       const idx = idxRes && idxRes.data ? idxRes.data : null;
+
+      /* Try offline data first for the stock */
+      var candles = null;
+      if (offlineMeta && offlineMeta.tickers && offlineMeta.tickers.indexOf(tk) >= 0) {
+        setProgress({ phase: "Loading " + tk + " from offline data\u2026", done: 0, total: 0 });
+        try {
+          var rec = await OfflineOHLCV.get(tk);
+          if (rec && rec.data) candles = rec.data;
+        } catch (e) {}
+      }
+      /* Fall back to live fetch */
+      if (!candles) {
+        setProgress({ phase: "Fetching daily + Nifty history\u2026", done: 0, total: 0 });
+        const stockRes = await DF.fetchOHLCVCached(tk, "daily");
+        candles = stockRes && stockRes.data ? stockRes.data : null;
+      }
       if (!candles || candles.length < 120) { setErr("Walk-forward needs longer history (120+ daily bars)."); return; }
       const eng = makeEngine(idx);
       const res = await eng.runWalkForward(candles, { symbol: tk, folds: Number(folds) || 4, minInSample: 120 }, {
@@ -6181,6 +6330,13 @@ const BacktestSuitePanel = () => {
       )
     ),
 
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: "8px 12px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+      React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)" } }, "Offline Data:"),
+      offlineMeta && offlineMeta.count > 0
+        ? React.createElement("span", { style: { fontSize: 10, color: "#22c55e", fontWeight: 600 } }, offlineMeta.count + " stocks (" + offlineMeta.totalBars + " bars) \u2014 downloaded " + (offlineMeta.downloadedAt ? new Date(offlineMeta.downloadedAt).toLocaleDateString() : ""))
+        : React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "No offline data. Download from Score Tuner to speed up backtest.")
+    ),
+
     React.createElement("div", { style: { display: mode === "single" ? "" : "none" } }, singleResult && !running && renderSingle(singleResult)),
     React.createElement("div", { style: { display: mode === "batch" ? "" : "none" } }, batchResult && !running && renderBatch(batchResult)),
     React.createElement("div", { style: { display: mode === "walkforward" ? "" : "none" } }, wfResult && !running && renderWalkForward(wfResult)),
@@ -6228,6 +6384,9 @@ const ScoreTunerPanel = () => {
       return defaults;
     } catch(e) { return TI.getScoreConfig ? TI.getScoreConfig() : {}; }
   });
+  const [offlineMeta, setOfflineMeta] = useState(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(null);
 
   const UNIVERSES = [
     { key: "random20", label: "Random 20", desc: "Random 20 large+mid cap (~1 min)", filter: function(s) { return true; }, limit: 20, random: true },
@@ -6266,6 +6425,85 @@ const ScoreTunerPanel = () => {
     if (TI.setScoreConfig) TI.setScoreConfig(def);
   }
 
+  /* ── Offline data: load metadata on mount ── */
+  useEffect(function() {
+    OfflineOHLCV.getMeta().then(function(meta) { setOfflineMeta(meta); }).catch(function() {});
+  }, []);
+
+  /* ── Download all NIFTY 200 daily candles to JSON file ── */
+  const downloadAllDaily = async () => {
+    setDownloading(true); setDownloadProgress({ phase: "Starting...", done: 0, total: 0 }); cancelRef.current = false;
+    try {
+      var stockList = NIFTY_200.slice();
+      var symbols = stockList.map(function(s) { return s.t; });
+      setDownloadProgress({ phase: "Fetching daily candles for " + symbols.length + " stocks...", done: 0, total: symbols.length });
+      var dataMap = {};
+      var errors = [];
+      for (var i = 0; i < symbols.length; i++) {
+        if (cancelRef.current) throw new Error("cancelled");
+        try {
+          var r = await DF.fetchOHLCVCached(symbols[i], "daily");
+          var c = (r && r.data) || null;
+          if (c && c.length >= 80) {
+            dataMap[symbols[i]] = c;
+          } else {
+            errors.push(symbols[i] + ": " + (c ? c.length + " bars" : "no data"));
+          }
+        } catch (e) { errors.push(symbols[i] + ": " + (e.message || e)); }
+        setDownloadProgress({ phase: "Fetching daily candles...", done: i + 1, total: symbols.length });
+        await new Promise(function(r) { setTimeout(r, 0); });
+      }
+      var validCount = Object.keys(dataMap).length;
+      if (validCount === 0) throw new Error("No valid data fetched. " + errors.length + " failures.");
+
+      /* Save to IndexedDB */
+      var records = Object.keys(dataMap).map(function(ticker) {
+        return { ticker: ticker, data: dataMap[ticker], downloadedAt: Date.now() };
+      });
+      await OfflineOHLCV.clear();
+      await OfflineOHLCV.putBulk(records);
+      var meta = await OfflineOHLCV.getMeta();
+      setOfflineMeta(meta);
+
+      /* Also download as JSON file */
+      var exportObj = { version: 1, downloadedAt: new Date().toISOString(), timeframe: "daily", stockCount: validCount, errors: errors, data: dataMap };
+      var blob = new Blob([JSON.stringify(exportObj)], { type: "application/json" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a"); a.href = url; a.download = "stox-ohlcv-daily-" + TODAY() + ".json"; a.click();
+      URL.revokeObjectURL(url);
+
+      setDownloadProgress(null);
+    } catch (e) {
+      if ((e && e.message) !== "cancelled") setErr((e && e.message) || String(e));
+      setDownloadProgress(null);
+    }
+    setDownloading(false);
+  };
+
+  /* ── Load offline data from JSON file ── */
+  const loadOfflineData = async () => {
+    try {
+      var content = await readFromFileInput(".json");
+      var obj = JSON.parse(content);
+      var dataMap = obj.data || obj;
+      var records = Object.keys(dataMap).map(function(ticker) {
+        return { ticker: ticker, data: dataMap[ticker], downloadedAt: obj.downloadedAt ? new Date(obj.downloadedAt).getTime() : Date.now() };
+      });
+      await OfflineOHLCV.clear();
+      await OfflineOHLCV.putBulk(records);
+      var meta = await OfflineOHLCV.getMeta();
+      setOfflineMeta(meta);
+    } catch (e) {
+      setErr("Failed to load file: " + (e.message || e));
+    }
+  };
+
+  /* ── Clear offline data ── */
+  const clearOfflineData = async () => {
+    await OfflineOHLCV.clear();
+    setOfflineMeta(null);
+  };
+
   const getUniverseConfig = function() {
     return UNIVERSES.find(function(u) { return u.key === universe; }) || UNIVERSES[0];
   };
@@ -6298,30 +6536,59 @@ const ScoreTunerPanel = () => {
       // Adaptive sampling: larger universes sample more aggressively
       const sampleEvery = symbols.length > 150 ? 4 : symbols.length > 80 ? 3 : 2;
 
-      setProgress({ phase: "Fetching candles for " + symbols.length + " stocks (sampling every " + sampleEvery + " bars)...", done: 0, total: symbols.length });
       const dataMap = {};
       const idxSym = "^NSEI";
       let idxCandles = null;
-      try { const r = await DF.fetchOHLCVCached(idxSym, "daily"); idxCandles = (r && r.data) || null; } catch (e) {}
-      var fetchErrors = [];
-      for (let i = 0; i < symbols.length; i++) {
-        if (cancelRef.current) throw new Error("cancelled");
-        try {
-          const r = await DF.fetchOHLCVCached(symbols[i], "daily");
-          const c = (r && r.data) || null;
-          if (c && c.length >= 80) {
-            dataMap[symbols[i]] = c;
-          } else {
-            fetchErrors.push(symbols[i] + ": " + (c ? c.length + " bars" : "no data"));
+
+      /* Check offline data first */
+      var useOffline = offlineMeta && offlineMeta.count > 0;
+      if (useOffline) {
+        setProgress({ phase: "Loading from offline data (" + offlineMeta.count + " stocks)...", done: 0, total: symbols.length });
+        try { const r = await DF.fetchOHLCVCached(idxSym, "daily"); idxCandles = (r && r.data) || null; } catch (e) {}
+        var offlineTickers = new Set(offlineMeta.tickers);
+        for (let i = 0; i < symbols.length; i++) {
+          if (cancelRef.current) throw new Error("cancelled");
+          if (offlineTickers.has(symbols[i])) {
+            try {
+              var rec = await OfflineOHLCV.get(symbols[i]);
+              if (rec && rec.data && rec.data.length >= 80) dataMap[symbols[i]] = rec.data;
+            } catch (e) {}
           }
-        } catch (e) { fetchErrors.push(symbols[i] + ": " + (e.message || e)); }
-        setProgress({ phase: "Fetching candles...", done: i + 1, total: symbols.length });
-        await new Promise(r => setTimeout(r, 0));
+          setProgress({ phase: "Loading from offline data...", done: i + 1, total: symbols.length });
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+
+      /* Fall back to live fetch if offline had no matching stocks */
+      var needLive = Object.keys(dataMap).length === 0;
+      if (needLive) {
+        setProgress({ phase: "Fetching candles for " + symbols.length + " stocks (sampling every " + sampleEvery + " bars)...", done: 0, total: symbols.length });
+        try { const r = await DF.fetchOHLCVCached(idxSym, "daily"); idxCandles = (r && r.data) || null; } catch (e) {}
+        var fetchErrors = [];
+        for (let i = 0; i < symbols.length; i++) {
+          if (cancelRef.current) throw new Error("cancelled");
+          try {
+            const r = await DF.fetchOHLCVCached(symbols[i], "daily");
+            const c = (r && r.data) || null;
+            if (c && c.length >= 80) {
+              dataMap[symbols[i]] = c;
+            } else {
+              fetchErrors.push(symbols[i] + ": " + (c ? c.length + " bars" : "no data"));
+            }
+          } catch (e) { fetchErrors.push(symbols[i] + ": " + (e.message || e)); }
+          setProgress({ phase: "Fetching candles...", done: i + 1, total: symbols.length });
+          await new Promise(r => setTimeout(r, 0));
+        }
       }
       const validCount = Object.keys(dataMap).length;
       if (validCount === 0) {
-        var debugMsg = "No valid data fetched. " + fetchErrors.length + " failures.";
-        if (fetchErrors.length > 0) debugMsg += " First 5: " + fetchErrors.slice(0, 5).join("; ");
+        var debugMsg = "No valid data found. ";
+        if (needLive && typeof fetchErrors !== "undefined") {
+          debugMsg += fetchErrors.length + " failures.";
+          if (fetchErrors.length > 0) debugMsg += " First 5: " + fetchErrors.slice(0, 5).join("; ");
+        } else {
+          debugMsg += "Offline data has no matching stocks for this universe. Try downloading data first.";
+        }
         throw new Error(debugMsg);
       }
 
@@ -6419,6 +6686,30 @@ const ScoreTunerPanel = () => {
         ),
         React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--bg4)", overflow: "hidden" } },
           React.createElement("div", { style: { height: "100%", width: progress.total ? Math.round(progress.done / progress.total * 100) + "%" : "100%", background: "var(--accent)", transition: "width .2s" } })
+        )
+      )
+    ),
+
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 12 } },
+      React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+        React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "var(--text3)" } }, "Offline Data:"),
+        React.createElement("button", { onClick: downloadAllDaily, disabled: downloading, className: "stx-btn stx-btn-primary", style: { fontSize: 11, padding: "6px 12px", opacity: downloading ? 0.6 : 1, cursor: downloading ? "wait" : "pointer" } },
+          downloading ? "Downloading..." : "Download All Daily"
+        ),
+        React.createElement("button", { onClick: loadOfflineData, className: "stx-btn", style: { fontSize: 11, padding: "6px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)" } }, "Load from File"),
+        offlineMeta && offlineMeta.count > 0 && React.createElement("button", { onClick: clearOfflineData, className: "stx-btn", style: { fontSize: 11, padding: "6px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "#ef4444" } }, "Clear"),
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)" } },
+          offlineMeta && offlineMeta.count > 0
+            ? React.createElement("span", null, React.createElement("span", { style: { color: "#22c55e", fontWeight: 600 } }, offlineMeta.count + " stocks"), " (" + offlineMeta.totalBars + " bars) downloaded " + (offlineMeta.downloadedAt ? new Date(offlineMeta.downloadedAt).toLocaleDateString() : ""))
+            : React.createElement("span", { style: { color: "var(--text6)" } }, "No offline data. Download to speed up sweep.")
+        )
+      ),
+      downloading && downloadProgress && React.createElement("div", { style: { marginTop: 8 } },
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 4, fontFamily: "var(--font-mono)" } },
+          downloadProgress.phase + (downloadProgress.total ? " " + downloadProgress.done + " / " + downloadProgress.total : "")
+        ),
+        React.createElement("div", { style: { height: 4, borderRadius: 2, background: "var(--bg4)", overflow: "hidden" } },
+          React.createElement("div", { style: { height: "100%", width: downloadProgress.total ? Math.round(downloadProgress.done / downloadProgress.total * 100) + "%" : "100%", background: "var(--accent)", transition: "width .2s" } })
         )
       )
     ),
