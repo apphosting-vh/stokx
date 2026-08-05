@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.35";
+window.__STOX_APP_VERSION = "2.10.36";
 
 /* Apply saved score config on startup */
 (function() {
@@ -6011,9 +6011,21 @@ const BacktestSuitePanel = () => {
   const setModeResult = (v) => { _bt2LastResult = v; try { localStorage.setItem(LS_BT2_RESULT, JSON.stringify(v)); } catch (e) {} if (v.mode === "single") setSingleResult(v.data); else if (v.mode === "batch") setBatchResult(v.data); else if (v.mode === "walkforward") setWfResult(v.data); else if (v.mode === "multiSymbol") { setMultiResult(v.data); setMultiTickers(v.tickers || []); } };
   const cancelRef = useRef(false);
   const [offlineMeta, setOfflineMeta] = useState(null);
+  const [pathTicker, setPathTicker] = useState("");
+  const [pathEntryDate, setPathEntryDate] = useState("");
+  const [pathExitDate, setPathExitDate] = useState("");
+  const [pathResult, setPathResult] = useState(null);
+  const [pathLoading, setPathLoading] = useState(false);
+  const [pathErr, setPathErr] = useState("");
 
   useEffect(function() {
     OfflineOHLCV.getMeta().then(function(meta) { setOfflineMeta(meta); }).catch(function() {});
+  }, []);
+
+  useEffect(function() {
+    var refresh = function() { OfflineOHLCV.getMeta().then(function(meta) { setOfflineMeta(meta); }).catch(function() {}); };
+    window.addEventListener("stox:offline-data-changed", refresh);
+    return function() { window.removeEventListener("stox:offline-data-changed", refresh); };
   }, []);
 
   useEffect(function() {
@@ -6095,6 +6107,15 @@ const BacktestSuitePanel = () => {
 
   const normTicker = (t) => (t || "").trim().toUpperCase().replace(/\.NS$/, "");
 
+  /* Resolve the correct offline IndexedDB key — offline stores "RELIANCE.NS" but normTicker strips .NS */
+  const resolveOfflineKey = (tk) => {
+    if (!offlineMeta || !offlineMeta.tickers) return null;
+    if (offlineMeta.tickers.indexOf(tk) >= 0) return tk;
+    var withNS = tk + ".NS";
+    if (offlineMeta.tickers.indexOf(withNS) >= 0) return withNS;
+    return null;
+  };
+
   const runSingle = async () => {
     const tk = normTicker(ticker);
     if (!tk) { setErr("Enter a ticker first, e.g. RELIANCE."); return; }
@@ -6111,10 +6132,11 @@ const BacktestSuitePanel = () => {
       /* Try offline data first for the stock */
       var candles = null;
       var multiTFData = null;
-      if (offlineMeta && offlineMeta.tickers && offlineMeta.tickers.indexOf(tk) >= 0) {
+      var _offlineTk = resolveOfflineKey(tk);
+      if (_offlineTk) {
         setProgress({ phase: "Loading " + tk + " from offline data\u2026", done: 0, total: 0 });
         try {
-          var rec = await OfflineOHLCV.get(tk);
+          var rec = await OfflineOHLCV.get(_offlineTk);
           if (rec) {
             candles = rec.daily || rec.data || null;
             if (candles) multiTFData = { daily: rec.daily || null, hourly: rec.hourly || null, weekly: rec.weekly || null };
@@ -6250,10 +6272,11 @@ const BacktestSuitePanel = () => {
       /* Try offline data first for the stock */
       var candles = null;
       var multiTFData = null;
-      if (offlineMeta && offlineMeta.tickers && offlineMeta.tickers.indexOf(tk) >= 0) {
+      var _offlineTk = resolveOfflineKey(tk);
+      if (_offlineTk) {
         setProgress({ phase: "Loading " + tk + " from offline data\u2026", done: 0, total: 0 });
         try {
-          var rec = await OfflineOHLCV.get(tk);
+          var rec = await OfflineOHLCV.get(_offlineTk);
           if (rec) {
             candles = rec.daily || rec.data || null;
             if (candles) multiTFData = { daily: rec.daily || null, hourly: rec.hourly || null, weekly: rec.weekly || null };
@@ -6366,6 +6389,124 @@ const BacktestSuitePanel = () => {
       setModeResult({ mode: "multiSymbol", tickers: symbols, data: res });
     } catch (e) { setErr((e && e.message) || String(e)); }
     finally { setRunning(false); setProgress(null); }
+  };
+
+  const runPathAnalysis = async function() {
+    var tk = normTicker(pathTicker);
+    if (!tk) { setPathErr("Enter a ticker first."); return; }
+    if (!pathEntryDate || !pathExitDate) { setPathErr("Select both Entry and Exit dates."); return; }
+    var entryDate = pathEntryDate;
+    var exitDate = pathExitDate;
+    if (exitDate <= entryDate) { setPathErr("Exit date must be after Entry date."); return; }
+    setPathErr(""); setPathLoading(true); setPathResult(null);
+    try {
+      var candles = null;
+      var _offlineTk = resolveOfflineKey(tk);
+      if (_offlineTk) {
+        try { var rec = await OfflineOHLCV.get(_offlineTk); if (rec) candles = rec.daily || rec.data || null; } catch(e) {}
+      }
+      if (!candles) {
+        var res = await DF.fetchOHLCVCached(tk, "daily");
+        candles = res && res.data ? res.data : null;
+      }
+      if (!candles || !candles.length) { setPathErr("No daily data found for " + tk + "."); setPathLoading(false); return; }
+      var filtered = candles.filter(function(b) {
+        var bDate = String(b.t || "").slice(0, 10);
+        return bDate >= entryDate && bDate <= exitDate;
+      });
+      if (filtered.length < 2) { setPathErr("Not enough daily data between the selected dates (need at least 2 bars)."); setPathLoading(false); return; }
+      var rows = [];
+      var cumChange = 0;
+      for (var i = 0; i < filtered.length; i++) {
+        var bar = filtered[i];
+        var dateStr = String(bar.t || "").slice(0, 10);
+        if (i === 0) {
+          rows.push({ date: dateStr, open: bar.o, high: bar.h, low: bar.l, close: bar.c, volume: bar.v || 0, dailyPct: null, cumPct: 0, prevClose: null });
+        } else {
+          var prevClose = filtered[i - 1].c;
+          var dailyPct = prevClose > 0 ? (bar.c - prevClose) / prevClose * 100 : 0;
+          cumChange += dailyPct;
+          rows.push({ date: dateStr, open: bar.o, high: bar.h, low: bar.l, close: bar.c, volume: bar.v || 0, dailyPct: Math.round(dailyPct * 100) / 100, cumPct: Math.round(cumChange * 100) / 100, prevClose: prevClose });
+        }
+      }
+      var firstClose = filtered[0].c;
+      var lastClose = filtered[filtered.length - 1].c;
+      var netPct = firstClose > 0 ? Math.round((lastClose - firstClose) / firstClose * 100 * 100) / 100 : 0;
+      var upDays = rows.filter(function(r) { return r.dailyPct != null && r.dailyPct > 0; }).length;
+      var dnDays = rows.filter(function(r) { return r.dailyPct != null && r.dailyPct < 0; }).length;
+      var flatDays = rows.filter(function(r) { return r.dailyPct != null && r.dailyPct === 0; }).length;
+      setPathResult({ ticker: tk, entryDate: pathEntryDate, exitDate: pathExitDate, entryClose: firstClose, exitClose: lastClose, netPct: netPct, tradingDays: filtered.length, upDays: upDays, dnDays: dnDays, flatDays: flatDays, rows: rows });
+    } catch(e) { setPathErr((e && e.message) || String(e)); }
+    setPathLoading(false);
+  };
+
+  const renderPathResult = function(d) {
+    var netColor = d.netPct > 0 ? "#16a34a" : d.netPct < 0 ? "#dc2626" : "var(--text)";
+    var maxCum = 0, minCum = 0;
+    d.rows.forEach(function(r) { if (r.cumPct > maxCum) maxCum = r.cumPct; if (r.cumPct < minCum) minCum = r.cumPct; });
+    var range = Math.max(Math.abs(maxCum), Math.abs(minCum), 1);
+    return React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: "12px 16px" } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 } },
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, d.ticker + " \u2014 Path Analysis"),
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, d.entryDate + " \u2192 " + d.exitDate + " \u00b7 " + d.tradingDays + " trading days")
+        ),
+        React.createElement("div", { style: { textAlign: "right" } },
+          React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, "Net Change"),
+          React.createElement("div", { style: { fontSize: 22, fontWeight: 800, fontFamily: "var(--font-heading)", color: netColor, lineHeight: 1 } }, (d.netPct > 0 ? "+" : "") + d.netPct + "%")
+        )
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 } },
+        React.createElement("div", { style: { padding: "6px 12px", borderRadius: 8, background: "var(--bg4)", fontSize: 11 } },
+          React.createElement("span", { style: { color: "var(--text5)" } }, "Entry Close: "),
+          React.createElement("span", { style: { fontWeight: 700, color: "var(--text2)" } }, "\u20b9" + d.entryClose.toFixed(2))
+        ),
+        React.createElement("div", { style: { padding: "6px 12px", borderRadius: 8, background: "var(--bg4)", fontSize: 11 } },
+          React.createElement("span", { style: { color: "var(--text5)" } }, "Exit Close: "),
+          React.createElement("span", { style: { fontWeight: 700, color: "var(--text2)" } }, "\u20b9" + d.exitClose.toFixed(2))
+        ),
+        React.createElement("div", { style: { padding: "6px 12px", borderRadius: 8, background: "rgba(22,163,74,.08)", fontSize: 11, color: "#16a34a", fontWeight: 600 } }, d.upDays + " up"),
+        React.createElement("div", { style: { padding: "6px 12px", borderRadius: 8, background: "rgba(239,68,68,.08)", fontSize: 11, color: "#dc2626", fontWeight: 600 } }, d.dnDays + " down"),
+        d.flatDays > 0 && React.createElement("div", { style: { padding: "6px 12px", borderRadius: 8, background: "var(--bg4)", fontSize: 11, color: "var(--text5)" } }, d.flatDays + " flat")
+      ),
+      React.createElement("div", { style: { overflowX: "auto" } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+          React.createElement("thead", null, React.createElement("tr", null,
+            ["Day", "Date", "Open", "High", "Low", "Close", "Volume", "Prev Close", "Daily %", "Cumulative %", "Path"].map(function(h) {
+              return React.createElement("th", { key: h, style: { padding: "6px 8px", fontSize: 9, fontWeight: 700, color: "var(--text5)", textAlign: h === "Day" || h === "Volume" || h === "Daily %" || h === "Cumulative %" || h === "Path" ? "center" : "right", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap" } }, h);
+            })
+          )),
+          React.createElement("tbody", null, d.rows.map(function(r, i) {
+            var barPct = r.dailyPct != null ? Math.abs(r.dailyPct) : 0;
+            var barW = Math.min(100, Math.round(barPct / 5 * 100));
+            var barColor = r.dailyPct != null ? (r.dailyPct > 0 ? "#16a34a" : r.dailyPct < 0 ? "#dc2626" : "var(--text6)") : "transparent";
+            var cumBarPct = Math.abs(r.cumPct);
+            var cumBarW = Math.min(100, Math.round(cumBarPct / 5 * 100));
+            var cumBarColor = r.cumPct > 0 ? "#16a34a" : r.cumPct < 0 ? "#dc2626" : "var(--text6)";
+            return React.createElement("tr", { key: i, style: { background: i === 0 ? "rgba(6,182,212,.04)" : "transparent" } },
+              React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, color: "var(--text6)", textAlign: "center", borderBottom: "1px solid var(--border)" } }, i + 1),
+              React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, color: "var(--text3)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" } }, r.date),
+              React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, color: "var(--text3)", textAlign: "right", borderBottom: "1px solid var(--border)" } }, r.open.toFixed(2)),
+              React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, color: "var(--text3)", textAlign: "right", borderBottom: "1px solid var(--border)" } }, r.high.toFixed(2)),
+              React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, color: "var(--text3)", textAlign: "right", borderBottom: "1px solid var(--border)" } }, r.low.toFixed(2)),
+              React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, fontWeight: 700, color: "var(--text2)", textAlign: "right", borderBottom: "1px solid var(--border)" } }, r.close.toFixed(2)),
+              React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, color: "var(--text5)", textAlign: "center", borderBottom: "1px solid var(--border)", fontFamily: "var(--font-mono)" } }, r.volume >= 1e6 ? (r.volume / 1e6).toFixed(2) + "M" : r.volume >= 1e3 ? (r.volume / 1e3).toFixed(1) + "K" : String(r.volume)),
+              React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, color: "var(--text5)", textAlign: "right", borderBottom: "1px solid var(--border)" } }, r.prevClose != null ? r.prevClose.toFixed(2) : "\u2014"),
+              React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, fontWeight: 700, color: r.dailyPct != null ? (r.dailyPct > 0 ? "#16a34a" : r.dailyPct < 0 ? "#dc2626" : "var(--text5)") : "var(--text6)", textAlign: "center", borderBottom: "1px solid var(--border)" } }, r.dailyPct != null ? (r.dailyPct > 0 ? "+" : "") + r.dailyPct.toFixed(2) + "%" : "\u2014"),
+              React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, fontWeight: 700, color: r.cumPct > 0 ? "#16a34a" : r.cumPct < 0 ? "#dc2626" : "var(--text5)", textAlign: "center", borderBottom: "1px solid var(--border)" } }, (r.cumPct > 0 ? "+" : "") + r.cumPct.toFixed(2) + "%"),
+              React.createElement("td", { style: { padding: "5px 8px", borderBottom: "1px solid var(--border)", minWidth: 80 } },
+                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4 } },
+                  React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--bg5)", width: 60, overflow: "hidden", position: "relative" } },
+                    React.createElement("div", { style: { height: "100%", width: barW + "%", background: barColor, borderRadius: 3, transition: "width .3s" } })
+                  ),
+                  React.createElement("span", { style: { fontSize: 8, color: "var(--text6)", minWidth: 24 } }, r.dailyPct != null ? (r.dailyPct > 0 ? "+" : "") + r.dailyPct.toFixed(1) : "")
+                )
+              )
+            );
+          }))
+        )
+      )
+    );
   };
 
   const exportCSV = () => {
@@ -6576,8 +6717,8 @@ const BacktestSuitePanel = () => {
     );
   };
 
-  const runFn = () => { if (mode === "single") return runSingle(); if (mode === "batch") return runBatch(); if (mode === "multiSymbol") return runMultiBacktest(); return runWalkForward(); };
-  const runLabel = mode === "single" ? "\u25b6 Run Analysis" : mode === "batch" ? "\u25b6 Run Batch" : mode === "multiSymbol" ? "\u25b6 Run Backtest" : "\u25b6 Run Walk-Forward";
+  const runFn = () => { if (mode === "pathAnalysis") return runPathAnalysis(); if (mode === "single") return runSingle(); if (mode === "batch") return runBatch(); if (mode === "multiSymbol") return runMultiBacktest(); return runWalkForward(); };
+  const runLabel = mode === "pathAnalysis" ? "\u25b6 Chart the Path" : mode === "single" ? "\u25b6 Run Analysis" : mode === "batch" ? "\u25b6 Run Batch" : mode === "multiSymbol" ? "\u25b6 Run Backtest" : "\u25b6 Run Walk-Forward";
 
   return React.createElement("div", null,
 
@@ -6591,7 +6732,7 @@ const BacktestSuitePanel = () => {
     ),
 
     React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" } },
-      [["single", "Single Symbol"], ["batch", "Batch Backtest"], ["walkforward", "Walk-Forward"], ["multiSymbol", "Multi Symbol"]].map(function (m) {
+      [["single", "Single Symbol"], ["batch", "Batch Backtest"], ["walkforward", "Walk-Forward"], ["multiSymbol", "Multi Symbol"], ["pathAnalysis", "Path Analysis"]].map(function (m) {
         return React.createElement("button", {
           key: m[0], onClick: function () { setMode(m[0]); },
           style: {
@@ -6604,7 +6745,7 @@ const BacktestSuitePanel = () => {
       })
     ),
 
-    React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16, display: mode === "pathAnalysis" ? "none" : "" } },
       React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" } },
         mode !== "batch" && mode !== "multiSymbol" && field("Stock Ticker",
           React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
@@ -6648,7 +6789,7 @@ const BacktestSuitePanel = () => {
             })
           )
         ),
-        React.createElement("button", { onClick: runFn, disabled: running, className: "stx-btn stx-btn-primary", style: { padding: "8px 18px", fontSize: 12, opacity: running ? 0.6 : 1, cursor: running ? "wait" : "pointer" } },
+        (mode !== "pathAnalysis") && React.createElement("button", { onClick: runFn, disabled: running, className: "stx-btn stx-btn-primary", style: { padding: "8px 18px", fontSize: 12, opacity: running ? 0.6 : 1, cursor: running ? "wait" : "pointer" } },
           running ? "Running\u2026" : runLabel
         ),
         running && React.createElement("button", { onClick: function () { cancelRef.current = true; }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "#eab308", cursor: "pointer" } }, "Cancel"),
@@ -6678,6 +6819,30 @@ const BacktestSuitePanel = () => {
     React.createElement("div", { style: { display: mode === "walkforward" ? "" : "none" } }, wfResult && !running && renderWalkForward(wfResult)),
     React.createElement("div", { style: { display: mode === "multiSymbol" ? "" : "none" } }, multiResult && !running && renderBatch(multiResult)),
 
+    mode === "pathAnalysis" && React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+      React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 } },
+        React.createElement("div", null,
+          React.createElement("label", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", display: "block", marginBottom: 3 } }, "Stock Ticker"),
+          React.createElement("input", { className: "inp", list: "path-symbols", type: "text", placeholder: "e.g. RELIANCE", value: pathTicker, onChange: function(e) { setPathTicker(e.target.value.toUpperCase()); }, style: { width: 150 } }),
+          React.createElement("datalist", { id: "path-symbols" }, NIFTY_200.map(function(s) { return React.createElement("option", { key: s.t, value: s.t.replace(".NS", "") }, s.n); }))
+        ),
+        React.createElement("div", null,
+          React.createElement("label", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", display: "block", marginBottom: 3 } }, "Entry Date"),
+          React.createElement("input", { className: "inp", type: "date", value: pathEntryDate, onChange: function(e) { setPathEntryDate(e.target.value); }, style: { width: 150 } })
+        ),
+        React.createElement("div", null,
+          React.createElement("label", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", display: "block", marginBottom: 3 } }, "Exit Date"),
+          React.createElement("input", { className: "inp", type: "date", value: pathExitDate, onChange: function(e) { setPathExitDate(e.target.value); }, style: { width: 150 } })
+        ),
+        React.createElement("button", { onClick: runPathAnalysis, disabled: pathLoading, className: "stx-btn stx-btn-primary", style: { padding: "8px 18px", fontSize: 12, opacity: pathLoading ? 0.6 : 1, cursor: pathLoading ? "wait" : "pointer" } },
+          pathLoading ? "Loading\u2026" : "\u25b6 Chart the Path"
+        ),
+        pathResult && React.createElement("button", { onClick: function() { setPathResult(null); }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid #ef4444", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer" } }, "\u2715 Clear")
+      ),
+      pathErr && React.createElement("div", { style: { fontSize: 11, color: "#ef4444", marginBottom: 8 } }, pathErr)
+    ),
+    mode === "pathAnalysis" && pathResult && renderPathResult(pathResult),
+
     (singleResult || batchResult || wfResult || multiResult) && !running && React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", lineHeight: 1.6, padding: "0 2px" } },
       "Methodology: at each entry date D the daily series (and the Nifty index used for beta / relative strength) are sliced to end at D \u2014 no lookahead \u2014 and the production Entry Score engine runs on that exact snapshot. " +
       "A trade opens when the score \u2265 " + fmtS(threshold) + ", priced at D's close, and closes at +" + fmt2(target) + "% (target touched intraday) or at the close of the " + fmtS(holding) + "th session. " +
@@ -6685,7 +6850,7 @@ const BacktestSuitePanel = () => {
     ),
 
     !(singleResult || batchResult || wfResult || multiResult) && !running && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
-      "Pick a mode and run a backtest. Single Symbol replays every session on one stock; Batch ranks the NIFTY 200 universe; Walk-Forward tests out-of-sample consistency fold by fold; Multi Symbol backtests stocks selected from the Screener."
+      "Pick a mode and run a backtest. Single Symbol replays every session on one stock; Batch ranks the NIFTY 200 universe; Walk-Forward tests out-of-sample consistency fold by fold; Multi Symbol backtests stocks selected from the Screener; Path Analysis charts the daily price path for any ticker over a date range."
     )
   );
 };
@@ -6810,6 +6975,7 @@ const ScoreTunerPanel = () => {
       await OfflineOHLCV.putBulk(records);
       var meta = await OfflineOHLCV.getMeta();
       setOfflineMeta(meta);
+      window.dispatchEvent(new CustomEvent("stox:offline-data-changed"));
 
       /* Also download as JSON file — normalize keys to daily/hourly/weekly */
       var exportData = {};
@@ -6850,6 +7016,7 @@ const ScoreTunerPanel = () => {
       await OfflineOHLCV.putBulk(records);
       var meta = await OfflineOHLCV.getMeta();
       setOfflineMeta(meta);
+      window.dispatchEvent(new CustomEvent("stox:offline-data-changed"));
     } catch (e) {
       setErr("Failed to load file: " + (e.message || e));
     }
@@ -6859,6 +7026,7 @@ const ScoreTunerPanel = () => {
   const clearOfflineData = async () => {
     await OfflineOHLCV.clear();
     setOfflineMeta(null);
+    window.dispatchEvent(new CustomEvent("stox:offline-data-changed"));
   };
 
   const getUniverseConfig = function() {
