@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.29";
+window.__STOX_APP_VERSION = "2.10.30";
 
 /* Apply saved score config on startup */
 (function() {
@@ -2580,9 +2580,10 @@ const PrematureExitPanel = ({ ticker, buyPrice }) => {
     );
   }
   if (!result || result.score == null) {
-    return React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: "10px 14px", border: "1px solid var(--border)" } },
-      React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text5)", marginBottom: 4 } }, "Premature Exit Analysis"),
-      React.createElement("div", { style: { fontSize: 11, color: "var(--text6)" } }, "Insufficient data for analysis (need 50+ daily candles)")
+    var errMsg = result && result.error ? result.error : (result && result.reasons && result.reasons[0]) || "unknown";
+    return React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: "10px 14px", border: "1px solid var(--lossborder)" } },
+      React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--loss)", marginBottom: 4 } }, "Premature Exit Analysis"),
+      React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", fontFamily: "var(--font-mono)" } }, "Error: " + errMsg)
     );
   }
 

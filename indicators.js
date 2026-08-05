@@ -3762,6 +3762,7 @@ window.TechIndicators = (function () {
     } catch (e) {
       result.score = null;
       result.reasons = ['Analysis failed: ' + (e.message || e)];
+      result.error = e.message || String(e);
     }
 
     return result;
