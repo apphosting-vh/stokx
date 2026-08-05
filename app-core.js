@@ -6202,13 +6202,19 @@ const BacktestSuitePanel = () => {
         React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
             React.createElement("thead", null, React.createElement("tr", null,
-              cell("Symbol", tdL), cell("Signals", td), cell("Wins", td), cell("Losses", td), cell("Win Rate", td), cell("Avg Return", td), cell("Profit Factor", td)
+              cell("Symbol", tdL), cell("Signals", td), cell("Wins", td), cell("Losses", td), cell("Win Rate", td), cell("Avg Return", td), cell("Profit Factor", td),
+              React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average Trend Health pillar score across all trades for this symbol" }, "Avg Trend"),
+              React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average Pullback Quality pillar score across all trades for this symbol" }, "Avg Pullback"),
+              React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average 4% Probability pillar score across all trades for this symbol" }, "Avg Prob4")
             )),
             React.createElement("tbody", null, (d.results || []).map((r) => React.createElement("tr", { key: r.symbol },
               cell(symName(r.symbol), tdL), cell(r.totalSignals), cell(r.winningTrades), cell(r.losingTrades),
               cell(React.createElement("span", { style: { color: retColor(r.winRate - 50), fontWeight: 700 } }, fmtPct(r.winRate))),
               cell(React.createElement("span", { style: { color: retColor(r.avgReturnPct) } }, fmtR(r.avgReturnPct))),
-              cell(fmtPF(r.profitFactor))
+              cell(fmtPF(r.profitFactor)),
+              React.createElement("td", { style: Object.assign({}, td, { color: r.avgTrend != null ? "var(--text)" : "var(--text6)" }) }, r.avgTrend != null ? fmt2(r.avgTrend) : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, td, { color: r.avgPullback != null ? "var(--text)" : "var(--text6)" }) }, r.avgPullback != null ? fmt2(r.avgPullback) : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, td, { color: r.avgProb4 != null ? "var(--text)" : "var(--text6)" }) }, r.avgProb4 != null ? fmt2(r.avgProb4) : "\u2014")
             )))
           )
         )

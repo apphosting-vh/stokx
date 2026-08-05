@@ -559,7 +559,22 @@ window.BacktestEngine = (function () {
           try {
             var single = await runSingle(candles, Object.assign({}, opts, { symbol: sym }));
             if (single.error) results.push({ symbol: sym, error: single.error });
-            else results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, detail: single });
+            else {
+              var trades = single.stats.trades || [];
+              var avgTrend = null, avgPullback = null, avgProb4 = null;
+              if (trades.length > 0) {
+                var tSum = 0, pSum = 0, prSum = 0, tN = 0, pN = 0, prN = 0;
+                for (var ti = 0; ti < trades.length; ti++) {
+                  if (trades[ti].trendScore != null) { tSum += trades[ti].trendScore; tN++; }
+                  if (trades[ti].pullbackScore != null) { pSum += trades[ti].pullbackScore; pN++; }
+                  if (trades[ti].probabilityScore != null) { prSum += trades[ti].probabilityScore; prN++; }
+                }
+                avgTrend = tN > 0 ? Math.round(tSum / tN * 10) / 10 : null;
+                avgPullback = pN > 0 ? Math.round(pSum / pN * 10) / 10 : null;
+                avgProb4 = prN > 0 ? Math.round(prSum / prN * 10) / 10 : null;
+              }
+              results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, avgTrend: avgTrend, avgPullback: avgPullback, avgProb4: avgProb4, detail: single });
+            }
           } catch (e) {
             results.push({ symbol: sym, error: (e && e.message) || String(e) });
           }
