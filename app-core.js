@@ -6782,6 +6782,41 @@ const ScoreTunerPanel = () => {
         )
       ),
 
+      result && activeResultTab === "pillar" && result.components && result.components.pillarConsumption && React.createElement("div", { className: "stx-card", style: { padding: 12, marginTop: 16 } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 4, color: "var(--text)" } }, "Pillar Score Consumption"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 10 } }, "How much of each pillar's max score was actually used in this run. If max touched is far below the configured max, increasing it further has no effect."),
+        React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap" } },
+          ["trendHealth", "pullbackQuality", "prob4"].map(function(p) {
+            var pc = result.components.pillarConsumption[p];
+            if (!pc) return null;
+            var label = p.replace(/([A-Z])/g, " $1").trim();
+            var pctUsed = pc.max > 0 ? Math.round((pc.touched / pc.max) * 100) : 0;
+            var barColor = pctUsed >= 90 ? "#22c55e" : pctUsed >= 60 ? "#eab308" : "#ef4444";
+            return React.createElement("div", { key: p, style: { flex: 1, minWidth: 200, padding: "10px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)" } },
+              React.createElement("div", { style: { fontSize: 10, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text6)", fontWeight: 700, marginBottom: 6 } }, label),
+              React.createElement("div", { style: { display: "flex", gap: 16, marginBottom: 6 } },
+                React.createElement("div", null,
+                  React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, "Max Touched"),
+                  React.createElement("div", { style: { fontSize: 16, fontWeight: 800, fontFamily: "var(--font-heading)", color: barColor } }, pc.touched + " / " + pc.max)
+                ),
+                React.createElement("div", null,
+                  React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, "At Max"),
+                  React.createElement("div", { style: { fontSize: 16, fontWeight: 800, fontFamily: "var(--font-heading)" } }, pc.atMaxPct + "%")
+                ),
+                React.createElement("div", null,
+                  React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, "Average"),
+                  React.createElement("div", { style: { fontSize: 16, fontWeight: 800, fontFamily: "var(--font-heading)" } }, pc.avg)
+                )
+              ),
+              React.createElement("div", { style: { height: 4, borderRadius: 2, background: "var(--bg3)", overflow: "hidden", marginBottom: 4 } },
+                React.createElement("div", { style: { height: "100%", width: pctUsed + "%", background: barColor, transition: "width .3s" } })
+              ),
+              React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, pc.symbols + " symbols \u00b7 " + pc.count + " scored bars")
+            );
+          })
+        )
+      ),
+
       result && activeResultTab === "component" && React.createElement("div", { className: "stx-card", style: { padding: 12, overflowX: "auto" } },
         React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 8, color: "var(--text)" } }, "Component Predictive Power"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 10 } }, "Point-biserial correlation of each component with forward hit rate. Higher abs(correlation) = more predictive. Info Value > 0.1 = meaningful."),

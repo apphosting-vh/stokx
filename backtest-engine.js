@@ -851,7 +851,31 @@ window.BacktestEngine = (function () {
         };
       });
 
-      return { components: result, totalScored: allScored.length };
+      /* Compute pillar consumption stats */
+      var pillars = ['trendHealth', 'pullbackQuality', 'prob4'];
+      var pillarMax = (typeof SCORE_CONFIG !== 'undefined' && SCORE_CONFIG.pillarMax) ? SCORE_CONFIG.pillarMax : { trendHealth: 30, pullbackQuality: 30, prob4: 40 };
+      var pillarConsumption = {};
+      pillars.forEach(function(p) {
+        var maxVal = pillarMax[p] || 0;
+        var vals = allScored.map(function(s) { return s[p]; }).filter(function(v) { return v != null && !isNaN(v); });
+        if (vals.length === 0) { pillarConsumption[p] = { max: maxVal, touched: 0, atMax: 0, atMaxPct: 0, avg: 0, median: 0, count: 0 }; return; }
+        var sorted = vals.slice().sort(function(a, b) { return a - b; });
+        var sum = vals.reduce(function(s, v) { return s + v; }, 0);
+        var atMax = vals.filter(function(v) { return Math.abs(v - maxVal) < 0.01; }).length;
+        var uniqueSymbols = new Set(allScored.filter(function(s) { return s[p] != null; }).map(function(s) { return s.symbol; })).size;
+        pillarConsumption[p] = {
+          max: maxVal,
+          touched: Math.round(sorted[sorted.length - 1] * 10) / 10,
+          atMax: atMax,
+          atMaxPct: Math.round((atMax / vals.length) * 1000) / 10,
+          avg: Math.round((sum / vals.length) * 10) / 10,
+          median: sorted[Math.floor(sorted.length / 2)],
+          count: vals.length,
+          symbols: uniqueSymbols
+        };
+      });
+
+      return { components: result, totalScored: allScored.length, pillarConsumption: pillarConsumption };
     }
 
     /**
