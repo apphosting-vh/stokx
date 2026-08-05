@@ -7159,6 +7159,9 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
     gapPct: multi.gapPct != null ? multi.gapPct : null,
     dominanceRatio: multi.dominanceRatio != null ? multi.dominanceRatio : null,
     efficiencyRatio10: multi.efficiencyRatio10 != null ? multi.efficiencyRatio10 : null,
+    aggTrendHealth: multi.trendHealth != null ? multi.trendHealth : null,
+    aggPullbackQuality: multi.pullbackQuality != null ? multi.pullbackQuality : null,
+    aggProb4: multi.prob4 != null ? multi.prob4 : null,
     weekly: null, daily: null, hourly: null
   };
   if (multi.details) multi.details.forEach(function(d) {
@@ -7899,7 +7902,7 @@ function StockScreener(props) {
                     React.createElement("input", { type: "checkbox", checked: allFilteredSelected, onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
                   );
                 }
-                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", avgTrend: "Avg Trend", avgPullback: "Avg Pullback", avgProb4: "Avg Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", addToES: "Add to ES", addToCS: "Add to CS", actions: "Last Refreshed" };
+                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", avgTrend: "Trend", avgPullback: "Pullback", avgProb4: "Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", addToES: "Add to ES", addToCS: "Add to CS", actions: "Last Refreshed" };
                 return React.createElement("th", { key: k, title: k === "conf10d" ? "Confidence Score \u2014 Next 10 Days (chance of +4% from current price within 10 trading days, /100)" : k === "addToCS" ? "Add this stock to the 10 Days Confidence Score Performance Tracker" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" || k === "addToES" || k === "addToCS" ? "default" : "pointer" }), onClick: k === "actions" || k === "addToES" || k === "addToCS" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" || k === "addToES" || k === "addToCS" ? "" : arrow(k)));
               })
             )
@@ -7940,18 +7943,18 @@ function StockScreener(props) {
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.weekChg != null ? (r.weekChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.weekChg != null ? (r.weekChg >= 0 ? "+" : "") + Number(r.weekChg).toFixed(2) + "%" : "--"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.monthChg != null ? (r.monthChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.monthChg != null ? (r.monthChg >= 0 ? "+" : "") + Number(r.monthChg).toFixed(2) + "%" : "--"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
-                  r.result.daily && r.result.daily.trendHealthScore != null
-                    ? React.createElement("span", { title: "Daily Trend Health: " + r.result.daily.trendHealthScore + "/" + (r.result.daily.trendHealthMax || 30), style: { fontWeight: 700, color: "var(--accent)" } }, r.result.daily.trendHealthScore)
+                  r.result.aggTrendHealth != null
+                    ? React.createElement("span", { title: "Trend Health contribution to entry score " + r.result.finalScore, style: { fontWeight: 700, color: "var(--accent)" } }, Number(r.result.aggTrendHealth).toFixed(1))
                     : "\u2014"
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
-                  r.result.daily && r.result.daily.pullbackScore != null
-                    ? React.createElement("span", { title: "Daily Pullback Quality: " + r.result.daily.pullbackScore + "/" + (r.result.daily.pullbackMax || 30), style: { fontWeight: 700, color: "var(--accent)" } }, r.result.daily.pullbackScore)
+                  r.result.aggPullbackQuality != null
+                    ? React.createElement("span", { title: "Pullback Quality contribution to entry score " + r.result.finalScore, style: { fontWeight: 700, color: "var(--accent)" } }, Number(r.result.aggPullbackQuality).toFixed(1))
                     : "\u2014"
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
-                  r.result.daily && r.result.daily.prob4Score != null
-                    ? React.createElement("span", { title: "Daily 4% Probability: " + r.result.daily.prob4Score + "/" + (r.result.daily.prob4Max || 40), style: { fontWeight: 700, color: "var(--accent)" } }, r.result.daily.prob4Score)
+                  r.result.aggProb4 != null
+                    ? React.createElement("span", { title: "4% Probability contribution to entry score " + r.result.finalScore, style: { fontWeight: 700, color: "var(--accent)" } }, Number(r.result.aggProb4).toFixed(1))
                     : "\u2014"
                 ),
                 React.createElement("td", { style: tdStyle },
