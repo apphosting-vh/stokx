@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.23";
+window.__STOX_APP_VERSION = "2.10.24";
 
 /* Apply saved score config on startup */
 (function() {
@@ -7889,17 +7889,17 @@ function StockScreener(props) {
         })
       ),
       React.createElement("div", { style: { overflowX: "auto", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg3)" } },
-        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1440 } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1640 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
-              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "finalScore", "weekly", "daily", "hourly", "conf10d", "addToES", "addToCS", "actions"].map(function(k) {
+              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "avgTrend", "avgPullback", "avgProb4", "finalScore", "weekly", "daily", "hourly", "conf10d", "addToES", "addToCS", "actions"].map(function(k) {
                 if (k === "select") {
                   var allFilteredSelected = filtered.length > 0 && filtered.every(function(r) { return selected[r.s.t]; });
                   return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: "default", textAlign: "center", width: 36 }) },
                     React.createElement("input", { type: "checkbox", checked: allFilteredSelected, onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
                   );
                 }
-                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", addToES: "Add to ES", addToCS: "Add to CS", actions: "Last Refreshed" };
+                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", avgTrend: "Avg Trend", avgPullback: "Avg Pullback", avgProb4: "Avg Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", addToES: "Add to ES", addToCS: "Add to CS", actions: "Last Refreshed" };
                 return React.createElement("th", { key: k, title: k === "conf10d" ? "Confidence Score \u2014 Next 10 Days (chance of +4% from current price within 10 trading days, /100)" : k === "addToCS" ? "Add this stock to the 10 Days Confidence Score Performance Tracker" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" || k === "addToES" || k === "addToCS" ? "default" : "pointer" }), onClick: k === "actions" || k === "addToES" || k === "addToCS" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" || k === "addToES" || k === "addToCS" ? "" : arrow(k)));
               })
             )
@@ -7939,6 +7939,21 @@ function StockScreener(props) {
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.dayChg != null ? (r.dayChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.dayChg != null ? (r.dayChg >= 0 ? "+" : "") + Number(r.dayChg).toFixed(2) + "%" : "--"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.weekChg != null ? (r.weekChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.weekChg != null ? (r.weekChg >= 0 ? "+" : "") + Number(r.weekChg).toFixed(2) + "%" : "--"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.monthChg != null ? (r.monthChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.monthChg != null ? (r.monthChg >= 0 ? "+" : "") + Number(r.monthChg).toFixed(2) + "%" : "--"),
+                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                  r.result.daily && r.result.daily.trendHealthScore != null
+                    ? React.createElement("span", { title: "Daily Trend Health: " + r.result.daily.trendHealthScore + "/" + (r.result.daily.trendHealthMax || 30), style: { fontWeight: 700, color: "var(--accent)" } }, r.result.daily.trendHealthScore)
+                    : "\u2014"
+                ),
+                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                  r.result.daily && r.result.daily.pullbackScore != null
+                    ? React.createElement("span", { title: "Daily Pullback Quality: " + r.result.daily.pullbackScore + "/" + (r.result.daily.pullbackMax || 30), style: { fontWeight: 700, color: "var(--accent)" } }, r.result.daily.pullbackScore)
+                    : "\u2014"
+                ),
+                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                  r.result.daily && r.result.daily.prob4Score != null
+                    ? React.createElement("span", { title: "Daily 4% Probability: " + r.result.daily.prob4Score + "/" + (r.result.daily.prob4Max || 40), style: { fontWeight: 700, color: "var(--accent)" } }, r.result.daily.prob4Score)
+                    : "\u2014"
+                ),
                 React.createElement("td", { style: tdStyle },
                   React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 6 } },
                     React.createElement("span", { style: { fontSize: 13, fontWeight: 900, color: d.color, fontFamily: "var(--font-heading)" } }, r.result.finalScore),
