@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.32";
+window.__STOX_APP_VERSION = "2.10.33";
 
 /* Apply saved score config on startup */
 (function() {
@@ -4203,6 +4203,9 @@ const EntryScorePanel = ({ shares }) => {
     if (!stale.length) return;
     (async () => {
       const updated = [...entries];
+      let _idxD = null, _idxW = null;
+      try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
+      try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch(e) {}
       for (const entry of stale) {
         try {
           const tk = entry.ticker.toUpperCase();
@@ -4211,7 +4214,7 @@ const EntryScorePanel = ({ shares }) => {
           const indW = TI.computeAll(resW.data);
           const indD = TI.computeAll(resD.data);
           const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-          const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+          const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
           if (result) result.lastClose = entry.currentPrice || resD.data[resD.data.length - 1].c;
           const idx = updated.findIndex(e => e.id === entry.id);
           if (idx >= 0) updated[idx] = { ...updated[idx], result, indicators: { weekly: indW, daily: indD, hourly: indH } };
@@ -4246,6 +4249,9 @@ const EntryScorePanel = ({ shares }) => {
     const oldScores = {};
     entries.forEach(e => { oldScores[e.ticker] = e.result ? e.result.finalScore : null; });
     const updated = [...entries];
+    let _idxD = null, _idxW = null;
+    try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
+    try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch(e) {}
     for (let i = 0; i < updated.length; i++) {
       const entry = updated[i];
       const tk = entry.ticker.toUpperCase();
@@ -4260,7 +4266,7 @@ const EntryScorePanel = ({ shares }) => {
         const indD = TI.computeAll(resD.data);
         const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
         const lastClose = resD.data[resD.data.length - 1]?.close || entry.currentPrice || 0;
-        const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+        const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
         if (result) result.lastClose = lastClose;
         updated[i] = { ...updated[i], currentPrice: entry.currentPrice || lastClose, result, indicators: { weekly: indW, daily: indD, hourly: indH } };
       } catch {}
@@ -4442,13 +4448,14 @@ const EntryScorePanel = ({ shares }) => {
       const indW = TI.computeAll(resW.data);
       const indD = TI.computeAll(resD.data);
       const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+      let _idxD = null, _idxW = null;
+      try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
+      try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
+      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
       if (result) result.lastClose = lastDailyClose;
       let conf10d = null;
       try {
-        let idxD = null;
-        try { const _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch (e) {}
-        const _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, idxD);
+        const _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD);
         if (_conf && _conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10;
       } catch (e) {}
       const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d, indicators: { weekly: indW, daily: indD, hourly: indH } };
@@ -5160,12 +5167,13 @@ const ConfidenceTracker = () => {
       }
       const lastDailyClose = resD.data[resD.data.length - 1].c;
       const price = parseFloat(addPrice) || lastDailyClose || 0;
-      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+      let _idxD = null, _idxW = null;
+      try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
+      try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
+      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
       let confidence = null;
       try {
-        let idxD = null;
-        try { const _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch (e) {}
-        const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, idxD);
+        const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD);
         if (conf && conf.confidence != null) confidence = conf.confidence;
       } catch (e) {}
       const row = {
@@ -7265,7 +7273,7 @@ var SCREENER_DECISION_MAP = {
 
 /* Wraps the new computeMultiTFEntryScore + per-timeframe computeEntryScore
    into the old result shape { finalScore, decision, baseScore, penalties, bonuses, weekly, daily, hourly } */
-function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
+function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles, indexCandles, indexWeeklyCandles) {
   if (!window.TechIndicators) return null;
   var TI = window.TechIndicators;
   var tfResults = [];
@@ -7273,7 +7281,7 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles) {
   if (dailyCandles && dailyCandles.length >= 50) tfResults.push({ timeframe: 'D', candles: dailyCandles });
   if (hourlyCandles && hourlyCandles.length >= 50) tfResults.push({ timeframe: 'H', candles: hourlyCandles });
   if (!tfResults.length) return null;
-  var multi = TI.computeMultiTFEntryScore(tfResults);
+  var multi = TI.computeMultiTFEntryScore(tfResults, indexCandles || null, indexWeeklyCandles || null);
   if (!multi || multi.multiTF_score == null) return null;
   function toDec(cls) {
     return SCREENER_DECISION_MAP[cls] || { label: cls, color: 'var(--text6)' };
@@ -7520,13 +7528,14 @@ function StockScreener(props) {
     input.click();
   };
 
-  var refreshStock = async function(s, indexDaily) {
+  var refreshStock = async function(s, indexDaily, indexWeekly) {
     if (!TI || !DF) return;
     setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = true; return c; });
     try {
       var tk = s.t.replace(".NS", "");
       DF.clearCache();
       if (!indexDaily) { try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {} }
+      if (!indexWeekly) { try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); indexWeekly = (_idxR2 && _idxR2.data) || null; } catch(e) {} }
       var [resW, resD, resH] = await Promise.all([
         DF.fetchOHLCVCached(tk, "weekly"),
         DF.fetchOHLCVCached(tk, "daily"),
@@ -7542,7 +7551,7 @@ function StockScreener(props) {
       var lastDailyClose = dc[_yi].c;
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
       var conf10d = null;
       try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
@@ -7573,8 +7582,9 @@ function StockScreener(props) {
     var found = NIFTY_200_UNIQUE.find(function(s) { return s.t === tk + ".NS"; });
     var stockObj = found ? found : { t: tk + ".NS", n: tk };
     try {
-      var indexDaily = null;
+      var indexDaily = null, indexWeekly = null;
       try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {}
+      try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); indexWeekly = (_idxR2 && _idxR2.data) || null; } catch(e) {}
       var [resW, resD, resH] = await Promise.all([
         DF.fetchOHLCVCached(tk, "weekly"),
         DF.fetchOHLCVCached(tk, "daily"),
@@ -7590,7 +7600,7 @@ function StockScreener(props) {
       var lastDailyClose = dc[_yi].c;
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
       var conf10d = null;
       try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
@@ -7614,10 +7624,11 @@ function StockScreener(props) {
     var batch = results.filter(function(r) { return tickers.indexOf(r.s.t) >= 0; });
     var oldScores = {};
     batch.forEach(function(r) { oldScores[r.s.t] = r.result ? r.result.finalScore : null; });
-    var indexDaily = null;
+    var indexDaily = null, indexWeekly = null;
     try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {}
+    try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); indexWeekly = (_idxR2 && _idxR2.data) || null; } catch(e) {}
     for (var i = 0; i < batch.length; i++) {
-      await refreshStock(batch[i].s, indexDaily);
+      await refreshStock(batch[i].s, indexDaily, indexWeekly);
     }
     var updatedResults = _resultsRef.current;
     var changes = [];
@@ -7663,8 +7674,9 @@ function StockScreener(props) {
     setBgRefreshing(true);
     setBgProgress({ done: 0, total: batch.length, current: "" });
     setSelected({});
-    var indexDaily = null;
+    var indexDaily = null, indexWeekly = null;
     try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {}
+    try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); indexWeekly = (_idxR2 && _idxR2.data) || null; } catch(e) {}
     for (var i = 0; i < batch.length; i++) {
       if (!bg.active) break;
       var stk = batch[i].s;
@@ -7686,7 +7698,7 @@ function StockScreener(props) {
           var lastDailyClose = dc[_yi].c;
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
-          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
           var conf10d = null;
           try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
@@ -7765,13 +7777,14 @@ function StockScreener(props) {
       var indW = TI.computeAll(resW.data);
       var indD = TI.computeAll(resD.data);
       var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+      var _idxD = null, _idxW = null;
+      try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
+      try { var _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
       if (result) result.lastClose = lc;
       var conf10d = null;
       try {
-        var idxD = null;
-        try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch (e) {}
-        var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, idxD);
+        var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD);
         if (_conf && _conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10;
       } catch (e) {}
       var entry = { id: Date.now(), ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d: conf10d, indicators: { weekly: indW, daily: indD, hourly: indH } };
@@ -7805,12 +7818,13 @@ function StockScreener(props) {
         return;
       }
       var lc = resD.data[resD.data.length - 1].c;
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+      var _idxD = null, _idxW = null;
+      try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
+      try { var _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch(e) {}
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
       var confidence = null;
       try {
-        var idxD = null;
-        try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch(e) {}
-        var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, idxD);
+        var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD);
         if (conf && conf.confidence != null) confidence = conf.confidence;
       } catch (e) {}
       var row = {
@@ -7844,8 +7858,9 @@ function StockScreener(props) {
     setProgress({ done: 0, total: total, current: "Starting..." });
     var out = [];
     var BATCH = 3;
-    var indexDaily = null;
+    var indexDaily = null, indexWeekly = null;
     try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {}
+    try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); indexWeekly = (_idxR2 && _idxR2.data) || null; } catch(e) {}
     for (var i = 0; i < stocks.length; i += BATCH) {
       var batch = stocks.slice(i, i + BATCH);
       var promises = batch.map(async function(s) {
@@ -7864,7 +7879,7 @@ function StockScreener(props) {
           var lastDailyClose = dc[_yi].c;
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
-          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null);
+          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
           var conf10d = null;
           try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
@@ -8407,9 +8422,10 @@ function SingleStockAnalysis({ requestedTicker }) {
       var resD = await DF.fetchOHLCVCached(tk, "daily");
       var resH = await DF.fetchOHLCVCached(tk, "1h");
       var idxD = await DF.fetchOHLCVCached("^NSEI", "daily");
+      var idxW = await DF.fetchOHLCVCached("^NSEI", "weekly");
       var entry = null;
       if (resW && resW.data && resD && resD.data) {
-        entry = computeCompatEntryScore(resW.data, resD.data, resH && resH.data && resH.data.length >= 100 ? resH.data : null);
+        entry = computeCompatEntryScore(resW.data, resD.data, resH && resH.data && resH.data.length >= 100 ? resH.data : null, idxD && idxD.data, idxW && idxW.data);
       }
       var rs = null, beta = null;
       if (idxD && idxD.data && resD && resD.data) {
@@ -8478,8 +8494,10 @@ function SingleStockAnalysis({ requestedTicker }) {
       if (!entry) {
         try {
           var resW = await DF.fetchOHLCVCached(ticker, "weekly");
+          var idxW = null;
+          try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); idxW = (_idxR2 && _idxR2.data) || null; } catch (e) {}
           if (resW && resW.data && d && resW.data.length >= 12 && d.length >= 12) {
-            entry = computeCompatEntryScore(resW.data, d, h1 && h1.length >= 100 ? h1 : null);
+            entry = computeCompatEntryScore(resW.data, d, h1 && h1.length >= 100 ? h1 : null, idxD, idxW);
           }
         } catch (e) {}
       }
