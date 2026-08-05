@@ -3525,12 +3525,15 @@ window.TechIndicators = (function () {
       var trendDetails = [];
 
       // ADX strength
-      var adx = calcADX(candles, 14);
-      if (adx && adx.adx != null) {
-        if (adx.adx >= 30 && adx.plusDI > adx.minusDI) { trendScore += 8; trendDetails.push('ADX ' + adx.adx.toFixed(0) + ' +DI>DI (strong)'); }
-        else if (adx.adx >= 25 && adx.plusDI > adx.minusDI) { trendScore += 5; trendDetails.push('ADX ' + adx.adx.toFixed(0) + ' (trending)'); }
-        else if (adx.adx >= 20) { trendScore += 2; trendDetails.push('ADX ' + adx.adx.toFixed(0) + ' (moderate)'); }
-        else { trendDetails.push('ADX ' + adx.adx.toFixed(0) + ' (weak)'); }
+      var adxObj = calcADX(candles, 14);
+      var adxVal = adxObj && adxObj.adx ? lastVal(adxObj.adx) : null;
+      var plusDI = adxObj && adxObj.plusDI ? lastVal(adxObj.plusDI) : null;
+      var minusDI = adxObj && adxObj.minusDI ? lastVal(adxObj.minusDI) : null;
+      if (adxVal != null) {
+        if (adxVal >= 30 && plusDI > minusDI) { trendScore += 8; trendDetails.push('ADX ' + adxVal.toFixed(0) + ' +DI>DI (strong)'); }
+        else if (adxVal >= 25 && plusDI > minusDI) { trendScore += 5; trendDetails.push('ADX ' + adxVal.toFixed(0) + ' (trending)'); }
+        else if (adxVal >= 20) { trendScore += 2; trendDetails.push('ADX ' + adxVal.toFixed(0) + ' (moderate)'); }
+        else { trendDetails.push('ADX ' + adxVal.toFixed(0) + ' (weak)'); }
       }
 
       // MACD momentum
