@@ -120,7 +120,7 @@ const OfflineOHLCV = {
           var bars = (r.data ? r.data.length : 0) + (r.daily ? r.daily.length : 0) + (r.hourly ? r.hourly.length : 0) + (r.weekly ? r.weekly.length : 0);
           return sum + bars;
         }, 0);
-        var hasMultiTF = recs.length > 0 && recs[0].daily != null;
+        var hasMultiTF = recs.length > 0 && recs.some(function(r) { return r.daily != null; });
         resolve({ count: tickers.length, totalBars: totalBars, downloadedAt: downloadedAt, tickers: tickers, multiTF: hasMultiTF });
         db.close();
       };
@@ -5884,13 +5884,18 @@ const BacktestSuitePanel = () => {
     /* Try multi-TF scoring if data available */
     var tfData = multiTFMap && symbol ? multiTFMap[symbol] : null;
     if (tfData && (tfData.daily || tfData.hourly || tfData.weekly)) {
-      var dailySlice = tfData.daily ? tfData.daily.slice(0, tfData.daily.findIndex(function(b) { return b.t > ts; }) || tfData.daily.length) : null;
-      var hourlySlice = tfData.hourly ? tfData.hourly.slice(0, tfData.hourly.findIndex(function(b) { return b.t > ts; }) || tfData.hourly.length) : null;
-      var weeklySlice = tfData.weekly ? tfData.weekly.slice(0, tfData.weekly.findIndex(function(b) { return b.t > ts; }) || tfData.weekly.length) : null;
+      function sliceBefore(arr) {
+        if (!arr) return null;
+        var fi = arr.findIndex(function(b) { return b.t > ts; });
+        return arr.slice(0, fi === -1 ? arr.length : fi);
+      }
+      var dailySlice = sliceBefore(tfData.daily);
+      var hourlySlice = sliceBefore(tfData.hourly);
+      var weeklySlice = sliceBefore(tfData.weekly);
       var tfResults = [];
       if (dailySlice && dailySlice.length >= 50) tfResults.push({ timeframe: "D", candles: dailySlice });
-      if (hourlySlice && hourlySlice.length >= 40) tfResults.push({ timeframe: "H", candles: hourlySlice });
-      if (weeklySlice && weeklySlice.length >= 30) tfResults.push({ timeframe: "W", candles: weeklySlice });
+      if (hourlySlice && hourlySlice.length >= 50) tfResults.push({ timeframe: "H", candles: hourlySlice });
+      if (weeklySlice && weeklySlice.length >= 50) tfResults.push({ timeframe: "W", candles: weeklySlice });
       if (tfResults.length >= 2) {
         try {
           var mtf = TI.computeMultiTFEntryScore(tfResults, idxSlice, null);
@@ -6553,8 +6558,12 @@ const ScoreTunerPanel = () => {
       var meta = await OfflineOHLCV.getMeta();
       setOfflineMeta(meta);
 
-      /* Also download as JSON file */
-      var exportObj = { version: 2, downloadedAt: new Date().toISOString(), timeframes: timeframes, stockCount: validCount, errors: errors, data: dataMap };
+      /* Also download as JSON file — normalize keys to daily/hourly/weekly */
+      var exportData = {};
+      Object.keys(dataMap).forEach(function(ticker) {
+        exportData[ticker] = { daily: dataMap[ticker].daily || null, hourly: dataMap[ticker]["1h"] || null, weekly: dataMap[ticker].weekly || null };
+      });
+      var exportObj = { version: 2, downloadedAt: new Date().toISOString(), timeframes: timeframes, stockCount: validCount, errors: errors, data: exportData };
       var blob = new Blob([JSON.stringify(exportObj)], { type: "application/json" });
       var url = URL.createObjectURL(blob);
       var a = document.createElement("a"); a.href = url; a.download = "stox-ohlcv-multi-tf-" + TODAY() + ".json"; a.click();
@@ -6578,8 +6587,8 @@ const ScoreTunerPanel = () => {
       var records = Object.keys(dataMap).map(function(ticker) {
         var entry = dataMap[ticker];
         /* v2 schema: entry is { daily: [...], hourly: [...], weekly: [...] } */
-        if (entry && (entry.daily || entry.hourly || entry.weekly)) {
-          return { ticker: ticker, daily: entry.daily || null, hourly: entry.hourly || null, weekly: entry.weekly || null, downloadedAt: dlAt };
+        if (entry && (entry.daily || entry.hourly || entry["1h"] || entry.weekly)) {
+          return { ticker: ticker, daily: entry.daily || null, hourly: entry.hourly || entry["1h"] || null, weekly: entry.weekly || null, downloadedAt: dlAt };
         }
         /* v1 schema: entry is raw candle array */
         return { ticker: ticker, data: entry, downloadedAt: dlAt };
@@ -6617,13 +6626,18 @@ const ScoreTunerPanel = () => {
     /* Try multi-TF scoring if data available */
     var tfData = multiTFMap && symbol ? multiTFMap[symbol] : null;
     if (tfData && (tfData.daily || tfData.hourly || tfData.weekly)) {
-      var dailySlice = tfData.daily ? tfData.daily.slice(0, tfData.daily.findIndex(function(b) { return b.t > ts; }) || tfData.daily.length) : null;
-      var hourlySlice = tfData.hourly ? tfData.hourly.slice(0, tfData.hourly.findIndex(function(b) { return b.t > ts; }) || tfData.hourly.length) : null;
-      var weeklySlice = tfData.weekly ? tfData.weekly.slice(0, tfData.weekly.findIndex(function(b) { return b.t > ts; }) || tfData.weekly.length) : null;
+      function sliceBefore(arr) {
+        if (!arr) return null;
+        var fi = arr.findIndex(function(b) { return b.t > ts; });
+        return arr.slice(0, fi === -1 ? arr.length : fi);
+      }
+      var dailySlice = sliceBefore(tfData.daily);
+      var hourlySlice = sliceBefore(tfData.hourly);
+      var weeklySlice = sliceBefore(tfData.weekly);
       var tfResults = [];
       if (dailySlice && dailySlice.length >= 50) tfResults.push({ timeframe: "D", candles: dailySlice });
-      if (hourlySlice && hourlySlice.length >= 40) tfResults.push({ timeframe: "H", candles: hourlySlice });
-      if (weeklySlice && weeklySlice.length >= 30) tfResults.push({ timeframe: "W", candles: weeklySlice });
+      if (hourlySlice && hourlySlice.length >= 50) tfResults.push({ timeframe: "H", candles: hourlySlice });
+      if (weeklySlice && weeklySlice.length >= 50) tfResults.push({ timeframe: "W", candles: weeklySlice });
       if (tfResults.length >= 2) {
         try {
           var mtf = TI.computeMultiTFEntryScore(tfResults, idxSlice, null);
