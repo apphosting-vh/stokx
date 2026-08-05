@@ -1558,7 +1558,7 @@ window.TechIndicators = (function () {
     if (sn.rsi14 !== null && sn.rsi14Prev !== null && sn.rsi14 < 50 && sn.rsi14Prev >= 50) s += 0.5;
     if (sn.stochRsiK !== null && sn.stochRsiD !== null && sn.stochRsiKPrev !== null && sn.stochRsiDPrev !== null && sn.stochRsiK < sn.stochRsiD && sn.stochRsiKPrev >= sn.stochRsiDPrev) s += 1.5;
     else if (sn.stochRsiK !== null && sn.stochRsiD !== null && sn.stochRsiK < sn.stochRsiD) s += 0.5;
-    if (sn.stochRsiK !== null && sn.stochRsiK < 20) s += 0.5;
+    /* StochRSI < 20 is oversold (bullish), not exhaustion — removed inverted logic */
     if (sn.willr !== null && sn.willr < -80) s += 1.0;
     if (sn.willr !== null && sn.willrPrev !== null && sn.willr < -50 && sn.willrPrev >= -50) s += 1.0;
     if (sn.willr !== null && sn.willrPrev !== null && sn.willr < sn.willrPrev && sn.willr < -50) s += 0.5;
@@ -1584,7 +1584,7 @@ window.TechIndicators = (function () {
     if (sn.mfi14 !== null) { if (sn.mfi14 > 80) s += 2.0; else if (sn.mfi14 > 70) s += 1.0; }
     if (sn.mfi14 !== null && sn.mfi14Prev !== null && sn.mfi14 < sn.mfi14Prev && sn.mfi14Prev > 70) s += 1.0;
     if (sn.mfi14 !== null && sn.mfi14Prev !== null && sn.mfi14 < 50 && sn.mfi14Prev >= 50) s += 0.5;
-    if (sn.mfi14 !== null && sn.mfi14 < 30) s += 0.5;
+    /* MFI < 30 is oversold (bullish), not exit signal — removed inverted logic */
     if (sn.cmf20 !== null) { if (sn.cmf20 < -0.05) s += 2.0; else if (sn.cmf20 < 0) s += 1.0; }
     if (sn.cmf20 !== null && sn.cmf20Prev !== null && sn.cmf20 < sn.cmf20Prev && sn.cmf20 < 0) s += 0.5;
     return Math.min(s, 7);
@@ -1609,11 +1609,11 @@ window.TechIndicators = (function () {
   /* ── 14.2 VWAP + Anchored VWAP Break (7 pts) ── */
   function scoreExitVwapAvwap(sn) {
     var s = 0;
-    if (sn.c < sn.vwap10 && sn.pc >= sn.prevVwap10) s += 2.0;
+    if (sn.c < sn.vwap10 && sn.prevVwap10 !== null && sn.pc >= sn.prevVwap10) s += 2.0;
     else if (sn.c < sn.vwap10) { var pct = (sn.vwap10 - sn.c) / sn.vwap10 * 100; if (pct > 2.0) s += 1.5; else if (pct > 1.0) s += 1.0; else s += 0.5; }
-    if (sn.vwap10 < sn.prevVwap10) s += 0.5;
+    if (sn.vwap10 !== null && sn.prevVwap10 !== null && sn.vwap10 < sn.prevVwap10) s += 0.5;
     if (sn.c < sn.anchoredVwap) s += 1.5;
-    if (sn.anchoredVwap < sn.prevAnchoredVwap) s += 0.5;
+    if (sn.anchoredVwap !== null && sn.prevAnchoredVwap !== null && sn.anchoredVwap < sn.prevAnchoredVwap) s += 0.5;
     if (sn.c < sn.vwap10 && sn.c < sn.anchoredVwap) s += 1.0;
     return Math.min(s, 7);
   }
@@ -1633,10 +1633,10 @@ window.TechIndicators = (function () {
   /* ── 15.1 BB + KC + DC + Chandelier Breakdown (9 pts) ── */
   function scoreExitBbKcDcChandelier(sn) {
     var s = 0;
-    if (sn.c < sn.bbMid && sn.pc >= sn.bbMidPrev) s += 2.0; else if (sn.c < sn.bbMid) s += 0.5;
+    if (sn.c < sn.bbMid && sn.bbMidPrev !== null && sn.pc >= sn.bbMidPrev) s += 2.0; else if (sn.c < sn.bbMid) s += 0.5;
     if (sn.c < sn.bbLower) s += 1.0;
-    if (sn.bbWidth > sn.bbWidthPrev && sn.c < sn.bbMid) s += 0.5;
-    if (sn.c < sn.kcMid && sn.pc >= sn.kcMidPrev) s += 1.0; else if (sn.c < sn.kcMid) s += 0.5;
+    if (sn.bbWidthPrev !== null && sn.bbWidth > sn.bbWidthPrev && sn.c < sn.bbMid) s += 0.5;
+    if (sn.c < sn.kcMid && sn.kcMidPrev !== null && sn.pc >= sn.kcMidPrev) s += 1.0; else if (sn.c < sn.kcMid) s += 0.5;
     if (sn.c <= sn.dcLower * 1.01) s += 1.0;
     if (sn.chandelierLong !== null && sn.c < sn.chandelierLong) s += 1.0;
     if (sn.chandelierLong !== null && sn.chandelierLongPrev !== null && sn.chandelierLong < sn.chandelierLongPrev) s += 0.5;
@@ -1665,8 +1665,7 @@ window.TechIndicators = (function () {
     var entryPrice = (position && position.entry_price) || sn.c;
     var currentPrice = sn.c;
     if (sn.darvasBottom !== null) { if (sn.c <= sn.darvasBottom) s += 2.0; else if (sn.darvasTop !== null && sn.c < (sn.darvasTop + sn.darvasBottom) / 2) s += 0.5; }
-    if (sn.hma16 < sn.prevHma16) s += 0.5;
-    if (sn.kama10 < sn.prevKama10) s += 0.5;
+    /* HMA/KAMA declining already scored in tf1a (scoreExitTrendBreakdown) — not repeated here to avoid double-count */
     if (sn.c < sn.hma16 && sn.c < sn.kama10) s += 0.5;
     if (sn.mtfAlign !== null) { if (sn.mtfAlign < 40) s += 1.5; else if (sn.mtfAlign < 60) s += 0.5; }
     if (sn.mtfAlign !== null && sn.mtfAlignPrev !== null && sn.mtfAlign < sn.mtfAlignPrev) s += 0.5;
@@ -2005,14 +2004,19 @@ window.TechIndicators = (function () {
     var distDayRatio = 0, prevDistDayRatio = 0;
     if (L >= 5) {
       var dVolLookback = 20, dSumVol = 0, dCnt = 0;
-      for (var v = Math.max(0, L - dVolLookback); v < L; v++) { dSumVol += vo[v]; dCnt++; }
+      /* Compute average volume BEFORE the 5-bar test window to avoid inflating the baseline */
+      var avgStart = Math.max(0, L - dVolLookback - 5);
+      var avgEnd = L - 5;
+      for (var v = avgStart; v < avgEnd; v++) { dSumVol += vo[v]; dCnt++; }
       var dAvgVol = dCnt > 0 ? dSumVol / dCnt : 0;
       var dDist = 0;
       for (var v = L - 5; v < L; v++) { if (v > 0 && cl[v] < cl[v - 1] && vo[v] > dAvgVol) dDist++; }
       distDayRatio = round(dDist / 5, 2);
       if (L >= 6) {
         var dSumVolPrev = 0, dCntPrev = 0;
-        for (var v = Math.max(0, L - 1 - dVolLookback); v < L - 1; v++) { dSumVolPrev += vo[v]; dCntPrev++; }
+        var avgStartPrev = Math.max(0, L - 1 - dVolLookback - 5);
+        var avgEndPrev = L - 1 - 5;
+        for (var v = avgStartPrev; v < avgEndPrev; v++) { dSumVolPrev += vo[v]; dCntPrev++; }
         var dAvgVolPrev = dCntPrev > 0 ? dSumVolPrev / dCntPrev : 0;
         var dDistPrev = 0;
         for (var v = L - 6; v < L - 1; v++) { if (v > 0 && cl[v] < cl[v - 1] && vo[v] > dAvgVolPrev) dDistPrev++; }
@@ -2561,7 +2565,7 @@ window.TechIndicators = (function () {
         } else { bbWidthArr.push(null); }
       }
       var bbWidth = gv(bbWidthArr);
-      var bbWidthPrev5 = bbWidthArr.length > L1 - 5 ? bbWidthArr[L1 - 5] : null;
+      var bbWidthPrev5 = (L1 - 5 >= 0 && L1 - 5 < bbWidthArr.length) ? bbWidthArr[L1 - 5] : null;
 
       var stochRsiK = gv(calcStochasticRSI(candles).k);
       var rsi14 = gv(calcRSI(candles, 14));
@@ -2904,8 +2908,12 @@ window.TechIndicators = (function () {
     var modifiers = penalties + bonuses;
 
     var finalScore = Math.max(0, Math.min(100, rawTotal + modifiers));
-    var cls = classifyScore(finalScore);
+
+    /* Spike gate (hard override): never score above NEUTRAL on the day of an abnormal print */
     var guard = computeSpikeGuard(candles);
+    if (guard.todaySpike) finalScore = Math.min(finalScore, 49);
+
+    var cls = classifyScore(finalScore);
 
     return {
       entry_score: round(finalScore, 1),
@@ -3004,6 +3012,10 @@ window.TechIndicators = (function () {
     var modifiers = penalties + bonuses;
 
     var finalScore = Math.max(0, Math.min(100, rawTotal + modifiers));
+
+    /* Spike gate (hard override): never score above NEUTRAL on the day of an abnormal print */
+    if (spikeDay) finalScore = Math.min(finalScore, 49);
+
     var cls = classifyScore(finalScore);
 
     var tfDetails = [];
@@ -3417,14 +3429,12 @@ window.TechIndicators = (function () {
 
     var exitResult = computeExitScore(currentData, { entry_price: ep, holding_days: days, entry_score: es }, indexCandles);
     var exitScore = exitResult && exitResult.exit_score != null ? exitResult.exit_score : 0;
-    var stopLoss, target;
+    var stopLoss = (ep != null && atr != null) ? ep - (atr * 1.5) : null;
+    var target = ep != null ? ep * 1.04 : null;
 
+    /* Layer 1: Hard Rules */
     if (ep != null && cp != null) {
-      target = ep * 1.04;
-      stopLoss = atr != null ? ep - (atr * 1.5) : null;
-
-      /* Layer 1: Hard Rules */
-      if (cp >= target) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Target hit (+4%)', action: 'Full exit', exit_score: exitScore });
+      if (target != null && cp >= target) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Target hit (+4%)', action: 'Full exit', exit_score: exitScore });
       if (stopLoss != null && cp <= stopLoss) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Stop loss triggered', action: 'Full exit', exit_score: exitScore });
       if (days >= 15 && cp < ep * 1.02) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Time stop (15 days, <2%)', action: 'Full exit', exit_score: exitScore });
     }
@@ -3435,7 +3445,7 @@ window.TechIndicators = (function () {
       if (exitScore >= 70) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
       if (exitScore >= 55) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
       if (exitScore >= 40 && cp != null && atr != null) {
-        var newStop = Math.max(stopLoss || 0, cp - atr * 1.5);
+        var newStop = (stopLoss != null) ? Math.max(stopLoss, cp - atr * 1.5) : cp - atr * 1.5;
         return Object.assign({}, exitResult, { reason: 'Move to ' + round(newStop, 2), action: 'Move stop to ' + round(newStop, 2) });
       }
     }
