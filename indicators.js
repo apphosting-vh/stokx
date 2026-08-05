@@ -3471,6 +3471,302 @@ window.TechIndicators = (function () {
     return Object.assign({}, exitResult || {}, { signal: 'HOLD', reason: 'Exit score ' + exitScore + ' conditions intact', action: 'Continue holding', exit_score: exitScore });
   }
 
+  /* ── Premature Exit Analysis ─────────────────────────────────────────────
+     Evaluates whether a stock that has hit +4% target still has technical
+     momentum to continue higher. Used to prevent premature exits on stocks
+     with strong continuation potential.
+
+     Returns { score: 0-100, signal: 'HOLD' | 'CONSIDER_EXIT' | 'EXIT',
+               components: { trendStrength, momentumHeadroom, volumeConfirm,
+                             resistanceRoom, multiTFAlignment },
+               reasons: string[] }.
+
+     Score bands:
+       80-100  Strong continuation — hold for more gains
+       60-79   Moderate continuation — consider holding
+       40-59   Neutral — standard exit rules apply
+       20-39   Weak continuation — lean toward exit
+       0-19    No continuation — exit now
+  ────────────────────────────────────────────────────────────────────────── */
+  function computePrematureExitScore(candles, indexCandles, opts) {
+    opts = opts || {};
+    var result = {
+      score: null, signal: 'NEUTRAL', reasons: [],
+      components: {
+        trendStrength: { score: 0, max: 25, details: [] },
+        momentumHeadroom: { score: 0, max: 25, details: [] },
+        volumeConfirm: { score: 0, max: 20, details: [] },
+        resistanceRoom: { score: 0, max: 15, details: [] },
+        multiTFAlignment: { score: 0, max: 15, details: [] }
+      }
+    };
+
+    try {
+      if (!candles || candles.length < 50) return result;
+
+      var L = candles.length - 1;
+      var cl = candles.map(function (c) { return c.c; });
+      var hi = candles.map(function (c) { return c.h; });
+      var lo = candles.map(function (c) { return c.l; });
+      var vo = candles.map(function (c) { return c.v; });
+      var c = cl[L], pc = cl[L - 1];
+
+      /* Helper: get last non-null value from array */
+      var lastVal = function (arr) {
+        if (!arr || arr.length === 0) return null;
+        for (var i = arr.length - 1; i >= 0; i--) {
+          if (arr[i] !== null && arr[i] !== undefined) return arr[i];
+        }
+        return null;
+      };
+
+      /* ── Component 1: Trend Strength (25 pts) ── */
+      var trendScore = 0;
+      var trendDetails = [];
+
+      // ADX strength
+      var adx = calcADX(candles, 14);
+      if (adx && adx.adx != null) {
+        if (adx.adx >= 30 && adx.plusDI > adx.minusDI) { trendScore += 8; trendDetails.push('ADX ' + adx.adx.toFixed(0) + ' +DI>DI (strong)'); }
+        else if (adx.adx >= 25 && adx.plusDI > adx.minusDI) { trendScore += 5; trendDetails.push('ADX ' + adx.adx.toFixed(0) + ' (trending)'); }
+        else if (adx.adx >= 20) { trendScore += 2; trendDetails.push('ADX ' + adx.adx.toFixed(0) + ' (moderate)'); }
+        else { trendDetails.push('ADX ' + adx.adx.toFixed(0) + ' (weak)'); }
+      }
+
+      // MACD momentum
+      var macdObj = calcMACD(candles);
+      var macdVal = macdObj && macdObj.macd ? lastVal(macdObj.macd) : null;
+      var macdSig = macdObj && macdObj.signal ? lastVal(macdObj.signal) : null;
+      if (macdVal != null && macdSig != null) {
+        if (macdVal > macdSig && macdVal > 0) { trendScore += 7; trendDetails.push('MACD bullish + above zero'); }
+        else if (macdVal > macdSig) { trendScore += 4; trendDetails.push('MACD above signal'); }
+        else { trendDetails.push('MACD bearish'); }
+      }
+
+      // MA alignment (SMA20 > SMA50)
+      var sma20Arr = calcSMA(candles, 20);
+      var sma50Arr = calcSMA(candles, 50);
+      var sma20 = lastVal(sma20Arr);
+      var sma50 = lastVal(sma50Arr);
+      if (sma20 != null && sma50 != null) {
+        if (sma20 > sma50 && c > sma20) { trendScore += 6; trendDetails.push('Price > SMA20 > SMA50'); }
+        else if (sma20 > sma50) { trendScore += 3; trendDetails.push('SMA20 > SMA50'); }
+        else { trendDetails.push('MA bearish'); }
+      }
+
+      // Price above SMA20 (short-term trend intact)
+      if (sma20 != null && c > sma20) { trendScore += 4; trendDetails.push('Above SMA20'); }
+
+      result.components.trendStrength.score = Math.min(trendScore, 25);
+      result.components.trendStrength.details = trendDetails;
+
+      /* ── Component 2: Momentum Headroom (25 pts) ── */
+      var momentumScore = 0;
+      var momentumDetails = [];
+
+      // RSI headroom (not overbought)
+      var rsiArr = calcRSI(candles, 14);
+      var rsi = lastVal(rsiArr);
+      if (rsi != null) {
+        if (rsi < 60) { momentumScore += 8; momentumDetails.push('RSI ' + rsi.toFixed(0) + ' (headroom)'); }
+        else if (rsi < 70) { momentumScore += 5; momentumDetails.push('RSI ' + rsi.toFixed(0) + ' (moderate)'); }
+        else if (rsi < 80) { momentumScore += 2; momentumDetails.push('RSI ' + rsi.toFixed(0) + ' (elevated)'); }
+        else { momentumDetails.push('RSI ' + rsi.toFixed(0) + ' (overbought)'); }
+      }
+
+      // StochRSI headroom
+      var stochRSI = calcStochasticRSI(candles);
+      var stochRsiK = stochRSI && stochRSI.k ? lastVal(stochRSI.k) : null;
+      if (stochRsiK != null) {
+        if (stochRsiK < 70) { momentumScore += 6; momentumDetails.push('StochRSI ' + stochRsiK.toFixed(0) + ' (headroom)'); }
+        else if (stochRsiK < 85) { momentumScore += 3; momentumDetails.push('StochRSI ' + stochRsiK.toFixed(0) + ' (elevated)'); }
+        else { momentumDetails.push('StochRSI ' + stochRsiK.toFixed(0) + ' (stretched)'); }
+      }
+
+      // Rate of change (ROC)
+      if (L >= 12) {
+        var roc = (c - cl[L - 12]) / cl[L - 12] * 100;
+        if (roc > 2 && roc < 8) { momentumScore += 6; momentumDetails.push('ROC ' + roc.toFixed(1) + '% (healthy)'); }
+        else if (roc >= 8 && roc < 15) { momentumScore += 3; momentumDetails.push('ROC ' + roc.toFixed(1) + '% (extended)'); }
+        else if (roc >= 15) { momentumDetails.push('ROC ' + roc.toFixed(1) + '% (overextended)'); }
+        else { momentumDetails.push('ROC ' + roc.toFixed(1) + '% (weak)'); }
+      }
+
+      // Efficiency Ratio (clean trend)
+      if (L >= 11) {
+        var erDir = Math.abs(c - cl[L - 11]);
+        var erPath = 0;
+        for (var ej = L - 10; ej < L; ej++) erPath += Math.abs(cl[ej] - cl[ej - 1]);
+        var er10 = erPath > 0 ? erDir / erPath : 0;
+        if (er10 > 0.6) { momentumScore += 5; momentumDetails.push('ER ' + er10.toFixed(2) + ' (efficient trend)'); }
+        else if (er10 > 0.4) { momentumScore += 3; momentumDetails.push('ER ' + er10.toFixed(2) + ' (moderate)'); }
+        else { momentumDetails.push('ER ' + er10.toFixed(2) + ' (choppy)'); }
+      }
+
+      result.components.momentumHeadroom.score = Math.min(momentumScore, 25);
+      result.components.momentumHeadroom.details = momentumDetails;
+
+      /* ── Component 3: Volume Confirmation (20 pts) ── */
+      var volScore = 0;
+      var volDetails = [];
+
+      // Volume trend (increasing on up days)
+      if (L >= 20) {
+        var recentVol = vo.slice(-5).reduce(function (a, b) { return a + b; }, 0) / 5;
+        var avgVol = vo.slice(-20, -5).reduce(function (a, b) { return a + b; }, 0) / 15;
+        var volRatio = avgVol > 0 ? recentVol / avgVol : 1;
+        if (volRatio > 1.5) { volScore += 8; volDetails.push('Volume expanding ' + volRatio.toFixed(1) + 'x'); }
+        else if (volRatio > 1.0) { volScore += 5; volDetails.push('Volume steady ' + volRatio.toFixed(1) + 'x'); }
+        else { volDetails.push('Volume declining ' + volRatio.toFixed(1) + 'x'); }
+      }
+
+      // OBV trend
+      var obv = calcOBV(candles);
+      if (obv && obv.length >= 20) {
+        var obvSlice = obv.slice(-20);
+        var obvSum = obvSlice.reduce(function (a, b) { return a + b; }, 0);
+        var obvSma20 = obvSum / 20;
+        var obvLast = lastVal(obv);
+        if (obvLast != null && obvLast > obvSma20) { volScore += 6; volDetails.push('OBV above SMA20 (accumulation)'); }
+        else { volDetails.push('OBV below SMA20'); }
+      }
+
+      // MFI confirmation
+      var mfiArr = calcMFI(candles, 14);
+      var mfi = lastVal(mfiArr);
+      if (mfi != null) {
+        if (mfi > 50 && mfi < 80) { volScore += 6; volDetails.push('MFI ' + mfi.toFixed(0) + ' (healthy flow)'); }
+        else if (mfi >= 80) { volDetails.push('MFI ' + mfi.toFixed(0) + ' (overbought flow)'); }
+        else { volDetails.push('MFI ' + mfi.toFixed(0) + ' (weak flow)'); }
+      }
+
+      result.components.volumeConfirm.score = Math.min(volScore, 20);
+      result.components.volumeConfirm.details = volDetails;
+
+      /* ── Component 4: Resistance Room (15 pts) ── */
+      var resistScore = 0;
+      var resistDetails = [];
+
+      // Distance to 52-week high
+      if (L >= 252) {
+        var high52w = Math.max.apply(null, hi.slice(-252));
+        var pctFromHigh = (high52w - c) / c * 100;
+        if (pctFromHigh > 10) { resistScore += 5; resistDetails.push(pctFromHigh.toFixed(1) + '% below 52w high'); }
+        else if (pctFromHigh > 5) { resistScore += 3; resistDetails.push(pctFromHigh.toFixed(1) + '% below 52w high'); }
+        else { resistDetails.push(pctFromHigh.toFixed(1) + '% near 52w high'); }
+      }
+
+      // Distance to Bollinger upper
+      var bb = calcBollingerBands(candles, 20, 2);
+      var bbUpper = bb && bb.upper ? lastVal(bb.upper) : null;
+      if (bbUpper != null) {
+        var pctToBB = (bbUpper - c) / c * 100;
+        if (pctToBB > 3) { resistScore += 5; resistDetails.push(pctToBB.toFixed(1) + '% to BB upper'); }
+        else if (pctToBB > 1) { resistScore += 3; resistDetails.push(pctToBB.toFixed(1) + '% to BB upper'); }
+        else { resistDetails.push('Near BB upper'); }
+      }
+
+      // Distance to Donchian upper
+      if (L >= 20) {
+        var dcUpper = Math.max.apply(null, hi.slice(-20));
+        var pctToDC = (dcUpper - c) / c * 100;
+        if (pctToDC > 2) { resistScore += 5; resistDetails.push(pctToDC.toFixed(1) + '% to Donchian upper'); }
+        else if (pctToDC > 0.5) { resistScore += 2; resistDetails.push(pctToDC.toFixed(1) + '% to Donchian upper'); }
+        else { resistDetails.push('At Donchian upper'); }
+      }
+
+      result.components.resistanceRoom.score = Math.min(resistScore, 15);
+      result.components.resistanceRoom.details = resistDetails;
+
+      /* ── Component 5: Multi-TF Alignment (15 pts) ── */
+      var mtfScore = 0;
+      var mtfDetails = [];
+
+      // Weekly trend
+      if (indexCandles && indexCandles.length >= 50) {
+        try {
+          var weeklyData = synthWeeklyCandles(candles);
+          if (weeklyData && weeklyData.length >= 50) {
+            var wSma20Arr = calcSMA(weeklyData, 20);
+            var wSma50Arr = calcSMA(weeklyData, 50);
+            var wSma20 = lastVal(wSma20Arr);
+            var wSma50 = lastVal(wSma50Arr);
+            var wClose = weeklyData[weeklyData.length - 1].c;
+            if (wSma20 != null && wSma50 != null && wClose > wSma20 && wSma20 > wSma50) {
+              mtfScore += 8; mtfDetails.push('Weekly: Price > SMA20 > SMA50');
+            } else if (wSma20 != null && wClose > wSma20) {
+              mtfScore += 4; mtfDetails.push('Weekly: Above SMA20');
+            } else {
+              mtfDetails.push('Weekly: Weak');
+            }
+
+            // Weekly RSI
+            var wRsiArr = calcRSI(weeklyData, 14);
+            var wRsi = lastVal(wRsiArr);
+            if (wRsi != null && wRsi < 70) {
+              mtfScore += 4; mtfDetails.push('Weekly RSI ' + wRsi.toFixed(0) + ' (headroom)');
+            } else if (wRsi != null) {
+              mtfDetails.push('Weekly RSI ' + wRsi.toFixed(0) + ' (overbought)');
+            }
+
+            // Weekly MACD
+            var wMacdObj = calcMACD(weeklyData);
+            var wMacdVal = wMacdObj && wMacdObj.macd ? lastVal(wMacdObj.macd) : null;
+            var wMacdSig = wMacdObj && wMacdObj.signal ? lastVal(wMacdObj.signal) : null;
+            if (wMacdVal != null && wMacdSig != null && wMacdVal > wMacdSig) {
+              mtfScore += 3; mtfDetails.push('Weekly MACD bullish');
+            } else {
+              mtfDetails.push('Weekly MACD bearish');
+            }
+          }
+        } catch (e) { mtfDetails.push('Weekly synthesis failed'); }
+      }
+
+      result.components.multiTFAlignment.score = Math.min(mtfScore, 15);
+      result.components.multiTFAlignment.details = mtfDetails;
+
+      /* ── Final Score ── */
+      var totalScore = result.components.trendStrength.score +
+                       result.components.momentumHeadroom.score +
+                       result.components.volumeConfirm.score +
+                       result.components.resistanceRoom.score +
+                       result.components.multiTFAlignment.score;
+
+      result.score = totalScore;
+
+      // Determine signal
+      if (totalScore >= 80) {
+        result.signal = 'STRONG_HOLD';
+        result.reasons.push('Strong continuation potential — hold for more gains');
+      } else if (totalScore >= 60) {
+        result.signal = 'HOLD';
+        result.reasons.push('Moderate continuation — consider holding');
+      } else if (totalScore >= 40) {
+        result.signal = 'NEUTRAL';
+        result.reasons.push('Neutral — standard exit rules apply');
+      } else if (totalScore >= 20) {
+        result.signal = 'CONSIDER_EXIT';
+        result.reasons.push('Weak continuation — lean toward exit');
+      } else {
+        result.signal = 'EXIT';
+        result.reasons.push('No continuation — exit now');
+      }
+
+      // Add specific reasons based on components
+      if (result.components.trendStrength.score < 10) result.reasons.push('Weak trend structure');
+      if (result.components.momentumHeadroom.score < 10) result.reasons.push('Momentum stretched');
+      if (result.components.volumeConfirm.score < 8) result.reasons.push('Volume not confirming');
+      if (result.components.resistanceRoom.score < 5) result.reasons.push('Near resistance levels');
+      if (result.components.multiTFAlignment.score < 5) result.reasons.push('Multi-TF not aligned');
+
+    } catch (e) {
+      result.score = null;
+      result.reasons = ['Analysis failed: ' + (e.message || e)];
+    }
+
+    return result;
+  }
+
   /* ── Session Confidence Score ─────────────────────────────────────────────
      "Will this position reach the target profit within today's session?" 0–100.
      Driven SOLELY by the stock's own intraday 15m tape plus the two mechanical
@@ -4260,6 +4556,7 @@ window.TechIndicators = (function () {
     computeMultiTFExitScore: computeMultiTFExitScore,
     computeCompatExitScore: computeCompatExitScore,
     computeSessionConfidence: computeSessionConfidence,
+    computePrematureExitScore: computePrematureExitScore,
     computeForwardConfidence: computeForwardConfidence,
     computeTenDayForwardConfidence: computeTenDayForwardConfidence,
     computeOptimumEntryPrice: computeOptimumEntryPrice,

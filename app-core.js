@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.25";
+window.__STOX_APP_VERSION = "2.10.29";
 
 /* Apply saved score config on startup */
 (function() {
@@ -1470,6 +1470,12 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
       entryScore: holding.entryScore,
     }),
 
+    // Premature Exit Analysis — should you hold for more gains after hitting +4%?
+    ticker && React.createElement(PrematureExitPanel, {
+      ticker: ticker,
+      buyPrice: holding ? holding.buyPrice : null,
+    }),
+
     // Full technical indicators panel
     React.createElement(window.TechnicalIndicatorsPanel, { shares: holdings || [], isMobile: isMobile })
   );
@@ -2525,6 +2531,134 @@ const ForwardConfidencePanel = ({ ticker, buyPrice, buyDate, entryScore }) => {
     ),
     React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: tone.c, padding: "7px 12px", borderRadius: 7, background: tone.bg, marginBottom: 10 } }, label),
     sc != null && React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8 } }, chips.map(chipRow))
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PREMATURE EXIT ANALYSIS PANEL
+   Evaluates whether a stock that has hit +4% target still has technical
+   momentum to continue higher. Shows trend strength, momentum headroom,
+   volume confirmation, resistance room, and multi-TF alignment.
+   ══════════════════════════════════════════════════════════════════════════ */
+const PrematureExitPanel = ({ ticker, buyPrice }) => {
+  const TI = window.TechIndicators;
+  const DF = window.OHLCVFetcher;
+  const [loading, setLoading] = React.useState(true);
+  const [result, setResult] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!ticker || !DF || !TI) { setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true); setErr(null); setResult(null);
+    DF.fetchOHLCVCached(ticker, "daily")
+      .then((res) => {
+        if (cancelled) return;
+        const d = res && res.data;
+        if (!d || d.length < 50) { setErr("insufficient_data"); return; }
+        const idxD = null;
+        const analysis = TI.computePrematureExitScore(d, idxD, { entry_price: buyPrice });
+        if (!cancelled) setResult(analysis);
+      })
+      .catch(() => { if (!cancelled) setErr("fetch"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [ticker, buyPrice]);
+
+  if (loading) {
+    return React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: "10px 14px" } },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, "Premature Exit Analysis"),
+        React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "Analyzing continuation potential...")
+      )
+    );
+  }
+  if (err) {
+    return React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: "10px 14px", border: "1px solid var(--border)" } },
+      React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text5)", marginBottom: 4 } }, "Premature Exit Analysis"),
+      React.createElement("div", { style: { fontSize: 11, color: "var(--text6)" } }, "Unable to load data (" + err + ")")
+    );
+  }
+  if (!result || result.score == null) {
+    return React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: "10px 14px", border: "1px solid var(--border)" } },
+      React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text5)", marginBottom: 4 } }, "Premature Exit Analysis"),
+      React.createElement("div", { style: { fontSize: 11, color: "var(--text6)" } }, "Insufficient data for analysis (need 50+ daily candles)")
+    );
+  }
+
+  const score = result.score;
+  const signal = result.signal;
+  const comps = result.components;
+  const reasons = result.reasons || [];
+
+  const tone = score >= 80 ? { c: "#16a34a", bg: "var(--profitbg)", bd: "var(--profitborder)" }
+    : score >= 60 ? { c: "#059669", bg: "#ecfdf5", bd: "#a7f3d0" }
+    : score >= 40 ? { c: "#d97706", bg: "var(--warnbg)", bd: "var(--warnborder)" }
+    : score >= 20 ? { c: "#ea580c", bg: "#fff7ed", bd: "#fed7aa" }
+    : { c: "#dc2626", bg: "var(--lossbg)", bd: "var(--lossborder)" };
+
+  const signalLabel = signal === 'STRONG_HOLD' ? 'Strong Continuation'
+    : signal === 'HOLD' ? 'Moderate Continuation'
+    : signal === 'NEUTRAL' ? 'Neutral'
+    : signal === 'CONSIDER_EXIT' ? 'Weak Continuation'
+    : 'Exit Now';
+
+  const progressColor = function (pct) {
+    if (pct >= 80) return '#16a34a';
+    if (pct >= 60) return '#059669';
+    if (pct >= 40) return '#d97706';
+    if (pct >= 20) return '#ea580c';
+    return '#dc2626';
+  };
+
+  const compBar = function (comp) {
+    const pct = comp.max > 0 ? Math.round(comp.score / comp.max * 100) : 0;
+    const col = progressColor(pct);
+    return React.createElement("div", { style: { marginBottom: 8 } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 } },
+        React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "var(--text3)" } }, comp.label),
+        React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: col } }, comp.score + "/" + comp.max)
+      ),
+      React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--bg5)", overflow: "hidden" } },
+        React.createElement("div", { style: { height: "100%", width: pct + "%", background: col, borderRadius: 3, transition: "width 0.3s" } })
+      ),
+      comp.details && comp.details.length > 0 && React.createElement("div", { style: { marginTop: 4, fontSize: 10, color: "var(--text6)", lineHeight: 1.5 } },
+        comp.details.map((d, i) => React.createElement("div", { key: i }, d))
+      )
+    );
+  };
+
+  return React.createElement("div", { className: "stx-card", style: { marginBottom: 14, padding: "12px 16px", border: "1px solid " + tone.bd } },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)" } }, "Premature Exit Analysis"),
+        React.createElement("div", { style: { fontSize: 11.5, color: "var(--text6)", marginTop: 2 } }, "Should you hold for more gains after hitting +4%?")
+      ),
+      React.createElement("div", { style: { textAlign: "right" } },
+        React.createElement("div", { style: { fontSize: 26, fontWeight: 800, fontFamily: "var(--font-heading)", color: tone.c, lineHeight: 1 } }, score + "/100"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 3 } }, signalLabel)
+      )
+    ),
+    React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: tone.c, padding: "7px 12px", borderRadius: 7, background: tone.bg, marginBottom: 12 } },
+      reasons[0] || "Analysis complete"
+    ),
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } },
+      React.createElement("div", null,
+        compBar({ label: "Trend Strength", score: comps.trendStrength.score, max: comps.trendStrength.max, details: comps.trendStrength.details }),
+        compBar({ label: "Momentum Headroom", score: comps.momentumHeadroom.score, max: comps.momentumHeadroom.max, details: comps.momentumHeadroom.details }),
+        compBar({ label: "Volume Confirmation", score: comps.volumeConfirm.score, max: comps.volumeConfirm.max, details: comps.volumeConfirm.details })
+      ),
+      React.createElement("div", null,
+        compBar({ label: "Resistance Room", score: comps.resistanceRoom.score, max: comps.resistanceRoom.max, details: comps.resistanceRoom.details }),
+        compBar({ label: "Multi-TF Alignment", score: comps.multiTFAlignment.score, max: comps.multiTFAlignment.max, details: comps.multiTFAlignment.details })
+      )
+    ),
+    reasons.length > 1 && React.createElement("div", { style: { marginTop: 10, padding: "8px 10px", borderRadius: 7, background: "var(--bg4)", border: "1px solid var(--border)" } },
+      React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text6)", marginBottom: 4, textTransform: "uppercase" } }, "Key Factors"),
+      React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", lineHeight: 1.6 } },
+        reasons.slice(1).map((r, i) => React.createElement("div", { key: i }, "\u2022 " + r))
+      )
+    )
   );
 };
 
