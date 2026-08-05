@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.33";
+window.__STOX_APP_VERSION = "2.10.35";
 
 /* Apply saved score config on startup */
 (function() {
@@ -6000,12 +6000,33 @@ const BacktestSuitePanel = () => {
     try { var v = JSON.parse(localStorage.getItem(LS_BT2_RESULT)); if (v && v.mode === "walkforward" && v.data) return v.data; } catch (e) {}
     return null;
   });
-  const setModeResult = (v) => { _bt2LastResult = v; try { localStorage.setItem(LS_BT2_RESULT, JSON.stringify(v)); } catch (e) {} if (v.mode === "single") setSingleResult(v.data); else if (v.mode === "batch") setBatchResult(v.data); else if (v.mode === "walkforward") setWfResult(v.data); };
+  const [multiTickers, setMultiTickers] = useState(function () {
+    try { var v = JSON.parse(localStorage.getItem(LS_BT2_RESULT)); if (v && v.mode === "multiSymbol" && v.tickers) return v.tickers; } catch (e) {}
+    return [];
+  });
+  const [multiResult, setMultiResult] = useState(function () {
+    try { var v = JSON.parse(localStorage.getItem(LS_BT2_RESULT)); if (v && v.mode === "multiSymbol" && v.data) return v.data; } catch (e) {}
+    return null;
+  });
+  const setModeResult = (v) => { _bt2LastResult = v; try { localStorage.setItem(LS_BT2_RESULT, JSON.stringify(v)); } catch (e) {} if (v.mode === "single") setSingleResult(v.data); else if (v.mode === "batch") setBatchResult(v.data); else if (v.mode === "walkforward") setWfResult(v.data); else if (v.mode === "multiSymbol") { setMultiResult(v.data); setMultiTickers(v.tickers || []); } };
   const cancelRef = useRef(false);
   const [offlineMeta, setOfflineMeta] = useState(null);
 
   useEffect(function() {
     OfflineOHLCV.getMeta().then(function(meta) { setOfflineMeta(meta); }).catch(function() {});
+  }, []);
+
+  useEffect(function() {
+    var handler = function(e) {
+      var detail = e && e.detail;
+      var ticks = detail && detail.tickers;
+      if (!ticks || !ticks.length) return;
+      setMode("multiSymbol");
+      setMultiTickers(ticks);
+      setTimeout(function() { runMultiBacktest(ticks); }, 100);
+    };
+    window.addEventListener("stox:add-to-backtest", handler);
+    return function() { window.removeEventListener("stox:add-to-backtest", handler); };
   }, []);
 
   const persist = () => { try { localStorage.setItem(LS_BT2_INPUT, JSON.stringify({ mode: mode, ticker: ticker, target: target, holding: holding, threshold: threshold, batchCap: batchCap, folds: folds })); } catch (e) {} };
@@ -6264,12 +6285,96 @@ const BacktestSuitePanel = () => {
     finally { setRunning(false); setProgress(null); }
   };
 
+  const runMultiBacktest = async function(ticks) {
+    var symbols = ticks || multiTickers;
+    if (!symbols || !symbols.length) { setErr("No symbols selected. Select stocks in the Screener and click Backtest."); return; }
+    persist();
+    if (running) return;
+    setErr(""); cancelRef.current = false;
+    setProgress({ phase: "Fetching Nifty index history\u2026", done: 0, total: 1 });
+    setRunning(true);
+    try {
+      const idxRes = await DF.fetchOHLCVCached("^NSEI", "daily");
+      const idx = idxRes && idxRes.data ? idxRes.data : null;
+      const total = symbols.length;
+      const dataMap = {};
+      const multiTFMap = {};
+
+      var useOffline = offlineMeta && offlineMeta.count > 0;
+      var offlineTickers = useOffline ? new Set(offlineMeta.tickers) : null;
+
+      if (useOffline) {
+        setProgress({ phase: "Loading from offline data\u2026", done: 0, total: total });
+        for (let i = 0; i < symbols.length; i++) {
+          if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
+          if (offlineTickers.has(symbols[i])) {
+            try {
+              var rec = await OfflineOHLCV.get(symbols[i]);
+              if (rec) {
+                var dailyCandles = rec.daily || rec.data || null;
+                if (dailyCandles && dailyCandles.length >= 60) {
+                  dataMap[symbols[i]] = dailyCandles;
+                  multiTFMap[symbols[i]] = { daily: rec.daily || null, hourly: rec.hourly || null, weekly: rec.weekly || null };
+                }
+              }
+            } catch (e) {}
+          }
+          setProgress({ phase: "Loading from offline data\u2026", done: i + 1, total: total });
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      }
+
+      var needLive = Object.keys(dataMap).length === 0;
+      if (needLive) {
+        setProgress({ phase: "Fetching daily+hourly+weekly\u2026", done: 0, total: total });
+        for (let i = 0; i < symbols.length; i += 5) {
+          if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
+          const chunk = symbols.slice(i, i + 5);
+          await Promise.all(chunk.map(async (s) => {
+            try {
+              const r = await DF.fetchOHLCVCached(s, "daily");
+              if (r && r.data && r.data.length >= 60) {
+                dataMap[s] = r.data;
+                var [hRes, wRes] = await Promise.all([
+                  DF.fetchOHLCVCached(s, "1h").catch(function() { return null; }),
+                  DF.fetchOHLCVCached(s, "weekly").catch(function() { return null; })
+                ]);
+                multiTFMap[s] = {
+                  daily: r.data,
+                  hourly: hRes && hRes.data ? hRes.data : null,
+                  weekly: wRes && wRes.data ? wRes.data : null
+                };
+              }
+            } catch (e) {}
+          }));
+          await new Promise((r) => setTimeout(r, 60));
+          setProgress({ phase: "Fetching D+H+W history \u2026", done: Math.min(i + 5, total), total: total });
+        }
+      }
+      if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
+      const ready = Object.keys(dataMap);
+      if (!ready.length) { setErr("Could not fetch daily history for any selected symbol."); return; }
+      const eng = makeEngine(idx, multiTFMap);
+      const res = await eng.runBatch(dataMap, { symbols: ready }, {
+        onSymbol: (d, t) => setProgress({ phase: "Backtesting " + d + " / " + t + " symbols\u2026", done: d, total: t })
+      });
+      res.targetProfitPct = Number(target) || 4;
+      res.holdingPeriodDays = Number(holding) || 14;
+      res.threshold = Number(threshold) || 65;
+      res.sourceLabel = "Selected from Screener";
+      if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
+      setModeResult({ mode: "multiSymbol", tickers: symbols, data: res });
+    } catch (e) { setErr((e && e.message) || String(e)); }
+    finally { setRunning(false); setProgress(null); }
+  };
+
   const exportCSV = () => {
-    const activeData = mode === "single" ? singleResult : mode === "batch" ? batchResult : wfResult;
+    const activeData = mode === "single" ? singleResult : mode === "batch" ? batchResult : mode === "multiSymbol" ? multiResult : wfResult;
     if (!activeData || !BE) return;
     let csv = "", name = "stox-bt2-";
     if (mode === "single") { csv = BE.exportSingleCSV(activeData); name += "single-" + (activeData.symbol || ""); }
     else if (mode === "batch") { csv = BE.exportBatchCSV(activeData); name += "batch"; }
+    else if (mode === "multiSymbol") { csv = BE.exportBatchCSV(activeData); name += "multi-symbol"; }
     else { csv = BE.exportWalkForwardCSV(activeData); name += "walkforward-" + (activeData.symbol || ""); }
     if (!csv) return;
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
@@ -6398,7 +6503,7 @@ const BacktestSuitePanel = () => {
     const errors = (d.allResults || []).filter(r => r.error).length;
     return React.createElement("div", null,
       React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } },
-        Stat("Symbols Tested", fmtS(s.symbolsTested), errors > 0 ? errors + " fetch/score failures skipped" : "NIFTY 200 universe"),
+        Stat("Symbols Tested", fmtS(s.symbolsTested), errors > 0 ? errors + " fetch/score failures skipped" : (d.sourceLabel || "NIFTY 200 universe")),
         Stat("With Signals", fmtS(s.symbolsWithSignals), fmtS(s.symbolsNoSignals) + " had no qualifying signals"),
         Stat("Total Signals", fmtS(s.totalSignals), "across all symbols"),
         Stat("Overall Win Rate", s.overallWinRate != null ? fmtPct(s.overallWinRate) : "\u2014", "all pooled signals", s.overallWinRate != null ? retColor(s.overallWinRate - 50) : undefined),
@@ -6471,8 +6576,8 @@ const BacktestSuitePanel = () => {
     );
   };
 
-  const runFn = () => { if (mode === "single") return runSingle(); if (mode === "batch") return runBatch(); return runWalkForward(); };
-  const runLabel = mode === "single" ? "\u25b6 Run Analysis" : mode === "batch" ? "\u25b6 Run Batch" : "\u25b6 Run Walk-Forward";
+  const runFn = () => { if (mode === "single") return runSingle(); if (mode === "batch") return runBatch(); if (mode === "multiSymbol") return runMultiBacktest(); return runWalkForward(); };
+  const runLabel = mode === "single" ? "\u25b6 Run Analysis" : mode === "batch" ? "\u25b6 Run Batch" : mode === "multiSymbol" ? "\u25b6 Run Backtest" : "\u25b6 Run Walk-Forward";
 
   return React.createElement("div", null,
 
@@ -6486,7 +6591,7 @@ const BacktestSuitePanel = () => {
     ),
 
     React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" } },
-      [["single", "Single Symbol"], ["batch", "Batch Backtest"], ["walkforward", "Walk-Forward"]].map(function (m) {
+      [["single", "Single Symbol"], ["batch", "Batch Backtest"], ["walkforward", "Walk-Forward"], ["multiSymbol", "Multi Symbol"]].map(function (m) {
         return React.createElement("button", {
           key: m[0], onClick: function () { setMode(m[0]); },
           style: {
@@ -6501,7 +6606,7 @@ const BacktestSuitePanel = () => {
 
     React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
       React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" } },
-        mode !== "batch" && field("Stock Ticker",
+        mode !== "batch" && mode !== "multiSymbol" && field("Stock Ticker",
           React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
             React.createElement("input", { className: "inp", list: "bt2-symbols", type: "text", placeholder: "e.g. RELIANCE", value: ticker, onChange: (e) => setTicker(e.target.value.toUpperCase()), style: { width: 170 } }),
             React.createElement("datalist", { id: "bt2-symbols" }, NIFTY_200.map((s) => React.createElement("option", { key: s.t, value: s.t.replace(".NS", "") }, s.n)))
@@ -6521,6 +6626,9 @@ const BacktestSuitePanel = () => {
               }, c[1]);
             })
           )
+        ),
+        mode === "multiSymbol" && React.createElement("div", { style: { padding: "6px 12px", borderRadius: 8, background: "rgba(249,115,22,.08)", border: "1px solid rgba(249,115,22,.2)", fontSize: 11, color: "#f97316", fontWeight: 600 } },
+          multiTickers.length > 0 ? multiTickers.length + " symbols selected from Screener" : "Select stocks in Screener and click Backtest"
         ),
         field("Target %", numInput(target, setTarget, 80)),
         field("Hold (sessions)", numInput(holding, setHolding, 80)),
@@ -6544,7 +6652,8 @@ const BacktestSuitePanel = () => {
           running ? "Running\u2026" : runLabel
         ),
         running && React.createElement("button", { onClick: function () { cancelRef.current = true; }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "#eab308", cursor: "pointer" } }, "Cancel"),
-        (singleResult || batchResult || wfResult) && !running && React.createElement("button", { onClick: exportCSV, className: "stx-btn", style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "\u2b06 CSV")
+        mode === "multiSymbol" && multiResult && !running ? React.createElement("button", { onClick: function() { setMultiResult(null); setMultiTickers([]); setModeResult({ mode: "multiSymbol", tickers: [], data: null }); }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid #ef4444", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer" } }, "\u2715 Clear") : null,
+        (singleResult || batchResult || wfResult || multiResult) && !running && React.createElement("button", { onClick: exportCSV, className: "stx-btn", style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "\u2b06 CSV")
       ),
       err && React.createElement("div", { style: { marginTop: 10, fontSize: 11, color: err.indexOf("cancelled") >= 0 ? "#eab308" : "#ef4444" } }, err),
       progress && React.createElement("div", { style: { marginTop: 12 } },
@@ -6567,15 +6676,16 @@ const BacktestSuitePanel = () => {
     React.createElement("div", { style: { display: mode === "single" ? "" : "none" } }, singleResult && !running && renderSingle(singleResult)),
     React.createElement("div", { style: { display: mode === "batch" ? "" : "none" } }, batchResult && !running && renderBatch(batchResult)),
     React.createElement("div", { style: { display: mode === "walkforward" ? "" : "none" } }, wfResult && !running && renderWalkForward(wfResult)),
+    React.createElement("div", { style: { display: mode === "multiSymbol" ? "" : "none" } }, multiResult && !running && renderBatch(multiResult)),
 
-    (singleResult || batchResult || wfResult) && !running && React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", lineHeight: 1.6, padding: "0 2px" } },
+    (singleResult || batchResult || wfResult || multiResult) && !running && React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", lineHeight: 1.6, padding: "0 2px" } },
       "Methodology: at each entry date D the daily series (and the Nifty index used for beta / relative strength) are sliced to end at D \u2014 no lookahead \u2014 and the production Entry Score engine runs on that exact snapshot. " +
       "A trade opens when the score \u2265 " + fmtS(threshold) + ", priced at D's close, and closes at +" + fmt2(target) + "% (target touched intraday) or at the close of the " + fmtS(holding) + "th session. " +
       "Periods with a full " + fmtS(holding) + "-session forward window are graded only."
     ),
 
-    !(singleResult || batchResult || wfResult) && !running && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
-      "Pick a mode and run a backtest. Single Symbol replays every session on one stock; Batch ranks the NIFTY 200 universe; Walk-Forward tests out-of-sample consistency fold by fold."
+    !(singleResult || batchResult || wfResult || multiResult) && !running && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
+      "Pick a mode and run a backtest. Single Symbol replays every session on one stock; Batch ranks the NIFTY 200 universe; Walk-Forward tests out-of-sample consistency fold by fold; Multi Symbol backtests stocks selected from the Screener."
     )
   );
 };
@@ -7360,14 +7470,6 @@ function StockScreener(props) {
   var scanTime = _s9[0], setScanTime = _s9[1];
   var _s10 = useState({});
   var refreshingMap = _s10[0], setRefreshingMap = _s10[1];
-  var _s11 = useState({});
-  var addingToES = _s11[0], setAddingToES = _s11[1];
-  var _s12 = useState({});
-  var addedToES = _s12[0], setAddedToES = _s12[1];
-  var _s18b = useState({});
-  var addingToCS = _s18b[0], setAddingToCS = _s18b[1];
-  var _s18c = useState({});
-  var addedToCS = _s18c[0], setAddedToCS = _s18c[1];
   var _s11 = useState([]);
   var snapshots = _s11[0], setSnapshots = _s11[1];
   var _s13 = useState({});
@@ -7752,102 +7854,77 @@ function StockScreener(props) {
 
   var selectedCount = Object.keys(selected).filter(function(t) { return selected[t]; }).length;
 
-  var addToEntryScore = async function(s) {
-    var tk = s.t.replace(".NS", "");
-    if (!tk || addingToES[tk]) return;
-    setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = true; return c; });
-    try {
-      var existing = await dbGetSetting("mm_entry_scores");
-      var entries = (Array.isArray(existing) ? existing : []);
-      if (entries.some(function(e) { return e.ticker === tk; })) {
-        setAddedToES(function(p) { var c = Object.assign({}, p); c[tk] = "exists"; return c; });
-        setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
-        return;
-      }
-      var [resW, resD, resH] = await Promise.all([
-        DF.fetchOHLCVCached(tk, "weekly"),
-        DF.fetchOHLCVCached(tk, "daily"),
-        DF.fetchOHLCVCached(tk, "1h"),
-      ]);
-      if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
-        setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
-        return;
-      }
-      var lc = resD.data[resD.data.length - 1].c;
-      var indW = TI.computeAll(resW.data);
-      var indD = TI.computeAll(resD.data);
-      var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-      var _idxD = null, _idxW = null;
-      try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
-      try { var _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
-      if (result) result.lastClose = lc;
-      var conf10d = null;
+  var batchAddToES = async function() {
+    var tickers = Object.keys(selected).filter(function(t) { return selected[t]; });
+    if (!tickers.length) return;
+    var existing = await dbGetSetting("mm_entry_scores");
+    var entries = (Array.isArray(existing) ? existing : []);
+    var existingSet = new Set(entries.map(function(e) { return e.ticker; }));
+    var toAdd = tickers.filter(function(t) { return !existingSet.has(t); });
+    if (!toAdd.length) { showToast("All selected stocks already in Entry Score", 2500); return; }
+    var _idxD = null, _idxW = null;
+    try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
+    try { var _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch(e) {}
+    var added = 0;
+    for (var i = 0; i < toAdd.length; i++) {
+      var tk = toAdd[i];
       try {
-        var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD);
-        if (_conf && _conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10;
-      } catch (e) {}
-      var entry = { id: Date.now(), ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d: conf10d, indicators: { weekly: indW, daily: indD, hourly: indH } };
-      entries.unshift(entry);
+        var [resW, resD, resH] = await Promise.all([
+          DF.fetchOHLCVCached(tk, "weekly"), DF.fetchOHLCVCached(tk, "daily"), DF.fetchOHLCVCached(tk, "1h")
+        ]);
+        if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) continue;
+        var lc = resD.data[resD.data.length - 1].c;
+        var indW = TI.computeAll(resW.data);
+        var indD = TI.computeAll(resD.data);
+        var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
+        var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
+        if (result) result.lastClose = lc;
+        var conf10d = null;
+        try { var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD); if (_conf && _conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10; } catch(e) {}
+        entries.unshift({ id: Date.now() + i, ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d: conf10d, indicators: { weekly: indW, daily: indD, hourly: indH } });
+        added++;
+      } catch(e) {}
+    }
+    if (added > 0) {
       await dbSetSetting("mm_entry_scores", entries);
       window.dispatchEvent(new CustomEvent("stox:data-changed"));
-      setAddedToES(function(p) { var c = Object.assign({}, p); c[tk] = true; return c; });
-    } catch (e) {}
-    setAddingToES(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
+    }
+    showToast(added + " of " + toAdd.length + " added to Entry Score", 2500);
+    setSelected({});
   };
 
-  var addToConfidence = async function(s) {
-    var tk = s.t.replace(".NS", "");
-    if (!tk || addingToCS[tk]) return;
-    setAddingToCS(function(p) { var c = Object.assign({}, p); c[tk] = true; return c; });
-    try {
-      var existing = await dbGetSetting(LS_CONF_TRACKER);
-      var entries = (Array.isArray(existing) ? existing : []);
-      if (entries.some(function(e) { return e.ticker === tk; })) {
-        setAddedToCS(function(p) { var c = Object.assign({}, p); c[tk] = "exists"; return c; });
-        setAddingToCS(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
-        return;
-      }
-      var [resW, resD, resH] = await Promise.all([
-        DF.fetchOHLCVCached(tk, "weekly"),
-        DF.fetchOHLCVCached(tk, "daily"),
-        DF.fetchOHLCVCached(tk, "1h"),
-      ]);
-      if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
-        setAddingToCS(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
-        return;
-      }
-      var lc = resD.data[resD.data.length - 1].c;
-      var _idxD = null, _idxW = null;
-      try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
-      try { var _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch(e) {}
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
-      var confidence = null;
+  var batchAddToCS = async function() {
+    var tickers = Object.keys(selected).filter(function(t) { return selected[t]; });
+    if (!tickers.length) return;
+    var existing = await dbGetSetting(LS_CONF_TRACKER);
+    var entries = (Array.isArray(existing) ? existing : []);
+    var existingSet = new Set(entries.map(function(e) { return e.ticker; }));
+    var toAdd = tickers.filter(function(t) { return !existingSet.has(t); });
+    if (!toAdd.length) { showToast("All selected stocks already in Confidence Tracker", 2500); return; }
+    var _idxD = null;
+    try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
+    var added = 0;
+    for (var i = 0; i < toAdd.length; i++) {
+      var tk = toAdd[i];
       try {
-        var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD);
-        if (conf && conf.confidence != null) confidence = conf.confidence;
-      } catch (e) {}
-      var row = {
-        id: Date.now(),
-        ticker: tk,
-        addedAt: new Date().toISOString(),
-        confidence: confidence != null ? Math.round(confidence * 10) / 10 : null,
-        entryScore: result && result.finalScore != null ? result.finalScore : null,
-        entryDecision: result && result.decision ? result.decision.label : null,
-        currentPrice: lc || 0
-      };
-      entries.unshift(row);
+        var [resW, resD, resH] = await Promise.all([
+          DF.fetchOHLCVCached(tk, "weekly"), DF.fetchOHLCVCached(tk, "daily"), DF.fetchOHLCVCached(tk, "1h")
+        ]);
+        if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) continue;
+        var lc = resD.data[resD.data.length - 1].c;
+        var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, null);
+        var confidence = null;
+        try { var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD); if (conf && conf.confidence != null) confidence = conf.confidence; } catch(e) {}
+        entries.unshift({ id: Date.now() + i, ticker: tk, addedAt: new Date().toISOString(), confidence: confidence != null ? Math.round(confidence * 10) / 10 : null, entryScore: result && result.finalScore != null ? result.finalScore : null, entryDecision: result && result.decision ? result.decision.label : null, currentPrice: lc || 0 });
+        added++;
+      } catch(e) {}
+    }
+    if (added > 0) {
       await dbSetSetting(LS_CONF_TRACKER, entries);
-      try {
-        var priceMap = await dbGetSetting(LS_CONF_PERF_PRICES);
-        var p = (priceMap && typeof priceMap === "object") ? Object.assign({}, priceMap) : {};
-        if (lc > 0) p[tk] = lc;
-        await dbSetSetting(LS_CONF_PERF_PRICES, p);
-      } catch (e) {}
       window.dispatchEvent(new CustomEvent("stox:data-changed"));
-      setAddedToCS(function(p) { var c = Object.assign({}, p); c[tk] = true; return c; });
-    } catch (e) {}
-    setAddingToCS(function(p) { var c = Object.assign({}, p); c[tk] = false; return c; });
+    }
+    showToast(added + " of " + toAdd.length + " added to Confidence Tracker", 2500);
+    setSelected({});
   };
 
   var startScan = async function() {
@@ -7974,6 +8051,25 @@ function StockScreener(props) {
           className: "stx-btn",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid var(--border)", background: bgRefreshing ? "var(--bg5)" : "var(--bg4)", color: bgRefreshing ? "var(--text6)" : "var(--text4)", cursor: bgRefreshing ? "wait" : "pointer" }
         }, bgRefreshing ? "\u21bb BG (" + bgProgress.done + "/" + bgProgress.total + ")" : "\u21bb Background (" + selectedCount + ")") : null,
+        results.length > 0 && !scanning && selectedCount > 0 ? React.createElement("button", {
+          onClick: function() {
+            var tickers = Object.keys(selected).filter(function(t) { return selected[t]; });
+            if (!tickers.length) return;
+            window.dispatchEvent(new CustomEvent("stox:add-to-backtest", { detail: { tickers: tickers } }));
+          },
+          className: "stx-btn",
+          style: { padding: "8px 14px", fontSize: 11, fontWeight: 700, border: "1px solid #f97316", background: "rgba(249,115,22,.08)", color: "#f97316", cursor: "pointer" }
+        }, "\u25b6 Backtest (" + selectedCount + ")") : null,
+        results.length > 0 && !scanning && selectedCount > 0 ? React.createElement("button", {
+          onClick: batchAddToES,
+          className: "stx-btn",
+          style: { padding: "8px 14px", fontSize: 11, fontWeight: 700, border: "1px solid #22c55e", background: "rgba(34,197,94,.08)", color: "#22c55e", cursor: "pointer" }
+        }, "+ ES (" + selectedCount + ")") : null,
+        results.length > 0 && !scanning && selectedCount > 0 ? React.createElement("button", {
+          onClick: batchAddToCS,
+          className: "stx-btn",
+          style: { padding: "8px 14px", fontSize: 11, fontWeight: 700, border: "1px solid #06b6d4", background: "rgba(6,182,212,.08)", color: "#06b6d4", cursor: "pointer" }
+        }, "+ CS (" + selectedCount + ")") : null,
         results.length > 0 && !scanning ? React.createElement("button", {
           onClick: saveSnapshot,
           className: "stx-btn",
@@ -8045,15 +8141,15 @@ function StockScreener(props) {
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1640 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
-              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "avgTrend", "avgPullback", "avgProb4", "finalScore", "weekly", "daily", "hourly", "conf10d", "addToES", "addToCS", "actions"].map(function(k) {
+              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "avgTrend", "avgPullback", "avgProb4", "finalScore", "weekly", "daily", "hourly", "conf10d", "actions"].map(function(k) {
                 if (k === "select") {
                   var allFilteredSelected = filtered.length > 0 && filtered.every(function(r) { return selected[r.s.t]; });
                   return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: "default", textAlign: "center", width: 36 }) },
                     React.createElement("input", { type: "checkbox", checked: allFilteredSelected, onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
                   );
                 }
-                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", avgTrend: "Trend", avgPullback: "Pullback", avgProb4: "Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", addToES: "Add to ES", addToCS: "Add to CS", actions: "Last Refreshed" };
-                return React.createElement("th", { key: k, title: k === "conf10d" ? "Confidence Score \u2014 Next 10 Days (chance of +4% from current price within 10 trading days, /100)" : k === "addToCS" ? "Add this stock to the 10 Days Confidence Score Performance Tracker" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" || k === "addToES" || k === "addToCS" ? "default" : "pointer" }), onClick: k === "actions" || k === "addToES" || k === "addToCS" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" || k === "addToES" || k === "addToCS" ? "" : arrow(k)));
+                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", avgTrend: "Trend", avgPullback: "Pullback", avgProb4: "Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", actions: "Last Refreshed" };
+                return React.createElement("th", { key: k, title: k === "conf10d" ? "Confidence Score \u2014 Next 10 Days (chance of +4% from current price within 10 trading days, /100)" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" ? "default" : "pointer" }), onClick: k === "actions" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" ? "" : arrow(k)));
               })
             )
           ),
@@ -8120,42 +8216,6 @@ function StockScreener(props) {
                   r.conf10d != null
                     ? React.createElement("span", { title: "Confidence Score \u2014 Next 10 Days (" + Number(r.conf10d).toFixed(0) + "/100)", style: { fontWeight: 800, fontFamily: "var(--font-heading)", color: r.conf10d >= 70 ? "#16a34a" : r.conf10d >= 40 ? "#d97706" : "#dc2626" } }, Number(r.conf10d).toFixed(0))
                     : React.createElement("span", { title: "Confidence Score \u2014 Next 10 Days", style: { fontSize: 10, color: "var(--text6)" } }, "\u2014")
-                ),
-                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
-                  (function() {
-                    var tk = r.s.t.replace(".NS", "");
-                    var isAdding = addingToES[tk];
-                    var wasAdded = addedToES[tk];
-                    if (wasAdded === true) {
-                      return React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#22c55e", background: "rgba(34,197,94,.1)", padding: "3px 8px", borderRadius: 4 } }, "\u2713 Added");
-                    }
-                    if (wasAdded === "exists") {
-                      return React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", padding: "3px 8px" } }, "In List");
-                    }
-                    return React.createElement("button", {
-                      onClick: function() { addToEntryScore(r.s); },
-                      disabled: isAdding,
-                      style: { fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(22,163,74,.3)", background: isAdding ? "var(--bg5)" : "rgba(22,163,74,.08)", color: "#16a34a", cursor: isAdding ? "wait" : "pointer", fontFamily: "inherit", opacity: isAdding ? 0.6 : 1 }
-                    }, isAdding ? "\u27f3 ..." : "+ Add");
-                  })()
-                ),
-                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
-                  (function() {
-                    var tk = r.s.t.replace(".NS", "");
-                    var isAddingCS = addingToCS[tk];
-                    var wasAddedCS = addedToCS[tk];
-                    if (wasAddedCS === true) {
-                      return React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#06b6d4", background: "rgba(6,182,212,.1)", padding: "3px 8px", borderRadius: 4 } }, "\u2713 Added");
-                    }
-                    if (wasAddedCS === "exists") {
-                      return React.createElement("span", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", padding: "3px 8px" } }, "In List");
-                    }
-                    return React.createElement("button", {
-                      onClick: function() { addToConfidence(r.s); },
-                      disabled: isAddingCS,
-                      style: { fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(6,182,212,.3)", background: isAddingCS ? "var(--bg5)" : "rgba(6,182,212,.08)", color: "#06b6d4", cursor: isAddingCS ? "wait" : "pointer", fontFamily: "inherit", opacity: isAddingCS ? 0.6 : 1 }
-                    }, isAddingCS ? "\u27f3 ..." : "+ Add");
-                  })()
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { whiteSpace: "nowrap" }) },
                   React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
