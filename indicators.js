@@ -4563,6 +4563,7 @@ window.TechIndicators = (function () {
     computePrematureExitScore: computePrematureExitScore,
     computeForwardConfidence: computeForwardConfidence,
     computeTenDayForwardConfidence: computeTenDayForwardConfidence,
+    computeHorizonConfidence: computeHorizonConfidence,
     computeOptimumEntryPrice: computeOptimumEntryPrice,
     integratedExitDecision: integratedExitDecision,
     getScoreConfig: getScoreConfig,
