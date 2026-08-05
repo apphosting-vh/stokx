@@ -5870,7 +5870,7 @@ const BacktestSuitePanel = () => {
   /* Score adapter: grades bar idx with NO lookahead — candles + Nifty index
      are both sliced to end at the entry bar before running the production
      Entry Score engine. */
-  const buildScoreFn = (idxCandles) => (candles, idx) => {
+  const buildScoreFn = (idxCandles, multiTFMap) => (candles, idx, symbol) => {
     const bar = candles[idx];
     if (!bar) return null;
     const ts = bar.t;
@@ -5880,6 +5880,28 @@ const BacktestSuitePanel = () => {
       while (lo < hi) { const mid = (lo + hi) >> 1; if (idxCandles[mid].t <= ts) lo = mid + 1; else hi = mid; }
       if (lo > 0) idxSlice = idxCandles.slice(0, lo);
     }
+
+    /* Try multi-TF scoring if data available */
+    var tfData = multiTFMap && symbol ? multiTFMap[symbol] : null;
+    if (tfData && (tfData.daily || tfData.hourly || tfData.weekly)) {
+      var dailySlice = tfData.daily ? tfData.daily.slice(0, tfData.daily.findIndex(function(b) { return b.t > ts; }) || tfData.daily.length) : null;
+      var hourlySlice = tfData.hourly ? tfData.hourly.slice(0, tfData.hourly.findIndex(function(b) { return b.t > ts; }) || tfData.hourly.length) : null;
+      var weeklySlice = tfData.weekly ? tfData.weekly.slice(0, tfData.weekly.findIndex(function(b) { return b.t > ts; }) || tfData.weekly.length) : null;
+      var tfResults = [];
+      if (dailySlice && dailySlice.length >= 50) tfResults.push({ timeframe: "D", candles: dailySlice });
+      if (hourlySlice && hourlySlice.length >= 40) tfResults.push({ timeframe: "H", candles: hourlySlice });
+      if (weeklySlice && weeklySlice.length >= 30) tfResults.push({ timeframe: "W", candles: weeklySlice });
+      if (tfResults.length >= 2) {
+        try {
+          var mtf = TI.computeMultiTFEntryScore(tfResults, idxSlice, null);
+          if (mtf && mtf.multiTF_score != null) {
+            return { entryScore: mtf.multiTF_score, raw_score: mtf.raw_score, classification: mtf.classification, trendHealth: mtf.trendHealth, pullbackQuality: mtf.pullbackQuality, prob4: mtf.prob4, modifiers: mtf.modifiers };
+          }
+        } catch (e) {}
+      }
+    }
+
+    /* Fall back to single-TF daily scoring */
     let res;
     try { res = TI.computeEntryScore(candles.slice(0, idx + 1), idxSlice && idxSlice.length ? idxSlice : null); } catch (e) { return null; }
     if (!res || res.entry_score == null) return null;
@@ -5894,8 +5916,8 @@ const BacktestSuitePanel = () => {
     };
   };
 
-  const makeEngine = (idxCandles) => BE.create({
-    scoreFn: buildScoreFn(idxCandles),
+  const makeEngine = (idxCandles, multiTFMap) => BE.create({
+    scoreFn: buildScoreFn(idxCandles, multiTFMap),
     targetProfitPct: Number(target) || 4,
     holdingPeriodDays: Number(holding) || 14,
     threshold: Number(threshold) || 65,
@@ -5919,11 +5941,15 @@ const BacktestSuitePanel = () => {
 
       /* Try offline data first for the stock */
       var candles = null;
+      var multiTFData = null;
       if (offlineMeta && offlineMeta.tickers && offlineMeta.tickers.indexOf(tk) >= 0) {
         setProgress({ phase: "Loading " + tk + " from offline data\u2026", done: 0, total: 0 });
         try {
           var rec = await OfflineOHLCV.get(tk);
-          if (rec && rec.data) candles = rec.data;
+          if (rec) {
+            candles = rec.daily || rec.data || null;
+            if (candles) multiTFData = { daily: rec.daily || null, hourly: rec.hourly || null, weekly: rec.weekly || null };
+          }
         } catch (e) {}
       }
       /* Fall back to live fetch */
@@ -5931,9 +5957,17 @@ const BacktestSuitePanel = () => {
         setProgress({ phase: "Fetching daily + Nifty history\u2026", done: 0, total: 0 });
         const stockRes = await DF.fetchOHLCVCached(tk, "daily");
         candles = stockRes && stockRes.data ? stockRes.data : null;
+        if (candles) {
+          var [hRes, wRes] = await Promise.all([
+            DF.fetchOHLCVCached(tk, "1h").catch(function() { return null; }),
+            DF.fetchOHLCVCached(tk, "weekly").catch(function() { return null; })
+          ]);
+          multiTFData = { daily: candles, hourly: hRes && hRes.data ? hRes.data : null, weekly: wRes && wRes.data ? wRes.data : null };
+        }
       }
       if (!candles || candles.length < 60) { setErr("Insufficient daily history for " + tk + " (need ~60+ bars)."); return; }
-      const eng = makeEngine(idx);
+      var multiTFMap = multiTFData ? (function() { var m = {}; m[tk] = multiTFData; return m; })() : {};
+      const eng = makeEngine(idx, multiTFMap);
       const res = await eng.runSingle(candles, { symbol: tk }, {
         onBar: (d, t) => setProgress({ phase: "Scoring " + t + " sessions as-of-date (no lookahead)\u2026", done: d, total: t })
       });
@@ -5960,6 +5994,7 @@ const BacktestSuitePanel = () => {
       syms = syms.slice(0, cap);
       const total = syms.length;
       const dataMap = {};
+      const multiTFMap = {};
 
       /* Check if offline data is available */
       var useOffline = offlineMeta && offlineMeta.count > 0;
@@ -5972,7 +6007,13 @@ const BacktestSuitePanel = () => {
           if (offlineTickers.has(syms[i])) {
             try {
               var rec = await OfflineOHLCV.get(syms[i]);
-              if (rec && rec.data && rec.data.length >= 60) dataMap[syms[i]] = rec.data;
+              if (rec) {
+                var dailyCandles = rec.daily || rec.data || null;
+                if (dailyCandles && dailyCandles.length >= 60) {
+                  dataMap[syms[i]] = dailyCandles;
+                  multiTFMap[syms[i]] = { daily: rec.daily || null, hourly: rec.hourly || null, weekly: rec.weekly || null };
+                }
+              }
             } catch (e) {}
           }
           setProgress({ phase: "Loading from offline data\u2026", done: i + 1, total: total });
@@ -5983,23 +6024,35 @@ const BacktestSuitePanel = () => {
       /* Fall back to live fetch if offline had no matching stocks */
       var needLive = Object.keys(dataMap).length === 0;
       if (needLive) {
+        setProgress({ phase: "Fetching daily+hourly+weekly\u2026", done: 0, total: total });
         for (let i = 0; i < syms.length; i += 5) {
           if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
           const chunk = syms.slice(i, i + 5);
           await Promise.all(chunk.map(async (s) => {
             try {
               const r = await DF.fetchOHLCVCached(s, "daily");
-              if (r && r.data && r.data.length >= 60) dataMap[s] = r.data;
+              if (r && r.data && r.data.length >= 60) {
+                dataMap[s] = r.data;
+                var [hRes, wRes] = await Promise.all([
+                  DF.fetchOHLCVCached(s, "1h").catch(function() { return null; }),
+                  DF.fetchOHLCVCached(s, "weekly").catch(function() { return null; })
+                ]);
+                multiTFMap[s] = {
+                  daily: r.data,
+                  hourly: hRes && hRes.data ? hRes.data : null,
+                  weekly: wRes && wRes.data ? wRes.data : null
+                };
+              }
             } catch (e) {}
           }));
           await new Promise((r) => setTimeout(r, 60));
-          setProgress({ phase: "Fetching daily history \u2026", done: Math.min(i + 5, total), total: total });
+          setProgress({ phase: "Fetching D+H+W history \u2026", done: Math.min(i + 5, total), total: total });
         }
       }
       if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
       const ready = Object.keys(dataMap);
       if (!ready.length) { setErr("Could not fetch daily history for any symbol."); return; }
-      const eng = makeEngine(idx);
+      const eng = makeEngine(idx, multiTFMap);
       const res = await eng.runBatch(dataMap, { symbols: ready }, {
         onSymbol: (d, t) => setProgress({ phase: "Backtesting " + t + " symbols\u2026", done: d, total: t })
       });
@@ -6027,11 +6080,15 @@ const BacktestSuitePanel = () => {
 
       /* Try offline data first for the stock */
       var candles = null;
+      var multiTFData = null;
       if (offlineMeta && offlineMeta.tickers && offlineMeta.tickers.indexOf(tk) >= 0) {
         setProgress({ phase: "Loading " + tk + " from offline data\u2026", done: 0, total: 0 });
         try {
           var rec = await OfflineOHLCV.get(tk);
-          if (rec && rec.data) candles = rec.data;
+          if (rec) {
+            candles = rec.daily || rec.data || null;
+            if (candles) multiTFData = { daily: rec.daily || null, hourly: rec.hourly || null, weekly: rec.weekly || null };
+          }
         } catch (e) {}
       }
       /* Fall back to live fetch */
@@ -6039,9 +6096,17 @@ const BacktestSuitePanel = () => {
         setProgress({ phase: "Fetching daily + Nifty history\u2026", done: 0, total: 0 });
         const stockRes = await DF.fetchOHLCVCached(tk, "daily");
         candles = stockRes && stockRes.data ? stockRes.data : null;
+        if (candles) {
+          var [hRes, wRes] = await Promise.all([
+            DF.fetchOHLCVCached(tk, "1h").catch(function() { return null; }),
+            DF.fetchOHLCVCached(tk, "weekly").catch(function() { return null; })
+          ]);
+          multiTFData = { daily: candles, hourly: hRes && hRes.data ? hRes.data : null, weekly: wRes && wRes.data ? wRes.data : null };
+        }
       }
       if (!candles || candles.length < 120) { setErr("Walk-forward needs longer history (120+ daily bars)."); return; }
-      const eng = makeEngine(idx);
+      var multiTFMap = multiTFData ? (function() { var m = {}; m[tk] = multiTFData; return m; })() : {};
+      const eng = makeEngine(idx, multiTFMap);
       const res = await eng.runWalkForward(candles, { symbol: tk, folds: Number(folds) || 4, minInSample: 120 }, {
         onFold: (f, t) => setProgress({ phase: "Evaluating out-of-sample fold " + f + " / " + t + "\u2026", done: f, total: t })
       });
