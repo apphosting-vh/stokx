@@ -5948,7 +5948,10 @@ const BacktestSuitePanel = () => {
       const idxRes = await DF.fetchOHLCVCached("^NSEI", "daily");
       const idx = idxRes && idxRes.data ? idxRes.data : null;
       let syms = shuffleArray(NIFTY_200).map(s => s.t);
-      const cap = batchCap === "all" ? syms.length : Math.min(parseInt(batchCap, 10) || 20, syms.length);
+      if (batchCap === "nifty100") {
+        syms = shuffleArray(NIFTY_200.filter(function(s) { return s.cap === "L"; })).map(function(s) { return s.t; });
+      }
+      const cap = batchCap === "all" || batchCap === "nifty100" ? syms.length : Math.min(parseInt(batchCap, 10) || 20, syms.length);
       syms = syms.slice(0, cap);
       const total = syms.length;
       const dataMap = {};
@@ -6282,7 +6285,7 @@ const BacktestSuitePanel = () => {
         ),
         mode === "batch" && field("Universe Size",
           React.createElement("div", { style: { display: "flex", gap: 4 } },
-            [["20", "Random 20"], ["50", "Random 50"], ["100", "Random 100"], ["150", "Random 150"], ["200", "NIFTY 200"], ["all", "All"]].map(function (c) {
+            [["20", "Random 20"], ["50", "Random 50"], ["100", "Random 100"], ["150", "Random 150"], ["nifty100", "NIFTY 100"], ["200", "NIFTY 200"], ["all", "All"]].map(function (c) {
               return React.createElement("button", {
                 key: c[0], onClick: function () { setBatchCap(c[0]); },
                 style: {
