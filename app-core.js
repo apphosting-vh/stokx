@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.44";
+window.__STOX_APP_VERSION = "2.10.45";
 
 /* Apply saved score config on startup */
 (function() {
@@ -7856,6 +7856,28 @@ function StockScreener(props) {
     URL.revokeObjectURL(url);
   };
 
+  var exportExcel = function() {
+    if (!results.length) return;
+    var cols = ["ticker","name","cap","price","todayChg","dayChg","weekChg","monthChg","avgTrend","avgPullback","avgProb4","finalScore","weekly","daily","hourly","conf10d"];
+    var headers = ["Ticker","Company","Cap","Price","Today %","1D Chg %","1W Chg %","1M Chg %","Trend","Pullback","Prob4","Score","Weekly","Daily","Hourly","Conf 10D"];
+    function csvEsc(v) { if (v == null) return ""; var s = String(v); if (s.indexOf(",") !== -1 || s.indexOf('"') !== -1 || s.indexOf("\n") !== -1) return '"' + s.replace(/"/g, '""') + '"'; return s; }
+    var rows = [headers.join(",")];
+    results.forEach(function(r) {
+      var row = cols.map(function(k) { return csvEsc(r[k]); });
+      rows.push(row.join(","));
+    });
+    var csv = "\uFEFF" + rows.join("\n");
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "stox-screener-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   var importJSON = function() {
     var input = document.createElement("input");
     input.type = "file";
@@ -8331,6 +8353,11 @@ function StockScreener(props) {
           className: "stx-btn",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
         }, "\u2b07 Export") : null,
+        results.length > 0 && !scanning ? React.createElement("button", {
+          onClick: exportExcel,
+          className: "stx-btn",
+          style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid #16a34a", background: "rgba(22,163,74,.08)", color: "#16a34a", cursor: "pointer" }
+        }, "\u2b07 Excel") : null,
         React.createElement("button", {
           onClick: importJSON,
           className: "stx-btn",
