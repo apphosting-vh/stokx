@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.37";
+window.__STOX_APP_VERSION = "2.10.38";
 
 /* Apply saved score config on startup */
 (function() {
@@ -6610,6 +6610,25 @@ const BacktestSuitePanel = () => {
           )
         )
       ),
+      d.calibration && d.calibration.buckets && d.calibration.buckets.length > 0 && card("Confidence Calibration", "10-Day Confidence model calibration: probTouch deciles vs actual +4% hit rate. Derived calP0 = " + (d.calibration.calP0 != null ? d.calibration.calP0 : "\u2014") + " (anchor) and calK = " + (d.calibration.calK != null ? d.calibration.calK : "\u2014") + " (slope). Current defaults: calP0=0.38, calK=38.",
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null,
+              cell("Decile", td), cell("Avg probTouch", td), cell("Range", td), cell("N", td), cell("Hits", td), cell("Empirical Hit Rate", td), cell("vs 50%", td)
+            )),
+            React.createElement("tbody", null, d.calibration.buckets.map(function(b) {
+              var diff = b.hitRate - 50;
+              return React.createElement("tr", { key: b.decile },
+                cell(b.decile), cell(b.avgProbTouch != null ? b.avgProbTouch.toFixed(2) : "\u2014"),
+                cell(b.probTouchRange ? b.probTouchRange[0].toFixed(2) + "\u2013" + b.probTouchRange[1].toFixed(2) : "\u2014"),
+                cell(b.n), cell(b.hits),
+                cell(React.createElement("span", { style: { fontWeight: 700, color: retColor(diff) } }, b.hitRate != null ? b.hitRate.toFixed(1) + "%" : "\u2014")),
+                cell(React.createElement("span", { style: { color: diff > 0 ? "#16a34a" : diff < 0 ? "#dc2626" : "var(--text5)", fontSize: 11 } }, (diff > 0 ? "+" : "") + diff.toFixed(1)))
+              );
+            }))
+          )
+        )
+      ),
       (st.monthlyBreakdown && st.monthlyBreakdown.length) && card("Monthly Breakdown", "Aggregate by entry month.",
         React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
@@ -6682,7 +6701,46 @@ const BacktestSuitePanel = () => {
       ),
       React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", lineHeight: 1.6, padding: "0 2px" } },
         "Each symbol is scored on its full daily history as-of-date (no lookahead); a trade is opened whenever the Entry Score \u2265 " + fmtS(d.threshold) + " and closed at +" + fmt2(d.targetProfitPct) + "% or after " + d.holdingPeriodDays + " sessions."
-      )
+      ),
+      (function() {
+        var calSymbols = (d.allResults || []).filter(function(r) { return r.detail && r.detail.calibration && r.detail.calibration.calP0 != null; });
+        if (calSymbols.length === 0) return null;
+        var totalN = calSymbols.reduce(function(s, r) { return s + (r.detail.calibration.n || 0); }, 0);
+        if (totalN < 20) return null;
+        var weightedP0 = calSymbols.reduce(function(s, r) { return s + (r.detail.calibration.calP0 || 0.38) * (r.detail.calibration.n || 0); }, 0) / totalN;
+        var weightedK = calSymbols.reduce(function(s, r) { return s + (r.detail.calibration.calK || 38) * (r.detail.calibration.n || 0); }, 0) / totalN;
+        var allBuckets = {};
+        calSymbols.forEach(function(r) {
+          (r.detail.calibration.buckets || []).forEach(function(b) {
+            if (!allBuckets[b.decile]) allBuckets[b.decile] = { hits: 0, total: 0, sumPT: 0 };
+            allBuckets[b.decile].hits += b.hits;
+            allBuckets[b.decile].total += b.n;
+            allBuckets[b.decile].sumPT += b.avgProbTouch * b.n;
+          });
+        });
+        var aggBuckets = Object.keys(allBuckets).sort(function(a, b) { return Number(a) - Number(b); }).map(function(k) {
+          var b = allBuckets[k];
+          return { decile: Number(k), avgProbTouch: b.total > 0 ? Math.round(b.sumPT / b.total * 100) / 100 : 0, n: b.total, hitRate: b.total > 0 ? Math.round((b.hits / b.total) * 1000) / 10 : 0 };
+        });
+        return card("Confidence Calibration (Aggregate)", calSymbols.length + " symbols, " + totalN + " trades with valid probTouch. Derived calP0 = " + weightedP0.toFixed(3) + ", calK = " + weightedK.toFixed(1) + ".",
+          React.createElement("div", { style: { overflowX: "auto" } },
+            React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+              React.createElement("thead", null, React.createElement("tr", null,
+                cell("Decile", td), cell("Avg probTouch", td), cell("N", td), cell("Empirical Hit Rate", td), cell("vs 50%", td)
+              )),
+              React.createElement("tbody", null, aggBuckets.map(function(b) {
+                var diff = b.hitRate - 50;
+                return React.createElement("tr", { key: b.decile },
+                  cell(b.decile), cell(b.avgProbTouch.toFixed(2)),
+                  cell(b.n),
+                  cell(React.createElement("span", { style: { fontWeight: 700, color: retColor(diff) } }, b.hitRate.toFixed(1) + "%")),
+                  cell(React.createElement("span", { style: { color: diff > 0 ? "#16a34a" : diff < 0 ? "#dc2626" : "var(--text5)", fontSize: 11 } }, (diff > 0 ? "+" : "") + diff.toFixed(1)))
+                );
+              }))
+            )
+          )
+        );
+      })()
     );
   };
 
@@ -6713,6 +6771,24 @@ const BacktestSuitePanel = () => {
               cell(f.oos.avgReturnPct != null ? React.createElement("span", { style: { color: retColor(f.oos.avgReturnPct) } }, fmtR(f.oos.avgReturnPct)) : "\u2014"),
               cell(f.oos.profitFactor != null ? fmtPF(f.oos.profitFactor) : "\u2014")
             )))
+          )
+        )
+      ),
+      d.calibration && d.calibration.buckets && d.calibration.buckets.length > 0 && card("Confidence Calibration (OOS)", "10-Day Confidence model calibration across all out-of-sample folds. Derived calP0 = " + (d.calibration.calP0 != null ? d.calibration.calP0 : "\u2014") + ", calK = " + (d.calibration.calK != null ? d.calibration.calK : "\u2014") + ".",
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null,
+              cell("Decile", td), cell("Avg probTouch", td), cell("N", td), cell("Empirical Hit Rate", td), cell("vs 50%", td)
+            )),
+            React.createElement("tbody", null, d.calibration.buckets.map(function(b) {
+              var diff = b.hitRate - 50;
+              return React.createElement("tr", { key: b.decile },
+                cell(b.decile), cell(b.avgProbTouch != null ? b.avgProbTouch.toFixed(2) : "\u2014"),
+                cell(b.n),
+                cell(React.createElement("span", { style: { fontWeight: 700, color: retColor(diff) } }, b.hitRate != null ? b.hitRate.toFixed(1) + "%" : "\u2014")),
+                cell(React.createElement("span", { style: { color: diff > 0 ? "#16a34a" : diff < 0 ? "#dc2626" : "var(--text5)", fontSize: 11 } }, (diff > 0 ? "+" : "") + diff.toFixed(1)))
+              );
+            }))
           )
         )
       )
