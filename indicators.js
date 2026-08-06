@@ -2629,7 +2629,8 @@ window.TechIndicators = (function () {
       }
 
       /* Pick nearest support level at or below price as buyRef.
-         Falls back through: nearest support → SMA(20) → BB Lower → null */
+         If no support is below price, fall back to nearest any-direction support.
+         Order: SMA(20) → BB Lower → Anchored VWAP → SMA(50) → null */
       var buyRef = null;
       if (c != null && c > 0) {
         var bestDist = Infinity;
@@ -2640,8 +2641,19 @@ window.TechIndicators = (function () {
             if (d < bestDist) { bestDist = d; buyRef = lv; }
           }
         }
+        /* If no support below price, pick nearest above (least-bad anchor) */
+        if (buyRef == null) {
+          var bestAbove = Infinity;
+          for (var j = 0; j < supportLevels.length; j++) {
+            var lv = supportLevels[j];
+            if (lv != null && lv > 0 && lv > c) {
+              var d = lv - c;
+              if (d < bestAbove) { bestAbove = d; buyRef = lv; }
+            }
+          }
+        }
       }
-      if (buyRef == null) buyRef = sma20 != null ? sma20 : (bbLower != null ? bbLower : null);
+      if (buyRef == null) buyRef = sma20 != null ? sma20 : (bbLower != null ? bbLower : (anchoredVwap != null ? anchoredVwap : (sma50 != null ? sma50 : null)));
 
       return {
         c: c, pc: L >= 2 ? cl[L1 - 1] : null, o: op[L1] != null ? op[L1] : c, h: hi[L1], l: lo[L1],
