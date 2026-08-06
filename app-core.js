@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.36";
+window.__STOX_APP_VERSION = "2.10.37";
 
 /* Apply saved score config on startup */
 (function() {
@@ -6099,6 +6099,8 @@ const BacktestSuitePanel = () => {
 
   const makeEngine = (idxCandles, multiTFMap) => BE.create({
     scoreFn: buildScoreFn(idxCandles, multiTFMap),
+    multiTFMap: multiTFMap,
+    indexCandles: idxCandles,
     targetProfitPct: Number(target) || 4,
     holdingPeriodDays: Number(holding) || 14,
     threshold: Number(threshold) || 65,
@@ -7508,7 +7510,7 @@ const ScoreTunerPanel = () => {
              ["modifiers.lowExpansionPenalty", "Low Expansion Penalty", -20, 0], ["modifiers.spikePenalty", "Spike Penalty", -20, 0],
              ["modifiers.spikeGapThreshold", "Spike Gap %", 1, 10], ["modifiers.stabilityThreshold", "Stability Threshold", 0.1, 0.8],
              ["modifiers.stabilityPenalty", "Stability Penalty", -25, 0], ["modifiers.mtfAlignBonus", "MTF Align Bonus", 0, 20],
-             ["modifiers.mtfAlignThreshold", "MTF Align Threshold", 40, 80], ["modifiers.highVolATRPercentile", "High Vol Pctl", 60, 95],
+             ["modifiers.mtfAlignThreshold", "MTF Align Threshold", 40, 80], ["modifiers.mtfAlignFloor", "MTF Align Floor", 30, 65], ["modifiers.highVolATRPercentile", "High Vol Pctl", 60, 95],
              ["modifiers.highVolERThreshold", "High Vol ER Thresh", 0.2, 0.9], ["modifiers.highVolBonus", "High Vol Bonus", 0, 15]
             ].map(([path, label, min, max]) =>
               React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },

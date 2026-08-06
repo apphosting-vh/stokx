@@ -2739,6 +2739,7 @@ window.TechIndicators = (function () {
       stabilityPenalty: -15,
       mtfAlignBonus: 10,
       mtfAlignThreshold: 65,
+      mtfAlignFloor: 50,
       highVolATRPercentile: 80,
       highVolERThreshold: 0.5,
       highVolBonus: 5,
@@ -2842,7 +2843,7 @@ window.TechIndicators = (function () {
     return Math.min(s, SCORE_CONFIG.pillarMax.prob4);
   }
 
-  /* Modifiers (±15 each): low-expansion, spike day, stability, MTF alignment.
+  /* Modifiers (±15 each): low-expansion, spike day, stability, MTF alignment (gradient).
      Volatility-normalized: use ATR percentile rank instead of fixed ATR%. */
   function buildEntryModifiers(sn, opts) {
     opts = opts || {};
@@ -2861,7 +2862,10 @@ window.TechIndicators = (function () {
       items.push({ reason: "Unstable price action (stability < " + mc.stabilityThreshold + ")", amount: mc.stabilityPenalty });
     }
 
-    if (opts.mtfAlign) items.push({ reason: "Weekly + daily both >= " + mc.mtfAlignThreshold + " (MTF alignment)", amount: mc.mtfAlignBonus });
+    if (opts.mtfAlignFactor > 0) {
+      var mtfAmt = Math.round(mc.mtfAlignBonus * opts.mtfAlignFactor * 10) / 10;
+      items.push({ reason: "MTF alignment (" + Math.round(opts.mtfAlignFactor * 100) + "%)", amount: mtfAmt });
+    }
 
     if (atrPercentile >= mc.highVolATRPercentile && sn && sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > mc.highVolERThreshold) {
       items.push({ reason: "High momentum in high-vol regime", amount: mc.highVolBonus });
@@ -2996,14 +3000,19 @@ window.TechIndicators = (function () {
 
     var wRaw = perTF.W ? (perTF.W.trendHealth + perTF.W.pullbackQuality + perTF.W.prob4) : null;
     var dRaw = perTF.D ? (perTF.D.trendHealth + perTF.D.pullbackQuality + perTF.D.prob4) : null;
-    var mtfAlign = wRaw !== null && dRaw !== null && wRaw >= SCORE_CONFIG.modifiers.mtfAlignThreshold && dRaw >= SCORE_CONFIG.modifiers.mtfAlignThreshold;
+    var mc = SCORE_CONFIG.modifiers;
+    var _mtfFloor = mc.mtfAlignFloor != null ? mc.mtfAlignFloor : 50;
+    var _mtfRange = (mc.mtfAlignThreshold || 65) - _mtfFloor;
+    var _wFactor = wRaw !== null && _mtfRange > 0 ? Math.max(0, Math.min(1, (wRaw - _mtfFloor) / _mtfRange)) : 0;
+    var _dFactor = dRaw !== null && _mtfRange > 0 ? Math.max(0, Math.min(1, (dRaw - _mtfFloor) / _mtfRange)) : 0;
+    var mtfAlignFactor = _wFactor * _dFactor;
 
     var spikeDay = false;
     if (dTF && dTF.candles && perTF.D) {
-      spikeDay = perTF.D.sn.spikeLast === true || (perTF.D.sn.gapPct != null && Math.abs(perTF.D.sn.gapPct) > SCORE_CONFIG.modifiers.spikeGapThreshold);
+      spikeDay = perTF.D.sn.spikeLast === true || (perTF.D.sn.gapPct != null && Math.abs(perTF.D.sn.gapPct) > mc.spikeGapThreshold);
     }
     var volRegime = perTF.D && perTF.D.volRegime ? perTF.D.volRegime : (baseSn ? calcVolRegime(baseSn, dTF ? dTF.candles : null) : null);
-    var modifierItems = buildEntryModifiers(baseSn, { spikeDay: spikeDay, mtfAlign: mtfAlign, volRegime: volRegime });
+    var modifierItems = buildEntryModifiers(baseSn, { spikeDay: spikeDay, mtfAlignFactor: mtfAlignFactor, volRegime: volRegime });
 
     var penalties = 0, bonuses = 0, penaltyItems = [], bonusItems = [];
     modifierItems.forEach(function (it) {
