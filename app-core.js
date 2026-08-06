@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.52";
+window.__STOX_APP_VERSION = "2.10.54";
 
 /* Apply saved score config on startup */
 (function() {
@@ -2819,6 +2819,7 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
     { k: "Support", v: cp.swingLow != null ? price(cp.swingLow) : "\u2014", x: "Lowest low of last 3 sessions \u2014 below this the setup breaks." },
     { k: "ATR cap", v: cp.atrCapPct != null ? cp.atrCapPct + "%" : "\u2014", x: "Volatility-scaled discount cap (1.5\u00d7 daily ATR%)." },
     { k: "Session left", v: cp.marketClosed ? "Closed" : (cp.sessionFraction != null ? Math.round(cp.sessionFraction * 100) + "%" : "\u2014"), x: cp.marketClosed ? "Market is closed \u2014 fill probabilities are unavailable." : "Fraction of today's 6.25h trading session remaining." },
+    { k: "Fill model", v: cp.empiricalMethod === 'empirical' ? "Empirical (" + cp.empiricalSampleCount + " samples)" : "Lognormal", x: cp.empiricalMethod === 'empirical' ? "Non-parametric drawdown model using " + cp.empiricalSampleCount + " historical intraday samples." : "Parametric model (lognormal) \u2014 insufficient 15m data for empirical estimate." },
     { k: "Range", v: cp.horizonReachPct != null ? cp.horizonReachPct + "% / 10d" : "\u2014", x: "Typical 10-day travel (ATR\u00d7\u221a10)." },
   ];
   const chipRow = (c) => React.createElement("div", { key: c.k, style: { padding: "7px 11px", borderRadius: 7, background: "var(--bg4)", border: "1px solid var(--border)", fontSize: 12, width: 250 } },
