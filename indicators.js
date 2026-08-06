@@ -4123,7 +4123,7 @@ window.TechIndicators = (function () {
     var holdingDays = cfg.holding_days != null ? cfg.holding_days : (cfg.holdingDays != null ? cfg.holdingDays : 0);
     var ctx = cfg.entryScoreContext || {};
     var base = {
-      confidence: null, reason: 'insufficient_hourly_data',
+      confidence: null, confidenceLognormal: null, confidenceEmpirical: null, reason: 'insufficient_hourly_data',
       components: { horizonDays: horizonDays, targetPct: targetPct, profitPct: null, remainingPct: null, daysHeld: holdingDays, sessions: 0, hourlyAdx: null, hourlyPlusDI: null, hourlyMinusDI: null, hourlyVwap: null, hourlyVwapSlope: null, hourlyRsi14: null, roc10: null, ema9: null, ema21: null, dailyEmaBullish: false, dailyMacdBullish: false, dailyMacdAboveZero: false, dailyPriceAboveEma21: false, dailyAdx: null, regimeMult: 1, regimeQuality: null, rsScore: null, atrPct: null, horizonReachPct: null, reachRatio: null, driftPct: null, volConfirm: null, sigmaDaily: null, muDaily: null, driftScore: null, zScore: null, probTerminal: null, probTouch: null, displayScore: null, calP0: 0.38, calK: 38.0, entryScoreUsed: false, entryScore: null, trendHealth: null, pullbackQuality: null, prob4: null, hourDrift: null, dayDrift: null, penalty: null, empiricalMethod: 'lognormal', empiricalSampleCount: 0 },
       flags: { alreadyAtTarget: false, withinReach: false }
     };
@@ -4291,12 +4291,14 @@ window.TechIndicators = (function () {
       base.components.hourDrift = round(hourDrift, 3);
       base.components.dayDrift = round(dayDrift, 3);
       var displayScore = null, zScore = null, probTerminal = null, probTouch = null, muDaily = null, muLog = null;
+      var displayScoreLog = null, displayScoreEmp = null;
       var calP0 = 0.38, calK = 38.0;
       var empiricalMethod = 'lognormal';
       var empiricalSampleCount = 0;
       var requiredReturn = remainingPct / 100;
 
       /* ── Empirical: scan historical daily candles for forward N-day windows ── */
+      var empProbTouch = null;
       if (dailyCandles && dailyCandles.length >= remainingDays + 10 && requiredReturn >= 0) {
         var hitsTouch = 0, hitsTerminal = 0, totalWindows = 0;
         var minLookback = Math.max(0, dailyCandles.length - 200);
@@ -4318,34 +4320,34 @@ window.TechIndicators = (function () {
         if (totalWindows >= 10) {
           empiricalMethod = 'empirical';
           empiricalSampleCount = totalWindows;
-          probTouch = hitsTouch / totalWindows;
-          probTerminal = hitsTerminal / totalWindows;
-          probTouch = Math.max(1e-6, Math.min(1 - 1e-6, probTouch));
-          probTerminal = Math.max(1e-6, Math.min(1 - 1e-6, probTerminal));
-          zScore = null;
-          displayScore = 50 + (Math.log(probTouch / (1 - probTouch)) - Math.log(calP0 / (1 - calP0))) * calK;
+          empProbTouch = hitsTouch / totalWindows;
+          empProbTouch = Math.max(1e-6, Math.min(1 - 1e-6, empProbTouch));
         }
       }
 
-      /* ── Lognormal fallback when empirical data is insufficient ────────────── */
-      if (empiricalMethod === 'lognormal') {
-        if (sigmaDaily == null) {
-          base.reason = 'insufficient_daily_data';
-        } else {
-          muDaily = driftScore * 0.0025;
-          muLog = muDaily - 0.5 * sigmaDaily * sigmaDaily;
-          var b = Math.log((1 + targetPct / 100) / (1 + profitPct / 100));
-          b = Math.max(b, 0.0005);
-          var sdN = sigmaDaily * Math.sqrt(remainingDays);
-          var muT = muLog * remainingDays;
-          zScore = (b - muT) / sdN;
-          probTerminal = 1 - normCdf(zScore);
-          probTouch = normCdf((muT - b) / sdN) + Math.exp(2 * muLog * b / (sigmaDaily * sigmaDaily)) * normCdf((-muT - b) / sdN);
-          probTouch = Math.max(1e-6, Math.min(1 - 1e-6, probTouch));
-          probTerminal = Math.max(1e-6, Math.min(1 - 1e-6, probTerminal));
-          displayScore = 50 + (Math.log(probTouch / (1 - probTouch)) - Math.log(calP0 / (1 - calP0))) * calK;
-        }
+      /* ── Lognormal: always compute when sigma is available ────────────────── */
+      var logProbTouch = null;
+      if (sigmaDaily != null) {
+        muDaily = driftScore * 0.0025;
+        muLog = muDaily - 0.5 * sigmaDaily * sigmaDaily;
+        var b = Math.log((1 + targetPct / 100) / (1 + profitPct / 100));
+        b = Math.max(b, 0.0005);
+        var sdN = sigmaDaily * Math.sqrt(remainingDays);
+        var muT = muLog * remainingDays;
+        zScore = (b - muT) / sdN;
+        logProbTouch = normCdf((muT - b) / sdN) + Math.exp(2 * muLog * b / (sigmaDaily * sigmaDaily)) * normCdf((-muT - b) / sdN);
+        logProbTouch = Math.max(1e-6, Math.min(1 - 1e-6, logProbTouch));
       }
+
+      /* ── Use empirical as primary, lognormal as secondary ────────────────── */
+      probTouch = empProbTouch != null ? empProbTouch : logProbTouch;
+      if (empProbTouch != null) {
+        displayScoreEmp = 50 + (Math.log(empProbTouch / (1 - empProbTouch)) - Math.log(calP0 / (1 - calP0))) * calK;
+      }
+      if (logProbTouch != null) {
+        displayScoreLog = 50 + (Math.log(logProbTouch / (1 - logProbTouch)) - Math.log(calP0 / (1 - calP0))) * calK;
+      }
+      displayScore = displayScoreEmp != null ? displayScoreEmp : displayScoreLog;
 
       if (displayScore != null) {
         var pen = 0;
@@ -4357,21 +4359,35 @@ window.TechIndicators = (function () {
         }
         if (pen > 0 && remainingPct != null) pen *= (1 + 0.3 * clamp(1 - remainingPct / 2.5, 0, 1));
         displayScore -= Math.min(15, pen);
+        if (displayScoreLog != null) displayScoreLog -= Math.min(15, pen);
+        if (displayScoreEmp != null) displayScoreEmp -= Math.min(15, pen);
         base.components.penalty = round(pen, 1);
-        var finalScore;
+
+        /* Apply entry score blending to both */
+        var finalScoreLog = displayScoreLog, finalScoreEmp = displayScoreEmp;
         if (ctx.entryScore != null) {
-          finalScore = 0.60 * displayScore + 0.40 * ctx.entryScore;
-          if (ctx.entryScore < 50) finalScore = Math.min(finalScore, 45);
-          if (ctx.entryScore < 35) finalScore = Math.min(finalScore, 30);
+          if (displayScoreLog != null) {
+            finalScoreLog = 0.60 * displayScoreLog + 0.40 * ctx.entryScore;
+            if (ctx.entryScore < 50) finalScoreLog = Math.min(finalScoreLog, 45);
+            if (ctx.entryScore < 35) finalScoreLog = Math.min(finalScoreLog, 30);
+          }
+          if (displayScoreEmp != null) {
+            finalScoreEmp = 0.60 * displayScoreEmp + 0.40 * ctx.entryScore;
+            if (ctx.entryScore < 50) finalScoreEmp = Math.min(finalScoreEmp, 45);
+            if (ctx.entryScore < 35) finalScoreEmp = Math.min(finalScoreEmp, 30);
+          }
           base.components.entryScoreUsed = true;
           base.components.entryScore = ctx.entryScore;
           base.components.trendHealth = ctx.trendHealth;
           base.components.pullbackQuality = ctx.pullbackQuality;
           base.components.prob4 = ctx.prob4;
         } else {
-          finalScore = displayScore;
+          finalScoreLog = displayScoreLog;
+          finalScoreEmp = displayScoreEmp;
         }
-        base.confidence = round(Math.max(0, Math.min(100, finalScore)), 1);
+        base.confidence = round(Math.max(0, Math.min(100, finalScoreEmp != null ? finalScoreEmp : finalScoreLog)), 1);
+        base.confidenceLognormal = finalScoreLog != null ? round(Math.max(0, Math.min(100, finalScoreLog)), 1) : null;
+        base.confidenceEmpirical = finalScoreEmp != null ? round(Math.max(0, Math.min(100, finalScoreEmp)), 1) : null;
       }
       base.components.calP0 = calP0;
       base.components.calK = calK;
@@ -4476,6 +4492,7 @@ window.TechIndicators = (function () {
       currentPrice: null, optimumEntryPrice: null, discountPct: null,
       entryConfidence: null, currentConfidence: null, advantagePct: null,
       overextended: false, fillRange: null,
+      todayHigh: null, todayLow: null, probToTodayLowLognormal: null, probToTodayLowEmpirical: null,
       components: {
         atrPct: null, horizonReachPct: null, vwap: null, ema21: null,
         high15: null, low15: null, swingLow: null, dipDepthPct: null,
@@ -4552,14 +4569,15 @@ window.TechIndicators = (function () {
       }
       base.components.sigmaIntraday = sigmaIntraday != null ? round(sigmaIntraday * 100, 3) : null;
 
-      /* ── 3. Empirical drawdown model (15m data when available) ───────────
+      /* ── 3. Empirical drawdown model (5m data when available) ──────────────
          Non-parametric: for each historical day at the same time-of-day bin,
          compute the remaining session's max drawdown, normalize by ATR.
-         Fill probability = fraction of historical drawdowns >= required. */
+         Fill probability = fraction of historical drawdowns >= required.
+         Uses 5m candles for finer granularity (75 bars per 75-min bin). */
       var empiricalDrawdowns = [];
       var empiricalSampleCount = 0;
       var empiricalMethod = 'lognormal';
-      if (intraCandles && intraCandles.length >= 60 && atrPct != null && atrPct > 0) {
+      if (intraCandles && intraCandles.length >= 100 && atrPct != null && atrPct > 0) {
         var TRADING_MINUTES = 375;
         var BIN_SIZE = 75;
         var NUM_BINS = 5;
@@ -4568,7 +4586,7 @@ window.TechIndicators = (function () {
         var binStartMin = currentBin * BIN_SIZE;
         var binEndMin = (currentBin + 1) * BIN_SIZE;
 
-        /* Group 15m bars by date */
+        /* Group 5m bars by date */
         var barsByDate = {};
         for (var bd = 0; bd < intraCandles.length; bd++) {
           var bKey = String(intraCandles[bd].t).slice(0, 10);
@@ -4581,7 +4599,7 @@ window.TechIndicators = (function () {
            and compute the remaining session's max drawdown */
         for (var dk = 0; dk < dateKeys.length; dk++) {
           var dayBars = barsByDate[dateKeys[dk]];
-          if (!dayBars || dayBars.length < 4) continue;
+          if (!dayBars || dayBars.length < 20) continue;
 
           /* Find the bar in this day that falls in the same time-of-day bin */
           for (var db = 0; db < dayBars.length; db++) {
@@ -4622,38 +4640,37 @@ window.TechIndicators = (function () {
       base.components.empiricalSampleCount = empiricalSampleCount;
       base.components.empiricalMethod = empiricalMethod;
 
-      /* ── 4. Fill-probability: hybrid empirical + lognormal ──────────────── */
-      function fillProb(P) {
+      /* ── 4. Fill-probability: separate lognormal + empirical ─────────────── */
+      function fillProbLognormal(P) {
         if (marketClosed) return null;
         if (P <= 0 || c <= 0) return null;
         if (P >= c - 1e-9) return 1;
-
-        /* Empirical path: when we have enough historical drawdown samples */
-        if (empiricalMethod === 'empirical' && empiricalDrawdowns.length >= 10) {
-          var requiredDD = (c - P) / c;
-          var normRequired = requiredDD / (atrPct / 100);
-          /* Count how many historical normalized drawdowns >= required */
-          var hits = 0;
-          for (var ed = 0; ed < empiricalDrawdowns.length; ed++) {
-            if (empiricalDrawdowns[ed] >= normRequired) hits++;
-          }
-          var raw = hits / empiricalDrawdowns.length;
-          /* Apply time-decay: remaining fraction within the current bin */
-          var binFraction = Math.max(0.02, Math.min(1, (binEndMin - nowMinutes) / BIN_SIZE));
-          var decayed = Math.pow(raw, Math.sqrt(binFraction));
-          return Math.max(0, Math.min(1, decayed));
-        }
-
-        /* Lognormal fallback: when empirical data is insufficient */
         if (sigmaIntraday == null) return null;
         var b = Math.log(c / P);
         var sdN = sigmaIntraday;
         if (sdN < 1e-10) return null;
         var z = b / sdN;
-        var raw2 = normCdf(z) + Math.exp(2 * 0 * b / (sigmaIntraday * sigmaIntraday)) * normCdf((-0 - b) / sdN);
-        raw2 = Math.max(0, Math.min(1, raw2));
-        var weighted = Math.pow(raw2, Math.sqrt(fraction));
+        var raw = normCdf(z) + Math.exp(2 * 0 * b / (sigmaIntraday * sigmaIntraday)) * normCdf((-0 - b) / sdN);
+        raw = Math.max(0, Math.min(1, raw));
+        var weighted = Math.pow(raw, Math.sqrt(fraction));
         return Math.max(0, Math.min(1, weighted));
+      }
+
+      function fillProbEmpirical(P) {
+        if (marketClosed) return null;
+        if (P <= 0 || c <= 0) return null;
+        if (P >= c - 1e-9) return 1;
+        if (empiricalMethod !== 'empirical' || empiricalDrawdowns.length < 10) return null;
+        var requiredDD = (c - P) / c;
+        var normRequired = requiredDD / (atrPct / 100);
+        var hits = 0;
+        for (var ed = 0; ed < empiricalDrawdowns.length; ed++) {
+          if (empiricalDrawdowns[ed] >= normRequired) hits++;
+        }
+        var raw = hits / empiricalDrawdowns.length;
+        var binFraction = Math.max(0.02, Math.min(1, (binEndMin - nowMinutes) / BIN_SIZE));
+        var decayed = Math.pow(raw, Math.sqrt(binFraction));
+        return Math.max(0, Math.min(1, decayed));
       }
 
       /* ── 4. 10-day horizon context from current price ─────────────────── */
@@ -4825,6 +4842,29 @@ window.TechIndicators = (function () {
         moderate: moderate ? { price: moderate.price, fillProb: moderate.fillProb, tag: moderate.tag } : null,
         conservative: conservative ? { price: conservative.price, fillProb: conservative.fillProb, tag: conservative.tag } : null
       };
+
+      /* ── 15. Today's high/low from intraday candles ─────────────────────── */
+      var todayHi = -Infinity, todayLo = Infinity;
+      var todaySource = intraCandles && intraCandles.length > 0 ? intraCandles : hourlyCandles;
+      if (todaySource && todayKey) {
+        for (var td = 0; td < todaySource.length; td++) {
+          var tdKey = String(todaySource[td].t).slice(0, 10);
+          if (tdKey === todayKey) {
+            if (todaySource[td].h > todayHi) todayHi = todaySource[td].h;
+            if (todaySource[td].l < todayLo) todayLo = todaySource[td].l;
+          }
+        }
+      }
+      base.todayHigh = todayHi !== -Infinity ? round(todayHi, 2) : null;
+      base.todayLow = todayLo !== Infinity ? round(todayLo, 2) : null;
+
+      /* ── 16. Probability of price falling to today's low ────────────────── */
+      if (base.todayLow != null && base.todayLow < c - 1e-9 && !marketClosed) {
+        var lnProb = fillProbLognormal(base.todayLow);
+        base.probToTodayLowLognormal = lnProb != null ? round(lnProb * 100, 1) : null;
+        var emProb = fillProbEmpirical(base.todayLow);
+        base.probToTodayLowEmpirical = emProb != null ? round(emProb * 100, 1) : null;
+      }
 
       base.reason = 'ok';
       return base;

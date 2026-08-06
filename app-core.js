@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.54";
+window.__STOX_APP_VERSION = "2.10.57";
 
 /* Apply saved score config on startup */
 (function() {
@@ -2767,15 +2767,15 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
     if (!ticker || !DF || !TI) { setLoading(false); return; }
     let cancelled = false;
     setLoading(true); setErr(null); setRes(null);
-    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h"), DF.fetchOHLCVCached("^NSEI", "daily"), DF.fetchOHLCVCached(ticker, "15m")])
+    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h"), DF.fetchOHLCVCached("^NSEI", "daily"), DF.fetchOHLCVCached(ticker, "5m")])
       .then((r) => {
         if (cancelled) return;
         const d = r[0] && r[0].data;
         const h1 = r[1] && r[1].data;
         const idxD = r[2] && r[2].data;
-        const i15 = r[3] && r[3].data;
+        const i5 = r[3] && r[3].data;
         if (!d || d.length < 30 || !h1 || h1.length < 60) { setErr("insufficient_data"); return; }
-        setRes(TI.computeOptimumEntryPrice(h1, d, idxD, entryScoreContext || null, i15 || null));
+        setRes(TI.computeOptimumEntryPrice(h1, d, idxD, entryScoreContext || null, i5 || null));
       })
       .catch(() => { if (!cancelled) setErr("fetch"); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -2810,6 +2810,10 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
 
   const chips = [
     { k: "Current", v: price(res.currentPrice), x: "The latest market price \u2014 paying the full ask means no entry edge." },
+    { k: "Today High", v: res.todayHigh != null ? price(res.todayHigh) : "\u2014", x: "Highest price traded today." },
+    { k: "Today Low", v: res.todayLow != null ? price(res.todayLow) : "\u2014", x: "Lowest price traded today." },
+    { k: "Drop to Low (LN)", v: res.probToTodayLowLognormal != null ? "\u2248" + res.probToTodayLowLognormal + "%" : (res.todayLow != null && res.todayLow >= res.currentPrice - 0.01 ? "At low" : "\u2014"), x: res.todayLow != null && res.todayLow < res.currentPrice - 0.01 ? "Lognormal model \u2014 probability of price touching " + price(res.todayLow) + " before close." : "Current price is at or near today's low." },
+    { k: "Drop to Low (EM)", v: res.probToTodayLowEmpirical != null ? "\u2248" + res.probToTodayLowEmpirical + "%" : (res.todayLow != null && res.todayLow >= res.currentPrice - 0.01 ? "At low" : (cp.empiricalMethod === 'empirical' ? "Insufficient samples" : "\u2014")), x: res.todayLow != null && res.todayLow < res.currentPrice - 0.01 ? "Empirical model (" + cp.empiricalSampleCount + " samples) \u2014 non-parametric estimate using 5m intraday data." : cp.empiricalMethod !== 'empirical' ? "Insufficient 5m data for empirical estimate." : "Current price is at or near today's low." },
     { k: "Optimum Entry", v: price(entry), hint: disc != null && disc > 0 ? "limit " + disc + "% below current" : disc != null ? "at current price" : null, x: "Best limit price \u2014 highest level with strong odds of +4% in 10 sessions." },
     { k: "Odds @ entry", v: confE != null ? confE + "/100" : "\u2014", hint: confC != null ? "vs " + confC + " at current" : null, x: "10-day +4% confidence if bought at the optimum price." },
     { k: "Advantage", v: res.advantagePct != null ? (res.advantagePct > 0 ? "+" : "") + res.advantagePct + " pts" : "\u2014", x: "Extra confidence gained by buying at the limit instead of market." },
@@ -4346,7 +4350,7 @@ const EntryScorePanel = ({ shares }) => {
   };
 
   const exportEntryScoreCSV = () => {
-    var rows = [["Stock","Date Added","Hourly","Daily","Weekly","Base","Bonus/Pen","Final","10-Day Conf","Price on Add","Days","Current Price","% Change"]];
+    var rows = [["Stock","Date Added","Hourly","Daily","Weekly","Base","Bonus/Pen","Final","10DLN","10DEM","Price on Add","Days","Current Price","% Change"]];
     var now = new Date();
     entries.forEach(function(entry) {
       var addedDate = new Date(entry.addedAt);
@@ -4366,7 +4370,7 @@ const EntryScorePanel = ({ shares }) => {
       var pct = priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100).toFixed(2) : "";
       var dateStr = addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       function esc(v) { var s = String(v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
-      rows.push([esc(entry.ticker), esc(dateStr), hourly, daily, weekly, base, esc(bonus), final, entry.conf10d != null ? entry.conf10d : "", priceOnAdd, daysElapsed, currentPrice, pct].join(","));
+      rows.push([esc(entry.ticker), esc(dateStr), hourly, daily, weekly, base, esc(bonus), final, entry.conf10dLog != null ? entry.conf10dLog : "", entry.conf10dEmp != null ? entry.conf10dEmp : "", priceOnAdd, daysElapsed, currentPrice, pct].join(","));
     });
     var csv = rows.join("\r\n");
     var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
@@ -4486,12 +4490,12 @@ const EntryScorePanel = ({ shares }) => {
       try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
       const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
       if (result) result.lastClose = lastDailyClose;
-      let conf10d = null;
+      let conf10d = null, conf10dLog = null, conf10dEmp = null;
       try {
         const _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result));
-        if (_conf && _conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10;
+        if (_conf) { conf10dLog = _conf.confidenceLognormal; conf10dEmp = _conf.confidenceEmpirical; if (_conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10; }
       } catch (e) {}
-      const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d, indicators: { weekly: indW, daily: indD, hourly: indH } };
+      const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d, conf10dLog, conf10dEmp, indicators: { weekly: indW, daily: indD, hourly: indH } };
       saveEntries([entry, ...entries]);
       setAddTicker(""); setAddPrice(""); setShowAdd(false);
     } catch (e) { setAddErr("Error: " + (e.message || "Failed")); }
@@ -4988,7 +4992,8 @@ const EntryScorePanel = ({ shares }) => {
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Stock"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Date Added"),
               React.createElement("th", { colSpan: 6, style: { padding: "8px 10px", textAlign: "center", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Entry Score"),
-              React.createElement("th", { title: "10-day forward confidence score frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10-Day Conf"),
+              React.createElement("th", { title: "10-day forward confidence score frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10DLN"),
+              React.createElement("th", { title: "10-day forward confidence (empirical) frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10DEM"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Price on Add"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Days"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Current Price"),
@@ -5000,6 +5005,7 @@ const EntryScorePanel = ({ shares }) => {
               ["Hourly", "Daily", "Weekly", "Base", "Bonus/Pen", "Final"].map(function(sub) {
                 return React.createElement("th", { key: sub, style: { padding: "4px 10px", textAlign: "center", fontWeight: 600, color: "var(--text5)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, sub);
               }),
+              React.createElement("th", { style: { background: "var(--bg3)" } }),
               React.createElement("th", { style: { background: "var(--bg3)" } }),
               React.createElement("th", { style: { background: "var(--bg3)" } }),
               React.createElement("th", { style: { background: "var(--bg3)" } }),
@@ -5046,7 +5052,8 @@ const EntryScorePanel = ({ shares }) => {
                   ) : "—"
                 ),
                 React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: finalColor, fontWeight: 900 }) }, finalScore !== null ? finalScore : "—"),
-                React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: entry.conf10d != null ? (entry.conf10d >= 70 ? "#16a34a" : entry.conf10d >= 40 ? "#d97706" : "#dc2626") : "var(--text6)", fontFamily: "var(--font-mono)" } }, entry.conf10d != null ? Number(entry.conf10d).toFixed(0) : "—"),
+                React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: entry.conf10dLog != null ? (entry.conf10dLog >= 70 ? "#16a34a" : entry.conf10dLog >= 40 ? "#d97706" : "#dc2626") : "var(--text6)", fontFamily: "var(--font-mono)" } }, entry.conf10dLog != null ? Number(entry.conf10dLog).toFixed(0) : "—"),
+                React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: entry.conf10dEmp != null ? (entry.conf10dEmp >= 70 ? "#16a34a" : entry.conf10dEmp >= 40 ? "#d97706" : "#dc2626") : "var(--text6)", fontFamily: "var(--font-mono)" } }, entry.conf10dEmp != null ? Number(entry.conf10dEmp).toFixed(0) : "—"),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text2)", fontFamily: "var(--font-mono)" } }, priceOnAdd > 0 ? INR(priceOnAdd) : "—"),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text4)" } }, daysElapsed),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text2)", fontFamily: "var(--font-mono)" } }, currentPrice > 0 ? INR(currentPrice) : (perfTrackerRefreshing ? "..." : "—")),
@@ -5401,7 +5408,8 @@ const ConfidenceTracker = () => {
             ),
             React.createElement("th", { style: thStyle, title: "Sort by stock", onClick: function() { toggleSort("ticker"); } }, "Stock" + arrow("ticker")),
             React.createElement("th", { style: thStyle, title: "Sort by date added", onClick: function() { toggleSort("addedAt"); } }, "Date Added" + arrow("addedAt")),
-            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }), title: "Sort by confidence score", onClick: function() { toggleSort("confidence"); } }, "Conf 10D" + arrow("confidence")),
+            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }), title: "Sort by lognormal confidence score", onClick: function() { toggleSort("confidence"); } }, "10DLN" + arrow("confidence")),
+            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }) }, "10DEM"),
             React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }), title: "Sort by entry score", onClick: function() { toggleSort("entryScore"); } }, "Entry Score" + arrow("entryScore")),
             React.createElement("th", { style: thRight, title: "Sort by price on add", onClick: function() { toggleSort("priceOnAdd"); } }, "Price on Add" + arrow("priceOnAdd")),
             React.createElement("th", { style: thRight, title: "Sort by days held", onClick: function() { toggleSort("days"); } }, "Days" + arrow("days")),
@@ -7908,9 +7916,10 @@ function StockScreener(props) {
       function(r) { return r.result ? r.result.weekly : null; },
       function(r) { return r.result ? r.result.daily : null; },
       function(r) { return r.result ? r.result.hourly : null; },
-      function(r) { return r.conf10d; }
+      function(r) { return r.conf10dLog; },
+      function(r) { return r.conf10dEmp; }
     ];
-    var headers = ["Ticker","Company","Cap","Price","Today %","1D Chg %","1W Chg %","1M Chg %","Yearly %","Trend","Pullback","Prob4","Score","Weekly","Daily","Hourly","Conf 10D"];
+    var headers = ["Ticker","Company","Cap","Price","Today %","1D Chg %","1W Chg %","1M Chg %","Yearly %","Trend","Pullback","Prob4","Score","Weekly","Daily","Hourly","Conf 10DLN","Conf 10DEM"];
     function csvEsc(v) { if (v == null) return ""; var s = String(v); if (s.indexOf(",") !== -1 || s.indexOf('"') !== -1 || s.indexOf("\n") !== -1) return '"' + s.replace(/"/g, '""') + '"'; return s; }
     var rows = [headers.join(",")];
     results.forEach(function(r) {
@@ -7978,8 +7987,8 @@ function StockScreener(props) {
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
-      var conf10d = null;
-      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
+      var conf10d = null, conf10dLog = null, conf10dEmp = null;
+      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10) { conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -7992,8 +8001,8 @@ function StockScreener(props) {
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
       setResults(function(p) {
         var idx = p.findIndex(function(r) { return r.s.t === s.t; });
-        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d }; return copy; }
-        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d }]);
+        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp }; return copy; }
+        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp }]);
       });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[s.t] = Date.now(); return c; });
     } catch(e) {}
@@ -8029,8 +8038,8 @@ function StockScreener(props) {
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
-      var conf10d = null;
-      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
+      var conf10d = null, conf10dLog = null, conf10dEmp = null;
+      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10) { conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -8041,7 +8050,7 @@ function StockScreener(props) {
       var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
-      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d }]); });
+      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp }]); });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[stockObj.t] = Date.now(); return c; });
     } catch(e) { setScanErr("Failed to fetch " + tk); }
     setManualLoading(false); setManualTicker("");
@@ -8129,20 +8138,20 @@ function StockScreener(props) {
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
-          var conf10d = null;
-          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
-          var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
-          var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
-          var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
-          var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
-          var c252d = _yi - 252 >= 0 ? dc[_yi - 252].c : null;
-          var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
-          var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
-          var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
-          var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
-          var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
-          var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
-          if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d };
+           var conf10d = null, conf10dLog = null, conf10dEmp = null;
+           try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10) { conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
+           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
+           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
+           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
+           var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
+           var c252d = _yi - 252 >= 0 ? dc[_yi - 252].c : null;
+           var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
+           var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
+           var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
+           var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
+           var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
+           var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
+           if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp };
           bg.timestamps[stk.t] = Date.now();
         }
       } catch(e) {}
@@ -8209,9 +8218,9 @@ function StockScreener(props) {
         var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
         var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
         if (result) result.lastClose = lc;
-        var conf10d = null;
-        try { var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result)); if (_conf && _conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10; } catch(e) {}
-        entries.unshift({ id: Date.now() + i, ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d: conf10d, indicators: { weekly: indW, daily: indD, hourly: indH } });
+        var conf10d = null, conf10dLog = null, conf10dEmp = null;
+        try { var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result)); if (_conf) { conf10dLog = _conf.confidenceLognormal; conf10dEmp = _conf.confidenceEmpirical; conf10d = _conf.confidence != null ? Math.round(_conf.confidence * 10) / 10 : null; } } catch(e) {}
+        entries.unshift({ id: Date.now() + i, ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, indicators: { weekly: indW, daily: indD, hourly: indH } });
         added++;
       } catch(e) {}
     }
@@ -8287,8 +8296,8 @@ function StockScreener(props) {
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
-          var conf10d = null;
-          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
+          var conf10d = null, conf10dLog = null, conf10dEmp = null;
+          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10) { conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -8299,7 +8308,7 @@ function StockScreener(props) {
           var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
           var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
           var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
-          return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d };
+          return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp };
         } catch(e) { return null; }
       });
       var batchResults = await Promise.all(promises);
@@ -8337,7 +8346,8 @@ function StockScreener(props) {
     else if (sortKey === "weekly") { av = a.result.weekly ? a.result.weekly.total : 0; bv = b.result.weekly ? b.result.weekly.total : 0; }
     else if (sortKey === "daily") { av = a.result.daily ? a.result.daily.total : 0; bv = b.result.daily ? b.result.daily.total : 0; }
     else if (sortKey === "hourly") { av = a.result.hourly ? a.result.hourly.total : 0; bv = b.result.hourly ? b.result.hourly.total : 0; }
-    else if (sortKey === "conf10d") { av = a.conf10d != null ? a.conf10d : -1; bv = b.conf10d != null ? b.conf10d : -1; }
+    else if (sortKey === "conf10dLog") { av = a.conf10dLog != null ? a.conf10dLog : -1; bv = b.conf10dLog != null ? b.conf10dLog : -1; }
+    else if (sortKey === "conf10dEmp") { av = a.conf10dEmp != null ? a.conf10dEmp : -1; bv = b.conf10dEmp != null ? b.conf10dEmp : -1; }
     else { av = a.result.finalScore; bv = b.result.finalScore; }
     return sortDir === "asc" ? av - bv : bv - av;
   });
@@ -8479,15 +8489,15 @@ function StockScreener(props) {
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1640 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
-              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "yearChg", "avgTrend", "avgPullback", "avgProb4", "finalScore", "weekly", "daily", "hourly", "conf10d", "actions"].map(function(k) {
+              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "yearChg", "avgTrend", "avgPullback", "avgProb4", "finalScore", "weekly", "daily", "hourly", "conf10dLog", "conf10dEmp", "actions"].map(function(k) {
                 if (k === "select") {
                   var allFilteredSelected = filtered.length > 0 && filtered.every(function(r) { return selected[r.s.t]; });
                   return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: "default", textAlign: "center", width: 36 }) },
                     React.createElement("input", { type: "checkbox", checked: allFilteredSelected, onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
                   );
                 }
-                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", yearChg: "Yearly %", avgTrend: "Trend", avgPullback: "Pullback", avgProb4: "Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", actions: "Last Refreshed" };
-                return React.createElement("th", { key: k, title: k === "conf10d" ? "Confidence Score \u2014 Next 10 Days (chance of +4% from current price within 10 trading days, /100)" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" ? "default" : "pointer" }), onClick: k === "actions" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" ? "" : arrow(k)));
+                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", yearChg: "Yearly %", avgTrend: "Trend", avgPullback: "Pullback", avgProb4: "Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10dLog: "Conf 10DLN", conf10dEmp: "Conf 10DEM", actions: "Last Refreshed" };
+                return React.createElement("th", { key: k, title: k === "conf10dLog" ? "10-Day Confidence \u2014 Lognormal Model" : k === "conf10dEmp" ? "10-Day Confidence \u2014 Empirical Model" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" ? "default" : "pointer" }), onClick: k === "actions" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" ? "" : arrow(k)));
               })
             )
           ),
@@ -8552,9 +8562,14 @@ function StockScreener(props) {
                 React.createElement("td", { style: tdStyle }, r.result.daily ? React.createElement("span", { style: { fontWeight: 700, color: r.result.daily.decision.color } }, r.result.daily.total) : "\u2014"),
                 React.createElement("td", { style: tdStyle }, r.result.hourly ? React.createElement("span", { style: { fontWeight: 700, color: r.result.hourly.decision.color } }, r.result.hourly.total) : "\u2014"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
-                  r.conf10d != null
-                    ? React.createElement("span", { title: "Confidence Score \u2014 Next 10 Days (" + Number(r.conf10d).toFixed(0) + "/100)", style: { fontWeight: 800, fontFamily: "var(--font-heading)", color: r.conf10d >= 70 ? "#16a34a" : r.conf10d >= 40 ? "#d97706" : "#dc2626" } }, Number(r.conf10d).toFixed(0))
-                    : React.createElement("span", { title: "Confidence Score \u2014 Next 10 Days", style: { fontSize: 10, color: "var(--text6)" } }, "\u2014")
+                  r.conf10dLog != null
+                    ? React.createElement("span", { title: "10-Day Confidence \u2014 Lognormal (" + Number(r.conf10dLog).toFixed(1) + "/100)", style: { fontWeight: 700, fontFamily: "var(--font-mono)", color: r.conf10dLog >= 70 ? "#16a34a" : r.conf10dLog >= 40 ? "#d97706" : "#dc2626", fontSize: 11 } }, Number(r.conf10dLog).toFixed(0))
+                    : React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "\u2014")
+                ),
+                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                  r.conf10dEmp != null
+                    ? React.createElement("span", { title: "10-Day Confidence \u2014 Empirical (" + Number(r.conf10dEmp).toFixed(1) + "/100)", style: { fontWeight: 700, fontFamily: "var(--font-mono)", color: r.conf10dEmp >= 70 ? "#16a34a" : r.conf10dEmp >= 40 ? "#d97706" : "#dc2626", fontSize: 11 } }, Number(r.conf10dEmp).toFixed(0))
+                    : React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "\u2014")
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { whiteSpace: "nowrap" }) },
                   React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
@@ -8886,7 +8901,7 @@ function SingleStockAnalysis({ requestedTicker }) {
         var idxD = null;
         try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch (e) {}
         var i15 = null;
-        try { var _r15 = await DF.fetchOHLCVCached(ticker, "15m"); i15 = (_r15 && _r15.data) || null; } catch (e) {}
+        try { var _r15 = await DF.fetchOHLCVCached(ticker, "5m"); i15 = (_r15 && _r15.data) || null; } catch (e) {}
         tenDayConf = TI.computeTenDayForwardConfidence(h1, d, idxD);
         var _snapEntryCtx = mtf && mtf.entry ? buildEntryScoreContext(mtf.entry) : null;
         optimumRes = TI.computeOptimumEntryPrice(h1, d, idxD, _snapEntryCtx, i15);
