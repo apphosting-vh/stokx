@@ -2670,7 +2670,7 @@ window.TechIndicators = (function () {
      without editing source code. Updated via setScoreConfig(). */
   var SCORE_CONFIG = {
     /* Pillar max scores */
-    pillarMax: { trendHealth: 30, pullbackQuality: 30, prob4: 40 },
+    pillarMax: { trendHealth: 35, pullbackQuality: 30, prob4: 40 },
     /* MTF weights */
     tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
 
