@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.38";
+window.__STOX_APP_VERSION = "2.10.40";
 
 /* Apply saved score config on startup */
 (function() {
@@ -4455,7 +4455,7 @@ const EntryScorePanel = ({ shares }) => {
       if (result) result.lastClose = lastDailyClose;
       let conf10d = null;
       try {
-        const _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD);
+        const _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result));
         if (_conf && _conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10;
       } catch (e) {}
       const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d, indicators: { weekly: indW, daily: indD, hourly: indH } };
@@ -5173,7 +5173,7 @@ const ConfidenceTracker = () => {
       const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
       let confidence = null;
       try {
-        const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD);
+        const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result));
         if (conf && conf.confidence != null) confidence = conf.confidence;
       } catch (e) {}
       const row = {
@@ -7691,6 +7691,11 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles, ind
   return out;
 }
 
+function buildEntryScoreContext(result) {
+  if (!result) return null;
+  return { entryScore: result.finalScore, trendHealth: result.aggTrendHealth, pullbackQuality: result.aggPullbackQuality, prob4: result.aggProb4 };
+}
+
 function StockScreener(props) {
   props = props || {};
   var onOpenStock = props.onOpenStock;
@@ -7901,7 +7906,7 @@ function StockScreener(props) {
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
       var conf10d = null;
-      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
+      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -7950,7 +7955,7 @@ function StockScreener(props) {
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
       var conf10d = null;
-      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
+      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -8048,7 +8053,7 @@ function StockScreener(props) {
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
           var conf10d = null;
-          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
+          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -8126,7 +8131,7 @@ function StockScreener(props) {
         var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
         if (result) result.lastClose = lc;
         var conf10d = null;
-        try { var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD); if (_conf && _conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10; } catch(e) {}
+        try { var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result)); if (_conf && _conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10; } catch(e) {}
         entries.unshift({ id: Date.now() + i, ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d: conf10d, indicators: { weekly: indW, daily: indD, hourly: indH } });
         added++;
       } catch(e) {}
@@ -8160,7 +8165,7 @@ function StockScreener(props) {
         var lc = resD.data[resD.data.length - 1].c;
         var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, null);
         var confidence = null;
-        try { var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD); if (conf && conf.confidence != null) confidence = conf.confidence; } catch(e) {}
+        try { var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result)); if (conf && conf.confidence != null) confidence = conf.confidence; } catch(e) {}
         entries.unshift({ id: Date.now() + i, ticker: tk, addedAt: new Date().toISOString(), confidence: confidence != null ? Math.round(confidence * 10) / 10 : null, entryScore: result && result.finalScore != null ? result.finalScore : null, entryDecision: result && result.decision ? result.decision.label : null, currentPrice: lc || 0 });
         added++;
       } catch(e) {}
@@ -8204,7 +8209,7 @@ function StockScreener(props) {
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
           var conf10d = null;
-          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
+          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10 && _c10.confidence != null) conf10d = _c10.confidence; } catch(e) {}
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;

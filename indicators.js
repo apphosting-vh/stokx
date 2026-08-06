@@ -2557,6 +2557,7 @@ window.TechIndicators = (function () {
       }
 
       var bbRes = calcBollingerBands(candles);
+      var bbUpper = gv(bbRes.upper);
       var bbLower = gv(bbRes.lower);
       var bbWidthArr = [];
       for (var i = 0; i < bbRes.upper.length; i++) {
@@ -2566,6 +2567,12 @@ window.TechIndicators = (function () {
       }
       var bbWidth = gv(bbWidthArr);
       var bbWidthPrev5 = (L1 - 5 >= 0 && L1 - 5 < bbWidthArr.length) ? bbWidthArr[L1 - 5] : null;
+
+      var upDayVol = 0, dnDayVol = 0;
+      for (var j = Math.max(1, L - 20); j < L; j++) {
+        if (cl[j] >= cl[j - 1]) upDayVol += vo[j]; else dnDayVol += vo[j];
+      }
+      var upDownVolRatio = (dnDayVol > 0) ? upDayVol / dnDayVol : (upDayVol > 0 ? 2 : 1);
 
       var stochRsiK = gv(calcStochasticRSI(candles).k);
       var rsi14 = gv(calcRSI(candles, 14));
@@ -2614,9 +2621,9 @@ window.TechIndicators = (function () {
         cl: cl, vo: vo, volRatio: volRatio,
         sma20: sma20, sma50: sma50, sma20Slope5: sma20Slope5, anchoredVwap: anchoredVwap,
         adxL: adxL, plusDI: plusDI, minusDI: minusDI, macdL: macdL, sigL: sigL, rsMansfield: rsMansfield,
-        bbLower: bbLower, bbWidth: bbWidth, bbWidthPrev5: bbWidthPrev5,
+        bbUpper: bbUpper, bbLower: bbLower, bbWidth: bbWidth, bbWidthPrev5: bbWidthPrev5,
         stochRsiK: stochRsiK, rsi14: rsi14, atr14: atr14, atr10: atr10,
-        efficiencyRatio10: efficiencyRatio10,
+        efficiencyRatio10: efficiencyRatio10, upDownVolRatio: upDownVolRatio,
         beta: beta, stability20: stability20, spikeLast: spikeLast, gapPct: gapPct,
         weeklyHABullish: weeklyHABullish,
         buyRef: sma20 != null ? sma20 : (bbLower != null ? bbLower : null)
@@ -2705,27 +2712,34 @@ window.TechIndicators = (function () {
     },
     /* Pillar 3: 4% Probability */
     prob4: {
-      targetReachable_T1: 15,
+      targetReachable_T1: 12,
       targetATR_threshold1: 2.0,
-      targetReachable_T2: 12,
+      targetReachable_T2: 10,
       targetATR_threshold2: 1.5,
-      targetReachable_T3: 8,
+      targetReachable_T3: 6,
       targetATR_threshold3: 1.0,
-      targetReachable_T4: 3,
-      targetDist_T1: 10,
+      targetReachable_T4: 2,
+      targetDist_T1: 8,
       targetDist_range1_lo: 0.25,
       targetDist_range1_hi: 2.0,
-      targetDist_T2: 5,
+      targetDist_T2: 4,
       targetDist_range2_lo: 0,
       targetDist_range2_hi: 3.0,
-      volSweet_T1: 10,
+      volSweet_T1: 8,
       volPercentile_lo: 30,
       volPercentile_hi: 70,
-      volSweet_T2: 5,
+      volSweet_T2: 4,
       volPercentile_lo2: 20,
       volPercentile_hi2: 80,
-      efficiencyRatio: 5,
+      efficiencyRatio: 4,
       efficiencyRatioThreshold: 0.4,
+      upDayVolBonus: 5,
+      upDayVol_threshold: 1.2,
+      upDayVolPenalty: -5,
+      upDayVol_low: 0.7,
+      directionalBias: 5,
+      resistancePenalty: -5,
+      resistanceThreshold: 0.04,
       targetPct: 0.04,
     },
     /* Modifiers */
@@ -2839,6 +2853,20 @@ window.TechIndicators = (function () {
     else if (atrPercentile >= c.volPercentile_lo2 && atrPercentile <= c.volPercentile_hi2) s += c.volSweet_T2;
 
     if (sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > c.efficiencyRatioThreshold) s += c.efficiencyRatio;
+
+    if (sn.upDownVolRatio != null) {
+      if (sn.upDownVolRatio >= c.upDayVol_threshold) s += c.upDayVolBonus;
+      else if (sn.upDownVolRatio <= c.upDayVol_low) s += c.upDayVolPenalty;
+    }
+
+    if (sn.plusDI != null && sn.minusDI != null) {
+      if (sn.plusDI > sn.minusDI) s += c.directionalBias;
+    }
+
+    if (sn.bbUpper != null && sn.c != null && sn.c > 0) {
+      var headroom = (sn.bbUpper - sn.c) / sn.c;
+      if (headroom < c.resistanceThreshold) s += c.resistancePenalty;
+    }
 
     return Math.min(s, SCORE_CONFIG.pillarMax.prob4);
   }
