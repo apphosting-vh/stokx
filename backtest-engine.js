@@ -720,6 +720,7 @@ window.BacktestEngine = (function () {
       var pResults = {};
       if (pillarSweep) {
         var pillarSweepCfg = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig().pillarMax : null;
+        if (!pillarSweepCfg && window.TechIndicators && window.TechIndicators.getDefaultScoreConfig) pillarSweepCfg = window.TechIndicators.getDefaultScoreConfig().pillarMax;
         var pillars = [
           { key: 'trendHealth', optKey: 'minTrendHealth', label: 'Trend Health', max: pillarSweepCfg ? pillarSweepCfg.trendHealth : 30, values: pillarSweep.trendHealth || [0, 5, 10, 15, 20, 25] },
           { key: 'pullbackQuality', optKey: 'minPullbackQuality', label: 'Pullback Quality', max: pillarSweepCfg ? pillarSweepCfg.pullbackQuality : 30, values: pillarSweep.pullbackQuality || [0, 5, 10, 15, 20, 25] },
@@ -869,7 +870,7 @@ window.BacktestEngine = (function () {
       /* Compute pillar consumption stats */
       var pillars = ['trendHealth', 'pullbackQuality', 'prob4'];
       var _sc = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
-      var pillarMax = _sc.pillarMax || { trendHealth: 30, pullbackQuality: 30, prob4: 40 };
+      var pillarMax = _sc.pillarMax || (window.TechIndicators && window.TechIndicators.getDefaultScoreConfig ? window.TechIndicators.getDefaultScoreConfig().pillarMax : { trendHealth: 30, pullbackQuality: 30, prob4: 40 });
       var pillarConsumption = {};
       pillars.forEach(function(p) {
         var maxVal = pillarMax[p] || 0;
