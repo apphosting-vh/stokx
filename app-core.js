@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.47";
+window.__STOX_APP_VERSION = "2.10.51";
 
 /* Apply saved score config on startup */
 (function() {
@@ -7867,6 +7867,7 @@ function StockScreener(props) {
       function(r) { return r.dayChg; },
       function(r) { return r.weekChg; },
       function(r) { return r.monthChg; },
+      function(r) { return r.yearChg; },
       function(r) { return r.result ? r.result.aggTrendHealth : null; },
       function(r) { return r.result ? r.result.aggPullbackQuality : null; },
       function(r) { return r.result ? r.result.aggProb4 : null; },
@@ -7876,7 +7877,7 @@ function StockScreener(props) {
       function(r) { return r.result ? r.result.hourly : null; },
       function(r) { return r.conf10d; }
     ];
-    var headers = ["Ticker","Company","Cap","Price","Today %","1D Chg %","1W Chg %","1M Chg %","Trend","Pullback","Prob4","Score","Weekly","Daily","Hourly","Conf 10D"];
+    var headers = ["Ticker","Company","Cap","Price","Today %","1D Chg %","1W Chg %","1M Chg %","Yearly %","Trend","Pullback","Prob4","Score","Weekly","Daily","Hourly","Conf 10D"];
     function csvEsc(v) { if (v == null) return ""; var s = String(v); if (s.indexOf(",") !== -1 || s.indexOf('"') !== -1 || s.indexOf("\n") !== -1) return '"' + s.replace(/"/g, '""') + '"'; return s; }
     var rows = [headers.join(",")];
     results.forEach(function(r) {
@@ -7950,14 +7951,16 @@ function StockScreener(props) {
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
       var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
+      var c252d = _yi - 252 >= 0 ? dc[_yi - 252].c : null;
       var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
       var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
       var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
+      var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
       setResults(function(p) {
         var idx = p.findIndex(function(r) { return r.s.t === s.t; });
-        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, conf10d: conf10d }; return copy; }
-        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, conf10d: conf10d }]);
+        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d }; return copy; }
+        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d }]);
       });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[s.t] = Date.now(); return c; });
     } catch(e) {}
@@ -7999,11 +8002,13 @@ function StockScreener(props) {
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
       var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
+      var c252d = _yi - 252 >= 0 ? dc[_yi - 252].c : null;
       var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
       var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
       var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
-      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, conf10d: conf10d }]); });
+      var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
+      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d }]); });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[stockObj.t] = Date.now(); return c; });
     } catch(e) { setScanErr("Failed to fetch " + tk); }
     setManualLoading(false); setManualTicker("");
@@ -8097,12 +8102,14 @@ function StockScreener(props) {
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
           var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
+          var c252d = _yi - 252 >= 0 ? dc[_yi - 252].c : null;
           var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
           var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
           var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
           var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
+          var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
           var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
-          if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, conf10d: conf10d };
+          if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d };
           bg.timestamps[stk.t] = Date.now();
         }
       } catch(e) {}
@@ -8253,11 +8260,13 @@ function StockScreener(props) {
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
           var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
+          var c252d = _yi - 252 >= 0 ? dc[_yi - 252].c : null;
           var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
           var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
           var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
           var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
-          return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, todayChg: todayChg, conf10d: conf10d };
+          var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
+          return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d };
         } catch(e) { return null; }
       });
       var batchResults = await Promise.all(promises);
@@ -8291,6 +8300,7 @@ function StockScreener(props) {
     else if (sortKey === "dayChg") { av = a.dayChg != null ? a.dayChg : -999; bv = b.dayChg != null ? b.dayChg : -999; }
     else if (sortKey === "weekChg") { av = a.weekChg != null ? a.weekChg : -999; bv = b.weekChg != null ? b.weekChg : -999; }
     else if (sortKey === "monthChg") { av = a.monthChg != null ? a.monthChg : -999; bv = b.monthChg != null ? b.monthChg : -999; }
+    else if (sortKey === "yearChg") { av = a.yearChg != null ? a.yearChg : -999; bv = b.yearChg != null ? b.yearChg : -999; }
     else if (sortKey === "weekly") { av = a.result.weekly ? a.result.weekly.total : 0; bv = b.result.weekly ? b.result.weekly.total : 0; }
     else if (sortKey === "daily") { av = a.result.daily ? a.result.daily.total : 0; bv = b.result.daily ? b.result.daily.total : 0; }
     else if (sortKey === "hourly") { av = a.result.hourly ? a.result.hourly.total : 0; bv = b.result.hourly ? b.result.hourly.total : 0; }
@@ -8436,14 +8446,14 @@ function StockScreener(props) {
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1640 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
-              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "avgTrend", "avgPullback", "avgProb4", "finalScore", "weekly", "daily", "hourly", "conf10d", "actions"].map(function(k) {
+              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "yearChg", "avgTrend", "avgPullback", "avgProb4", "finalScore", "weekly", "daily", "hourly", "conf10d", "actions"].map(function(k) {
                 if (k === "select") {
                   var allFilteredSelected = filtered.length > 0 && filtered.every(function(r) { return selected[r.s.t]; });
                   return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: "default", textAlign: "center", width: 36 }) },
                     React.createElement("input", { type: "checkbox", checked: allFilteredSelected, onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
                   );
                 }
-                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", avgTrend: "Trend", avgPullback: "Pullback", avgProb4: "Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", actions: "Last Refreshed" };
+                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", yearChg: "Yearly %", avgTrend: "Trend", avgPullback: "Pullback", avgProb4: "Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10d: "Conf 10D", actions: "Last Refreshed" };
                 return React.createElement("th", { key: k, title: k === "conf10d" ? "Confidence Score \u2014 Next 10 Days (chance of +4% from current price within 10 trading days, /100)" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" ? "default" : "pointer" }), onClick: k === "actions" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" ? "" : arrow(k)));
               })
             )
@@ -8483,6 +8493,7 @@ function StockScreener(props) {
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.dayChg != null ? (r.dayChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.dayChg != null ? (r.dayChg >= 0 ? "+" : "") + Number(r.dayChg).toFixed(2) + "%" : "--"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.weekChg != null ? (r.weekChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.weekChg != null ? (r.weekChg >= 0 ? "+" : "") + Number(r.weekChg).toFixed(2) + "%" : "--"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.monthChg != null ? (r.monthChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.monthChg != null ? (r.monthChg >= 0 ? "+" : "") + Number(r.monthChg).toFixed(2) + "%" : "--"),
+                React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.yearChg != null ? (r.yearChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.yearChg != null ? (r.yearChg >= 0 ? "+" : "") + Number(r.yearChg).toFixed(2) + "%" : "--"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
                   r.result.aggTrendHealth != null
                     ? React.createElement("span", { title: "Trend Health contribution to entry score " + r.result.finalScore, style: { fontWeight: 700, color: "var(--accent)" } }, Number(r.result.aggTrendHealth).toFixed(1))

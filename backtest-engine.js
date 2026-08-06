@@ -417,15 +417,21 @@ window.BacktestEngine = (function () {
        empirical hit rates, derive calP0 (50% crossover) and calK (slope). */
     function calibrateConfidence(trades) {
       var withPT = trades.filter(function(t) { return t.probTouch != null && !isNaN(t.probTouch); });
-      if (withPT.length < 20) return null;
+      var MIN_TOTAL = 50;
+      var TARGET_PER_BUCKET = 15;
+      var MIN_BUCKETS = 3;
+      var MAX_BUCKETS = 10;
+      if (withPT.length < MIN_TOTAL) return null;
+      var bucketCount = Math.max(MIN_BUCKETS, Math.min(MAX_BUCKETS, Math.floor(withPT.length / TARGET_PER_BUCKET)));
       var sorted = withPT.slice().sort(function(a, b) { return a.probTouch - b.probTouch; });
-      var bucketCount = Math.min(10, sorted.length);
       var bucketSize = Math.floor(sorted.length / bucketCount);
+      if (bucketSize < 3) { bucketCount = Math.floor(sorted.length / 3); if (bucketCount < MIN_BUCKETS) return null; bucketSize = Math.floor(sorted.length / bucketCount); }
       var buckets = [];
       for (var i = 0; i < bucketCount; i++) {
         var start = i * bucketSize;
         var end = i === bucketCount - 1 ? sorted.length : start + bucketSize;
         var group = sorted.slice(start, end);
+        if (group.length < 3) continue;
         var hits = group.filter(function(t) { return t.hitTarget; }).length;
         var avgPT = group.reduce(function(s, t) { return s + t.probTouch; }, 0) / group.length;
         buckets.push({
@@ -438,6 +444,7 @@ window.BacktestEngine = (function () {
           misses: group.length - hits
         });
       }
+      if (buckets.length < 3) return null;
       var calP0 = null, calK = null;
       for (var j = 1; j < buckets.length; j++) {
         if (buckets[j - 1].hitRate < 50 && buckets[j].hitRate >= 50) {
@@ -465,14 +472,27 @@ window.BacktestEngine = (function () {
           if (pAt50 > 0.05 && pAt50 < 0.95 && Math.abs(slope) > 0.5) calP0 = Math.round(pAt50 * 1000) / 1000;
         }
       }
-      var empiricalK = null;
       if (calP0 > 0 && calP0 < 1) {
-        var baseLogit = Math.log(calP0 / (1 - calP0));
-        var midBucket = buckets[Math.floor(buckets.length / 2)];
-        var empiricalLogit = Math.log(Math.max(0.01, Math.min(0.99, midBucket.hitRate / 100)) / Math.max(0.01, 1 - midBucket.hitRate / 100));
-        var empScoreMid = 50 + (empiricalLogit - baseLogit) * 38;
-        calK = Math.round(empScoreMid * 10) / 10;
+        var logitPts = buckets.filter(function(b) { return b.hitRate > 1 && b.hitRate < 99 && b.avgProbTouch > 0.01 && b.avgProbTouch < 0.99; })
+          .map(function(b) {
+            var lx = Math.log(b.avgProbTouch / (1 - b.avgProbTouch));
+            var ly = Math.log(b.hitRate / 100 / (1 - b.hitRate / 100));
+            return { x: lx, y: ly };
+          });
+        if (logitPts.length >= 3) {
+          var lsx = 0, lsy = 0, lsxy = 0, lsx2 = 0;
+          for (var k = 0; k < logitPts.length; k++) {
+            lsx += logitPts[k].x; lsy += logitPts[k].y;
+            lsxy += logitPts[k].x * logitPts[k].y; lsx2 += logitPts[k].x * logitPts[k].x;
+          }
+          var lDenom = logitPts.length * lsx2 - lsx * lsx;
+          if (Math.abs(lDenom) > 1e-10) {
+            var logitSlope = (logitPts.length * lsxy - lsx * lsy) / lDenom;
+            calK = Math.max(5, Math.min(100, Math.round(logitSlope * 100) / 100));
+          }
+        }
       }
+      if (calK == null || calK <= 0) calK = 38;
       return { buckets: buckets, calP0: calP0, calK: calK, n: withPT.length };
     }
 
