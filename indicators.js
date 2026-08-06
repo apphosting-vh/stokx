@@ -2616,6 +2616,18 @@ window.TechIndicators = (function () {
 
       var sma20Slope5 = sma20_s ? slope(sma20_s, 5) : null;
 
+      var swingHigh20 = null;
+      for (var j = Math.max(0, L - 20); j < L; j++) { if (cl[j] != null && (swingHigh20 === null || cl[j] > swingHigh20)) swingHigh20 = cl[j]; }
+      var pullbackDepth = (swingHigh20 != null && swingHigh20 > 0 && c != null) ? (swingHigh20 - c) / swingHigh20 : null;
+
+      var supportLevels = [sma20, bbLower, anchoredVwap, sma50];
+      var nearSupportCount = 0;
+      if (c != null && c > 0 && atr14 != null) {
+        for (var j = 0; j < supportLevels.length; j++) {
+          if (supportLevels[j] != null && Math.abs(c - supportLevels[j]) / c < atr14 / c * 0.5) nearSupportCount++;
+        }
+      }
+
       return {
         c: c, pc: L >= 2 ? cl[L1 - 1] : null, o: op[L1] != null ? op[L1] : c, h: hi[L1], l: lo[L1],
         cl: cl, vo: vo, volRatio: volRatio,
@@ -2626,7 +2638,8 @@ window.TechIndicators = (function () {
         efficiencyRatio10: efficiencyRatio10, upDownVolRatio: upDownVolRatio,
         beta: beta, stability20: stability20, spikeLast: spikeLast, gapPct: gapPct,
         weeklyHABullish: weeklyHABullish,
-        buyRef: sma20 != null ? sma20 : (bbLower != null ? bbLower : null)
+        buyRef: sma20 != null ? sma20 : (bbLower != null ? bbLower : null),
+        pullbackDepth: pullbackDepth, nearSupportCount: nearSupportCount
       };
     } catch (e) { return null; }
   }
@@ -2677,7 +2690,7 @@ window.TechIndicators = (function () {
      without editing source code. Updated via setScoreConfig(). */
   var SCORE_CONFIG = {
     /* Pillar max scores */
-    pillarMax: { trendHealth: 35, pullbackQuality: 30, prob4: 40 },
+    pillarMax: { trendHealth: 35, pullbackQuality: 35, prob4: 40 },
     /* MTF weights */
     tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
 
@@ -2697,18 +2710,24 @@ window.TechIndicators = (function () {
     },
     /* Pillar 2: Pullback Quality */
     pullbackQuality: {
-      distATR_inner: 10,
+      distATR_inner: 7,
       distATR_innerRange: 1.0,
-      distATR_outer: 5,
+      distATR_outer: 3,
       distATR_outerRange: 1.5,
-      candleColor: 5,
-      bbWidthSqueeze: 5,
-      rsiOversold: 5,
+      candleColor: 4,
+      bbWidthSqueeze: 3,
+      rsiOversold: 3,
       stochRSIThreshold: 20,
       rsiOversoldNormal: 40,
       rsiOversoldHighVol: 35,
-      volumeConfirm: 5,
+      volumeConfirm: 4,
       volRatioThreshold: 1.5,
+      pullbackDepthIdeal: 6,
+      pullbackDepthLo: 0.05,
+      pullbackDepthHi: 0.15,
+      pullbackDepthMax: 0.25,
+      supportConfluence: 5,
+      supportConfluenceThreshold: 2,
     },
     /* Pillar 3: 4% Probability */
     prob4: {
@@ -2821,6 +2840,8 @@ window.TechIndicators = (function () {
     var rsiOversold = (volRegime && volRegime.regime === 'high') ? c.rsiOversoldHighVol : c.rsiOversoldNormal;
     if ((sn.stochRsiK != null && sn.stochRsiK < c.stochRSIThreshold) || (sn.rsi14 != null && sn.rsi14 < rsiOversold)) s += c.rsiOversold;
     if (sn.volRatio != null && sn.volRatio > c.volRatioThreshold && sn.c != null && sn.o != null && sn.c > sn.o) s += c.volumeConfirm;
+    if (sn.pullbackDepth != null && sn.pullbackDepth >= c.pullbackDepthLo && sn.pullbackDepth <= c.pullbackDepthHi) s += c.pullbackDepthIdeal;
+    if (sn.nearSupportCount != null && sn.nearSupportCount >= c.supportConfluenceThreshold) s += c.supportConfluence;
     return Math.min(s, SCORE_CONFIG.pillarMax.pullbackQuality);
   }
 
