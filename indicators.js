@@ -2817,9 +2817,10 @@ window.TechIndicators = (function () {
       else if (distATR >= -c.distATR_outerRange && distATR <= c.distATR_outerRange) s += c.distATR_outer;
     }
     if (sn.c != null && sn.o != null && sn.c > sn.o) s += c.candleColor;
-    if (sn.bbWidth != null && sn.bbWidthPrev5 != null && sn.bbWidth < sn.bbWidthPrev5) s += c.bbWidthSqueeze;
+    var trendUp = (sn.plusDI != null && sn.minusDI != null && sn.plusDI > sn.minusDI) || (sn.c != null && sn.sma50 != null && sn.c > sn.sma50);
+    if (sn.bbWidth != null && sn.bbWidthPrev5 != null && sn.bbWidth < sn.bbWidthPrev5 && trendUp) s += c.bbWidthSqueeze;
     var rsiOversold = (volRegime && volRegime.regime === 'high') ? c.rsiOversoldHighVol : c.rsiOversoldNormal;
-    if ((sn.stochRsiK != null && sn.stochRsiK < c.stochRSIThreshold) || (sn.rsi14 != null && sn.rsi14 < rsiOversold)) s += c.rsiOversold;
+    if (((sn.stochRsiK != null && sn.stochRsiK < c.stochRSIThreshold) || (sn.rsi14 != null && sn.rsi14 < rsiOversold)) && trendUp) s += c.rsiOversold;
     if (sn.volRatio != null && sn.volRatio > c.volRatioThreshold && sn.c != null && sn.o != null && sn.c > sn.o) s += c.volumeConfirm;
     return Math.min(s, SCORE_CONFIG.pillarMax.pullbackQuality);
   }
