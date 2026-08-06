@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stox-v179';
+const CACHE_NAME = 'stox-v180';
 const urlsToCache = [
   './',
   './index.html',

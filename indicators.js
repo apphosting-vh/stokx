@@ -2628,6 +2628,21 @@ window.TechIndicators = (function () {
         }
       }
 
+      /* Pick nearest support level at or below price as buyRef.
+         Falls back through: nearest support → SMA(20) → BB Lower → null */
+      var buyRef = null;
+      if (c != null && c > 0) {
+        var bestDist = Infinity;
+        for (var j = 0; j < supportLevels.length; j++) {
+          var lv = supportLevels[j];
+          if (lv != null && lv > 0 && lv <= c) {
+            var d = c - lv;
+            if (d < bestDist) { bestDist = d; buyRef = lv; }
+          }
+        }
+      }
+      if (buyRef == null) buyRef = sma20 != null ? sma20 : (bbLower != null ? bbLower : null);
+
       return {
         c: c, pc: L >= 2 ? cl[L1 - 1] : null, o: op[L1] != null ? op[L1] : c, h: hi[L1], l: lo[L1],
         cl: cl, vo: vo, volRatio: volRatio,
@@ -2638,7 +2653,7 @@ window.TechIndicators = (function () {
         efficiencyRatio10: efficiencyRatio10, upDownVolRatio: upDownVolRatio,
         beta: beta, stability20: stability20, spikeLast: spikeLast, gapPct: gapPct,
         weeklyHABullish: weeklyHABullish,
-        buyRef: sma20 != null ? sma20 : (bbLower != null ? bbLower : null),
+        buyRef: buyRef,
         pullbackDepth: pullbackDepth, nearSupportCount: nearSupportCount
       };
     } catch (e) { return null; }
