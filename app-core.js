@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.45";
+window.__STOX_APP_VERSION = "2.10.46";
 
 /* Apply saved score config on startup */
 (function() {
@@ -8128,7 +8128,7 @@ function StockScreener(props) {
   var selectedCount = Object.keys(selected).filter(function(t) { return selected[t]; }).length;
 
   var batchAddToES = async function() {
-    var tickers = Object.keys(selected).filter(function(t) { return selected[t]; });
+    var tickers = Object.keys(selected).filter(function(t) { return selected[t]; }).map(function(t) { return t.replace(/\.NS$/, ""); });
     if (!tickers.length) return;
     var existing = await dbGetSetting("mm_entry_scores");
     var entries = (Array.isArray(existing) ? existing : []);
@@ -8167,7 +8167,7 @@ function StockScreener(props) {
   };
 
   var batchAddToCS = async function() {
-    var tickers = Object.keys(selected).filter(function(t) { return selected[t]; });
+    var tickers = Object.keys(selected).filter(function(t) { return selected[t]; }).map(function(t) { return t.replace(/\.NS$/, ""); });
     if (!tickers.length) return;
     var existing = await dbGetSetting(LS_CONF_TRACKER);
     var entries = (Array.isArray(existing) ? existing : []);
