@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.46";
+window.__STOX_APP_VERSION = "2.10.47";
 
 /* Apply saved score config on startup */
 (function() {
@@ -7858,12 +7858,29 @@ function StockScreener(props) {
 
   var exportExcel = function() {
     if (!results.length) return;
-    var cols = ["ticker","name","cap","price","todayChg","dayChg","weekChg","monthChg","avgTrend","avgPullback","avgProb4","finalScore","weekly","daily","hourly","conf10d"];
+    var cols = [
+      function(r) { return r.s ? r.s.t.replace(/\.NS$/, "") : ""; },
+      function(r) { return r.s ? r.s.n : ""; },
+      function(r) { return r.s ? r.s.cap : ""; },
+      function(r) { return r.lc; },
+      function(r) { return r.todayChg; },
+      function(r) { return r.dayChg; },
+      function(r) { return r.weekChg; },
+      function(r) { return r.monthChg; },
+      function(r) { return r.result ? r.result.aggTrendHealth : null; },
+      function(r) { return r.result ? r.result.aggPullbackQuality : null; },
+      function(r) { return r.result ? r.result.aggProb4 : null; },
+      function(r) { return r.result ? r.result.finalScore : null; },
+      function(r) { return r.result ? r.result.weekly : null; },
+      function(r) { return r.result ? r.result.daily : null; },
+      function(r) { return r.result ? r.result.hourly : null; },
+      function(r) { return r.conf10d; }
+    ];
     var headers = ["Ticker","Company","Cap","Price","Today %","1D Chg %","1W Chg %","1M Chg %","Trend","Pullback","Prob4","Score","Weekly","Daily","Hourly","Conf 10D"];
     function csvEsc(v) { if (v == null) return ""; var s = String(v); if (s.indexOf(",") !== -1 || s.indexOf('"') !== -1 || s.indexOf("\n") !== -1) return '"' + s.replace(/"/g, '""') + '"'; return s; }
     var rows = [headers.join(",")];
     results.forEach(function(r) {
-      var row = cols.map(function(k) { return csvEsc(r[k]); });
+      var row = cols.map(function(fn) { return csvEsc(fn(r)); });
       rows.push(row.join(","));
     });
     var csv = "\uFEFF" + rows.join("\n");
