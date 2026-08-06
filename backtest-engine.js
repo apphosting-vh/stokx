@@ -870,7 +870,7 @@ window.BacktestEngine = (function () {
       /* Compute pillar consumption stats */
       var pillars = ['trendHealth', 'pullbackQuality', 'prob4'];
       var _sc = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
-      var pillarMax = _sc.pillarMax || (window.TechIndicators && window.TechIndicators.getDefaultScoreConfig ? window.TechIndicators.getDefaultScoreConfig().pillarMax : { trendHealth: 30, pullbackQuality: 30, prob4: 40 });
+      var pillarMax = _sc.pillarMax || (window.TechIndicators && window.TechIndicators.getDefaultScoreConfig ? window.TechIndicators.getDefaultScoreConfig().pillarMax : {});
       var pillarConsumption = {};
       pillars.forEach(function(p) {
         var maxVal = pillarMax[p] || 0;
