@@ -21,7 +21,7 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["finance", "utilities"],
+  "categories": ["finances", "utilities"],
   "lang": "en-IN",
   "dir": "ltr",
   "scope": "./",
