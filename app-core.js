@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.51";
+window.__STOX_APP_VERSION = "2.10.52";
 
 /* Apply saved score config on startup */
 (function() {
@@ -2756,7 +2756,7 @@ const TenDayConfidencePanel = ({ ticker }) => {
    highest-priced limit that keeps strong odds — no chasing the day's high.
    Rendered in Single Stock Analysis (Pulse tab).
    ══════════════════════════════════════════════════════════════════════════ */
-const OptimumEntryPanel = ({ ticker }) => {
+const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
   const [loading, setLoading] = React.useState(true);
@@ -2767,25 +2767,26 @@ const OptimumEntryPanel = ({ ticker }) => {
     if (!ticker || !DF || !TI) { setLoading(false); return; }
     let cancelled = false;
     setLoading(true); setErr(null); setRes(null);
-    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h"), DF.fetchOHLCVCached("^NSEI", "daily")])
+    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h"), DF.fetchOHLCVCached("^NSEI", "daily"), DF.fetchOHLCVCached(ticker, "15m")])
       .then((r) => {
         if (cancelled) return;
         const d = r[0] && r[0].data;
         const h1 = r[1] && r[1].data;
         const idxD = r[2] && r[2].data;
+        const i15 = r[3] && r[3].data;
         if (!d || d.length < 30 || !h1 || h1.length < 60) { setErr("insufficient_data"); return; }
-        setRes(TI.computeOptimumEntryPrice(h1, d, idxD));
+        setRes(TI.computeOptimumEntryPrice(h1, d, idxD, entryScoreContext || null, i15 || null));
       })
       .catch(() => { if (!cancelled) setErr("fetch"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [ticker]);
+  }, [ticker, entryScoreContext]);
 
   if (loading) {
     return React.createElement("div", { className: "stx-card", style: { marginBottom: 14, padding: "12px 16px" } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
         React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)" } }, "Optimum Entry Price"),
-        React.createElement("span", { style: { fontSize: 11, color: "var(--text6)" } }, "Scoring 15-day entry levels...")
+        React.createElement("span", { style: { fontSize: 11, color: "var(--text6)" } }, "Scoring entry levels...")
       )
     );
   }
@@ -2797,6 +2798,7 @@ const OptimumEntryPanel = ({ ticker }) => {
   const confC = res.currentConfidence;
   const disc = res.discountPct;
   const cp = res.components;
+  const fr = res.fillRange;
   const tone = confE != null
     ? (confE >= 70 ? { c: "#16a34a", bg: "var(--profitbg)", bd: "var(--profitborder)" } : confE >= 40 ? { c: "#d97706", bg: "var(--warnbg)", bd: "var(--warnborder)" } : { c: "#dc2626", bg: "var(--lossbg)", bd: "var(--lossborder)" })
     : { c: "var(--text5)", bg: "var(--bg5)", bd: "var(--border)" };
@@ -2805,16 +2807,19 @@ const OptimumEntryPanel = ({ ticker }) => {
     : res.overextended && disc > 0 ? "Don't chase the high \u2014 wait for a pullback to this level"
     : disc > 0 ? "Lower entry improves the odds \u2014 place a limit at this level"
     : "Weak odds at any level \u2014 consider waiting for a better setup";
+
   const chips = [
     { k: "Current", v: price(res.currentPrice), x: "The latest market price \u2014 paying the full ask means no entry edge." },
-    { k: "Optimum Entry", v: price(entry), hint: disc != null && disc > 0 ? "limit " + disc + "% below current" : disc != null ? "at current price" : null, x: "Best limit price \u2014 the highest level that still keeps strong odds of +4% in 10 sessions." },
-    { k: "Odds @ entry", v: confE != null ? confE + "/100" : "\u2014", hint: confC != null ? "vs " + confC + " at current" : null, x: "10-day +4% confidence if bought at the optimum price \u2014 should beat buying at market." },
-    { k: "Advantage", v: res.advantagePct != null ? (res.advantagePct > 0 ? "+" : "") + res.advantagePct + " pts" : "\u2014", x: "Extra confidence points gained by buying at the limit instead of the current price." },
-    { k: "VWAP", v: cp.vwap != null ? price(cp.vwap) : "\u2014", x: "Latest session average price \u2014 a natural pullback target when price is above it." },
-    { k: "EMA21", v: cp.ema21 != null ? price(cp.ema21) : "\u2014", x: "21-hour trend average \u2014 price tends to bounce here during an uptrend." },
-    { k: "Dip", v: cp.dipDepthPct != null ? cp.dipDepthPct + "%" : "\u2014", x: "Average intraday pullback from session open \u2014 the depth a limit order realistically fills at." },
-    { k: "Support", v: cp.swingLow != null ? price(cp.swingLow) : "\u2014", x: "Lowest low of the last 3 sessions \u2014 below this the setup has broken." },
-    { k: "Range", v: cp.horizonReachPct != null ? cp.horizonReachPct + "% / 10d" : "\u2014", x: "Typical 10-day travel (ATR\u00d7\u221a10) \u2014 the room the stock usually has to run." },
+    { k: "Optimum Entry", v: price(entry), hint: disc != null && disc > 0 ? "limit " + disc + "% below current" : disc != null ? "at current price" : null, x: "Best limit price \u2014 highest level with strong odds of +4% in 10 sessions." },
+    { k: "Odds @ entry", v: confE != null ? confE + "/100" : "\u2014", hint: confC != null ? "vs " + confC + " at current" : null, x: "10-day +4% confidence if bought at the optimum price." },
+    { k: "Advantage", v: res.advantagePct != null ? (res.advantagePct > 0 ? "+" : "") + res.advantagePct + " pts" : "\u2014", x: "Extra confidence gained by buying at the limit instead of market." },
+    { k: "VWAP", v: cp.vwap != null ? price(cp.vwap) : "\u2014", x: "Session average price \u2014 natural pullback target." },
+    { k: "EMA21", v: cp.ema21 != null ? price(cp.ema21) : "\u2014", x: "21-hour trend average \u2014 bounces here in uptrends." },
+    { k: "Dip (median)", v: cp.dipDepthPct != null ? cp.dipDepthPct + "%" : "\u2014", x: "Median intraday pullback from session open (excl. today)." },
+    { k: "Support", v: cp.swingLow != null ? price(cp.swingLow) : "\u2014", x: "Lowest low of last 3 sessions \u2014 below this the setup breaks." },
+    { k: "ATR cap", v: cp.atrCapPct != null ? cp.atrCapPct + "%" : "\u2014", x: "Volatility-scaled discount cap (1.5\u00d7 daily ATR%)." },
+    { k: "Session left", v: cp.marketClosed ? "Closed" : (cp.sessionFraction != null ? Math.round(cp.sessionFraction * 100) + "%" : "\u2014"), x: cp.marketClosed ? "Market is closed \u2014 fill probabilities are unavailable." : "Fraction of today's 6.25h trading session remaining." },
+    { k: "Range", v: cp.horizonReachPct != null ? cp.horizonReachPct + "% / 10d" : "\u2014", x: "Typical 10-day travel (ATR\u00d7\u221a10)." },
   ];
   const chipRow = (c) => React.createElement("div", { key: c.k, style: { padding: "7px 11px", borderRadius: 7, background: "var(--bg4)", border: "1px solid var(--border)", fontSize: 12, width: 250 } },
     React.createElement("div", { style: { color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600, marginBottom: 2 } }, c.k),
@@ -2823,11 +2828,37 @@ const OptimumEntryPanel = ({ ticker }) => {
     c.x && React.createElement("div", { style: { color: "var(--text6)", marginTop: 3, fontSize: 11, lineHeight: 1.4 } }, c.x)
   );
 
+  var fillRangeEl = null;
+  if (cp.marketClosed) {
+    fillRangeEl = React.createElement("div", { style: { marginTop: 8, padding: "8px 12px", borderRadius: 7, background: "var(--bg4)", border: "1px solid var(--border)", textAlign: "center" } },
+      React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 } }, "Fill Probability Range"),
+      React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", fontWeight: 600 } }, "Market closed \u2014 fill probabilities unavailable until market opens (9:15 AM)")
+    );
+  } else if (fr && (fr.aggressive || fr.moderate || fr.conservative)) {
+    var frItems = [];
+    if (fr.conservative) frItems.push({ label: "Conservative", price: fr.conservative.price, prob: fr.conservative.fillProb, tag: fr.conservative.tag, color: "#16a34a" });
+    if (fr.moderate) frItems.push({ label: "Moderate", price: fr.moderate.price, prob: fr.moderate.fillProb, tag: fr.moderate.tag, color: "#d97706" });
+    if (fr.aggressive) frItems.push({ label: "Aggressive", price: fr.aggressive.price, prob: fr.aggressive.fillProb, tag: fr.aggressive.tag, color: "#dc2626" });
+    fillRangeEl = React.createElement("div", { style: { marginTop: 8, padding: "8px 12px", borderRadius: 7, background: "var(--bg4)", border: "1px solid var(--border)" } },
+      React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 } }, "Fill Probability Range (today)"),
+      React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
+        frItems.map(function (item) {
+          return React.createElement("div", { key: item.label, style: { flex: "1 1 0", minWidth: 140, textAlign: "center" } },
+            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", fontWeight: 600, marginBottom: 2 } }, item.label),
+            React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: item.color, lineHeight: 1.1 } }, price(item.price)),
+            React.createElement("div", { style: { fontSize: 11, color: item.color, fontWeight: 700, marginTop: 2 } }, "\u2248" + item.prob + "% chance"),
+            React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 1 } }, item.tag)
+          );
+        })
+      )
+    );
+  }
+
   return React.createElement("div", { className: "stx-card", style: { marginBottom: 14, padding: "12px 16px", border: "1px solid " + tone.bd } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)" } }, "Optimum Entry Price"),
-        React.createElement("div", { style: { fontSize: 11.5, color: "var(--text6)", marginTop: 2 } }, "Best limit for +4% within 10 sessions \u00b7 15-session read")
+        React.createElement("div", { style: { fontSize: 11.5, color: "var(--text6)", marginTop: 2 } }, "Fill probability \u00b7 10-day horizon \u00b7 15-session read")
       ),
       entry != null && React.createElement("div", { style: { textAlign: "right" } },
         React.createElement("div", { style: { fontSize: 26, fontWeight: 800, fontFamily: "var(--font-heading)", color: tone.c, lineHeight: 1 } }, price(entry)),
@@ -2836,7 +2867,8 @@ const OptimumEntryPanel = ({ ticker }) => {
       )
     ),
     React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: tone.c, padding: "7px 12px", borderRadius: 7, background: tone.bg, marginBottom: 10 } }, label),
-    confE != null && React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8 } }, chips.map(chipRow))
+    confE != null && React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8 } }, chips.map(chipRow)),
+    fillRangeEl
   );
 };
 
@@ -8852,8 +8884,11 @@ function SingleStockAnalysis({ requestedTicker }) {
       if (d && h1 && d.length >= 30 && h1.length >= 60) {
         var idxD = null;
         try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch (e) {}
+        var i15 = null;
+        try { var _r15 = await DF.fetchOHLCVCached(ticker, "15m"); i15 = (_r15 && _r15.data) || null; } catch (e) {}
         tenDayConf = TI.computeTenDayForwardConfidence(h1, d, idxD);
-        optimumRes = TI.computeOptimumEntryPrice(h1, d, idxD);
+        var _snapEntryCtx = mtf && mtf.entry ? buildEntryScoreContext(mtf.entry) : null;
+        optimumRes = TI.computeOptimumEntryPrice(h1, d, idxD, _snapEntryCtx, i15);
         try { indCompact = pickCompactIndicators(TI.computeAll(d)); } catch (e) {}
       }
       var entry = mtf && mtf.entry ? mtf.entry : null;
@@ -9389,8 +9424,11 @@ function SingleStockAnalysis({ requestedTicker }) {
       : confScore >= 70 ? "Strong odds \u2014 +4% likely in 10 sessions"
       : confScore >= 40 ? "Moderate odds" : "Low odds";
     var oeLabel = oe == null ? null
+      : oe.components && oe.components.marketClosed ? "Market closed"
       : oe.overextended && oe.discountPct > 0 ? "Wait for pullback"
       : oe.discountPct > 0 ? "Limit " + oe.discountPct + "% below" : "Enter at market";
+    var oeFillProb = oe && !oe.components.marketClosed && oe.fillRange && oe.fillRange.moderate ? oe.fillRange.moderate.fillProb : null;
+    if (oeLabel && oeFillProb != null) oeLabel += " \u00b7 \u2248" + oeFillProb + "% fill";
     var hasCharts = (snap.daily && snap.daily.length > 1) || (snap.hourly && snap.hourly.length > 1);
 
     var scoreTile = function (label, value, sub, color) {
@@ -9646,7 +9684,7 @@ function SingleStockAnalysis({ requestedTicker }) {
         renderGauge(),
         renderMtfCard(),
         React.createElement(TenDayConfidencePanel, { ticker: ticker }),
-        React.createElement(OptimumEntryPanel, { ticker: ticker }),
+        React.createElement(OptimumEntryPanel, { ticker: ticker, entryScoreContext: mtf && mtf.entry ? buildEntryScoreContext(mtf.entry) : null }),
         React.createElement("div", { style: { display: "flex", gap: 3, marginBottom: 10, flexWrap: "wrap" } },
           catKeys.map(function (cat) {
             var label = cat === "all" ? "All" : cat;

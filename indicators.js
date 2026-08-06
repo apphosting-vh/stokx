@@ -4416,26 +4416,32 @@ window.TechIndicators = (function () {
      "At what price should I enter so that +4% within the next 10 trading
      sessions is realistic?" Derives limit levels from the stock's OWN last
      ~15 hourly sessions (current market, session VWAP, hourly EMA21, the
-     typical intraday dip, recent swing support) and scores each one with the
-     10-day horizon-confidence model. Returns the highest-priced level that
-     still carries strong odds — so the user doesn't chase the day's high or
-     pay an unreasonable price.
+     typical intraday dip, recent swing support) and scores each one with:
+       • A fill-probability layer: lognormal touch-probability with sigma
+         scaled to remaining session time (fraction of ~6.25h trading day),
+         mu ≈ 0, time-of-day weighted. Uses 15m candles when available for
+         better intraday sigma accuracy.
+       • The 10-day horizon-confidence model for longer-term odds.
+     If the market is closed, fill probabilities are null (no intraday edge).
      Returns { reason, currentPrice, optimumEntryPrice, discountPct,
                entryConfidence, currentConfidence, advantagePct, overextended,
-               components, candidates }. */
-  function computeOptimumEntryPrice(hourlyCandles, dailyCandles, indexCandles) {
+               fillRange, components, candidates }. */
+  function computeOptimumEntryPrice(hourlyCandles, dailyCandles, indexCandles, entryScoreContext, intraCandles) {
+    var entryScoreCtx = entryScoreContext || {};
     var base = {
       reason: 'insufficient_hourly_data',
       currentPrice: null, optimumEntryPrice: null, discountPct: null,
       entryConfidence: null, currentConfidence: null, advantagePct: null,
-      overextended: false,
+      overextended: false, fillRange: null,
       components: {
         atrPct: null, horizonReachPct: null, vwap: null, ema21: null,
         high15: null, low15: null, swingLow: null, dipDepthPct: null,
         vDistPct: null, highGapPct: null, rsi14: null,
         hourlyAdx: null, hourlyPlusDI: null, hourlyMinusDI: null,
         dailyEmaBullish: false, dailyMacdBullish: false,
-        dailyAdx: null, regimeMult: 1, rsScore: null
+        dailyAdx: null, regimeMult: 1, rsScore: null,
+        atrCapPct: null, sessionFraction: null, todWeight: null,
+        sigmaIntraday: null, atrSigmaDaily: null, marketClosed: false
       },
       candidates: []
     };
@@ -4446,15 +4452,85 @@ window.TechIndicators = (function () {
       if (!(c > 0)) return base;
       base.currentPrice = round(c, 2);
 
-      /* 10-day context from the current market price (entry = C → 0% profit) */
+      /* ── 1. Remaining session time ─────────────────────────────────────── */
+      var TRADING_HOURS = 6.25;
+      var now = new Date();
+      var marketOpen = new Date(now);
+      marketOpen.setHours(9, 15, 0, 0);
+      var marketClose = new Date(now);
+      marketClose.setHours(15, 30, 0, 0);
+      var hoursLeft = 0;
+      var marketClosed = false;
+      if (now >= marketOpen && now <= marketClose) {
+        hoursLeft = (marketClose - now) / 3600000;
+      } else if (now > marketClose) {
+        hoursLeft = 0;
+        marketClosed = true;
+      } else {
+        hoursLeft = TRADING_HOURS;
+      }
+      var fraction = Math.max(0.02, Math.min(1, hoursLeft / TRADING_HOURS));
+      base.components.sessionFraction = round(fraction, 3);
+      base.components.marketClosed = marketClosed;
+
+      /* ── 2. ATR + intraday sigma ───────────────────────────────────────── */
+      var atrPct = null, atrAbs = null;
+      if (dailyCandles && dailyCandles.length >= 30) {
+        var prevClose = dailyCandles[dailyCandles.length - 1].c;
+        var atrV = last(calcATR(dailyCandles, 14));
+        if (prevClose > 0 && atrV != null) {
+          atrPct = atrV / prevClose * 100;
+          atrAbs = atrV;
+        }
+      }
+      base.components.atrPct = atrPct != null ? round(atrPct, 2) : null;
+      var atrSigmaDaily = atrPct != null ? atrPct / 100 * Math.sqrt(Math.PI / 8) : null;
+      base.components.atrSigmaDaily = atrSigmaDaily != null ? round(atrSigmaDaily * 100, 3) : null;
+
+      /* Prefer 15m returns for intraday sigma when available (more granular) */
+      var sigmaIntraday = null;
+      if (intraCandles && intraCandles.length >= 30) {
+        var intraRets = [];
+        for (var ir = intraCandles.length - 1; ir > 0 && intraRets.length < 120; ir--) {
+          var ip0 = intraCandles[ir - 1].c, ip1 = intraCandles[ir].c;
+          if (ip0 > 0 && ip1 > 0) intraRets.push(Math.log(ip1 / ip0));
+        }
+        if (intraRets.length >= 20) {
+          var intraVol = sampleStdDev(intraRets);
+          if (intraVol != null) {
+            sigmaIntraday = intraVol * Math.sqrt(fraction);
+          }
+        }
+      }
+      /* Fallback: derive from daily ATR */
+      if (sigmaIntraday == null && atrSigmaDaily != null) {
+        sigmaIntraday = atrSigmaDaily * Math.sqrt(fraction);
+      }
+      base.components.sigmaIntraday = sigmaIntraday != null ? round(sigmaIntraday * 100, 3) : null;
+
+      /* ── 3. Fill-probability: lognormal touch at price P before close ──── */
+      function fillProb(P) {
+        if (marketClosed) return null;
+        if (sigmaIntraday == null || P <= 0 || c <= 0 || P >= c) return P >= c - 1e-9 ? 1 : null;
+        var b = Math.log(c / P);
+        var sdN = sigmaIntraday;
+        if (sdN < 1e-10) return null;
+        var z = b / sdN;
+        var raw = normCdf(z) + Math.exp(2 * 0 * b / (sigmaIntraday * sigmaIntraday)) * normCdf((-0 - b) / sdN);
+        raw = Math.max(0, Math.min(1, raw));
+        var weighted = Math.pow(raw, Math.sqrt(fraction));
+        return Math.max(0, Math.min(1, weighted));
+      }
+
+      /* ── 4. 10-day horizon context from current price ─────────────────── */
       var ctx = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-        horizonDays: 10, windowSessions: 40, entry_price: c, targetPct: 4, holdingDays: 0, indexCandles: indexCandles
+        horizonDays: 10, windowSessions: 40, entry_price: c, targetPct: 4,
+        holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
       });
       if (ctx.reason !== 'ok' || ctx.confidence == null) { base.reason = ctx.reason || base.reason; return base; }
       base.currentConfidence = ctx.confidence;
 
       var cp = ctx.components;
-      base.components.atrPct = cp.atrPct;
       base.components.horizonReachPct = cp.horizonReachPct;
       base.components.vwap = cp.hourlyVwap;
       base.components.ema21 = cp.ema21;
@@ -4468,12 +4544,13 @@ window.TechIndicators = (function () {
       base.components.regimeMult = cp.regimeMult;
       base.components.rsScore = cp.rsScore;
 
-      /* isolate the last 15 hourly sessions */
+      /* ── 5. Isolate last 15 hourly sessions ───────────────────────────── */
       var seen = {}, keys = [];
       for (var i = hourlyCandles.length - 1; i >= 0 && keys.length < 15; i--) {
         var k = String(hourlyCandles[i].t).slice(0, 10);
         if (!seen[k]) { seen[k] = true; keys.push(k); }
       }
+      var todayKey = String(cur.t).slice(0, 10);
       var recent = [];
       for (var j = 0; j < hourlyCandles.length; j++) {
         if (seen[String(hourlyCandles[j].t).slice(0, 10)]) recent.push(hourlyCandles[j]);
@@ -4485,46 +4562,61 @@ window.TechIndicators = (function () {
         if (recent[n].h > high15) high15 = recent[n].h;
         if (recent[n].l < low15) low15 = recent[n].l;
         var sk = String(recent[n].t).slice(0, 10);
+        if (sk === todayKey) continue;
         if (sessionOp[sk] == null) sessionOp[sk] = recent[n].o;
         if (sessionLo[sk] == null || recent[n].l < sessionLo[sk]) sessionLo[sk] = recent[n].l;
       }
       base.components.high15 = round(high15, 2);
       base.components.low15 = round(low15, 2);
 
-      /* typical intraday dip: average pullback from session open to session low */
-      var dipSum = 0, dipCnt = 0;
+      /* ── 6. Typical dip: median pullback from today's open to session low ─ */
+      var dips = [];
       for (var sk2 in sessionLo) {
         var op = sessionOp[sk2];
-        if (op > 0) { dipSum += (op - sessionLo[sk2]) / op * 100; dipCnt++; }
+        if (op > 0) dips.push((op - sessionLo[sk2]) / op * 100);
       }
-      var dipDepthPct = dipCnt > 0 ? dipSum / dipCnt : 0;
+      dips.sort(function (a, b) { return a - b; });
+      var dipDepthPct = 0;
+      if (dips.length > 0) {
+        var mid = Math.floor(dips.length / 2);
+        dipDepthPct = dips.length % 2 === 0 ? (dips[mid - 1] + dips[mid]) / 2 : dips[mid];
+      }
       base.components.dipDepthPct = round(dipDepthPct, 2);
 
-      /* recent support = lowest low of the last 3 sessions */
+      /* ── 7. Recent support = lowest low of the last 3 completed sessions ─ */
       var last3 = {}, cnt3 = 0;
       for (var m = recent.length - 1; m >= 0 && cnt3 < 3; m--) {
         var mk = String(recent[m].t).slice(0, 10);
+        if (mk === todayKey) continue;
         if (!last3[mk]) { last3[mk] = recent[m].l; cnt3++; }
       }
       var swingLow = Infinity;
       for (var sk3 in last3) if (last3[sk3] < swingLow) swingLow = last3[sk3];
       base.components.swingLow = swingLow === Infinity ? null : round(swingLow, 2);
 
+      /* ── 8. VWAP distance, high gap ────────────────────────────────────── */
       var vwap = cp.hourlyVwap;
       var vDistPct = vwap != null && vwap > 0 ? (c - vwap) / vwap * 100 : null;
       var highGapPct = (high15 - c) / high15 * 100;
       base.components.vDistPct = vDistPct != null ? round(vDistPct, 2) : null;
       base.components.highGapPct = round(highGapPct, 2);
 
-      /* stretched = chasing risk: well above session VWAP, or pinned to the
-         15-session high while hot, or blown-off RSI */
-      var overextended = (vDistPct != null && vDistPct > 1.5)
-        || (highGapPct < 0.4 && cp.hourlyRsi14 != null && cp.hourlyRsi14 >= 70)
-        || (cp.hourlyRsi14 != null && cp.hourlyRsi14 >= 85);
+      /* ── 9. Overextended: ATR-normalized VWAP stretch + RSI ────────────── */
+      var vwapExt = 0;
+      if (vwap != null && atrPct != null) {
+        var vwScale = atrPct / 100 * c;
+        vwapExt = vwScale > 0 ? (c - vwap) / vwScale : 0;
+      }
+      var overextended = vwapExt > 2.0;
+      if (cp.hourlyRsi14 != null && cp.hourlyRsi14 >= 85) overextended = true;
       base.overextended = overextended;
 
-      /* candidate limit levels — never more than 3.5% below the market */
-      var floorP = c * (1 - 0.035);
+      /* ── 10. ATR-scaled discount cap ───────────────────────────────────── */
+      var capPct = atrPct != null ? clamp(1.5 * atrPct, 2.0, 6.0) : 3.5;
+      base.components.atrCapPct = round(capPct, 2);
+      var floorP = c * (1 - capPct / 100);
+
+      /* ── 11. Build candidate levels ────────────────────────────────────── */
       var cand = {};
       cand[c] = 'current';
       if (vwap != null && vwap > 0) cand[vwap] = 'VWAP';
@@ -4533,45 +4625,73 @@ window.TechIndicators = (function () {
       if (swingLow !== Infinity) cand[swingLow] = 'Swing low';
 
       var prices = Object.keys(cand).map(Number).filter(function (p) {
-        return p > 0 && p <= c && p >= floorP;
+        return p > 0 && p <= c;
       }).sort(function (a, b) { return b - a; });
       if (prices.length === 0) prices = [c];
 
+      /* ── 12. Score each candidate: fill probability + horizon confidence ─ */
       var candData = [];
       for (var p2 = 0; p2 < prices.length; p2++) {
         var P = prices[p2];
+        var fp = fillProb(P);
         var res = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-          horizonDays: 10, windowSessions: 40, entry_price: P, targetPct: 4, holdingDays: 0, indexCandles: indexCandles
+          horizonDays: 10, windowSessions: 40, entry_price: P, targetPct: 4,
+          holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
         });
-        candData.push({ price: round(P, 2), confidence: res.confidence, tag: cand[P] });
+        var isAggressive = P < floorP;
+        candData.push({
+          price: round(P, 2),
+          fillProb: fp != null ? round(fp * 100, 1) : null,
+          horizonConf: res.confidence != null ? round(res.confidence, 1) : null,
+          tag: cand[P],
+          aggressive: isAggressive
+        });
       }
       base.candidates = candData;
 
-      /* pick the level: if not stretched and the market already has strong
-         odds, enter at market. Otherwise take the highest-priced limit below
-         the market with strong odds (>=60); else the level with the best odds. */
+      /* ── 13. Pick optimum entry: highest price with fillProb ≥ 50% ────── */
       var chosen;
+      var strong = null;
+      for (var q = 0; q < candData.length; q++) {
+        if (candData[q].fillProb != null && candData[q].fillProb >= 50 && candData[q].price < c - 1e-9) {
+          strong = candData[q]; break;
+        }
+      }
       if (!overextended && ctx.confidence >= 60) {
         chosen = candData[0];
+      } else if (strong) {
+        chosen = strong;
       } else {
-        var strong = null;
-        for (var q = 0; q < candData.length; q++) {
-          if (candData[q].price < c - 1e-9 && candData[q].confidence != null && candData[q].confidence >= 60) { strong = candData[q]; break; }
+        var best = candData[0];
+        for (var r2 = 1; r2 < candData.length; r2++) {
+          var a = candData[r2].fillProb != null ? candData[r2].fillProb : -1;
+          var b = best.fillProb != null ? best.fillProb : -1;
+          if (a > b) best = candData[r2];
         }
-        if (strong) chosen = strong;
-        else {
-          var best = candData[0];
-          for (var r2 = 1; r2 < candData.length; r2++) {
-            if ((candData[r2].confidence != null ? candData[r2].confidence : -1) > (best.confidence != null ? best.confidence : -1)) best = candData[r2];
-          }
-          chosen = best;
-        }
+        chosen = best;
       }
 
       base.optimumEntryPrice = chosen.price;
-      base.entryConfidence = chosen.confidence != null ? round(chosen.confidence, 1) : null;
+      base.entryConfidence = chosen.horizonConf;
       base.discountPct = round((c - chosen.price) / c * 100, 2);
-      base.advantagePct = chosen.confidence != null && ctx.confidence != null ? round(chosen.confidence - ctx.confidence, 1) : null;
+      base.advantagePct = chosen.horizonConf != null && ctx.confidence != null ? round(chosen.horizonConf - ctx.confidence, 1) : null;
+
+      /* ── 14. Fill range: aggressive / moderate / conservative ──────────── */
+      var aggressive = null, moderate = null, conservative = null;
+      for (var r3 = 0; r3 < candData.length; r3++) {
+        var cd = candData[r3];
+        if (cd.price >= c - 1e-9) continue;
+        if (cd.fillProb == null) continue;
+        if (!conservative && cd.fillProb >= 30) conservative = cd;
+        if (!moderate && cd.fillProb >= 50) moderate = cd;
+        if (!aggressive && cd.fillProb >= 70) aggressive = cd;
+      }
+      base.fillRange = {
+        aggressive: aggressive ? { price: aggressive.price, fillProb: aggressive.fillProb, tag: aggressive.tag } : null,
+        moderate: moderate ? { price: moderate.price, fillProb: moderate.fillProb, tag: moderate.tag } : null,
+        conservative: conservative ? { price: conservative.price, fillProb: conservative.fillProb, tag: conservative.tag } : null
+      };
+
       base.reason = 'ok';
       return base;
     } catch (e) {
