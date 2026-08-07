@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.61";
+window.__STOX_APP_VERSION = "2.10.62";
 
 /* Apply saved score config on startup */
 (function() {
@@ -2681,14 +2681,21 @@ const TenDayConfidencePanel = ({ ticker }) => {
     if (!ticker || !DF || !TI) { setLoading(false); return; }
     let cancelled = false;
     setLoading(true); setErr(null); setConf(null);
-    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h"), DF.fetchOHLCVCached("^NSEI", "daily")])
+    Promise.all([DF.fetchOHLCVCached(ticker, "daily"), DF.fetchOHLCVCached(ticker, "1h"), DF.fetchOHLCVCached("^NSEI", "daily"), DF.fetchOHLCVCached(ticker, "weekly"), DF.fetchOHLCVCached("^NSEI", "weekly")])
       .then((res) => {
         if (cancelled) return;
         const d = res[0] && res[0].data;
         const h1 = res[1] && res[1].data;
         const idxD = res[2] && res[2].data;
+        const w = res[3] && res[3].data;
+        const idxW = res[4] && res[4].data;
         if (!d || d.length < 30 || !h1 || h1.length < 60) { setErr("insufficient_data"); return; }
-        const c = TI.computeTenDayForwardConfidence(h1, d, idxD);
+        var entryScoreContext = null;
+        try {
+          var result = computeCompatEntryScore(w && w.length >= 50 ? w : null, d, h1 && h1.length >= 100 ? h1 : null, idxD, idxW);
+          if (result) entryScoreContext = buildEntryScoreContext(result);
+        } catch(e) {}
+        const c = TI.computeTenDayForwardConfidence(h1, d, idxD, entryScoreContext);
         setConf(c);
       })
       .catch(() => { if (!cancelled) setErr("fetch"); })
@@ -2707,11 +2714,14 @@ const TenDayConfidencePanel = ({ ticker }) => {
   if (err || !conf) return null;
 
   const sc = conf.confidence;
+  const scLog = conf.confidenceLognormal;
+  const scEmp = conf.confidenceEmpirical;
   const cp = conf.components;
   const remainingPct = cp.remainingPct != null ? Math.round(cp.remainingPct * 100) / 100 : null;
-  const tone = sc != null
-    ? (sc >= 70 ? { c: "#16a34a", bg: "var(--profitbg)", bd: "var(--profitborder)" } : sc >= 40 ? { c: "#d97706", bg: "var(--warnbg)", bd: "var(--warnborder)" } : { c: "#dc2626", bg: "var(--lossbg)", bd: "var(--lossborder)" })
-    : { c: "var(--text5)", bg: "var(--bg5)", bd: "var(--border)" };
+  function confColor(v) { return v != null ? (v >= 70 ? "#16a34a" : v >= 40 ? "#d97706" : "#dc2626") : "var(--text5)"; }
+  function confBg(v) { return v != null ? (v >= 70 ? "var(--profitbg)" : v >= 40 ? "var(--warnbg)" : "var(--lossbg)") : "var(--bg5)"; }
+  function confBd(v) { return v != null ? (v >= 70 ? "var(--profitborder)" : v >= 40 ? "var(--warnborder)" : "var(--lossborder)") : "var(--border)"; }
+  const tone = { c: confColor(sc), bg: confBg(sc), bd: confBd(sc) };
   const label = sc == null ? "Insufficient hourly data for a 10-day read"
     : sc >= 70 ? "Strong odds \u2014 expect +4% within 10 trading days"
     : sc >= 40 ? "Moderate \u2014 needs the hourly trend to cooperate"
@@ -2723,7 +2733,9 @@ const TenDayConfidencePanel = ({ ticker }) => {
     { k: "Daily", v: cp.dailyEmaBullish && cp.dailyMacdBullish ? "EMA+MACD bull" : cp.dailyEmaBullish ? "EMA bull" : cp.dailyMacdBullish ? "MACD bull" : "flat/weak", x: "Daily EMA + MACD confirmation \u2014 does the longer-term trend back the hourly move?" },
     { k: "Range", v: cp.atrPct != null ? cp.atrPct + "% ATR" : "\u2014", x: "Daily ATR \u2014 the stock's typical single-day move; higher ATR = more room to reach +4%." },
     { k: "Reach", v: cp.horizonReachPct != null ? cp.horizonReachPct + "% vs " + (remainingPct != null ? remainingPct + "%" : "\u2014") + " to go" : "\u2014", hint: (cp.driftPct != null ? "drift " + (cp.driftPct > 0 ? "+" : "") + cp.driftPct + "% in window" : "") + (cp.volConfirm != null ? " \u00b7 buy vol " + Math.round(cp.volConfirm * 100) + "%" : ""), x: "Typical 10-day travel (ATR\u00d7\u221a10) vs +4% gap, plus recent drift and buy-volume strength." },
-  ];
+    { k: "Model", v: cp.empiricalMethod === 'empirical' ? "Empirical (" + cp.empiricalSampleCount + " samples)" : "Lognormal fallback", x: "Whether the model used real historical forward-window hit rates or fell back to the lognormal distribution. 60+ samples needed for empirical." },
+    cp.entryScoreUsed ? { k: "Entry Score", v: cp.entryScore != null ? cp.entryScore + "/100" : "\u2014", x: "Entry score blended 60/40 with the raw confidence. Low entry scores (<35) cap the final confidence." } : null,
+  ].filter(Boolean);
   const chipRow = (c) => React.createElement("div", { key: c.k, style: { padding: "7px 11px", borderRadius: 7, background: "var(--bg4)", border: "1px solid var(--border)", fontSize: 12, width: 250 } },
     React.createElement("div", { style: { color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600, marginBottom: 2 } }, c.k),
     React.createElement("div", { style: { color: "var(--text2)", fontWeight: 700, fontFamily: "var(--font-heading)", fontSize: 12.5 } }, c.v),
@@ -2737,11 +2749,22 @@ const TenDayConfidencePanel = ({ ticker }) => {
         React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)" } }, "Confidence Score \u2014 Next 10 Days"),
         React.createElement("div", { style: { fontSize: 11.5, color: "var(--text6)", marginTop: 2 } }, "Chance of +4% from current price within 10 trading days \u00b7 15-day hourly read")
       ),
-      sc != null && React.createElement("div", { style: { textAlign: "right" } },
-        React.createElement("div", { style: { fontSize: 26, fontWeight: 800, fontFamily: "var(--font-heading)", color: tone.c, lineHeight: 1 } }, sc + "/100"),
-        React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 3 } },
-          "from current price \u00b7 +4% = " + (remainingPct != null ? remainingPct + "%" : "\u2014") + " away" + (cp.sessions != null ? " \u00b7 " + cp.sessions + " sessions" : ""))
+      sc != null && React.createElement("div", { style: { display: "flex", gap: 16, textAlign: "right" } },
+        scLog != null && React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 22, fontWeight: 800, fontFamily: "var(--font-heading)", color: confColor(scLog), lineHeight: 1 } }, scLog + "/100"),
+          React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 2 } }, "Lognormal")
+        ),
+        scEmp != null && React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 22, fontWeight: 800, fontFamily: "var(--font-heading)", color: confColor(scEmp), lineHeight: 1 } }, scEmp + "/100"),
+          React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 2 } }, "Empirical")
+        ),
+        scLog == null && scEmp == null && React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 22, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text5)", lineHeight: 1 } }, "\u2014")
+        )
       )
+    ),
+    React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginBottom: 6 } },
+      "from current price \u00b7 +4% = " + (remainingPct != null ? remainingPct + "%" : "\u2014") + " away" + (cp.sessions != null ? " \u00b7 " + cp.sessions + " sessions" : "") + (cp.entryScoreUsed ? " \u00b7 entry-score blended" : "")
     ),
     React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: tone.c, padding: "7px 12px", borderRadius: 7, background: tone.bg, marginBottom: 10 } }, label),
     sc != null && React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8 } }, chips.map(chipRow))
