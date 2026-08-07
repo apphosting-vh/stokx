@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.70";
+window.__STOX_APP_VERSION = "2.10.71";
 
 /* Apply saved score config on startup */
 (function() {
@@ -6789,8 +6789,45 @@ const BacktestSuitePanel = () => {
         s.worstByWinRate ? React.createElement("span", { style: { color: "#ef4444", fontWeight: 700 } }, " \u00b7 Worst: " + symName(s.worstByWinRate) + " (" + fmtPct(s.worstWinRate) + ")") : null,
         s.bestByReturn ? React.createElement("span", null, " \u00b7 Highest avg return: " + symName(s.bestByReturn) + " (" + fmtR(s.bestReturn) + ")") : null
       ),
-      card("Ranking by Win Rate", (d.results || []).length + " symbols with qualifying signals \u00b7 +" + fmt2(d.targetProfitPct) + "% / " + d.holdingPeriodDays + "d.",
-        React.createElement("div", { style: { overflowX: "auto" } },
+      (function() {
+        var exportRankingCSV = function() {
+          if (!d.results || !d.results.length) return;
+          var headers = ["Symbol", "Signals", "Wins", "Losses", "Win Rate %", "Avg Return %", "Profit Factor", "Avg Trend", "Avg Pullback", "Avg Prob4"];
+          var rows = d.results.map(function(r) {
+            return [r.symbol, r.totalSignals, r.winningTrades, r.losingTrades, r.winRate != null ? r.winRate : "", r.avgReturnPct != null ? r.avgReturnPct : "", r.profitFactor, r.avgTrend != null ? r.avgTrend : "", r.avgPullback != null ? r.avgPullback : "", r.avgProb4 != null ? r.avgProb4 : ""];
+          });
+          var csv = [headers.join(",")].concat(rows.map(function(r) { return r.map(function(v) { var s = String(v == null ? "" : v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(","); })).join("\r\n");
+          var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement("a"); a.href = url; a.download = "stox-batch-ranking-" + (d.symbol || "batch") + ".csv"; a.click();
+          URL.revokeObjectURL(url);
+          showToast("Exported ranking CSV", 3000);
+        };
+        var exportRankingXLSX = function() {
+          if (typeof XLSX === "undefined") { showToast("XLSX library still loading — try again in a moment", 3000); return; }
+          if (!d.results || !d.results.length) return;
+          var rows = d.results.map(function(r) {
+            return { "Symbol": r.symbol, "Signals": r.totalSignals, "Wins": r.winningTrades, "Losses": r.losingTrades, "Win Rate %": r.winRate, "Avg Return %": r.avgReturnPct, "Profit Factor": typeof r.profitFactor === "string" ? r.profitFactor : r.profitFactor, "Avg Trend": r.avgTrend, "Avg Pullback": r.avgPullback, "Avg Prob4": r.avgProb4 };
+          });
+          var ws = XLSX.utils.json_to_sheet(rows);
+          var wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "Ranking");
+          var colWidths = [{ wch: 18 }, { wch: 8 }, { wch: 6 }, { wch: 7 }, { wch: 10 }, { wch: 11 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 10 }];
+          ws["!cols"] = colWidths;
+          XLSX.writeFile(wb, "stox-batch-ranking-" + (d.symbol || "batch") + ".xlsx");
+          showToast("Exported ranking XLSX", 3000);
+        };
+        var btnStyle = { fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--text2)", cursor: "pointer", marginLeft: 6, fontWeight: 600 };
+        return React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 } },
+            React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Ranking by Win Rate"),
+            React.createElement("div", { style: { display: "flex", gap: 4 } },
+              React.createElement("button", { onClick: exportRankingCSV, style: btnStyle }, "CSV"),
+              React.createElement("button", { onClick: exportRankingXLSX, style: btnStyle }, "XLSX")
+            )
+          ),
+          React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } }, (d.results || []).length + " symbols with qualifying signals \u00b7 +" + fmt2(d.targetProfitPct) + "% / " + d.holdingPeriodDays + "d."),
+          React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
             React.createElement("thead", null, React.createElement("tr", null,
               cell("Symbol", tdL), cell("Signals", td), cell("Wins", td), cell("Losses", td), cell("Win Rate", td), cell("Avg Return", td), cell("Profit Factor", td),
@@ -6809,7 +6846,8 @@ const BacktestSuitePanel = () => {
             )))
           )
         )
-      ),
+        );
+      })(),
       React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", lineHeight: 1.6, padding: "0 2px" } },
         "Each symbol is scored on its full daily history as-of-date (no lookahead); a trade is opened whenever the Entry Score \u2265 " + fmtS(d.threshold) + " and closed at +" + fmt2(d.targetProfitPct) + "% or after " + d.holdingPeriodDays + " sessions."
       ),
