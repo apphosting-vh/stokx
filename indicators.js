@@ -4700,6 +4700,12 @@ window.TechIndicators = (function () {
         return Math.max(0, Math.min(1, decayed));
       }
 
+      function fillProb(P) {
+        var em = fillProbEmpirical(P);
+        if (em != null) return em;
+        return fillProbLognormal(P);
+      }
+
       /* ── 4. 10-day horizon context from current price ─────────────────── */
       var ctx = computeHorizonConfidence(hourlyCandles, dailyCandles, {
         horizonDays: 10, windowSessions: 40, entry_price: c, targetPct: 4,
