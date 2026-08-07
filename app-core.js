@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.86";
+window.__STOX_APP_VERSION = "2.10.87";
 
 /* Apply saved score config on startup */
 (function() {
@@ -6795,7 +6795,7 @@ const BacktestSuitePanel = () => {
       (d.currentScore) && React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, marginBottom: 16, background: "rgba(6,182,212,.06)", border: "1px solid rgba(6,182,212,.2)", fontSize: 12, color: "var(--text2)", lineHeight: 1.6 } },
         React.createElement("span", { style: { color: "var(--accent)", fontWeight: 700 } }, "Current session: "),
         "Entry Score " + fmtS(d.currentScore.entryScore) + " (" + (d.currentScore.classification || "\u2014") + ")" +
-        " \u00b7 Trend " + fmt2(d.currentScore.trendHealth) + "/" + (_pmRS.trendHealth != null ? _pmRS.trendHealth : 30) + " \u00b7 Pullback " + fmt2(d.currentScore.pullbackQuality) + "/" + (_pmRS.pullbackQuality != null ? _pmRS.pullbackQuality : 30) + " \u00b7 4% Prob " + fmt2(d.currentScore.prob4) + "/" + (_pmRS.prob4 != null ? _pmRS.prob4 : 40) +
+        " \u00b7 Trend " + fmt2(d.currentScore.trendHealth) + "/" + (_pmRS.trendHealth != null ? _pmRS.trendHealth : 35) + " \u00b7 Pullback " + fmt2(d.currentScore.pullbackQuality) + "/" + (_pmRS.pullbackQuality != null ? _pmRS.pullbackQuality : 35) + " \u00b7 4% Prob " + fmt2(d.currentScore.prob4) + "/" + (_pmRS.prob4 != null ? _pmRS.prob4 : 40) +
         (d.currentScore.modifiers != null ? " \u00b7 modifiers " + (d.currentScore.modifiers >= 0 ? "+" : "") + fmt2(d.currentScore.modifiers) : "") +
         ". Data is as-of the last close \u2014 this is the score you would have seen."
       ),
@@ -7075,7 +7075,7 @@ const BacktestSuitePanel = () => {
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Backtesting"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } },
-          (function() { var _pm = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().pillarMax || {}) : {}; var _th = _pm.trendHealth != null ? _pm.trendHealth : 30; var _pb = _pm.pullbackQuality != null ? _pm.pullbackQuality : 30; var _p4 = _pm.prob4 != null ? _pm.prob4 : 40; return "StoX engine \u00b7 grades the Entry Score (Trend " + _th + " / Pullback " + _pb + " / 4% Prob " + _p4 + " + modifiers) as-of-date against a +" + fmt2(target) + "% target over " + fmtS(holding) + " sessions"; })()
+          (function() { var _pm = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().pillarMax || {}) : {}; var _th = _pm.trendHealth != null ? _pm.trendHealth : 35; var _pb = _pm.pullbackQuality != null ? _pm.pullbackQuality : 35; var _p4 = _pm.prob4 != null ? _pm.prob4 : 40; return "StoX engine \u00b7 grades the Entry Score (Trend " + _th + " / Pullback " + _pb + " / 4% Prob " + _p4 + " + modifiers) as-of-date against a +" + fmt2(target) + "% target over " + fmtS(holding) + " sessions"; })()
         )
       )
     ),
@@ -7523,7 +7523,7 @@ const ScoreTunerPanel = () => {
       const sweepResult = await engine.sweepEntryScore(dataMap, {
         symbols: Object.keys(dataMap),
         scoreThresholds: [40, 45, 50, 55, 60, 65, 70, 75, 80],
-        pillarSweep: { trendHealth: [0, 5, 10, 15, 20, 25], pullbackQuality: [0, 5, 10, 15, 20, 25], prob4: [0, 5, 10, 15, 20, 25, 30, 35] },
+        pillarSweep: { trendHealth: [0, 5, 10, 15, 20, 25, 30, 35], pullbackQuality: [0, 5, 10, 15, 20, 25, 30, 35], prob4: [0, 5, 10, 15, 20, 25, 30, 35, 40] },
         sampleEvery: sampleEvery
       }, {
         onProgress: (done, total, label) => { if (!cancelRef.current) setProgress({ phase: label, done, total }); }
@@ -7822,15 +7822,27 @@ const ScoreTunerPanel = () => {
         React.createElement("div", { style: { marginBottom: 16 } },
           React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 2: Pullback Quality"),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8 } },
-            [["pullbackQuality.distATR_inner", "ATR Dist Inner", 0, 15], ["pullbackQuality.distATR_innerRange", "Inner Range (ATR)", 0.5, 3],
-             ["pullbackQuality.distATR_outer", "ATR Dist Outer", 0, 10], ["pullbackQuality.distATR_outerRange", "Outer Range (ATR)", 1, 5],
-             ["pullbackQuality.candleColor", "Candle Color", 0, 10], ["pullbackQuality.bbWidthSqueeze", "BB Squeeze", 0, 10],
-             ["pullbackQuality.rsiOversold", "RSI Oversold", 0, 10], ["pullbackQuality.stochRSIThreshold", "StochRSI Threshold", 5, 40],
-             ["pullbackQuality.rsiOversoldNormal", "RSI Normal Threshold", 20, 50], ["pullbackQuality.rsiOversoldHighVol", "RSI HighVol Threshold", 15, 45],
-             ["pullbackQuality.volumeConfirm", "Volume Confirm", 0, 10], ["pullbackQuality.volRatioThreshold", "Vol Ratio Threshold", 0.5, 3]
+            [["pullbackQuality.distATR_idealCenter", "ATR Dist Ideal Center", -1, 2],
+             ["pullbackQuality.distATR_idealWidth", "ATR Dist Ideal Width", 0.1, 2],
+             ["pullbackQuality.distATR_maxRange", "ATR Dist Max Range", 1, 6],
+             ["pullbackQuality.pullbackDepthIdealCenter", "Depth Ideal Center", 0.02, 0.15],
+             ["pullbackQuality.pullbackDepthIdealWidth", "Depth Ideal Width", 0.01, 0.05],
+             ["pullbackQuality.pullbackDepthMax", "Depth Hard Max", 0.10, 0.40],
+             ["pullbackQuality.bullCandleBodyATR", "Bull Body (ATR×)", 0.1, 1.0],
+             ["pullbackQuality.reversalRiskPenalty", "Reversal Risk Penalty", 0, 10],
+             ["pullbackQuality.candleColor", "Candle Color", 0, 10],
+             ["pullbackQuality.bbWidthSqueeze", "BB Squeeze", 0, 10],
+             ["pullbackQuality.rsiOversold", "RSI Oversold", 0, 10],
+             ["pullbackQuality.stochRSIThreshold", "StochRSI Threshold", 5, 40],
+             ["pullbackQuality.rsiOversoldNormal", "RSI Normal Threshold", 20, 50],
+             ["pullbackQuality.rsiOversoldHighVol", "RSI HighVol Threshold", 15, 45],
+             ["pullbackQuality.volumeConfirm", "Volume Confirm", 0, 10],
+             ["pullbackQuality.volRatioThreshold", "Vol Ratio Threshold", 0.5, 3],
+             ["pullbackQuality.supportConfluence", "Support Confluence", 0, 10],
+             ["pullbackQuality.supportConfluenceThreshold", "Support Min Count", 1, 4]
             ].map(([path, label, min, max]) =>
               React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
-                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 150 } }, label),
+                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 170 } }, label),
                 React.createElement("input", { className: "inp", type: "number", step: 0.5, min: min, max: max, value: scoreConfig.pullbackQuality[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 75, fontSize: 11 } })
               )
             )
@@ -7949,7 +7961,7 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles, ind
       total: d.entryScore,
       decision: toDec(d.classification),
       trendHealthScore: d.trendHealth, trendHealthMax: _pm.trendHealth != null ? _pm.trendHealth : 30,
-      pullbackScore: d.pullbackQuality, pullbackMax: _pm.pullbackQuality != null ? _pm.pullbackQuality : 30,
+      pullbackScore: d.pullbackQuality, pullbackMax: _pm.pullbackQuality != null ? _pm.pullbackQuality : 35,
       prob4Score: d.prob4, prob4Max: _pm.prob4 != null ? _pm.prob4 : 40,
       modifiersScore: d.modifiers != null ? d.modifiers : 0, modifiersMax: _modCfg.max != null ? _modCfg.max : 15,
       penalties: d.penalties, bonuses: d.bonuses, raw_score: d.raw_score,
@@ -10203,11 +10215,11 @@ function InfoPage() {
         // ENTRY SCORE
         React.createElement(MethSection, { label: "Entry Score (100 raw pts)", stateKey: "entry" }),
         React.createElement(MethContent, { stateKey: "entry" },
-          React.createElement("p", { style: subH }, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _th = _pm.trendHealth != null ? _pm.trendHealth : 30; var _pb = _pm.pullbackQuality != null ? _pm.pullbackQuality : 30; var _p4 = _pm.prob4 != null ? _pm.prob4 : 40; return "3 Pillars \u2014 Trend Health(" + _th + ") | Pullback Quality(" + _pb + ") | 4% Probability(" + _p4 + ")"; })()),
+          React.createElement("p", { style: subH }, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _th = _pm.trendHealth != null ? _pm.trendHealth : 35; var _pb = _pm.pullbackQuality != null ? _pm.pullbackQuality : 35; var _p4 = _pm.prob4 != null ? _pm.prob4 : 40; return "3 Pillars \u2014 Trend Health(" + _th + ") | Pullback Quality(" + _pb + ") | 4% Probability(" + _p4 + ")"; })()),
           React.createElement("p", { style: subSub }, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _th = _pm.trendHealth != null ? _pm.trendHealth : 30; return "1. Trend Health (" + _th + " pts)"; })()),
           React.createElement("p", null, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _th = _pm.trendHealth != null ? _pm.trendHealth : 30; return "Price > SMA(50) (+5). SMA(20) > SMA(50) (+5). Price > SMA(20) OR > Anchored VWAP (+5). ADX(14) >=25 AND +DI > -DI (+5). Mansfield RS(52w) > -5 (+5). MACD(12,26,9) above signal (+5). Weekly Heikin-Ashi bullish, synthesized from daily for the D timeframe (+2.5). SMA(20) 5-bar slope >0 AND price > SMA(20) (+2.5). Cap " + _th + "."; })()),
-          React.createElement("p", { style: subSub }, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _pb = _pm.pullbackQuality != null ? _pm.pullbackQuality : 30; return "2. Pullback / Setup Quality (" + _pb + " pts)"; })()),
-          React.createElement("p", null, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _pb = _pm.pullbackQuality != null ? _pm.pullbackQuality : 30; return "Price within \u00b12% of the nearest support (SMA20 / BB Lower / Anchored VWAP / SMA50) (+7). Bullish candle c > o (+4). Bollinger width < 5 bars ago (+3). StochRSI K < 20 OR RSI(14) < 40 (+3). Volume > 1.5\u00d7 20-bar average AND c > o (+4). Cap " + _pb + "."; })()),
+          React.createElement("p", { style: subSub }, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _pb = _pm.pullbackQuality != null ? _pm.pullbackQuality : 35; return "2. Pullback / Setup Quality (" + _pb + " pts)"; })()),
+          React.createElement("p", null, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _pb = _pm.pullbackQuality != null ? _pm.pullbackQuality : 35; return "Graded scoring: ATR distance to support (10 max, direction-aware, peak at ideal center + decay). Bullish body >= 0.3\u00d7ATR (+4). BB squeeze (+3). RSI/StochRSI oversold (continuous, +3). Volume confirmation (+4). Pullback depth graded on ideal 8% center (up to +6). Support confluence (+5). Bullish reversal confirmation: undercut-reclaim, rising RSI/StochRSI, MACD histogram troughing (+3). Bearish reversal-risk penalty up to \u22126. Cap " + _pb + "."; })()),
           React.createElement("p", { style: subSub }, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _p4 = _pm.prob4 != null ? _pm.prob4 : 40; return "3. 4% Probability (" + _p4 + " pts)"; })()),
           React.createElement("p", null, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _p4 = _pm.prob4 != null ? _pm.prob4 : 40; return "(0.04 \u00d7 c) / ATR(14) > 1.5 \u2014 the 4% move fits in \u2248 2.67\u00d7 daily ATR (+15). Price 0.5\u20134.0% below target4 = buyRef \u00d7 1.04 (+10) \u2014 the window is wide enough to survive shallow 1\u20131.5% dips toward support, but breaking below support exits it. ATR(10) between 1.5% and 3.5% of price (+10). Efficiency ratio 10 > 0.4 (+5). Cap " + _p4 + "."; })()),
           React.createElement("p", { style: subH }, "Modifiers (penalties / bonuses)"),
@@ -10422,7 +10434,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally. No data is sent to any server."),
         React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "2.4.25"),
-        React.createElement("p", { style: { marginTop: 4, color: "var(--text5)" } }, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _th = _pm.trendHealth != null ? _pm.trendHealth : 30; var _pb = _pm.pullbackQuality != null ? _pm.pullbackQuality : 30; var _p4 = _pm.prob4 != null ? _pm.prob4 : 40; return "Latest: Entry score rebuilt on three pillars \u2014 Trend Health(" + _th + ") + Pullback Quality(" + _pb + ") + 4% Probability(" + _p4 + ") \u2014 with spike/stability/reversal modifiers and the todaySpike hard gate (cap 49). Blow-off/stability-collapse urgency bonuses remain on exit. No double-counted penalties."; })()),
+        React.createElement("p", { style: { marginTop: 4, color: "var(--text5)" } }, (function() { var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {}; var _th = _pm.trendHealth != null ? _pm.trendHealth : 35; var _pb = _pm.pullbackQuality != null ? _pm.pullbackQuality : 35; var _p4 = _pm.prob4 != null ? _pm.prob4 : 40; return "Latest: Entry score rebuilt on three pillars \u2014 Trend Health(" + _th + ") + Pullback Quality(" + _pb + ") + 4% Probability(" + _p4 + ") \u2014 with spike/stability/reversal modifiers and the todaySpike hard gate (cap 49). Blow-off/stability-collapse urgency bonuses remain on exit. No double-counted penalties."; })()),
         React.createElement("p", null, "Data: Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
     ),

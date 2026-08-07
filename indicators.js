@@ -2475,7 +2475,7 @@ window.TechIndicators = (function () {
 
   /* ══════════════════════════════════════════════════════════════════════════
      NEW ENTRY ENGINE — 3-pillar model (0-100):
-     Trend Health (30) + Pullback Quality (30) + 4% Probability (40),
+     Trend Health (35) + Pullback Quality (35) + 4% Probability (40),
      then ±15 modifiers. Designed to keep scores stable on shallow 1-1.5%
      dips toward support (pillar inputs are dip-insensitive, pullback pillar
      even gains on a dip to SMA20/lower-BB support).
@@ -2550,6 +2550,12 @@ window.TechIndicators = (function () {
       var adxL = gv(adxRes.adx), plusDI = gv(adxRes.plusDI), minusDI = gv(adxRes.minusDI);
       var macdRes = calcMACD(candles);
       var macdL = gv(macdRes.macd), sigL = gv(macdRes.signal);
+      var macdHist = (macdL != null && sigL != null) ? macdL - sigL : null;
+      var macdHistPrev = null;
+      if (macdRes.histogram && macdRes.histogram.length > L1 && L1 - 1 >= 0) {
+        var _hPrev = macdRes.histogram[L1 - 1];
+        macdHistPrev = _hPrev != null ? _hPrev : null;
+      }
 
       var rsMansfield = null;
       if (indexCandles && indexCandles.length > 10) {
@@ -2574,8 +2580,12 @@ window.TechIndicators = (function () {
       }
       var upDownVolRatio = (dnDayVol > 0) ? upDayVol / dnDayVol : (upDayVol > 0 ? 2 : 1);
 
-      var stochRsiK = gv(calcStochasticRSI(candles).k);
-      var rsi14 = gv(calcRSI(candles, 14));
+      var stochRsiK_arr = calcStochasticRSI(candles).k;
+      var stochRsiK = gv(stochRsiK_arr);
+      var stochRsiKPrev = (stochRsiK_arr && stochRsiK_arr.length > L1 && L1 - 1 >= 0) ? stochRsiK_arr[L1 - 1] : null;
+      var rsi14_arr = calcRSI(candles, 14);
+      var rsi14 = gv(rsi14_arr);
+      var rsi14Prev = (rsi14_arr && rsi14_arr.length > L1 && L1 - 1 >= 0) ? rsi14_arr[L1 - 1] : null;
       var atr14 = gv(calcATR(candles, 14));
       var atr10 = gv(calcATR(candles, 10));
 
@@ -2661,7 +2671,9 @@ window.TechIndicators = (function () {
         sma20: sma20, sma50: sma50, sma20Slope5: sma20Slope5, anchoredVwap: anchoredVwap,
         adxL: adxL, plusDI: plusDI, minusDI: minusDI, macdL: macdL, sigL: sigL, rsMansfield: rsMansfield,
         bbUpper: bbUpper, bbLower: bbLower, bbWidth: bbWidth, bbWidthPrev5: bbWidthPrev5,
-        stochRsiK: stochRsiK, rsi14: rsi14, atr14: atr14, atr10: atr10,
+        stochRsiK: stochRsiK, stochRsiKPrev: stochRsiKPrev, rsi14: rsi14, rsi14Prev: rsi14Prev,
+        macdHist: macdHist, macdHistPrev: macdHistPrev,
+        atr14: atr14, atr10: atr10,
         efficiencyRatio10: efficiencyRatio10, upDownVolRatio: upDownVolRatio,
         beta: beta, stability20: stability20, spikeLast: spikeLast, gapPct: gapPct,
         weeklyHABullish: weeklyHABullish,
@@ -2737,26 +2749,45 @@ window.TechIndicators = (function () {
       sma20Slope: 2.5,
       sma20SlopeThreshold: 0,
     },
-    /* Pillar 2: Pullback Quality */
+    /* Pillar 2: Pullback Quality (max 35).
+       Graded (continuous) scoring for distATR and pullbackDepth.
+       Includes bullish reversal-confirmation sub-score and
+       bearish reversal-risk penalty via calcReversalRisk(). */
     pullbackQuality: {
+      /* ATR distance — direction-aware, graded */
+      distATR_idealCenter: 0.0,
+      distATR_idealWidth: 0.5,
+      distATR_maxRange: 3.0,
+      /* pullbackDepth — graded, center on ideal */
+      pullbackDepthIdealCenter: 0.08,
+      pullbackDepthIdealWidth: 0.03,
+      pullbackDepthMax: 0.25,
+      /* Legacy band weights (kept for backward compat, unused by new graded scorer) */
       distATR_inner: 7,
       distATR_innerRange: 1.0,
       distATR_outer: 3,
       distATR_outerRange: 1.5,
-      candleColor: 4,
-      bbWidthSqueeze: 3,
-      rsiOversold: 3,
-      stochRSIThreshold: 20,
-      rsiOversoldNormal: 40,
-      rsiOversoldHighVol: 35,
-      volumeConfirm: 4,
-      volRatioThreshold: 1.5,
       pullbackDepthIdeal: 6,
       pullbackDepthLo: 0.05,
       pullbackDepthHi: 0.15,
-      pullbackDepthMax: 0.25,
+      /* Candle body */
+      candleColor: 4,
+      bullCandleBodyATR: 0.3,
+      /* BB squeeze */
+      bbWidthSqueeze: 3,
+      /* RSI oversold — tightened */
+      rsiOversold: 3,
+      stochRSIThreshold: 20,
+      rsiOversoldNormal: 32,
+      rsiOversoldHighVol: 35,
+      /* Volume */
+      volumeConfirm: 4,
+      volRatioThreshold: 1.5,
+      /* Support confluence */
       supportConfluence: 5,
       supportConfluenceThreshold: 2,
+      /* Bearish reversal penalty */
+      reversalRiskPenalty: 6,
     },
     /* Pillar 3: 4% Probability */
     prob4: {
@@ -2852,25 +2883,97 @@ window.TechIndicators = (function () {
     return Math.min(s, SCORE_CONFIG.pillarMax.trendHealth);
   }
 
-  /* Pillar 2: Pullback / Setup Quality (max 30).
-     Volatility-normalized: distance to buyRef measured in ATR terms instead of
-     fixed percentage. For large cap (1.5% ATR), 1.0 ATR ~ 1.5%. For mid cap
-     (3% ATR), 1.0 ATR ~ 3%. This naturally adapts to the stock's volatility. */
+  /* Pillar 2: Pullback / Setup Quality (max 35).
+     Graded (continuous) scoring for distATR and pullbackDepth so scores
+     move smoothly near boundaries. Includes bullish reversal-confirmation
+     sub-score and bearish reversal-risk penalty. ATR-normalized for
+     cross-cap compatibility. */
   function calcPullbackScore(sn, volRegime) {
     var c = SCORE_CONFIG.pullbackQuality;
     var s = 0;
+
+    /* ── 1. ATR distance to buyRef — direction-aware, graded ────────────── */
     if (sn.c != null && sn.buyRef != null && sn.buyRef > 0 && sn.atr14 != null && sn.atr14 > 0) {
       var distATR = (sn.c - sn.buyRef) / sn.atr14;
-      if (distATR >= -c.distATR_innerRange && distATR <= c.distATR_innerRange) s += c.distATR_inner;
-      else if (distATR >= -c.distATR_outerRange && distATR <= c.distATR_outerRange) s += c.distATR_outer;
+      var absDist = Math.abs(distATR);
+      var idealW = c.distATR_idealWidth || 0.5;
+      var maxR = c.distATR_maxRange || 3.0;
+      if (absDist <= idealW) {
+        /* Right at support — full points */
+        s += 10;
+      } else if (absDist <= maxR) {
+        /* Linear decay from 10 → 2 over [idealW, maxR] */
+        var decayFrac = (absDist - idealW) / (maxR - idealW);
+        s += Math.round((10 - 8 * decayFrac) * 10) / 10;
+      }
+      /* Direction bonus: above buyRef gets +1 for testing intact, below gets −1 */
+      if (distATR > 0.1) s += 1;
+      else if (distATR < -0.5) s -= 1;
     }
-    if (sn.c != null && sn.o != null && sn.c > sn.o) s += c.candleColor;
+
+    /* ── 2. Candle body quality — minimum body relative to ATR ──────────── */
+    if (sn.c != null && sn.o != null && sn.atr14 != null && sn.atr14 > 0) {
+      var bodyPct = Math.abs(sn.c - sn.o) / sn.atr14;
+      if (sn.c > sn.o && bodyPct >= (c.bullCandleBodyATR || 0.3)) {
+        s += c.candleColor;
+      } else if (sn.c > sn.o) {
+        s += Math.round(c.candleColor * 0.5 * 10) / 10;
+      }
+    }
+
+    /* ── 3. BB squeeze — rolling comparison (5-bar) ─────────────────────── */
     if (sn.bbWidth != null && sn.bbWidthPrev5 != null && sn.bbWidth < sn.bbWidthPrev5) s += c.bbWidthSqueeze;
+
+    /* ── 4. RSI/StochRSI oversold — continuous grading ──────────────────── */
     var rsiOversold = (volRegime && volRegime.regime === 'high') ? c.rsiOversoldHighVol : c.rsiOversoldNormal;
-    if ((sn.stochRsiK != null && sn.stochRsiK < c.stochRSIThreshold) || (sn.rsi14 != null && sn.rsi14 < rsiOversold)) s += c.rsiOversold;
+    if (sn.stochRsiK != null && sn.stochRsiK < c.stochRSIThreshold) {
+      s += c.rsiOversold;
+    } else if (sn.rsi14 != null) {
+      if (sn.rsi14 < rsiOversold - 5) s += c.rsiOversold;
+      else if (sn.rsi14 < rsiOversold) s += Math.round(c.rsiOversold * 0.5 * 10) / 10;
+    }
+
+    /* ── 5. Volume confirmation — volume spike + bullish candle ─────────── */
     if (sn.volRatio != null && sn.volRatio > c.volRatioThreshold && sn.c != null && sn.o != null && sn.c > sn.o) s += c.volumeConfirm;
-    if (sn.pullbackDepth != null && sn.pullbackDepth >= c.pullbackDepthLo && sn.pullbackDepth <= c.pullbackDepthHi) s += c.pullbackDepthIdeal;
+
+    /* ── 6. Pullback depth — graded, centered on ideal ──────────────────── */
+    if (sn.pullbackDepth != null) {
+      var depthCenter = c.pullbackDepthIdealCenter || 0.08;
+      var depthWidth = c.pullbackDepthIdealWidth || 0.03;
+      var depthMax = c.pullbackDepthMax || 0.25;
+      var depthDiff = Math.abs(sn.pullbackDepth - depthCenter);
+      if (depthDiff <= depthWidth) {
+        s += c.pullbackDepthIdeal;
+      } else if (sn.pullbackDepth < depthMax) {
+        /* Linear decay from full → 2 over [depthCenter+depthWidth, depthMax] */
+        var depthDecay = (depthDiff - depthWidth) / (depthMax - depthCenter - depthWidth);
+        if (depthDecay > 1) depthDecay = 1;
+        s += Math.round((c.pullbackDepthIdeal - (c.pullbackDepthIdeal - 2) * depthDecay) * 10) / 10;
+      }
+      /* Hard fail beyond pullbackDepthMax — broken trend */
+      if (sn.pullbackDepth > depthMax) s -= 3;
+    }
+
+    /* ── 7. Support confluence — multiple support levels nearby ─────────── */
     if (sn.nearSupportCount != null && sn.nearSupportCount >= c.supportConfluenceThreshold) s += c.supportConfluence;
+
+    /* ── 8. Bullish reversal confirmation sub-score (+3 max) ───────────── */
+    var revBonus = 0;
+    /* 8a. Undercut & reclaim: intraday low pierced buyRef, close back above it */
+    if (sn.l != null && sn.c != null && sn.buyRef != null && sn.buyRef > 0) {
+      if (sn.l < sn.buyRef && sn.c > sn.buyRef) revBonus += 1;
+    }
+    /* 8b. RSI14 or StochRSI K rising vs prior bar */
+    var rsiRising = (sn.rsi14 != null && sn.rsi14Prev != null && sn.rsi14 > sn.rsi14Prev);
+    var stochRising = (sn.stochRsiK != null && sn.stochRsiKPrev != null && sn.stochRsiK > sn.stochRsiKPrev);
+    if (rsiRising || stochRising) revBonus += 1;
+    /* 8c. MACD histogram troughing (today > yesterday, both negative) */
+    if (sn.macdHist != null && sn.macdHistPrev != null && sn.macdHist > sn.macdHistPrev && sn.macdHist < 0) revBonus += 1;
+    s += Math.min(revBonus, 3);
+
+    /* ── 9. Bearish reversal-risk penalty (from calcReversalRisk) ───────── */
+    /* Applied as a modifier outside this function; passed via sn._reversalRisk */
+
     return Math.min(s, SCORE_CONFIG.pillarMax.pullbackQuality);
   }
 
@@ -2983,6 +3086,12 @@ window.TechIndicators = (function () {
     var spikeDay = sn.spikeLast === true || (sn.gapPct != null && Math.abs(sn.gapPct) > SCORE_CONFIG.modifiers.spikeGapThreshold);
     var modifierItems = buildEntryModifiers(sn, { spikeDay: spikeDay, volRegime: volRegime });
 
+    /* Reversal-risk penalty (bearish topping patterns: climax, exhaustion, divergence) */
+    var reversalRisk = calcReversalRisk(candles);
+    var rrPenalty = SCORE_CONFIG.pullbackQuality.reversalRiskPenalty || 6;
+    if (reversalRisk >= 7) modifierItems.push({ reason: "High reversal risk (divergence/climax)", amount: -rrPenalty });
+    else if (reversalRisk >= 5) modifierItems.push({ reason: "Reversal risk (divergence/climax)", amount: -Math.round(rrPenalty * 0.5 * 10) / 10 });
+
     var penalties = 0, bonuses = 0, penaltyItems = [], bonusItems = [];
     modifierItems.forEach(function (it) {
       if (it.amount < 0) { penalties += it.amount; penaltyItems.push(it); } else { bonuses += it.amount; bonusItems.push(it); }
@@ -3091,6 +3200,13 @@ window.TechIndicators = (function () {
     }
     var volRegime = perTF.D && perTF.D.volRegime ? perTF.D.volRegime : (baseSn ? calcVolRegime(baseSn, dTF ? dTF.candles : null) : null);
     var modifierItems = buildEntryModifiers(baseSn, { spikeDay: spikeDay, mtfAlignFactor: mtfAlignFactor, volRegime: volRegime });
+
+    /* Reversal-risk penalty (bearish topping patterns: climax, exhaustion, divergence) */
+    var dailyCandles = (dTF && dTF.candles && dTF.candles.length >= 30) ? dTF.candles : null;
+    var reversalRisk = dailyCandles ? calcReversalRisk(dailyCandles) : 0;
+    var rrPenalty = SCORE_CONFIG.pullbackQuality.reversalRiskPenalty || 6;
+    if (reversalRisk >= 7) modifierItems.push({ reason: "High reversal risk (divergence/climax)", amount: -rrPenalty });
+    else if (reversalRisk >= 5) modifierItems.push({ reason: "Reversal risk (divergence/climax)", amount: -Math.round(rrPenalty * 0.5 * 10) / 10 });
 
     var penalties = 0, bonuses = 0, penaltyItems = [], bonusItems = [];
     modifierItems.forEach(function (it) {
