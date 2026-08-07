@@ -353,7 +353,7 @@ window.BacktestEngine = (function () {
         var entryScoreCtx = scoreObj ? { trendHealth: scoreObj.trendHealth, pullbackQuality: scoreObj.pullbackQuality, prob4: scoreObj.prob4, entryScore: scoreObj.entryScore } : null;
         var cfg = { horizonDays: 10, windowSessions: 40, entry_price: bar.c, targetPct: targetProfitPct, indexCandles: idxSlice, entryScoreContext: entryScoreCtx };
         var res = window.TechIndicators.computeHorizonConfidence(hSlice, dSlice, cfg);
-        if (res && res.components && res.components.probTouch != null) return res.components.probTouch / 100;
+        if (res && res.components && res.components.probTouch != null) return { probTouch: res.components.probTouch / 100, confLog: res.confidenceLognormal != null ? res.confidenceLognormal / 100 : null, confEmp: res.confidenceEmpirical != null ? res.confidenceEmpirical / 100 : null };
       } catch (e) {}
       return null;
     }
@@ -382,7 +382,10 @@ window.BacktestEngine = (function () {
               && (r.raw_score == null || r.raw_score >= minRaw)) {
             var trade = simulateTrade(candles, i, r, opts);
             trade.symbol = symbol;
-            trade.probTouch = conf10dAt(candles, i, symbol);
+            var c10 = conf10dAt(candles, i, symbol);
+            trade.probTouch = c10 ? c10.probTouch : null;
+            trade.confLog = c10 ? c10.confLog : null;
+            trade.confEmp = c10 ? c10.confEmp : null;
             t.push(trade);
           }
         }
@@ -534,7 +537,10 @@ window.BacktestEngine = (function () {
                 && (r.prob4 == null || r.prob4 >= minP4)
                 && (r.raw_score == null || r.raw_score >= minRaw)) {
               fwd.symbol = symbol;
-              fwd.probTouch = conf10dAt(candles, i, symbol);
+              var c10 = conf10dAt(candles, i, symbol);
+              fwd.probTouch = c10 ? c10.probTouch : null;
+              fwd.confLog = c10 ? c10.confLog : null;
+              fwd.confEmp = c10 ? c10.confEmp : null;
               trades.push(fwd);
             }
           }
@@ -756,9 +762,9 @@ window.BacktestEngine = (function () {
 
     function exportSingleCSV(res) {
       var st = res.stats;
-      var headers = ["Symbol", "Entry Date", "Exit Date", "Entry Price", "Exit Price", "Entry Score", "Signal", "Target", "Hit Target", "Days", "Return %", "Max Fav %", "Max Adv %", "Trend", "Pullback", "Prob4", "Modifiers"];
+      var headers = ["Symbol", "Entry Date", "Exit Date", "Entry Price", "Exit Price", "Entry Score", "10DLN", "10DEM", "Signal", "Target", "Hit Target", "Days", "Return %", "Max Fav %", "Max Adv %", "Trend", "Pullback", "Prob4", "Modifiers"];
       var rows = (st && st.trades ? st.trades : []).map(function (t) {
-        return [res.symbol, t.entryDate, t.exitDate, t.entryPrice, t.exitPrice, t.entryScore, t.signal, t.targetPrice, t.hitTarget ? "YES" : "NO", t.daysToTarget || "", t.finalReturnPct, t.maxProfitPct, t.maxLossPct, t.trendScore, t.pullbackScore, t.probabilityScore, t.modifiers];
+        return [res.symbol, t.entryDate, t.exitDate, t.entryPrice, t.exitPrice, t.entryScore, t.confLog != null ? Math.round(t.confLog * 1000) / 10 : null, t.confEmp != null ? Math.round(t.confEmp * 1000) / 10 : null, t.signal, t.targetPrice, t.hitTarget ? "YES" : "NO", t.daysToTarget || "", t.finalReturnPct, t.maxProfitPct, t.maxLossPct, t.trendScore, t.pullbackScore, t.probabilityScore, t.modifiers];
       });
       return csvRows(headers, rows);
     }

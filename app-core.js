@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.66";
+window.__STOX_APP_VERSION = "2.10.70";
 
 /* Apply saved score config on startup */
 (function() {
@@ -5792,14 +5792,15 @@ const BacktestPanel = () => {
     }
   };
 
+  function escCsv(v) { const s = String(v == null ? "" : Math.round(v * 100) / 100); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
+
   const exportCSV = () => {
     if (!result || !result.log || !result.log.length) return;
     const header = ["Date", "Entry", "EntryScore", "Conf10d", "10DLN", "10DEM", "Fwd5d%", "Fwd10d%", "Fwd20d%", "TouchHit(+4%)", "CloseHit(+4%)", "Loss(\u2264-3%)", "MaxFav%", "MaxAdv%"];
-    function esc(v) { const s = String(v == null ? "" : Math.round(v * 100) / 100); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
     const lines = [header.join(",")].concat(result.log.map(function (r) {
-      return [r.date, esc(r.entry), r.entryScore != null ? r.entryScore : "", r.conf != null ? r.conf : "", r.confLog != null ? r.confLog : "", r.confEmp != null ? r.confEmp : "",
-        esc(r.fwd5), esc(r.fwd10), esc(r.fwd20), r.touchHit ? "1" : "0", r.closeHit ? "1" : "0", r.lossHit ? "1" : "0",
-        esc(r.maxFav), esc(r.maxAdv)].join(",");
+      return [r.date, escCsv(r.entry), r.entryScore != null ? r.entryScore : "", r.conf != null ? r.conf : "", r.confLog != null ? r.confLog : "", r.confEmp != null ? r.confEmp : "",
+        escCsv(r.fwd5), escCsv(r.fwd10), escCsv(r.fwd20), r.touchHit ? "1" : "0", r.closeHit ? "1" : "0", r.lossHit ? "1" : "0",
+        escCsv(r.maxFav), escCsv(r.maxAdv)].join(",");
     }));
     const csv = lines.join("\r\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
@@ -5977,7 +5978,7 @@ const BacktestPanel = () => {
               result.log.map(function (r) {
                 return React.createElement("tr", { key: r.date },
                   cell(r.date, tdL),
-                  cell(esc(r.entry)),
+                  cell(escCsv(r.entry)),
                   cell(r.entryScore != null ? fmtS(r.entryScore) : "\u2014"),
                   cell(r.confLog != null ? React.createElement("span", { style: { fontWeight: 700, color: r.confLog >= 70 ? "#16a34a" : r.confLog >= 40 ? "#d97706" : "#dc2626" } }, fmtS(r.confLog)) : "\u2014"),
                   cell(r.confEmp != null ? React.createElement("span", { style: { fontWeight: 700, color: r.confEmp >= 70 ? "#16a34a" : r.confEmp >= 40 ? "#d97706" : "#dc2626" } }, fmtS(r.confEmp)) : "\u2014"),
@@ -6753,10 +6754,13 @@ const BacktestSuitePanel = () => {
         React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
             React.createElement("thead", null, React.createElement("tr", null,
-              cell("Entry", tdL), cell("Exit", tdL), cell("Score", td), cell("Signal", tdL), cell("Entry", td), cell("Exit", td), cell("Days", td), cell("Return", td), cell("Hit", td)
+              cell("Entry", tdL), cell("Exit", tdL), cell("Score", td), cell("10DLN", td), cell("10DEM", td), cell("Signal", tdL), cell("Entry", td), cell("Exit", td), cell("Days", td), cell("Return", td), cell("Hit", td)
             )),
             React.createElement("tbody", null, (st.trades || []).slice(0, 30).map((t, i) => React.createElement("tr", { key: t.entryDate + "-" + i },
-              cell(t.entryDate, tdL), cell(t.exitDate, tdL), cell(fmtS(t.entryScore)), cell(t.signal, tdL),
+              cell(t.entryDate, tdL), cell(t.exitDate, tdL), cell(fmtS(t.entryScore)),
+              cell(t.confLog != null ? React.createElement("span", { style: { color: t.confLog * 100 >= 50 ? "#22c55e" : "#ef4444", fontWeight: 700 } }, fmt2(t.confLog * 100)) : "\u2014"),
+              cell(t.confEmp != null ? React.createElement("span", { style: { color: t.confEmp * 100 >= 50 ? "#22c55e" : "#ef4444", fontWeight: 700 } }, fmt2(t.confEmp * 100)) : "\u2014"),
+              cell(t.signal, tdL),
               cell(fmtInr(t.entryPrice)), cell(fmtInr(t.exitPrice)), cell(t.daysToTarget != null ? t.daysToTarget : "\u2014"),
               cell(React.createElement("span", { style: { color: retColor(t.finalReturnPct), fontWeight: 700 } }, fmtR(t.finalReturnPct))),
               cell(t.hitTarget ? React.createElement("span", { style: { color: "#22c55e", fontWeight: 700 } }, "YES") : React.createElement("span", { style: { color: "#eab308" } }, "no"))
