@@ -245,7 +245,7 @@ const ProfitabilityMetrics=({shares,soldShareSnapshots={}})=>{
       display:"flex",alignItems:"center",gap:3,justifyContent:align||"flex-start",
       padding:"6px 8px",
     }
-  },label,sortBy===field&&React.createElement("span",{style:{fontSize:8}},sortDir==="desc"?"▼":"▲"));
+  },label,sortBy===field&&React.createElement("span",{style:{fontSize:8}},sortDir==="desc"?Ico.triangleDown(10):Ico.triangleUp(10)));
 
   if(!trades.length)return React.createElement("div",{style:{textAlign:"center",padding:"48px 20px"}},
     React.createElement("div",{style:{fontSize:40,marginBottom:12,color:"var(--text6)"}},React.createElement(Icon,{n:"invest",size:40})),
@@ -1066,7 +1066,7 @@ const WinLossPatterns=({shares,soldShareSnapshots={}})=>{
       display:"flex",alignItems:"center",gap:3,justifyContent:align||"flex-start",
       padding:"6px 8px",
     }
-  },label,sortBy===field&&React.createElement("span",{style:{fontSize:8}},sortDir==="desc"?"▼":"▲"));
+  },label,sortBy===field&&React.createElement("span",{style:{fontSize:8}},sortDir==="desc"?Ico.triangleDown(10):Ico.triangleUp(10)));
 
   /* ── Empty state ── */
   if(!trades.length)return React.createElement("div",{style:{textAlign:"center",padding:"48px 20px"}},
@@ -2739,7 +2739,7 @@ const TradeTimingCorrelation=({shares,soldShareSnapshots={}})=>{
           const isWorst=buyDayStats.worst&&s.day===buyDayStats.worst.day;
           const maxRet=Math.max(...buyDayStats.stats.filter(x=>x.count>0).map(x=>Math.abs(x.avgReturn)),1);
           return React.createElement("div",{key:s.day,style:{display:"grid",gridTemplateColumns:"70px 1fr 60px 70px 70px 60px",gap:8,padding:"8px 4px",borderBottom:"1px solid var(--border2)",background:isBest?"rgba(22,163,74,.04)":isWorst?"rgba(239,68,68,.04)":"transparent",borderRadius:isBest||isWorst?6:0}},
-            React.createElement("div",{style:{fontSize:12,fontWeight:600,color:isBest?"#16a34a":isWorst?"#ef4444":"var(--text)"}},s.label,React.createElement("span",{style:{fontSize:9,color:"var(--text5)",marginLeft:4}},s.day===buyDayStats.best?.day?"★":s.day===buyDayStats.worst?.day?"▼":"")),
+            React.createElement("div",{style:{fontSize:12,fontWeight:600,color:isBest?"#16a34a":isWorst?"#ef4444":"var(--text)"}},s.label,React.createElement("span",{style:{fontSize:9,color:"var(--text5)",marginLeft:4}},s.day===buyDayStats.best?.day?Ico.star(12,"#f59e0b"):s.day===buyDayStats.worst?.day?Ico.triangleDown(8,"#ef4444"):"")),
             React.createElement("div",{style:{display:"flex",alignItems:"center",gap:6}},
               React.createElement(BarPct,{pct:Math.abs(s.avgReturn),maxPct:maxRet,color:retColor(s.avgReturn)}),
               React.createElement("span",{style:{fontSize:11,fontWeight:600,color:retColor(s.avgReturn),minWidth:52,textAlign:"right"}},retSign(s.avgReturn))
@@ -2781,7 +2781,7 @@ const TradeTimingCorrelation=({shares,soldShareSnapshots={}})=>{
           const isWorst=sellDayStats.worst&&s.day===sellDayStats.worst.day;
           const maxRet=Math.max(...sellDayStats.stats.filter(x=>x.count>0).map(x=>Math.abs(x.avgReturn)),1);
           return React.createElement("div",{key:s.day,style:{display:"grid",gridTemplateColumns:"70px 1fr 60px 70px 70px",gap:8,padding:"8px 4px",borderBottom:"1px solid var(--border2)",background:isBest?"rgba(22,163,74,.04)":isWorst?"rgba(239,68,68,.04)":"transparent",borderRadius:isBest||isWorst?6:0}},
-            React.createElement("div",{style:{fontSize:12,fontWeight:600,color:isBest?"#16a34a":isWorst?"#ef4444":"var(--text)"}},s.label,React.createElement("span",{style:{fontSize:9,color:"var(--text5)",marginLeft:4}},s.day===sellDayStats.best?.day?"★":s.day===sellDayStats.worst?.day?"▼":"")),
+            React.createElement("div",{style:{fontSize:12,fontWeight:600,color:isBest?"#16a34a":isWorst?"#ef4444":"var(--text)"}},s.label,React.createElement("span",{style:{fontSize:9,color:"var(--text5)",marginLeft:4}},s.day===sellDayStats.best?.day?Ico.star(12,"#f59e0b"):s.day===sellDayStats.worst?.day?Ico.triangleDown(8,"#ef4444"):"")),
             React.createElement("div",{style:{display:"flex",alignItems:"center",gap:6}},
               React.createElement(BarPct,{pct:Math.abs(s.avgReturn),maxPct:maxRet,color:retColor(s.avgReturn)}),
               React.createElement("span",{style:{fontSize:11,fontWeight:600,color:retColor(s.avgReturn),minWidth:52,textAlign:"right"}},retSign(s.avgReturn))
@@ -2816,7 +2816,7 @@ const TradeTimingCorrelation=({shares,soldShareSnapshots={}})=>{
             const isBest=monthStats.best&&s.month===monthStats.best.month;
             const isWorst=monthStats.worst&&s.month===monthStats.worst.month;
             return React.createElement("div",{key:s.month,style:{padding:"10px 12px",borderRadius:10,border:"1px solid "+(isBest?"rgba(22,163,74,.3)":isWorst?"rgba(239,68,68,.3)":"var(--border)"),background:isBest?"rgba(22,163,74,.06)":isWorst?"rgba(239,68,68,.06)":"var(--bg4)"}},
-              React.createElement("div",{style:{fontSize:11,fontWeight:700,color:isBest?"#16a34a":isWorst?"#ef4444":"var(--text)",marginBottom:4}},s.label,isBest?" ★":"",isWorst?" ▼":""),
+              React.createElement("div",{style:{fontSize:11,fontWeight:700,color:isBest?"#16a34a":isWorst?"#ef4444":"var(--text)",marginBottom:4}},s.label,isBest?React.createElement(React.Fragment,null," ",Ico.star(12,"#f59e0b")):"",isWorst?React.createElement(React.Fragment,null," ",Ico.triangleDown(8,"#ef4444")):""),
               s.count>0?React.createElement(React.Fragment,null,
                 React.createElement("div",{style:{fontSize:15,fontFamily:"'Sora',sans-serif",fontWeight:700,color:retColor(s.avgReturn)}},retSign(s.avgReturn)),
                 React.createElement("div",{style:{fontSize:9,color:"var(--text5)",marginTop:2}},s.count+" trades · "+s.winRate.toFixed(0)+"% win")
@@ -3422,7 +3422,7 @@ const RiskMetrics=({shares,soldShareSnapshots={}})=>{
             React.createElement("div",{style:{fontSize:9,fontWeight:700,color:"var(--text6)",textTransform:"uppercase",letterSpacing:.7,padding:"8px",textAlign:"center"}},"Win %")
           ),
           riskAdjustedRankings.map((s,i)=>{
-            const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":"";
+            const medal=i===0?Ico.medal1(14):i===1?Ico.medal2(14):i===2?Ico.medal3(14):"";
             const sharpeColor=s.sharpe>1?"#16a34a":s.sharpe>0.5?"#f59e0b":"#ef4444";
             return React.createElement("div",{key:s.ticker||i,style:{display:"grid",gridTemplateColumns:"40px 2fr 60px 80px 80px 80px 60px",gap:0,borderBottom:"1px solid var(--border2)",background:i%2===0?"transparent":"var(--bg4)",transition:"background .1s"},onMouseEnter:e=>e.currentTarget.style.background="var(--accentbg2)",onMouseLeave:e=>e.currentTarget.style.background=i%2===0?"transparent":"var(--bg4)"},
               React.createElement("div",{style:{padding:"9px 8px",fontSize:13,textAlign:"center",color:medal?"var(--text3)":"var(--text6)"}},medal||(i+1)),
@@ -3748,7 +3748,7 @@ const PatternMining=({shares,soldShareSnapshots={}})=>{
           }},
             React.createElement("div",{style:{fontSize:12,fontWeight:isBest?700:500,color:isBest?"#16a34a":"var(--text3)",display:"flex",alignItems:"center",gap:6}},
               b.label,
-              isBest&&React.createElement("span",{style:{fontSize:8,fontWeight:700,padding:"2px 6px",borderRadius:8,background:"rgba(22,163,74,.12)",color:"#16a34a"}},"★ BEST")
+              isBest&&React.createElement("span",{style:{fontSize:8,fontWeight:700,padding:"2px 6px",borderRadius:8,background:"rgba(22,163,74,.12)",color:"#16a34a"}},React.createElement(React.Fragment,null,Ico.star(12,"#f59e0b")," BEST"))
             ),
             React.createElement("div",{style:{fontSize:12,fontWeight:600,color:"var(--text4)",textAlign:"center"}},b.count),
             React.createElement("div",{style:{fontSize:12,fontWeight:700,fontFamily:"'Sora',sans-serif",color:b.avgReturn>=0?"#16a34a":"#ef4444",textAlign:"right"}},ret(b.avgReturn)),
@@ -3868,7 +3868,7 @@ const PatternMining=({shares,soldShareSnapshots={}})=>{
           React.createElement("div",{style:{fontSize:11,fontWeight:700,fontFamily:"'Sora',sans-serif",color:st.subAvgReturn>=0?"#16a34a":"#ef4444",textAlign:"right"}},ret(st.subAvgReturn)),
           React.createElement("div",{style:{fontSize:11,fontWeight:700,fontFamily:"'Sora',sans-serif",color:st.deltaReturn>=0?"#16a34a":"#ef4444",textAlign:"right"}},(st.deltaReturn>=0?"+":"")+st.deltaReturn.toFixed(1)+"%"),
           React.createElement("div",{style:{textAlign:"center"}},
-            React.createElement("span",{style:{fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:8,background:st.improved?"rgba(22,163,74,.1)":"rgba(239,68,68,.1)",color:st.improved?"#16a34a":"#ef4444"}},st.improved?"✓ Better":"✗ Worse")
+            React.createElement("span",{style:{fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:8,background:st.improved?"rgba(22,163,74,.1)":"rgba(239,68,68,.1)",color:st.improved?"#16a34a":"#ef4444"}},st.improved?React.createElement(React.Fragment,null,Ico.check(12,"#22c55e")," Better"):React.createElement(React.Fragment,null,Ico.x(12,"#ef4444")," Worse"))
           )
         )),
         revisitData.stocks.length>10&&React.createElement("div",{style:{fontSize:10,color:"var(--text6)",textAlign:"center",padding:"8px 0"}},"+"+(revisitData.stocks.length-10)+" more stocks")
@@ -3982,7 +3982,7 @@ const DrawdownRecoveryTracker=({shares,soldShareSnapshots={}})=>{
       React.createElement("div",{style:{background:eq.recoveryFactor>=2?"rgba(22,163,74,.07)":eq.recoveryFactor>=1?"rgba(234,179,8,.07)":"rgba(239,68,68,.07)",border:"1px solid "+(eq.recoveryFactor>=2?"rgba(22,163,74,.2)":eq.recoveryFactor>=1?"rgba(234,179,8,.2)":"rgba(239,68,68,.2)"),borderRadius:12,padding:"14px 16px"}},
         React.createElement("div",{style:{fontSize:10,color:"var(--text6)",textTransform:"uppercase",letterSpacing:.5,marginBottom:4}},"Recovery Factor"),
         React.createElement("div",{style:{fontSize:20,fontFamily:"'Sora',sans-serif",fontWeight:800,color:eq.recoveryFactor>=2?"#16a34a":eq.recoveryFactor>=1?"#eab308":"#ef4444"}},eq.recoveryFactor.toFixed(2)+"×"),
-        React.createElement("div",{style:{fontSize:10,color:"var(--text5)",marginTop:2}},eq.recoveryFactor>=2?"✓ Healthy (>2×)":eq.recoveryFactor>=1?"Marginal (<2×)":"⚠ Weak (<1×)")
+        React.createElement("div",{style:{fontSize:10,color:"var(--text5)",marginTop:2}},eq.recoveryFactor>=2?React.createElement(React.Fragment,null,Ico.check(11,"#22c55e")," Healthy (>2×)"):eq.recoveryFactor>=1?"Marginal (<2×)":React.createElement(React.Fragment,null,Ico.alertTriangle(11,"#f59e0b")," Weak (<1×)"))
       ),
       React.createElement("div",{style:{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:12,padding:"14px 16px"}},
         React.createElement("div",{style:{fontSize:10,color:"var(--text6)",textTransform:"uppercase",letterSpacing:.5,marginBottom:4}},"Peak Portfolio Value"),
@@ -4179,7 +4179,7 @@ const MultiTimeframePerformance = ({ shares, soldShareSnapshots }) => {
                 (() => { const d = new Date(selectedMonth + "-01T12:00:00"); return d.toLocaleString("en-IN", { month: "long", year: "numeric" }); })(),
                 React.createElement("span", { style: { fontSize: 11, fontWeight: 500, color: "var(--text5)", marginLeft: 4 } }, tradesByMonth[selectedMonth].length + " trade" + (tradesByMonth[selectedMonth].length !== 1 ? "s" : ""))
               ),
-              React.createElement("div", { onClick: () => setSelectedMonth(null), style: { fontSize: 10, color: "var(--text6)", cursor: "pointer", padding: "3px 8px", borderRadius: 6, background: "var(--bg4)" }, "aria-label": "Close" }, "\u2715")
+              React.createElement("div", { onClick: () => setSelectedMonth(null), style: { fontSize: 10, color: "var(--text6)", cursor: "pointer", padding: "3px 8px", borderRadius: 6, background: "var(--bg4)" }, "aria-label": "Close" }, Ico.x(12))
             ),
             React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
               React.createElement("div", { style: { display: "grid", gridTemplateColumns: "2fr 1.1fr 1.1fr 1fr 1fr 0.9fr 1fr", gap: 6, padding: "6px 10px", borderRadius: "8px 8px 0 0", background: "var(--bg4)", fontSize: 9, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .4 } },
@@ -4226,7 +4226,7 @@ const MultiTimeframePerformance = ({ shares, soldShareSnapshots }) => {
       ),
       React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 } },
         bestWeek && React.createElement("div", { style: { background: "rgba(22,163,74,.05)", border: "1px solid rgba(22,163,74,.2)", borderRadius: 10, padding: "14px" } },
-          React.createElement("div", { style: { fontSize: 10, color: "#16a34a", fontWeight: 700, textTransform: "uppercase", letterSpacing: .5, marginBottom: 6 } }, "\u25b2 Best Week"),
+          React.createElement("div", { style: { fontSize: 10, color: "#16a34a", fontWeight: 700, textTransform: "uppercase", letterSpacing: .5, marginBottom: 6 } }, React.createElement(React.Fragment, null, Ico.triangleUp(10, "#22c55e"), " Best Week")),
           React.createElement("div", { style: { fontSize: 18, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#16a34a", marginBottom: 4 } }, (bestWeek.pnl >= 0 ? "+" : "") + INR(bestWeek.pnl)),
           React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8 } }, "Week of " + bestWeek.week + " \u00b7 " + bestWeek.count + " trade" + (bestWeek.count !== 1 ? "s" : "")),
           React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 3 } },
@@ -4237,7 +4237,7 @@ const MultiTimeframePerformance = ({ shares, soldShareSnapshots }) => {
           )
         ),
         worstWeek && React.createElement("div", { style: { background: "rgba(239,68,68,.05)", border: "1px solid rgba(239,68,68,.2)", borderRadius: 10, padding: "14px" } },
-          React.createElement("div", { style: { fontSize: 10, color: "#ef4444", fontWeight: 700, textTransform: "uppercase", letterSpacing: .5, marginBottom: 6 } }, "\u25bc Worst Week"),
+          React.createElement("div", { style: { fontSize: 10, color: "#ef4444", fontWeight: 700, textTransform: "uppercase", letterSpacing: .5, marginBottom: 6 } }, React.createElement(React.Fragment, null, Ico.triangleDown(10, "#ef4444"), " Worst Week")),
           React.createElement("div", { style: { fontSize: 18, fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "#ef4444", marginBottom: 4 } }, (worstWeek.pnl >= 0 ? "+" : "") + INR(worstWeek.pnl)),
           React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8 } }, "Week of " + worstWeek.week + " \u00b7 " + worstWeek.count + " trade" + (worstWeek.count !== 1 ? "s" : "")),
           React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 3 } },
@@ -4256,7 +4256,7 @@ const MultiTimeframePerformance = ({ shares, soldShareSnapshots }) => {
       React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
         streaks.consecMonths.map((s, i) => React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8, background: s.type === "win" ? "rgba(22,163,74,.08)" : "rgba(239,68,68,.08)", border: "1px solid " + (s.type === "win" ? "rgba(22,163,74,.2)" : "rgba(239,68,68,.2)") } },
           React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: s.type === "win" ? "#16a34a" : "#ef4444", fontFamily: "'Sora'" } }, s.length),
-          React.createElement("span", { style: { fontSize: 9, color: "var(--text5)" } }, s.type === "win" ? "\u2713" : "\u2717"),
+          React.createElement("span", { style: { fontSize: 9, color: "var(--text5)" } }, s.type === "win" ? Ico.check(12, "#22c55e") : Ico.x(12, "#ef4444")),
           React.createElement("span", { style: { fontSize: 9, color: "var(--text6)" } }, s.start)
         ))
       )
@@ -4341,7 +4341,7 @@ const TradeFrequencyAnalytics=({shares,soldShareSnapshots={}})=>{
     React.createElement("div",{style:{fontSize:13,color:"var(--text6)"}},"Add shares or save snapshots to see trade frequency analytics.")
   );
   var _overtradeColor = activityCorrelation && activityCorrelation.lowAvgPnl > activityCorrelation.highAvgPnl ? "#eab308" : "#374151";
-  var _overtradeText = activityCorrelation && activityCorrelation.lowAvgPnl > activityCorrelation.highAvgPnl ? "\u26a0 Likely" : "\u2713 None";
+  var _overtradeText = activityCorrelation && activityCorrelation.lowAvgPnl > activityCorrelation.highAvgPnl ? React.createElement(React.Fragment, null, Ico.alertTriangle(11, "#f59e0b"), " Likely") : React.createElement(React.Fragment, null, Ico.check(11, "#22c55e"), " None");
   var _overtradeBg = activityCorrelation && activityCorrelation.lowAvgPnl > activityCorrelation.highAvgPnl ? "rgba(22,163,74,.07)" : "var(--bg4)";
   var _overtradeBorder = activityCorrelation && activityCorrelation.lowAvgPnl > activityCorrelation.highAvgPnl ? "rgba(22,163,74,.2)" : "var(--border)";
   var _lossColor = cooldownAnalysis.avgAfterLoss < 0 ? "rgba(239,68,68,.05)" : "rgba(22,163,74,.05)";
@@ -4409,7 +4409,7 @@ const TradeFrequencyAnalytics=({shares,soldShareSnapshots={}})=>{
           React.createElement("div",{style:{fontSize:10,color:"var(--text6)",marginTop:2}},ret(activityCorrelation.highAvgReturn)+" avg return")
         )
       ),
-      activityCorrelation.lowAvgPnl>activityCorrelation.highAvgPnl&&React.createElement("div",{style:{marginTop:12,padding:"10px 14px",background:"rgba(234,179,8,.08)",border:"1px solid rgba(234,179,8,.25)",borderRadius:8,fontSize:11,color:"#92400e",lineHeight:1.5}},"\u26a0 Less-active months outperform by ",INR(activityCorrelation.lowAvgPnl-activityCorrelation.highAvgPnl),"/mo. Consider reducing trade frequency.")
+      activityCorrelation.lowAvgPnl>activityCorrelation.highAvgPnl&&React.createElement("div",{style:{marginTop:12,padding:"10px 14px",background:"rgba(234,179,8,.08)",border:"1px solid rgba(234,179,8,.25)",borderRadius:8,fontSize:11,color:"#92400e",lineHeight:1.5}},React.createElement(React.Fragment, null, Ico.alertTriangle(11, "#f59e0b"), " Less-active months outperform by "),INR(activityCorrelation.lowAvgPnl-activityCorrelation.highAvgPnl),"/mo. Consider reducing trade frequency.")
     ),
     cooldownAnalysis&&React.createElement("div",{style:{background:"var(--card)",border:"1px solid var(--border)",borderRadius:14,overflow:"hidden",padding:20}},
       React.createElement("div",{style:{fontSize:13,fontWeight:700,color:"var(--text3)",marginBottom:14,display:"flex",alignItems:"center",gap:8}},
@@ -4427,8 +4427,8 @@ const TradeFrequencyAnalytics=({shares,soldShareSnapshots={}})=>{
           cooldownAnalysis.after3dayBreak.count>0?React.createElement(React.Fragment,null,React.createElement("div",{style:{fontSize:16,fontFamily:"'Sora',sans-serif",fontWeight:800,color:cooldownAnalysis.avgAfterBreak>=0?"#16a34a":"#ef4444"}},ret(cooldownAnalysis.avgAfterBreak)),React.createElement("div",{style:{fontSize:10,color:"var(--text6)",marginTop:2}},"avg return")):React.createElement("div",{style:{fontSize:11,color:"var(--text6)"}},"No trades found")
         )
       ),
-      cooldownAnalysis.afterLoss24h.count>0&&cooldownAnalysis.after3dayBreak.count>0&&cooldownAnalysis.avgAfterLoss<cooldownAnalysis.avgAfterBreak&&React.createElement("div",{style:{marginTop:12,padding:"10px 14px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,fontSize:11,color:"#991b1b",lineHeight:1.5}},"\u26a0 Revenge trading detected. Post-loss avg ",ret(cooldownAnalysis.avgAfterLoss)," vs ",ret(cooldownAnalysis.avgAfterBreak)," after breaks. Consider a 48h pause."),
-      cooldownAnalysis.afterLoss24h.count>0&&cooldownAnalysis.after3dayBreak.count>0&&cooldownAnalysis.avgAfterLoss>=cooldownAnalysis.avgAfterBreak&&React.createElement("div",{style:{marginTop:12,padding:"10px 14px",background:"rgba(22,163,74,.08)",border:"1px solid rgba(22,163,74,.25)",borderRadius:8,fontSize:11,color:"#166534",lineHeight:1.5}},"\u2713 No revenge trading pattern detected.")
+      cooldownAnalysis.afterLoss24h.count>0&&cooldownAnalysis.after3dayBreak.count>0&&cooldownAnalysis.avgAfterLoss<cooldownAnalysis.avgAfterBreak&&React.createElement("div",{style:{marginTop:12,padding:"10px 14px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,fontSize:11,color:"#991b1b",lineHeight:1.5}},React.createElement(React.Fragment, null, Ico.alertTriangle(11, "#f59e0b"), " Revenge trading detected. Post-loss avg "),ret(cooldownAnalysis.avgAfterLoss)," vs ",ret(cooldownAnalysis.avgAfterBreak)," after breaks. Consider a 48h pause."),
+      cooldownAnalysis.afterLoss24h.count>0&&cooldownAnalysis.after3dayBreak.count>0&&cooldownAnalysis.avgAfterLoss>=cooldownAnalysis.avgAfterBreak&&React.createElement("div",{style:{marginTop:12,padding:"10px 14px",background:"rgba(22,163,74,.08)",border:"1px solid rgba(22,163,74,.25)",borderRadius:8,fontSize:11,color:"#166534",lineHeight:1.5}},React.createElement(React.Fragment, null, Ico.check(11, "#22c55e"), " No revenge trading pattern detected."))
     ),
     React.createElement("div",{style:{padding:"10px 14px",background:"var(--accentbg2)",border:"1px solid var(--border2)",borderRadius:10,fontSize:11,color:"var(--text5)",lineHeight:1.6}},
       React.createElement("strong",{style:{color:"var(--accent)"}},"Methodology: "),
@@ -4541,7 +4541,7 @@ const SwingHoldOptimizer=({shares,soldShareSnapshots={}})=>{
   var _tsText = timeStopData && timeStopData.negativeIdx >= 0 ? "Day " + timeStopData.buckets[timeStopData.negativeIdx].dayStart + "+" : "Never goes -ve";
   var _tsSubText = timeStopData && timeStopData.negativeIdx >= 0 ? "Returns turn negative here" : "Avg return stays positive";
   var _weColor = weekendData && weekendData.avgWeekend < weekendData.avgNoWeekend ? "#eab308" : "#374151";
-  var _weText = weekendData && weekendData.avgWeekend < weekendData.avgNoWeekend ? "\u26a0 Detected" : "\u2713 Low";
+  var _weText = weekendData && weekendData.avgWeekend < weekendData.avgNoWeekend ? React.createElement(React.Fragment, null, Ico.alertTriangle(11, "#f59e0b"), " Detected") : React.createElement(React.Fragment, null, Ico.check(11, "#22c55e"), " Low");
   var _weBg = weekendData && weekendData.avgWeekend < weekendData.avgNoWeekend ? "rgba(234,179,8,.07)" : "var(--bg4)";
   var _weBorder = weekendData && weekendData.avgWeekend < weekendData.avgNoWeekend ? "rgba(234,179,8,.2)" : "var(--border)";
   return React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:20}},
@@ -4578,7 +4578,7 @@ const SwingHoldOptimizer=({shares,soldShareSnapshots={}})=>{
             var barW=Math.max(4,Math.abs(b.expectancy)/maxExpectancy*100);
             var isBest=bestExpectancy&&b.key===bestExpectancy.key;
             return React.createElement("div",{key:b.key,style:{display:"grid",gridTemplateColumns:"110px 1fr 80px 70px 65px",gap:8,alignItems:"center",padding:"8px 10px",borderRadius:8,background:isBest?"rgba(22,163,74,.08)":"transparent",border:isBest?"1px solid rgba(22,163,74,.2)":"1px solid transparent"}},
-              React.createElement("div",{style:{fontSize:11,fontWeight:isBest?700:500,color:isBest?"#16a34a":"var(--text4)"}},b.label+(isBest?" \u2605":"")),
+              React.createElement("div",{style:{fontSize:11,fontWeight:isBest?700:500,color:isBest?"#16a34a":"var(--text4)"}},b.label+(isBest?React.createElement(React.Fragment, null, " ", Ico.star(12, "#f59e0b")):"")),
               React.createElement("div",{style:{display:"flex",alignItems:"center",gap:6}},
                 React.createElement("div",{style:{flex:1,height:18,background:"var(--bg5)",borderRadius:4,overflow:"hidden",position:"relative"}},
                   React.createElement("div",{style:{position:"absolute",left:b.expectancy>=0?"50%":"auto",right:b.expectancy<0?"50%":"auto",top:0,height:"100%",width:barW+"%",background:b.expectancy>=0?"rgba(22,163,74,.4)":"rgba(239,68,68,.4)",borderRadius:4}})
@@ -4609,7 +4609,7 @@ const SwingHoldOptimizer=({shares,soldShareSnapshots={}})=>{
           }).concat(timeStopData.negativeIdx>=0?[React.createElement("rect",{key:"dd",x:40+timeStopData.negativeIdx*50,y:10,width:30,height:180,fill:"rgba(239,68,68,.05)",stroke:"rgba(239,68,68,.2)",strokeDasharray:"3,3"})]:[])
         )
       ),
-      timeStopData.negativeIdx>=0?React.createElement("div",{style:{marginTop:10,padding:"10px 14px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,fontSize:11,color:"#991b1b",lineHeight:1.5}},"\u26a0 Returns turn negative after day ",timeStopData.buckets[timeStopData.negativeIdx].dayStart,". Set a time-stop at ",React.createElement("strong",null,timeStopData.buckets[timeStopData.negativeIdx].dayStart+" days"),". Decay: ",ret(timeStopData.slope)," per day."):null
+      timeStopData.negativeIdx>=0?React.createElement("div",{style:{marginTop:10,padding:"10px 14px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,fontSize:11,color:"#991b1b",lineHeight:1.5}},React.createElement(React.Fragment, null, Ico.alertTriangle(11, "#f59e0b"), " Returns turn negative after day "),timeStopData.buckets[timeStopData.negativeIdx].dayStart,". Set a time-stop at ",React.createElement("strong",null,timeStopData.buckets[timeStopData.negativeIdx].dayStart+" days"),". Decay: ",ret(timeStopData.slope)," per day."):null
     ):null,
     weekendData?React.createElement("div",{style:{background:"var(--card)",border:"1px solid var(--border)",borderRadius:14,overflow:"hidden",padding:20}},
       React.createElement("div",{style:{fontSize:13,fontWeight:700,color:"var(--text3)",marginBottom:14,display:"flex",alignItems:"center",gap:8}},
@@ -4648,7 +4648,7 @@ const SwingHoldOptimizer=({shares,soldShareSnapshots={}})=>{
           React.createElement("div",{style:{fontSize:18,fontFamily:"'Sora',sans-serif",fontWeight:800,color:"var(--text)"}},daysToTarget.p25+"d")
         ),
         React.createElement("div",{style:{background:"rgba(109,40,217,.07)",border:"1px solid rgba(109,40,217,.2)",borderRadius:10,padding:"12px",textAlign:"center"}},
-          React.createElement("div",{style:{fontSize:9,color:"#6d28d9",textTransform:"uppercase",letterSpacing:.5,marginBottom:4}},"Median \u2605"),
+          React.createElement("div",{style:{fontSize:9,color:"#6d28d9",textTransform:"uppercase",letterSpacing:.5,marginBottom:4}},React.createElement(React.Fragment, null, "Median ", Ico.star(12, "#f59e0b"))),
           React.createElement("div",{style:{fontSize:22,fontFamily:"'Sora',sans-serif",fontWeight:800,color:"#6d28d9"}},daysToTarget.median+"d")
         ),
         React.createElement("div",{style:{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:10,padding:"12px",textAlign:"center"}},

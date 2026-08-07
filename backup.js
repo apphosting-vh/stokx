@@ -569,7 +569,7 @@ function DataBackupSection(props) {
       storageStats && alerts.map(function(a, i) {
         var t = alertTone(a.sev);
         return React.createElement("div", { key: i, style: { display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 14px", borderRadius: 9, marginBottom: 8, background: t.bg, border: "1px solid " + t.bd } },
-          React.createElement("span", { style: { fontSize: 14, lineHeight: 1.2 } }, a.sev === 2 ? "\u26a0\ufe0f" : "\u26a0"),
+          React.createElement("span", { style: { fontSize: 14, lineHeight: 1.2 } }, a.sev === 2 ? Ico.alertTriangle(14, "#ef4444") : Ico.alertTriangle(14, "#f59e0b")),
           React.createElement("div", null,
             React.createElement("div", { style: { fontSize: 11.5, fontWeight: 700, color: t.c } }, a.title),
             React.createElement("div", { style: { fontSize: 10.5, color: "var(--text5)", marginTop: 2, lineHeight: 1.5 } }, a.msg)
@@ -577,7 +577,7 @@ function DataBackupSection(props) {
         );
       }),
       healthy && React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", padding: "8px 12px", borderRadius: 9, marginBottom: 8, background: "rgba(22,163,74,.07)", border: "1px solid rgba(22,163,74,.25)", fontSize: 11, color: "#16a34a", fontWeight: 600 } },
-        "\u2713 All storage levels healthy."
+        React.createElement(React.Fragment, null, Ico.check(14, "#22c55e"), " All storage levels healthy.")
       ),
       React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8, marginBottom: 14 } },
         React.createElement("div", { style: { background: "var(--bg3)", borderRadius: 10, padding: "10px 14px", border: "1px solid var(--border)" } },
@@ -660,11 +660,11 @@ function DataBackupSection(props) {
         React.createElement("button", {
           onClick: handleBackup,
           style: Object.assign({}, btnBase, { background: "rgba(16,185,129,.13)", border: "1px solid rgba(16,185,129,.35)", color: "#10b981" })
-        }, "\u2B07 Download Backup"),
+        }, React.createElement(React.Fragment, null, Ico.download(14), " Download Backup")),
         React.createElement("button", {
           onClick: handleRestore,
           style: Object.assign({}, btnBase, { background: "rgba(109,40,217,.13)", border: "1px solid rgba(109,40,217,.35)", color: "#6d28d9" })
-        }, "\u2B06 Restore from Backup")
+        }, React.createElement(React.Fragment, null, Ico.upload(14), " Restore from Backup"))
       )
     ),
 
@@ -674,7 +674,7 @@ function DataBackupSection(props) {
       React.createElement("button", {
         onClick: handleFinsightImport,
         style: Object.assign({}, btnBase, { background: "rgba(14,165,233,.13)", border: "1px solid rgba(14,165,233,.35)", color: "#0ea5e9" })
-      }, "\u{1F4E5} Import from Finsight")
+      }, React.createElement(React.Fragment, null, Ico.inbox(14), " Import from Finsight"))
     ),
 
     msg ? React.createElement("div", {

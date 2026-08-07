@@ -519,7 +519,7 @@ window.TechnicalIndicatorsPanel = (function () {
           background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.2)",
         }
       },
-        React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#ef4444", marginBottom: 4 } }, "\u26a0 Critical Overrides"),
+        React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#ef4444", marginBottom: 4 } }, React.createElement(React.Fragment, null, Ico.alertTriangle(12, "#ef4444"), " Critical Overrides")),
         es.overrides.map(function (o, i) {
           return React.createElement("div", { key: i, style: { fontSize: 10, color: "#ef4444", lineHeight: 1.5 } }, "\u2022 " + o);
         })
@@ -573,7 +573,7 @@ window.TechnicalIndicatorsPanel = (function () {
           }
         },
           React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: exitRecs.activeRule.color, marginBottom: 2 } },
-            "\u26a0 " + exitRecs.activeRule.type.toUpperCase() + " SIGNAL"
+            React.createElement(React.Fragment, null, Ico.alertTriangle(12, "#ef4444"), " " + exitRecs.activeRule.type.toUpperCase() + " SIGNAL")
           ),
           React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text)" } }, exitRecs.activeRule.label),
           exitRecs.activeRule.price !== null && React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } },
@@ -595,7 +595,7 @@ window.TechnicalIndicatorsPanel = (function () {
                 r.price !== null ? INR(r.price) : "\u2014"
               ),
               React.createElement("div", { style: { fontSize: 9, color: r.active ? r.color : "var(--text6)", marginTop: 2 } },
-                r.active ? "\u25cf ACTIVE" : "Pending"
+                r.active ? React.createElement(React.Fragment, null, Ico.dot(8, "#22c55e"), " ACTIVE") : "Pending"
               )
             );
           })
@@ -798,7 +798,7 @@ window.TechnicalIndicatorsPanel = (function () {
             color: autoRefresh ? "#16a34a" : "var(--text5)",
             cursor: "pointer",
           }
-        }, autoRefresh ? "● Live" : "○ Auto"),
+          }, autoRefresh ? React.createElement(React.Fragment, null, Ico.dot(8, "#22c55e"), " Live") : React.createElement(React.Fragment, null, Ico.dotOutline(8, "var(--text5)"), " Auto")),
         /* Manual refresh */
         React.createElement("button", {
           onClick: function () { DF.clearCache(); setRefreshTick(function (t) { return t + 1; }); },
@@ -1234,7 +1234,7 @@ window.TechnicalIndicatorsPanel = (function () {
               background: autoRefresh ? "rgba(22,163,74,.1)" : "var(--bg4)",
               color: autoRefresh ? "#16a34a" : "var(--text5)", cursor: "pointer",
             }
-          }, autoRefresh ? "● Live" : "○ Auto"),
+        }, autoRefresh ? React.createElement(React.Fragment, null, Ico.dot(8, "#22c55e"), " Live") : React.createElement(React.Fragment, null, Ico.dotOutline(8, "var(--text5)"), " Auto")),
           React.createElement("button", {
             onClick: function () { DF.clearCache(); setRefreshTick(function (t) { return t + 1; }); },
             disabled: loading,

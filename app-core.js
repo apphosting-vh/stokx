@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.76";
+window.__STOX_APP_VERSION = "2.10.80";
 
 /* Apply saved score config on startup */
 (function() {
@@ -15,6 +15,123 @@ window.__STOX_APP_VERSION = "2.10.76";
 })();
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SVG ICON SYSTEM — Modern minimal icons
+   ══════════════════════════════════════════════════════════════════════════ */
+const _ico = (size, color, paths, extra) => {
+  const props = Object.assign({ width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: color || "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }, extra || {});
+  return React.createElement("svg", props, paths.map((d, i) => {
+    if (typeof d === "string") return React.createElement("path", { key: i, d: d });
+    if (d.circle) return React.createElement("circle", { key: i, cx: d.circle[0], cy: d.circle[1], r: d.circle[2], fill: d.fill || color || "currentColor", stroke: d.stroke || "none" });
+    if (d.line) return React.createElement("line", { key: i, x1: d.line[0], y1: d.line[1], x2: d.line[2], y2: d.line[3] });
+    if (d.polyline) return React.createElement("polyline", { key: i, points: d.polyline });
+    if (d.rect) return React.createElement("rect", { key: i, x: d.rect[0], y: d.rect[1], width: d.rect[2], height: d.rect[3], rx: d.rect[4] || 0, fill: d.fill || "none" });
+    if (d.polygon) return React.createElement("polygon", { key: i, points: d.polygon, fill: d.fill || "none", stroke: d.stroke || color || "currentColor" });
+    return null;
+  }));
+};
+const Ico = {
+  // Arrows
+  chevronUp: (s, c) => _ico(s||14, c, ["M18 15l-6-6-6 6"]),
+  chevronDown: (s, c) => _ico(s||14, c, ["M6 9l6 6 6-6"]),
+  arrowUp: (s, c) => _ico(s||14, c, ["M12 19V5", "M5 12l7-7 7 7"]),
+  arrowDown: (s, c) => _ico(s||14, c, ["M12 5v14", "M19 12l-7 7-7-7"]),
+  arrowRight: (s, c) => _ico(s||14, c, ["M5 12h14", "M12 5l7 7-7 7"]),
+  arrowLeft: (s, c) => _ico(s||14, c, ["M19 12H5", "M12 19l-7-7 7-7"]),
+  sortUp: (s, c) => _ico(s||14, c, ["M12 5l5 8H7l5-8z"], { fill: c || "currentColor", stroke: "none" }),
+  sortDown: (s, c) => _ico(s||14, c, ["M12 19l5-8H7l5 8z"], { fill: c || "currentColor", stroke: "none" }),
+  triangleUp: (s, c) => _ico(s||12, c, ["M12 4l8 14H4l8-14z"], { fill: c || "currentColor", stroke: "none" }),
+  triangleDown: (s, c) => _ico(s||12, c, ["M12 20l-8-14h16l-8 14z"], { fill: c || "currentColor", stroke: "none" }),
+
+  // Check / Cross
+  check: (s, c) => _ico(s||16, c, ["M5 13l4 4L19 7"]),
+  x: (s, c) => _ico(s||16, c, ["M18 6L6 18", "M6 6l12 12"]),
+  checkCircle: (s, c) => _ico(s||16, c, ["M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z", "M9 12l2 2 4-4"]),
+  xCircle: (s, c) => _ico(s||16, c, ["M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z", "M15 9l-6 6", "M9 9l6 6"]),
+
+  // Warning
+  alertTriangle: (s, c) => _ico(s||16, c, ["M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z", { line: [12, 9, 12, 13] }, { line: [12, 17, 12.01, 17] }]),
+  alertCircle: (s, c) => _ico(s||16, c, ["M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z", { line: [12, 8, 12, 12] }, { line: [12, 16, 12.01, 16] }]),
+
+  // Status dots
+  dot: (s, c) => React.createElement("svg", { width: s||8, height: s||8, viewBox: "0 0 8 8" }, React.createElement("circle", { cx: 4, cy: 4, r: 3.5, fill: c || "currentColor" })),
+  dotOutline: (s, c) => React.createElement("svg", { width: s||8, height: s||8, viewBox: "0 0 8 8" }, React.createElement("circle", { cx: 4, cy: 4, r: 3, fill: "none", stroke: c || "currentColor", strokeWidth: 1.5 })),
+
+  // Star
+  star: (s, c) => _ico(s||14, c, ["M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"], { fill: c || "currentColor" }),
+  starOutline: (s, c) => _ico(s||14, c, ["M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"]),
+
+  // Medals
+  medal1: (s, c) => _ico(s||16, c, ["M8 21l4-8 4 8", { circle: [12, 8, 5], fill: c || "#fbbf24", stroke: "none" }, { line: [12, 6, 12, 10] }, { line: [10, 8, 14, 8] }]),
+  medal2: (s, c) => _ico(s||16, c, ["M8 21l4-8 4 8", { circle: [12, 8, 5], fill: c || "#94a3b8", stroke: "none" }, { line: [12, 6, 12, 10] }]),
+  medal3: (s, c) => _ico(s||16, c, ["M8 21l4-8 4 8", { circle: [12, 8, 5], fill: c || "#d97706", stroke: "none" }, { line: [10, 8, 14, 8] }]),
+
+  // UI
+  refresh: (s, c) => _ico(s||16, c, ["M23 4v6h-6", "M1 20v-6h6", "M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"]),
+  download: (s, c) => _ico(s||16, c, ["M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4", "M7 10l5 5 5-5", "M12 15V3"]),
+  upload: (s, c) => _ico(s||16, c, ["M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4", "M17 8l-5-5-5 5", "M12 3v12"]),
+  camera: (s, c) => _ico(s||16, c, ["M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z", { circle: [12, 13, 4] }]),
+  folder: (s, c) => _ico(s||16, c, ["M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"]),
+  folderOpen: (s, c) => _ico(s||16, c, ["M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2v1", { polyline: [2, 15, 7, 10, 12, 15, 22, 5] }]),
+  hourglass: (s, c) => _ico(s||16, c, ["M5 22h14", "M5 2h14", { path: "M17 22v-4.172a2 2 0 00-.586-1.414L12 12l-4.414 4.414A2 2 0 007 17.828V22", fill: "none" }, { path: "M7 2v4.172a2 2 0 00.586 1.414L12 12l4.414-4.414A2 2 0 0017 6.172V2", fill: "none" }]),
+  inbox: (s, c) => _ico(s||16, c, ["M22 12h-6l-2 3h-4l-2-3H2", "M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"]),
+  save: (s, c) => _ico(s||16, c, ["M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z", { polyline: [17, 21, 17, 13, 7, 13, 7, 21] }, { polyline: [7, 3, 7, 8, 15, 8] }]),
+  file: (s, c) => _ico(s||16, c, ["M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z", { polyline: [14, 2, 14, 8, 20, 8] }]),
+  fileText: (s, c) => _ico(s||16, c, ["M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z", { polyline: [14, 2, 14, 8, 20, 8] }, { line: [16, 13, 8, 13] }, { line: [16, 17, 8, 17] }, { polyline: [10, 9, 9, 9, 8, 9] }]),
+  smartphone: (s, c) => _ico(s||16, c, ["M5 2h14a1 1 0 011 1v18a1 1 0 01-1 1H5a1 1 0 01-1-1V3a1 1 0 011-1z", { line: [12, 18, 12.01, 18] }]),
+  database: (s, c) => _ico(s||16, c, ["M12 2C6.48 2 2 3.79 2 6v12c0 2.21 4.48 4 10 4s10-1.79 10-4V6c0-2.21-4.48-4-10-4z", { ellipse: [12, 6, 10, 4] }, { ellipse: [12, 12, 10, 4] }]),
+  clock: (s, c) => _ico(s||16, c, ["M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z", { polyline: [12, 6, 12, 12, 16, 14] }]),
+  zap: (s, c) => _ico(s||16, c, ["M13 2L3 14h9l-1 8 10-12h-9l1-8z"]),
+  shield: (s, c) => _ico(s||16, c, ["M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"]),
+  copy: (s, c) => _ico(s||16, c, ["M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2", { rect: [8, 2, 8, 8, 0], rx: 0 }]),
+  trash: (s, c) => _ico(s||16, c, ["M3 6h18", "M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"]),
+  edit: (s, c) => _ico(s||16, c, ["M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7", "M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"]),
+  search: (s, c) => _ico(s||16, c, ["M11 19a8 8 0 100-16 8 8 0 000 16z", { line: [21, 21, 16.65, 16.65] }]),
+  settings: (s, c) => _ico(s||16, c, ["M12 15a3 3 0 100-6 3 3 0 000 6z", { path: "M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" }]),
+  info: (s, c) => _ico(s||16, c, ["M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z", { line: [12, 16, 12, 12] }, { line: [12, 8, 12.01, 8] }]),
+  bookmark: (s, c) => _ico(s||16, c, ["M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"]),
+  bookmarkFilled: (s, c) => _ico(s||16, c, ["M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"], { fill: c || "currentColor" }),
+  grid: (s, c) => _ico(s||16, c, ["M3 3h7v7H3V3z", "M14 3h7v7h-7V3z", "M14 14h7v7h-7v-7z", "M3 14h7v7H3v-7z"]),
+  list: (s, c) => _ico(s||16, c, ["M8 6h13", "M8 12h13", "M8 18h13", { line: [3, 6, 3.01, 6] }, { line: [3, 12, 3.01, 12] }, { line: [3, 18, 3.01, 18] }]),
+  barChart: (s, c) => _ico(s||16, c, ["M12 20V10", "M18 20V4", "M6 20v-4"]),
+  trendingUp: (s, c) => _ico(s||16, c, ["M23 6l-9.5 9.5-5-5L1 18"]),
+  trendingDown: (s, c) => _ico(s||16, c, ["M23 18l-9.5-9.5-5 5L1 6"]),
+  activity: (s, c) => _ico(s||16, c, ["M22 12h-4l-3 9L9 3l-3 9H2"]),
+  globe: (s, c) => _ico(s||16, c, ["M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z", { line: [2, 12, 22, 12] }, { path: "M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" }]),
+  user: (s, c) => _ico(s||16, c, ["M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2", { circle: [12, 7, 4] }]),
+  target: (s, c) => _ico(s||16, c, ["M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z", { circle: [12, 12, 6] }, { circle: [12, 12, 1] }]),
+  layers: (s, c) => _ico(s||16, c, ["M12 2L2 7l10 5 10-5-10-5z", { path: "M2 17l10 5 10-5", fill: "none" }, { path: "M2 12l10 5 10-5", fill: "none" }]),
+  cpu: (s, c) => _ico(s||16, c, ["M9 3v2", "M15 3v2", "M9 19v2", "M15 19v2", { rect: [5, 5, 14, 14, 2] }, { line: [9, 9, 15, 15] }, { line: [15, 9, 9, 15] }]),
+  crosshair: (s, c) => _ico(s||16, c, ["M12 2v4", "M12 18v4", "M2 12h4", "M18 12h4", { circle: [12, 12, 4] }]),
+  home: (s, c) => _ico(s||16, c, ["M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z", { polyline: [9, 22, 9, 12, 15, 12, 15, 22] }]),
+  briefcase: (s, c) => _ico(s||16, c, ["M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z", { path: "M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" }]),
+  bell: (s, c) => _ico(s||16, c, ["M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9", { path: "M13.73 21a2 2 0 01-3.46 0" }]),
+  externalLink: (s, c) => _ico(s||16, c, ["M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6", { polyline: [15, 3, 21, 3, 21, 9] }, { line: [10, 14, 21, 3] }]),
+  link: (s, c) => _ico(s||16, c, ["M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71", "M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"]),
+  share: (s, c) => _ico(s||16, c, ["M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8", { polyline: [16, 6, 12, 2, 8, 6] }, { line: [12, 2, 12, 15] }]),
+  code: (s, c) => _ico(s||16, c, ["M16 18l6-6-6-6", "M8 6l-6 6 6 6"]),
+  terminal: (s, c) => _ico(s||16, c, ["M4 17l6-5-6-5", { line: [12, 19, 20, 19] }]),
+  moon: (s, c) => _ico(s||16, c, ["M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"]),
+  sun: (s, c) => _ico(s||16, c, ["M12 17a5 5 0 100-10 5 5 0 000 10z", { line: [12, 1, 12, 3] }, { line: [12, 21, 12, 23] }, { line: [4.22, 4.22, 5.64, 5.64] }, { line: [18.36, 18.36, 19.78, 19.78] }, { line: [1, 12, 3, 12] }, { line: [21, 12, 23, 12] }, { line: [4.22, 19.78, 5.64, 18.36] }, { line: [18.36, 5.64, 19.78, 4.22] }]),
+  filter: (s, c) => _ico(s||16, c, ["M22 3H2l8 9.46V19l4 2v-8.54L22 3z"]),
+  mail: (s, c) => _ico(s||16, c, ["M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z", { polyline: [22, 6, 12, 13, 2, 6] }]),
+  lock: (s, c) => _ico(s||16, c, ["M19 11H5a2 2 0 00-2 2v7a2 2 0 002 2h14a2 2 0 002-2v-7a2 2 0 00-2-2z", { path: "M7 11V7a5 5 0 0110 0v4" }]),
+  unlock: (s, c) => _ico(s||16, c, ["M19 11H5a2 2 0 00-2 2v7a2 2 0 002 2h14a2 2 0 002-2v-7a2 2 0 00-2-2z", { path: "M7 11V7a5 5 0 019.9-1" }]),
+  key: (s, c) => _ico(s||16, c, ["M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"]),
+  cloud: (s, c) => _ico(s||16, c, ["M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"]),
+  cloudDownload: (s, c) => _ico(s||16, c, ["M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z", { polyline: [8, 21, 12, 17, 16, 21] }, { line: [12, 17, 12, 12] }]),
+  sync: (s, c) => _ico(s||16, c, ["M23 4v6h-6", "M1 20v-6h6", "M3.51 9a9 9 0 0114.85-3.36L23 10", "M1 14l4.64 4.36A9 9 0 0020.49 15"]),
+  play: (s, c) => _ico(s||16, c, ["M5 3l14 9-14 9V3z"], { fill: c || "currentColor", stroke: "none" }),
+  pause: (s, c) => _ico(s||16, c, ["M6 4h4v16H6V4z", "M14 4h4v16h-4V4z"], { fill: c || "currentColor", stroke: "none" }),
+  stop: (s, c) => _ico(s||16, c, ["M4 4h16v16H4V4z"], { fill: c || "currentColor", stroke: "none" }),
+  moreVertical: (s, c) => _ico(s||16, c, [{ circle: [12, 5, 1] }, { circle: [12, 12, 1] }, { circle: [12, 19, 1] }]),
+  plus: (s, c) => _ico(s||16, c, ["M12 5v14", "M5 12h14"]),
+  minus: (s, c) => _ico(s||16, c, ["M5 12h14"]),
+  max: (s, c) => _ico(s||14, c, ["M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"]),
+  min: (s, c) => _ico(s||14, c, ["M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"]),
+};
+window.Ico = Ico;
 
 /* ══════════════════════════════════════════════════════════════════════════
    UTILITIES
@@ -933,7 +1050,7 @@ function ToastHost() {
   return React.createElement("div", { className: "stx-toast-host" },
     toasts.map((t) =>
       React.createElement("div", { key: t.id, className: "stx-toast" + (t.persistent ? " stx-toast-persistent" : ""), style: t.persistent ? { background: "var(--accent)", color: "#fff", border: "none", fontWeight: 700, boxShadow: "0 4px 24px rgba(0,0,0,.25)" } : {} },
-        t.persistent && React.createElement("span", { style: { marginRight: 6, fontSize: 13 } }, "\u26a0"),
+        t.persistent && React.createElement("span", { style: { marginRight: 6, display: "inline-flex" } }, Ico.alertTriangle(13, "#f59e0b")),
         React.createElement("span", { className: "stx-toast-msg" }, t.msg),
         t.action && React.createElement("button", {
           className: "stx-toast-action",
@@ -943,7 +1060,7 @@ function ToastHost() {
           className: "stx-toast-close",
           style: t.persistent ? { color: "rgba(255,255,255,.8)" } : {},
           onClick: () => setToasts((prev) => prev.filter((x) => x.id !== t.id))
-        }, "\u00d7")
+        }, Ico.x(14))
       )
     )
   );
@@ -1117,7 +1234,7 @@ const MarketTicker = React.memo(function MarketTicker() {
             /* Change row */
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" } },
               React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: col, lineHeight: 1 } },
-                isUp ? "\u25b2" : "\u25bc", " ",
+                isUp ? Ico.triangleUp(10, "#22c55e") : Ico.triangleDown(10, "#ef4444"), " ",
                 item.currency === "USD"
                   ? "$" + Math.abs(item.change).toFixed(2)
                   : "\u20b9" + Math.abs(item.change).toFixed(2)
@@ -1276,7 +1393,7 @@ function MarketNewsPanel({ holdings }) {
 
     activeTab === "market" && React.createElement("div", null,
       loading && React.createElement("div", { style: { textAlign: "center", padding: 40, color: "var(--text5)" } },
-        React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite", fontSize: 20 } }, "\u21bb"),
+        React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, Ico.refresh(20)),
         React.createElement("div", { style: { marginTop: 8, fontSize: 12 } }, "Loading market news...")
       ),
       !loading && news.length === 0 && React.createElement("div", { style: { textAlign: "center", padding: 32, color: "var(--text6)", fontSize: 12 } }, "No news available right now."),
@@ -1287,7 +1404,7 @@ function MarketNewsPanel({ holdings }) {
 
     activeTab === "stock" && React.createElement("div", null,
       loading && React.createElement("div", { style: { textAlign: "center", padding: 40, color: "var(--text5)" } },
-        React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite", fontSize: 20 } }, "\u21bb"),
+        React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, Ico.refresh(20)),
         React.createElement("div", { style: { marginTop: 8, fontSize: 12 } }, "Loading news for your holdings...")
       ),
       !loading && stockNews.length === 0 && React.createElement("div", { style: { textAlign: "center", padding: 32, color: "var(--text6)", fontSize: 12 } }, "No relevant news found for your holdings."),
@@ -1321,7 +1438,7 @@ function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
     }
     var passed = results.filter(function (r) { return r.ok; }).length;
     var total = results.length;
-    var lines = results.map(function (r) { return (r.ok ? "\u2705" : "\u274c") + " " + r.proxy.replace("https://", "") + (r.ok ? "" : ": " + r.err); }).join("\n");
+    var lines = results.map(function (r) { return (r.ok ? "Pass" : "Fail") + " " + r.proxy.replace("https://", "") + (r.ok ? "" : ": " + r.err); }).join("\n");
     setTestStatus({ ok: passed > 0, msg: passed + "/" + total + " proxies working\n" + lines });
     setTimeout(function () { setTestStatus(null); }, 8000);
   };
@@ -1360,7 +1477,7 @@ function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
           disabled: testStatus === "testing",
           onClick: testConnectivity,
           style: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg4)", color: testStatus === "testing" ? "var(--text6)" : "var(--text5)", cursor: testStatus === "testing" ? "wait" : "pointer", fontFamily: "var(--font-body)", whiteSpace: "nowrap" }
-        }, testStatus === "testing" ? "\u23f3 Testing..." : "\u26a1 Test API")
+         }, testStatus === "testing" ? React.createElement(React.Fragment, null, Ico.hourglass(13, "#f59e0b"), " Testing...") : React.createElement(React.Fragment, null, Ico.zap(13), " Test API"))
       )
     ),
 
@@ -1967,7 +2084,7 @@ function EntryScoreAnalysis({ entry, onBack }) {
       (r.todaySpike || r.sessionReturnPct != null || r.gapPct != null || r.dominanceRatio != null || r.efficiencyRatio10 != null) ? React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text5)" } },
           React.createElement("span", null, "Today spike (session \u00b7 gap)"),
-          React.createElement("span", { style: { fontWeight: 700, color: r.todaySpike ? "#f97316" : "#22c55e" } }, r.todaySpike ? "\u2717 Capped at Neutral" : "\u2713 Clear")
+           React.createElement("span", { style: { fontWeight: 700, color: r.todaySpike ? "#f97316" : "#22c55e" } }, r.todaySpike ? React.createElement(React.Fragment, null, Ico.x(11, "#f97316"), " Capped at Neutral") : React.createElement(React.Fragment, null, Ico.check(11, "#22c55e"), " Clear"))
         ),
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text5)" } },
           React.createElement("span", null, "Session return / Gap %"),
@@ -1993,7 +2110,7 @@ function EntryScoreAnalysis({ entry, onBack }) {
         var valStr = valMatch ? valMatch[0] : "";
         var label = valStr ? f.replace(valStr, "").replace(/\s*\u2014\s*/, " \u2014 ").trim() : f;
         return React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "5px 0", borderBottom: "1px solid var(--border)" } },
-          React.createElement("span", { style: { color: "var(--text3)", fontSize: 12, flex: 1 } }, isBonus ? "\u2713 " + label : "\u26a0 " + label),
+          React.createElement("span", { style: { color: "var(--text3)", fontSize: 12, flex: 1 } }, isBonus ? React.createElement(React.Fragment, null, Ico.check(12, "#22c55e"), " ", label) : React.createElement(React.Fragment, null, Ico.alertTriangle(12, "#f59e0b"), " ", label)),
           valStr && React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: isBonus ? "#20c46a" : "#f0473f", background: isBonus ? "rgba(34,197,94,.08)" : "rgba(239,68,68,.08)", padding: "2px 8px", borderRadius: 4, fontFamily: "var(--font-mono)" } }, valStr)
         );
       })
@@ -2125,7 +2242,7 @@ const HoldingValueChart = ({ pts, qty, buyPrice, color, gradId }) => {
         const diff = hp.value - costBasis;
         const diffPct = costBasis > 0 ? ((diff / costBasis) * 100).toFixed(2) : "0.00";
         const col = diff >= 0 ? "#10b981" : "#ef4444";
-        const sign = diff >= 0 ? "\u25b2 +" : "\u25bc ";
+         const sign = diff >= 0 ? "+" : "";
         return React.createElement("text", { x: tipX + 24, y: tipY + 122, fill: col, fontSize: 18, fontWeight: 600 }, sign + INR(Math.abs(diff)) + " (" + Math.abs(diffPct) + "%)");
       })()
     )
@@ -2284,7 +2401,7 @@ const ExitScoreTrend = ({ ticker, buyPrice, buyDate, entryScore }) => {
       React.createElement("button", {
         onClick: () => setExpanded(!expanded),
         style: { background: "none", border: "none", color: "var(--text5)", cursor: "pointer", fontSize: 12, padding: "2px 4px" }
-      }, expanded ? "\u25b2" : "\u25bc")
+      }, React.createElement("span", { style: { display: "inline-flex", transition: "transform .2s", transform: expanded ? "rotate(90deg)" : "rotate(0deg)" } }, Ico.chevronDown(12)))
     ),
     expanded && React.createElement(React.Fragment, null,
       React.createElement("svg", {
@@ -3028,7 +3145,7 @@ const HoldingHistoryPanel = ({ h, prices }) => {
     background: "var(--bg4)", border: "1px solid var(--border2)",
     display: "flex", alignItems: "center", gap: 10
   }},
-    React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite", fontSize: 16 } }, "\u21bb"),
+    React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, Ico.refresh(16)),
     React.createElement("span", { style: { fontSize: 13, color: "var(--text5)", flex: 1 } }, "Fetching price history since " + h.buyDate + "...")
   );
 
@@ -3044,13 +3161,13 @@ const HoldingHistoryPanel = ({ h, prices }) => {
         React.createElement("span", { style: { fontSize: 14, fontWeight: 700, color: "var(--text4)", textTransform: "uppercase", letterSpacing: .5 } }, "Holding Value History"),
         React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", background: "var(--accentbg2)", border: "1px solid var(--border2)", borderRadius: 6, padding: "2px 8px", whiteSpace: "nowrap" } }, chartPts[0].date + " \u2192 " + chartPts[chartPts.length - 1].date),
         React.createElement("div", { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 } },
-          React.createElement("span", { style: { fontSize: 12, padding: "3px 10px", borderRadius: 8, fontWeight: 700, background: overallChg >= 0 ? "rgba(16,185,129,.12)" : "rgba(239,68,68,.12)", border: "1px solid " + (overallChg >= 0 ? "rgba(16,185,129,.25)" : "rgba(239,68,68,.25)"), color: chgCol } }, (overallChg >= 0 ? "\u25b2 +" : "\u25bc ") + Math.abs(overallChgPct) + "%"),
+          React.createElement("span", { style: { fontSize: 12, padding: "3px 10px", borderRadius: 8, fontWeight: 700, background: overallChg >= 0 ? "rgba(16,185,129,.12)" : "rgba(239,68,68,.12)", border: "1px solid " + (overallChg >= 0 ? "rgba(16,185,129,.25)" : "rgba(239,68,68,.25)"), color: chgCol, display: "inline-flex", alignItems: "center", gap: 3 } }, (overallChg >= 0 ? React.createElement(React.Fragment, null, Ico.triangleUp(9, chgCol), " +") : React.createElement(React.Fragment, null, Ico.triangleDown(9, chgCol), " ")), Math.abs(overallChgPct) + "%"),
           React.createElement("span", { style: { fontSize: 12, color: "var(--text6)" } }, chartPts.length + " days"),
           React.createElement("button", {
             onClick: () => { if (histLoading) return; setHistPts(null); setRefreshKey(k => k + 1); },
             disabled: histLoading,
             style: { display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 11px", borderRadius: 7, border: "1px solid rgba(16,185,129,.3)", background: "rgba(16,185,129,.08)", color: "var(--accent)", cursor: histLoading ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 600, opacity: histLoading ? .5 : 1 }
-          }, "\u21bb Refresh")
+          }, React.createElement(React.Fragment, null, Ico.refresh(12), " Refresh"))
         )
       ),
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 16, marginBottom: 8, fontSize: 12, color: "var(--text6)" } },
@@ -3073,11 +3190,11 @@ const HoldingHistoryPanel = ({ h, prices }) => {
       background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.18)",
       color: "#ef4444", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap"
     }},
-      React.createElement("span", { style: { flex: 1 } }, "\u26a0 Could not fetch price history for " + h.ticker + ". Check connection or try again."),
+      React.createElement("span", { style: { flex: 1 } }, Ico.alertTriangle(13, "#f59e0b"), " Could not fetch price history for " + h.ticker + ". Check connection or try again."),
       React.createElement("button", {
         onClick: () => { setHistPts(null); setRefreshKey(k => k + 1); },
         style: { display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 11px", borderRadius: 7, border: "1px solid rgba(239,68,68,.3)", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer", fontSize: 11, fontWeight: 600 }
-      }, "\u21bb Retry")
+      }, React.createElement(React.Fragment, null, Ico.refresh(12), " Retry"))
     );
   }
 
@@ -3099,7 +3216,7 @@ const SnapshotChartPanel = ({ sn, dispatch }) => {
     display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap"
   }},
     React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", flex: 1 } },
-      chartError ? React.createElement(React.Fragment, null, "\u26a0 " + chartError) : "No chart data saved with this snapshot."
+      chartError ? React.createElement(React.Fragment, null, Ico.alertTriangle(13, "#f59e0b"), " " + chartError) : "No chart data saved with this snapshot."
     ),
     React.createElement("button", {
       disabled: loadingChart,
@@ -3128,7 +3245,7 @@ const SnapshotChartPanel = ({ sn, dispatch }) => {
         opacity: loadingChart ? 0.6 : 1
       }
     },
-      loadingChart ? React.createElement(React.Fragment, null, React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, "\u21bb"), " Fetching\u2026")
+      loadingChart ? React.createElement(React.Fragment, null, React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, Ico.refresh(14)), " Fetching\u2026")
         : React.createElement(React.Fragment, null, "\u{1F4C8} Load Chart")
     )
   );
@@ -3382,7 +3499,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       React.createElement("div", { className: "stx-card stx-fu", style: { maxWidth: 520, margin: "40px auto", width: "92vw" } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
           React.createElement("h2", { style: { fontSize: 17, fontWeight: 700, fontFamily: "var(--font-heading)" } }, "Add Share"),
-          React.createElement("button", { onClick: () => { setShowAdd(false); resetForm(); }, style: { background: "transparent", border: "none", color: "var(--text5)", cursor: "pointer", fontSize: 20 } }, "\u00d7")
+          React.createElement("button", { onClick: () => { setShowAdd(false); resetForm(); }, style: { background: "transparent", border: "none", color: "var(--text5)", cursor: "pointer", display: "inline-flex" } }, Ico.x(20))
         ),
 
         /* ── Mode toggle: Active holding vs Past trade ── */
@@ -3453,7 +3570,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
             return React.createElement("div", {
               style: { padding: "8px 12px", borderRadius: 8, marginTop: 12, background: isG ? "var(--profitbg)" : "var(--lossbg)", border: "1px solid " + (isG ? "var(--profitborder)" : "var(--lossborder)"), display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }
             },
-              React.createElement("span", { style: { color: isG ? "var(--profit)" : "var(--loss)", fontWeight: 600 } }, isG ? "\u25b2 Profit" : "\u25bc Loss"),
+              React.createElement("span", { style: { color: isG ? "var(--profit)" : "var(--loss)", fontWeight: 600 } }, isG ? React.createElement(React.Fragment, null, Ico.triangleUp(10, "var(--profit)"), " Profit") : React.createElement(React.Fragment, null, Ico.triangleDown(10, "var(--loss)"), " Loss")),
               React.createElement("span", { style: { fontWeight: 700, color: isG ? "var(--profit)" : "var(--loss)", fontFamily: "var(--font-heading)", fontSize: 14 } }, (isG ? "+" : "") + INR(pnlPreview)),
               React.createElement("span", { style: { color: isG ? "var(--profit)" : "var(--loss)", opacity: 0.8 } }, (isG ? "+" : "") + pnlPctPreview.toFixed(2) + "%")
             );
@@ -3495,7 +3612,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       React.createElement("div", { className: "stx-card stx-fu", style: { maxWidth: 520, margin: "40px auto", width: "92vw" } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
           React.createElement("h2", { style: { fontSize: 17, fontWeight: 700, fontFamily: "var(--font-heading)" } }, "Edit Holding"),
-          React.createElement("button", { onClick: () => setEditShare(null), style: { background: "transparent", border: "none", color: "var(--text5)", cursor: "pointer", fontSize: 20 } }, "\u00d7")
+          React.createElement("button", { onClick: () => setEditShare(null), style: { background: "transparent", border: "none", color: "var(--text5)", cursor: "pointer", display: "inline-flex" } }, Ico.x(20))
         ),
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
           React.createElement("div", null,
@@ -3541,7 +3658,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           const pnlPct = +editShare.buyPrice > 0 ? ((+editShare.currentPrice - +editShare.buyPrice) / +editShare.buyPrice * 100) : 0;
           const isG = pnl >= 0;
           return React.createElement("div", { style: { padding: "8px 12px", borderRadius: 8, marginTop: 12, background: isG ? "var(--profitbg)" : "var(--lossbg)", border: "1px solid " + (isG ? "var(--profitborder)" : "var(--lossborder)"), display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 } },
-            React.createElement("span", { style: { color: isG ? "var(--profit)" : "var(--loss)", fontWeight: 600 } }, isG ? "\u25b2 Profit" : "\u25bc Loss"),
+            React.createElement("span", { style: { color: isG ? "var(--profit)" : "var(--loss)", fontWeight: 600 } }, isG ? React.createElement(React.Fragment, null, Ico.triangleUp(10, "var(--profit)"), " Profit") : React.createElement(React.Fragment, null, Ico.triangleDown(10, "var(--loss)"), " Loss")),
             React.createElement("span", { style: { fontWeight: 700, color: isG ? "var(--profit)" : "var(--loss)", fontFamily: "var(--font-heading)", fontSize: 14 } }, (isG ? "+" : "") + INR(pnl)),
             React.createElement("span", { style: { color: isG ? "var(--profit)" : "var(--loss)", opacity: 0.8 } }, (isG ? "+" : "") + pnlPct.toFixed(2) + "%")
           );
@@ -3577,7 +3694,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                   React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", marginBottom: 4, lineHeight: 1.3 } }, h.company || h.ticker),
                   React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
                     React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: "var(--r-pill)", fontSize: 11, fontWeight: 600, background: "var(--infobg)", border: "1px solid var(--infoborder)", color: "var(--info)" } }, h.ticker),
-                    hasLivePrice && React.createElement("span", { style: { fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 10, background: "var(--profitbg)", color: "var(--profit)", border: "1px solid var(--profitborder)" } }, "\u25cf LIVE"),
+                     hasLivePrice && React.createElement("span", { style: { fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 10, background: "var(--profitbg)", color: "var(--profit)", border: "1px solid var(--profitborder)", display: "inline-flex", alignItems: "center", gap: 3 } }, Ico.dot(6, "var(--profit)"), " LIVE"),
                     h.buyDate && React.createElement("span", { style: { fontSize: 9, fontWeight: 600, padding: "2px 7px", borderRadius: 10, background: "var(--accentbg2)", color: "var(--text5)", border: "1px solid var(--border2)" } }, "since " + h.buyDate)
                   )
                 ),
@@ -3606,7 +3723,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 border: "1px solid " + (isGain ? "var(--profitborder)" : "var(--lossborder)")
               } },
                 React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                  React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: isGain ? "var(--profit)" : "var(--loss)" } }, isGain ? "\u25b2 Profit" : "\u25bc Loss"),
+                   React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: isGain ? "var(--profit)" : "var(--loss)", display: "inline-flex", alignItems: "center", gap: 3 } }, isGain ? Ico.triangleUp(10, "var(--profit)") : Ico.triangleDown(10, "var(--loss)"), " ", isGain ? "Profit" : "Loss"),
                   React.createElement("div", { style: { textAlign: "right" } },
                     React.createElement("div", { style: { fontSize: 16, fontFamily: "var(--font-heading)", fontWeight: 800, color: isGain ? "var(--profit)" : "var(--loss)" } }, (isGain ? "+" : "") + INR(pnl)),
                     React.createElement("div", { style: { fontSize: 11, color: isGain ? "var(--profit)" : "var(--loss)", opacity: 0.8 } }, (isGain ? "+" : "") + pnlPct.toFixed(2) + "% \u00b7 \u20b9" + (priceDiff >= 0 ? "+" : "") + Number(priceDiff).toFixed(2) + " per share")
@@ -3752,7 +3869,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           })
         )
       : React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: "48px 24px" } },
-          React.createElement("div", { style: { fontSize: 48, marginBottom: 16, opacity: 0.3 } }, "\ud83d\udcbc"),
+          React.createElement("div", { style: { marginBottom: 16, opacity: 0.2 } }, Ico.folder(48, "var(--text5)")),
           React.createElement("h3", { style: { fontSize: 16, fontWeight: 700, color: "var(--text2)", marginBottom: 8 } }, "No Holdings Yet"),
           React.createElement("p", { style: { fontSize: 13, color: "var(--text5)", marginBottom: 20, maxWidth: 360, margin: "0 auto 20px" } }, "Add your first stock to start tracking your portfolio performance with live prices, P&L, and tax classification."),
           React.createElement("button", { className: "stx-btn stx-btn-primary", onClick: () => { setShowAdd(true); resetForm(); } }, "+ Add First Holding")
@@ -3881,7 +3998,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
         React.createElement("div", { style: { width: 60, height: 60, borderRadius: 16, background: "rgba(109,40,217,.1)", border: "1px solid rgba(109,40,217,.25)", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 16 } }, Icons.save(28)),
         React.createElement("h3", { style: { fontSize: 16, fontWeight: 700, color: "var(--text2)", marginBottom: 8 } }, "No Trade Snapshots"),
         React.createElement("p", { style: { fontSize: 13, color: "var(--text5)", marginBottom: 20, maxWidth: 400, margin: "0 auto 20px" } }, "Go to Portfolio \u2192 click \"Save Snapshot\" on any active holding to capture its current values as a historical record here."),
-        React.createElement("button", { onClick: importTrades, className: "stx-btn", style: { fontSize: 11, padding: "8px 16px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)" } }, "\u2b06 Import from JSON")
+        React.createElement("button", { onClick: importTrades, className: "stx-btn", style: { fontSize: 11, padding: "8px 16px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)" } }, React.createElement(React.Fragment, null, Ico.upload(11), " Import from JSON"))
       )
     );
   }
@@ -3895,8 +4012,8 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 2 } }, totalSnapshots + " snapshot" + (totalSnapshots !== 1 ? "s" : "") + " across " + fyKeys.length + " financial year" + (fyKeys.length !== 1 ? "s" : ""))
       ),
       React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
-        React.createElement("button", { onClick: exportTrades, className: "stx-btn", style: { fontSize: 10, padding: "5px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)" } }, "\u2b07 Export"),
-        React.createElement("button", { onClick: importTrades, className: "stx-btn", style: { fontSize: 10, padding: "5px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)" } }, "\u2b06 Import"),
+        React.createElement("button", { onClick: exportTrades, className: "stx-btn", style: { fontSize: 10, padding: "5px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)" } }, React.createElement(React.Fragment, null, Ico.download(10), " Export")),
+        React.createElement("button", { onClick: importTrades, className: "stx-btn", style: { fontSize: 10, padding: "5px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)" } }, React.createElement(React.Fragment, null, Ico.upload(10), " Import")),
         React.createElement("button", { onClick: expandAll, className: "stx-btn stx-btn-ghost", style: { fontSize: 11, padding: "5px 10px" } }, "Expand All"),
         React.createElement("button", { onClick: collapseAll, className: "stx-btn stx-btn-ghost", style: { fontSize: 11, padding: "5px 10px" } }, "Collapse All")
       )
@@ -3920,7 +4037,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
             background: "var(--bg4)", border: "1px solid var(--border2)", transition: "all .15s",
           }
         },
-          React.createElement("span", { style: { fontSize: 12, color: "var(--text6)", transition: "transform .2s", display: "inline-block", transform: isCollapsedFY ? "rotate(-90deg)" : "rotate(0deg)" } }, "\u25bc"),
+          React.createElement("span", { style: { color: "var(--text6)", transition: "transform .2s", display: "inline-flex", transform: isCollapsedFY ? "rotate(-90deg)" : "rotate(0deg)" } }, Ico.chevronDown(14)),
           React.createElement("span", { style: { fontFamily: "var(--font-heading)", fontSize: 14, fontWeight: 700, color: "var(--text)", flex: 1 } }, fy),
           React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", borderRadius: 8, background: "rgba(109,40,217,.1)", color: "#6d28d9", border: "1px solid rgba(109,40,217,.2)", fontWeight: 600 } }, snaps.length + " trade" + (snaps.length !== 1 ? "s" : "")),
           totalCost > 0 && React.createElement("span", { style: { fontSize: 12, fontWeight: 700, padding: "2px 10px", borderRadius: 8, background: totalPnl >= 0 ? "var(--profitbg)" : "var(--lossbg)", color: totalPnl >= 0 ? "var(--profit)" : "var(--loss)", border: "1px solid " + (totalPnl >= 0 ? "var(--profitborder)" : "var(--lossborder)") } }, "Net P&L: " + (totalPnl >= 0 ? "+" : "") + INR(totalPnl))
@@ -3953,7 +4070,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
                 onClick: () => toggleMonth(mk),
                 style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, marginBottom: mIsCollapsed ? 0 : 8, cursor: "pointer", background: "var(--bg5)", border: "1px solid var(--border)", transition: "all .15s" }
               },
-                React.createElement("span", { style: { fontSize: 10, color: "var(--text6)", transition: "transform .2s", display: "inline-block", transform: mIsCollapsed ? "rotate(-90deg)" : "rotate(0deg)" } }, "\u25bc"),
+                React.createElement("span", { style: { color: "var(--text6)", transition: "transform .2s", display: "inline-flex", transform: mIsCollapsed ? "rotate(-90deg)" : "rotate(0deg)" } }, Ico.chevronDown(10)),
                 React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "var(--text3)", flex: 1 } }, mg.label),
                 React.createElement("span", { style: { fontSize: 10, padding: "2px 7px", borderRadius: 7, background: "rgba(109,40,217,.08)", color: "#6d28d9", border: "1px solid rgba(109,40,217,.15)", fontWeight: 600 } }, mg.snaps.length + " trade" + (mg.snaps.length !== 1 ? "s" : "")),
                 React.createElement("span", { style: { fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 7, background: mPnl >= 0 ? "var(--profitbg)" : "var(--lossbg)", color: mPnl >= 0 ? "var(--profit)" : "var(--loss)", border: "1px solid " + (mPnl >= 0 ? "var(--profitborder)" : "var(--lossborder)") } }, (mPnl >= 0 ? "+" : "") + INR(mPnl))
@@ -4001,7 +4118,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
                     /* P&L box */
                     React.createElement("div", { style: { padding: "9px 12px", borderRadius: 9, marginBottom: 8, background: isGain ? "var(--profitbg)" : "var(--lossbg)", border: "1px solid " + (isGain ? "var(--profitborder)" : "var(--lossborder)"), display: "flex", justifyContent: "space-between", alignItems: "center" } },
                       React.createElement("div", null,
-                        React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: isGain ? "var(--profit)" : "var(--loss)", marginBottom: 2 } }, isGain ? "\u25b2 Profit" : "\u25bc Loss"),
+                        React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: isGain ? "var(--profit)" : "var(--loss)", marginBottom: 2, display: "flex", alignItems: "center", gap: 3 } }, isGain ? Ico.triangleUp(9, "var(--profit)") : Ico.triangleDown(9, "var(--loss)"), " ", isGain ? "Profit" : "Loss"),
                         React.createElement("div", { style: { fontSize: 10, color: "var(--text6)" } }, sn.qty + " shares \u00b7 cost " + INR(sn.costBasis))
                       ),
                       React.createElement("div", { style: { textAlign: "right" } },
@@ -4031,7 +4148,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
                       React.createElement("button", {
                         onClick: async () => { if (await showConfirm("Remove this snapshot? This cannot be undone.")) deleteSnapshot(fy, sn.id); },
                         style: { fontSize: 10, padding: "3px 10px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontFamily: "var(--font-body)", border: "1px solid var(--lossborder)", background: "var(--lossbg)", color: "var(--loss)" }
-                      }, "\u00d7 Remove")
+                      },                        React.createElement(React.Fragment, null, Ico.x(10), " Remove"))
                     ),
                     React.createElement(SnapshotChartPanel, { sn: sn }),
                     sn.chartPts && sn.chartPts.length >= 2 && (() => {
@@ -4049,7 +4166,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
                             sn.chartPts[0].date + " \u2192 " + sn.chartPts[sn.chartPts.length - 1].date
                           ),
                           React.createElement("div", { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 } },
-                            React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", borderRadius: 7, fontWeight: 700, background: snChgAbs >= 0 ? "rgba(22,163,74,.12)" : "rgba(239,68,68,.12)", border: "1px solid " + (snChgAbs >= 0 ? "rgba(22,163,74,.25)" : "rgba(239,68,68,.25)"), color: snChgCol } }, (snChgAbs >= 0 ? "\u25b2 +" : "\u25bc ") + Math.abs(snChgPct) + "%"),
+                            React.createElement("span", { style: { fontSize: 11, padding: "2px 8px", borderRadius: 7, fontWeight: 700, background: snChgAbs >= 0 ? "rgba(22,163,74,.12)" : "rgba(239,68,68,.12)", border: "1px solid " + (snChgAbs >= 0 ? "rgba(22,163,74,.25)" : "rgba(239,68,68,.25)"), color: snChgCol, display: "inline-flex", alignItems: "center", gap: 3 } }, (snChgAbs >= 0 ? React.createElement(React.Fragment, null, Ico.triangleUp(8, snChgCol), " +") : React.createElement(React.Fragment, null, Ico.triangleDown(8, snChgCol), " ")), Math.abs(snChgPct) + "%"),
                             React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, sn.chartPts.length + " days")
                           )
                         ),
@@ -4080,7 +4197,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
       React.createElement("div", { className: "stx-card stx-fu", style: { maxWidth: 520, margin: "40px auto", width: "92vw" } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
           React.createElement("h2", { style: { fontSize: 17, fontWeight: 700, fontFamily: "var(--font-heading)" } }, "Edit Snapshot"),
-          React.createElement("button", { onClick: () => setEditSnap(null), style: { background: "transparent", border: "none", color: "var(--text5)", cursor: "pointer", fontSize: 20 } }, "\u00d7")
+          React.createElement("button", { onClick: () => setEditSnap(null), style: { background: "transparent", border: "none", color: "var(--text5)", cursor: "pointer", display: "inline-flex" } }, Ico.x(20))
         ),
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
           React.createElement("div", null,
@@ -4126,7 +4243,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
           const pnlPct = +editSnap.buyPrice > 0 ? ((+editSnap.sellPrice - +editSnap.buyPrice) / +editSnap.buyPrice * 100) : 0;
           const isG = pnl >= 0;
           return React.createElement("div", { style: { padding: "8px 12px", borderRadius: 8, marginTop: 12, background: isG ? "var(--profitbg)" : "var(--lossbg)", border: "1px solid " + (isG ? "var(--profitborder)" : "var(--lossborder)"), display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 } },
-            React.createElement("span", { style: { color: isG ? "var(--profit)" : "var(--loss)", fontWeight: 600 } }, isG ? "\u25b2 Profit" : "\u25bc Loss"),
+            React.createElement("span", { style: { color: isG ? "var(--profit)" : "var(--loss)", fontWeight: 600 } }, isG ? React.createElement(React.Fragment, null, Ico.triangleUp(10, "var(--profit)"), " Profit") : React.createElement(React.Fragment, null, Ico.triangleDown(10, "var(--loss)"), " Loss")),
             React.createElement("span", { style: { fontWeight: 700, color: isG ? "var(--profit)" : "var(--loss)", fontFamily: "var(--font-heading)", fontSize: 14 } }, (isG ? "+" : "") + INR(pnl)),
             React.createElement("span", { style: { color: isG ? "var(--profit)" : "var(--loss)", opacity: 0.8 } }, (isG ? "+" : "") + pnlPct.toFixed(2) + "%")
           );
@@ -4247,7 +4364,7 @@ const EntryScorePanel = ({ shares }) => {
       }
     });
     if (changes.length > 0) {
-      var msg = "\u2713 " + changes.length + " % change" + (changes.length !== 1 ? "s" : "") + " updated: " + changes.join(", ");
+      var msg = changes.length + " % change" + (changes.length !== 1 ? "s" : "") + " updated: " + changes.join(", ");
       if (noChanges.length > 0) msg += " \u00b7 " + noChanges.length + " unchanged";
       showToast(msg, 0);
     } else {
@@ -4357,7 +4474,7 @@ const EntryScorePanel = ({ shares }) => {
       }
     });
     if (changes.length > 0) {
-      showToast("\u2713 Scores updated: " + changes.join(", "), 0);
+      showToast("Scores updated: " + changes.join(", "), 0);
     } else {
       showToast("Entry scores refreshed \u2014 no changes", 0);
     }
@@ -4692,7 +4809,7 @@ const EntryScorePanel = ({ shares }) => {
             React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, "Score"),
             React.createElement("div", { style: { fontSize: 20, fontWeight: 900, color: r.decision.color, fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore)
           ),
-          React.createElement("div", { onClick: () => deleteSnapshot(snap.id), style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--text6)", fontSize: 14, title: "Delete snapshot" } }, "\u2715")
+          React.createElement("div", { onClick: () => deleteSnapshot(snap.id), style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--text6)", title: "Delete snapshot", display: "inline-flex" } }, Ico.x(14))
         )
       ),
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 6, background: r.decision.color + "12", marginBottom: 6 } },
@@ -4714,10 +4831,10 @@ const EntryScorePanel = ({ shares }) => {
       scoreMathBlock(r),
       React.createElement("div", { style: { display: "flex", justifyContent: "center", gap: 12, marginTop: 8 } },
         React.createElement("div", { onClick: () => setSnapExpanded(p => ({ ...p, [snap.id]: !p[snap.id] })), style: { fontSize: 9, color: "var(--accent)", cursor: "pointer", fontWeight: 600 } },
-          isExp ? "\u25b2 Hide Details" : "\u25bc Show Details"
+          React.createElement(React.Fragment, null, isExp ? Ico.chevronUp(12) : Ico.chevronDown(12), " ", isExp ? "Hide Details" : "Show Details")
         ),
         ind && React.createElement("div", { onClick: () => setSnapTech(p => ({ ...p, [snap.id]: !p[snap.id] })), style: { fontSize: 9, color: isTech ? "var(--text5)" : "#f97316", cursor: "pointer", fontWeight: 600 } },
-          "\u26a1 " + (isTech ? "Hide Technicals" : "Technicals")
+          React.createElement(React.Fragment, null, Ico.activity(13), " " + (isTech ? "Hide Technicals" : "Technicals"))
         )
       ),
       isExp && React.createElement("div", { style: { marginTop: 8, padding: "6px 0" } },
@@ -4732,7 +4849,7 @@ const EntryScorePanel = ({ shares }) => {
             var valStr = valMatch ? valMatch[0] : "";
             var label = valStr ? f.replace(valStr, "").replace(/\s*—\s*/, " — ").trim() : f;
             return React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4, fontSize: 9, lineHeight: 1.4 } },
-              React.createElement("span", { style: { color: "var(--text3)", flex: 1, minWidth: 0, overflow: "hidden", wordBreak: "break-word" } }, isBonus ? "\u2713 " + label : "\u26a0 " + label),
+                  React.createElement("span", { style: { color: "var(--text3)", flex: 1, minWidth: 0, overflow: "hidden", wordBreak: "break-word" } }, isBonus ? React.createElement(React.Fragment, null, Ico.check(12, "#22c55e"), " ", label) : React.createElement(React.Fragment, null, Ico.alertTriangle(12, "#f59e0b"), " ", label)),
               valStr && React.createElement("span", { style: { fontSize: 9, fontWeight: 800, color: "var(--text3)", background: "var(--bg4)", padding: "1px 5px", borderRadius: 3, fontFamily: "var(--font-mono)", flexShrink: 0 } }, valStr)
             );
           }),
@@ -4824,17 +4941,17 @@ const EntryScorePanel = ({ shares }) => {
           onClick: exportEntryScores, disabled: !entries.length,
           className: "stx-btn",
           style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: entries.length ? "pointer" : "default", opacity: entries.length ? 1 : 0.5 }
-        }, "\u2b07 Export"),
+        }, React.createElement(React.Fragment, null, Ico.download(10), " Export")),
         React.createElement("button", {
           onClick: importEntryScores,
           className: "stx-btn",
           style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
-        }, "\u2b06 Import"),
+        }, React.createElement(React.Fragment, null, Ico.upload(10), " Import")),
         React.createElement("button", {
           onClick: refreshEntries, disabled: refreshing || !entries.length,
           className: "stx-btn stx-btn-ghost",
           style: { fontSize: 12, padding: "8px 14px", opacity: refreshing || !entries.length ? 0.5 : 1, cursor: refreshing ? "wait" : "pointer" }
-        }, refreshing ? "Refreshing..." : "\u21bb Refresh"),
+        }, refreshing ? "Refreshing..." : React.createElement(React.Fragment, null, Ico.refresh(12), " Refresh")),
         React.createElement("button", { onClick: () => setShowAdd(true), className: "stx-btn stx-btn-primary", style: { fontSize: 12, padding: "8px 16px" } },
           "+ Add Entry"
         )
@@ -4918,7 +5035,7 @@ const EntryScorePanel = ({ shares }) => {
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "6px 10px", borderRadius: 8, background: r.decision.color + "12" } },
             React.createElement("span", { style: { fontSize: 12, fontWeight: 800, color: r.decision.color, fontFamily: "var(--font-heading)" } }, r.decision.label),
             React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--text5)", fontStyle: "italic" } }, r.decision.position),
-            r.todaySpike && React.createElement("span", { title: "Abnormal single-session spike or gap \u2014 score capped at Neutral", style: { fontSize: 8, fontWeight: 700, color: "#f97316", padding: "2px 5px", borderRadius: 3, background: "rgba(249,115,22,.12)", border: "1px solid rgba(249,115,22,.25)" } }, "\u26a0 Spike Day"),
+            r.todaySpike && React.createElement("span", { title: "Abnormal single-session spike or gap \u2014 score capped at Neutral", style: { fontSize: 8, fontWeight: 700, color: "#f97316", padding: "2px 5px", borderRadius: 3, background: "rgba(249,115,22,.12)", border: "1px solid rgba(249,115,22,.25)", display: "inline-flex", alignItems: "center", gap: 3 } }, Ico.alertTriangle(8, "#f97316"), " Spike Day"),
             r.hardFilters && r.hardFilters.length > 0 && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: "#ef4444", padding: "2px 5px", borderRadius: 3, background: "rgba(239,68,68,.1)" } }, r.hardFilters.length + " filter" + (r.hardFilters.length > 1 ? "s" : ""))
           ),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 } },
@@ -4935,10 +5052,10 @@ const EntryScorePanel = ({ shares }) => {
           scoreMathBlock(r),
           React.createElement("div", { style: { display: "flex", justifyContent: "center", gap: 12, marginBottom: 6 } },
             React.createElement("div", { onClick: function() { setExpandedIds(function(prev) { var next = Object.assign({}, prev); next[entry.id] = !next[entry.id]; return next; }); }, style: { fontSize: 10, color: "var(--accent)", cursor: "pointer", fontWeight: 600 } },
-              isExpanded ? "\u25b2 Hide Details" : "\u25bc Show Details"
+              React.createElement(React.Fragment, null, isExpanded ? Ico.chevronUp(10) : Ico.chevronDown(10), " ", isExpanded ? "Hide Details" : "Show Details")
             ),
             window.TechnicalIndicatorsInline && React.createElement("div", { onClick: function() { setViewingAnalysis(viewingAnalysis && viewingAnalysis.id === entry.id ? null : entry); }, style: { fontSize: 10, color: "#f97316", cursor: "pointer", fontWeight: 600 } },
-              "\u26a1 Technicals"
+              React.createElement(React.Fragment, null, Ico.activity(13), " Technicals")
             )
           ),
           isExpanded && React.createElement("div", { style: { marginTop: 8 } },
@@ -4953,7 +5070,7 @@ const EntryScorePanel = ({ shares }) => {
                 var valStr = valMatch ? valMatch[0] : "";
                 var label = valStr ? f.replace(valStr, "").replace(/\s*—\s*/, " — ").trim() : f;
                 return React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, lineHeight: 1.5, fontSize: 10 } },
-                  React.createElement("span", { style: { color: "var(--text3)", flex: 1, minWidth: 0, overflow: "hidden", wordBreak: "break-word" } }, isBonus ? "\u2713 " + label : "\u26a0 " + label),
+              React.createElement("span", { style: { color: "var(--text3)", flex: 1, minWidth: 0, overflow: "hidden", wordBreak: "break-word" } }, isBonus ? React.createElement(React.Fragment, null, Ico.check(12, "#22c55e"), " ", label) : React.createElement(React.Fragment, null, Ico.alertTriangle(12, "#f59e0b"), " ", label)),
                   valStr && React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "var(--text3)", background: "var(--bg4)", padding: "1px 6px", borderRadius: 4, fontFamily: "var(--font-mono)", flexShrink: 0 } }, valStr)
                 );
               }),
@@ -5017,8 +5134,8 @@ const EntryScorePanel = ({ shares }) => {
           React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, (perfTrackerExpanded ? "\u25be " : "\u25b8 ") + "Entry Score Performance Tracker")
         ),
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
-          perfTrackerExpanded && React.createElement("div", { onClick: function(e) { e.stopPropagation(); exportEntryScoreCSV(); }, style: { fontSize: 10, color: "var(--text6)", cursor: "pointer", fontWeight: 600, padding: "4px 10px", borderRadius: 6, background: "var(--bg4)" } }, "\u2b06 CSV"),
-          perfTrackerExpanded && React.createElement("div", { onClick: function(e) { e.stopPropagation(); refreshPerfTracker(); }, style: { fontSize: 10, color: perfTrackerRefreshing ? "var(--text6)" : "var(--accent)", cursor: perfTrackerRefreshing ? "wait" : "pointer", fontWeight: 600, padding: "4px 10px", borderRadius: 6, background: "var(--bg4)" } }, perfTrackerRefreshing ? "Refreshing..." : "\u21bb Refresh Prices")
+          perfTrackerExpanded && React.createElement("div", { onClick: function(e) { e.stopPropagation(); exportEntryScoreCSV(); }, style: { fontSize: 10, color: "var(--text6)", cursor: "pointer", fontWeight: 600, padding: "4px 10px", borderRadius: 6, background: "var(--bg4)" } }, React.createElement(React.Fragment, null, Ico.download(10), " CSV")),
+          perfTrackerExpanded && React.createElement("div", { onClick: function(e) { e.stopPropagation(); refreshPerfTracker(); }, style: { fontSize: 10, color: perfTrackerRefreshing ? "var(--text6)" : "var(--accent)", cursor: perfTrackerRefreshing ? "wait" : "pointer", fontWeight: 600, padding: "4px 10px", borderRadius: 6, background: "var(--bg4)" } }, perfTrackerRefreshing ? "Refreshing..." : React.createElement(React.Fragment, null, Ico.refresh(12), " Refresh Prices"))
         )
       ),
       perfTrackerExpanded && React.createElement("div", { style: { overflowX: "auto", marginTop: 4 } },
@@ -5218,7 +5335,7 @@ const ConfidenceTracker = () => {
       }
     });
     if (changes.length > 0) {
-      let msg = "\u2713 " + changes.length + " % change" + (changes.length !== 1 ? "s" : "") + " updated: " + changes.join(", ");
+      let msg = changes.length + " % change" + (changes.length !== 1 ? "s" : "") + " updated: " + changes.join(", ");
       if (noChanges.length > 0) msg += " \u00b7 " + noChanges.length + " unchanged";
       showToast(msg, 0);
     } else {
@@ -5367,7 +5484,7 @@ const ConfidenceTracker = () => {
   var selectedCount = Object.keys(selected).filter(function(id) { return selected[id]; }).length;
   var arrow = function (key) {
     if (sortKey !== key) return "";
-    return sortDir === "asc" ? " \u25b2" : " \u25bc";
+    return sortDir === "asc" ? React.createElement("span", { style: { display: "inline-flex", verticalAlign: "middle" } }, Ico.triangleUp(10, "var(--accent)")) : React.createElement("span", { style: { display: "inline-flex", verticalAlign: "middle" } }, Ico.triangleDown(10, "var(--accent)"));
   };
   var thStyle = { padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" };
   var thRight = Object.assign({}, thStyle, { textAlign: "right" });
@@ -5387,12 +5504,12 @@ const ConfidenceTracker = () => {
           onClick: refreshPrices, disabled: refreshing,
           className: "stx-btn",
           style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: refreshing ? "var(--text6)" : "var(--accent)", cursor: refreshing ? "wait" : "pointer" }
-        }, refreshing ? "Refreshing..." : "\u21bb Refresh Prices"),
+        }, refreshing ? "Refreshing..." : React.createElement(React.Fragment, null, Ico.refresh(12), " Refresh Prices")),
         tracked.length > 0 && React.createElement("button", {
           onClick: exportConfCSV,
           className: "stx-btn",
           style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
-        }, "\u2b06 CSV"),
+        }, React.createElement(React.Fragment, null, Ico.download(10), " CSV")),
         React.createElement("button", {
           onClick: () => { setShowAdd(!showAdd); setAddErr(""); },
           className: "stx-btn stx-btn-primary",
@@ -5872,7 +5989,7 @@ const BacktestPanel = () => {
           running ? "Running\u2026" : "\u25b6 Run Backtest"
         ),
         running && React.createElement("button", { onClick: function () { cancelRef.current = true; }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "#eab308", cursor: "pointer" } }, "Cancel"),
-        result && !running && React.createElement("button", { onClick: exportCSV, className: "stx-btn", style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "\u2b06 CSV")
+        result && !running && React.createElement("button", { onClick: exportCSV, className: "stx-btn", style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, React.createElement(React.Fragment, null, Ico.download(10), " CSV"))
       ),
       err && React.createElement("div", { style: { marginTop: 10, fontSize: 11, color: err.indexOf("cancelled") >= 0 ? "#eab308" : "#ef4444" } }, err),
       progress && React.createElement("div", { style: { marginTop: 12 } },
@@ -5990,8 +6107,8 @@ const BacktestPanel = () => {
                   cell(r.fwd5 != null ? React.createElement("span", { style: { color: retColor(r.fwd5) } }, fmtR(r.fwd5)) : "\u2014"),
                   cell(r.fwd10 != null ? React.createElement("span", { style: { color: retColor(r.fwd10), fontWeight: 700 } }, fmtR(r.fwd10)) : "\u2014"),
                   cell(r.fwd20 != null ? React.createElement("span", { style: { color: retColor(r.fwd20) } }, fmtR(r.fwd20)) : "\u2014"),
-                  cell(r.touchHit ? React.createElement("span", { style: { color: "#22c55e", fontWeight: 700 } }, "\u2713") : "\u2014"),
-                  cell(r.closeHit ? React.createElement("span", { style: { color: "#22c55e", fontWeight: 700 } }, "\u2713") : "\u2014")
+                  cell(r.touchHit ? React.createElement("span", { style: { color: "#22c55e", fontWeight: 700, display: "inline-flex" } }, Ico.check(12, "#22c55e")) : "\u2014"),
+                  cell(r.closeHit ? React.createElement("span", { style: { color: "#22c55e", fontWeight: 700, display: "inline-flex" } }, Ico.check(12, "#22c55e")) : "\u2014")
                 );
               })
             )
@@ -7029,8 +7146,8 @@ const BacktestSuitePanel = () => {
           running ? "Running\u2026" : runLabel
         ),
         running && React.createElement("button", { onClick: function () { cancelRef.current = true; }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "#eab308", cursor: "pointer" } }, "Cancel"),
-        mode === "multiSymbol" && multiResult && !running ? React.createElement("button", { onClick: function() { setMultiResult(null); setMultiTickers([]); setModeResult({ mode: "multiSymbol", tickers: [], data: null }); }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid #ef4444", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer" } }, "\u2715 Clear") : null,
-        (singleResult || batchResult || wfResult || multiResult) && !running && React.createElement("button", { onClick: exportCSV, className: "stx-btn", style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "\u2b06 CSV")
+        mode === "multiSymbol" && multiResult && !running ? React.createElement("button", { onClick: function() { setMultiResult(null); setMultiTickers([]); setModeResult({ mode: "multiSymbol", tickers: [], data: null }); }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid #ef4444", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 } }, Ico.x(10, "#ef4444"), " Clear") : null,
+        (singleResult || batchResult || wfResult || multiResult) && !running && React.createElement("button", { onClick: exportCSV, className: "stx-btn", style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, React.createElement(React.Fragment, null, Ico.download(10), " CSV"))
       ),
       err && React.createElement("div", { style: { marginTop: 10, fontSize: 11, color: err.indexOf("cancelled") >= 0 ? "#eab308" : "#ef4444" } }, err),
       progress && React.createElement("div", { style: { marginTop: 12 } },
@@ -7073,7 +7190,7 @@ const BacktestSuitePanel = () => {
         React.createElement("button", { onClick: runPathAnalysis, disabled: pathLoading, className: "stx-btn stx-btn-primary", style: { padding: "8px 18px", fontSize: 12, opacity: pathLoading ? 0.6 : 1, cursor: pathLoading ? "wait" : "pointer" } },
           pathLoading ? "Loading\u2026" : "\u25b6 Chart the Path"
         ),
-        pathResult && React.createElement("button", { onClick: function() { setPathResult(null); }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid #ef4444", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer" } }, "\u2715 Clear")
+        pathResult && React.createElement("button", { onClick: function() { setPathResult(null); }, className: "stx-btn", style: { fontSize: 11, padding: "8px 12px", border: "1px solid #ef4444", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 } }, Ico.x(10, "#ef4444"), " Clear")
       ),
       pathErr && React.createElement("div", { style: { fontSize: 11, color: "#ef4444", marginBottom: 8 } }, pathErr)
     ),
@@ -8220,7 +8337,7 @@ function StockScreener(props) {
       }
     });
     if (changes.length > 0) {
-      var msg = "\u2713 " + changes.length + " score" + (changes.length !== 1 ? "s" : "") + " changed: " + changes.join(", ");
+      var msg = changes.length + " score" + (changes.length !== 1 ? "s" : "") + " changed: " + changes.join(", ");
       if (noChanges.length > 0) msg += " \u00b7 " + noChanges.length + " unchanged";
       showToast(msg, 0);
     } else {
@@ -8509,7 +8626,7 @@ function StockScreener(props) {
 
   var arrow = function(key) {
     if (sortKey !== key) return "";
-    return sortDir === "desc" ? " \u25bc" : " \u25b2";
+    return sortDir === "desc" ? React.createElement("span", { style: { display: "inline-flex", verticalAlign: "middle" } }, Ico.triangleDown(10, "var(--accent)")) : React.createElement("span", { style: { display: "inline-flex", verticalAlign: "middle" } }, Ico.triangleUp(10, "var(--accent)"));
   };
 
   var thStyle = { padding: "8px 10px", fontSize: 10, fontWeight: 700, color: "var(--text5)", textAlign: "left", borderBottom: "2px solid var(--border)", cursor: "pointer", whiteSpace: "nowrap", userSelect: "none" };
@@ -8529,12 +8646,12 @@ function StockScreener(props) {
           onClick: refreshSelected,
           className: "stx-btn stx-btn-primary",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 700, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", cursor: "pointer" }
-        }, "\u21bb Refresh Selected (" + selectedCount + ")") : null,
+        }, React.createElement(React.Fragment, null, Ico.refresh(12), " Refresh Selected (" + selectedCount + ")")) : null,
         results.length > 0 && !scanning && selectedCount > 0 ? React.createElement("button", {
           onClick: refreshSelectedBackground,
           className: "stx-btn",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid var(--border)", background: bgRefreshing ? "var(--bg5)" : "var(--bg4)", color: bgRefreshing ? "var(--text6)" : "var(--text4)", cursor: bgRefreshing ? "wait" : "pointer" }
-        }, bgRefreshing ? "\u21bb BG (" + bgProgress.done + "/" + bgProgress.total + ")" : "\u21bb Background (" + selectedCount + ")") : null,
+        }, bgRefreshing ? React.createElement(React.Fragment, null, Ico.refresh(12), " BG (" + bgProgress.done + "/" + bgProgress.total + ")") : React.createElement(React.Fragment, null, Ico.refresh(12), " Background (" + selectedCount + ")")) : null,
         results.length > 0 && !scanning && selectedCount > 0 ? React.createElement("button", {
           onClick: function() {
             var tickers = Object.keys(selected).filter(function(t) { return selected[t]; });
@@ -8563,17 +8680,17 @@ function StockScreener(props) {
           onClick: exportJSON,
           className: "stx-btn",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
-        }, "\u2b07 Export") : null,
+        }, React.createElement(React.Fragment, null, Ico.download(10), " Export")) : null,
         results.length > 0 && !scanning ? React.createElement("button", {
           onClick: exportExcel,
           className: "stx-btn",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid #16a34a", background: "rgba(22,163,74,.08)", color: "#16a34a", cursor: "pointer" }
-        }, "\u2b07 Excel") : null,
+        }, React.createElement(React.Fragment, null, Ico.download(10), " Excel")) : null,
         React.createElement("button", {
           onClick: importJSON,
           className: "stx-btn",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
-        }, "\u2b06 Import"),
+        }, React.createElement(React.Fragment, null, Ico.upload(10), " Import")),
         results.length > 0 && !scanning ? React.createElement("button", {
           onClick: purgeData,
           className: "stx-btn",
@@ -8727,7 +8844,7 @@ function StockScreener(props) {
                     React.createElement("button", {
                       onClick: function() { refreshStock(r.s); }, disabled: !!refreshingMap[r.s.t],
                       style: { width: 24, height: 24, borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg4)", cursor: refreshingMap[r.s.t] ? "wait" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, padding: 0, color: "var(--text5)", flexShrink: 0 }
-                    }, refreshingMap[r.s.t] ? React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, "\u21bb") : "\u21bb"),
+                    }, refreshingMap[r.s.t] ? React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, Ico.refresh(14)) : Ico.refresh(14)),
                     React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, timestamps[r.s.t] ? new Date(timestamps[r.s.t]).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "\u2014")
                   )
                 )
@@ -9690,7 +9807,7 @@ function SingleStockAnalysis({ requestedTicker }) {
             React.createElement("div", { style: { fontSize: 8, color: "var(--text5)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3 } }, "Entry Score"),
             React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: entryTone, fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore != null ? r.finalScore : "\u2014")
           ),
-          React.createElement("div", { onClick: function () { deleteSnapshot(snap.id); }, style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--text6)", fontSize: 13, title: "Delete snapshot" } }, "\u2715")
+           React.createElement("div", { onClick: function () { deleteSnapshot(snap.id); }, style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--text6)", title: "Delete snapshot", display: "inline-flex" } }, Ico.x(13))
         )
       ),
       overallEl,
@@ -9704,7 +9821,7 @@ function SingleStockAnalysis({ requestedTicker }) {
       tfRow,
       React.createElement("div", { style: { display: "flex", gap: 12, justifyContent: "center", marginTop: 8 } },
         React.createElement("div", { onClick: function () { setSnapOpen(function (p) { var n = Object.assign({}, p); n[snap.id] = !n[snap.id]; return n; }); }, style: { fontSize: 9, color: "var(--accent)", cursor: "pointer", fontWeight: 600 } },
-          isOpen ? "\u25b2 Hide Details" : "\u25bc Show Details"
+          React.createElement(React.Fragment, null, isOpen ? Ico.chevronUp(10) : Ico.chevronDown(10), " ", isOpen ? "Hide Details" : "Show Details")
         )
       ),
       isOpen && chartsEl,
@@ -9798,17 +9915,17 @@ function SingleStockAnalysis({ requestedTicker }) {
           React.createElement("button", {
             onClick: function () { setAutoRefresh(!autoRefresh); },
             style: { padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 600, border: "1px solid " + (autoRefresh ? "rgba(22,163,74,.4)" : "var(--border)"), background: autoRefresh ? "rgba(22,163,74,.1)" : "var(--bg4)", color: autoRefresh ? "var(--profit)" : "var(--text5)", cursor: "pointer" }
-          }, autoRefresh ? "\u25cf Live" : "\u25cb Auto"),
+          }, autoRefresh ? React.createElement(React.Fragment, null, Ico.dot(7, "#22c55e"), " Live") : React.createElement(React.Fragment, null, Ico.dotOutline(7, "var(--text5)"), " Auto")),
           React.createElement("button", {
             onClick: function () { DF.clearCache(); setRefreshTick(function (t) { return t + 1; }); },
             disabled: loading,
             style: { padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text5)", cursor: loading ? "wait" : "pointer", opacity: loading ? 0.6 : 1 }
-          }, loading ? "..." : "\u21bb"),
+          }, loading ? "..." : Ico.refresh(14)),
           React.createElement("button", {
             onClick: saveSnapshot, disabled: savingSnap || loading || !candles,
             title: "Capture current chart, signal, entry score, 10-day confidence and optimum entry",
             style: { padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, border: "1px solid rgba(139,92,246,.4)", background: savingSnap ? "var(--bg4)" : "rgba(139,92,246,.1)", color: "#a78bfa", cursor: savingSnap || loading || !candles ? "wait" : "pointer", opacity: savingSnap || loading || !candles ? 0.6 : 1, whiteSpace: "nowrap" }
-          }, savingSnap ? "\u23f3 Saving..." : "\ud83d\udcf7 Snapshot")
+          }, savingSnap ? React.createElement(React.Fragment, null, Ico.hourglass(13, "#f59e0b"), " Saving...") : React.createElement(React.Fragment, null, Ico.camera(13), " Snapshot"))
         )
       ),
       error && React.createElement("div", { style: { padding: "8px 12px", borderRadius: 8, marginBottom: 10, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", fontSize: 11, color: "var(--loss)" } }, error),
@@ -10596,34 +10713,34 @@ function App() {
       React.createElement("div", {
         className: "stx-sidebar",
         style: {
-          width: 220, minWidth: 220, background: "var(--sidebar)", display: "flex", flexDirection: "column",
-          borderRight: "1px solid var(--border)", padding: "20px 0", flexShrink: 0, height: "100vh", overflowY: "auto"
+          width: 240, minWidth: 240, display: "flex", flexDirection: "column",
+          padding: "14px 0", flexShrink: 0, height: "100vh", overflowY: "auto"
         }
       },
-        React.createElement("div", { style: { padding: "0 20px 20px", borderBottom: "1px solid rgba(255,255,255,.08)" } },
-          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
-            React.createElement("div", { style: { width: 36, height: 36, borderRadius: 10, background: "rgba(16,185,129,.2)", border: "1px solid rgba(16,185,129,.3)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, color: "#10b981", fontFamily: "var(--font-heading)", fontSize: 18 } }, "S"),
+        React.createElement("div", { style: { padding: "0 16px 16px", borderBottom: "1px solid var(--border)" } },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+            React.createElement("div", { style: { width: 38, height: 38, borderRadius: 12, background: "linear-gradient(135deg,var(--accent),var(--accent2))", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, color: "#fff", fontFamily: "var(--font-heading)", fontSize: 17, boxShadow: "0 4px 12px var(--accentbg3)" } }, "S"),
             React.createElement("div", null,
-              React.createElement("div", { style: { fontWeight: 800, fontSize: 16, color: "#ecfdf5", fontFamily: "var(--font-heading)" } }, "Sto", React.createElement("span", { style: { color: "#10b981" } }, "X")),
-              React.createElement("div", { style: { fontSize: 9, color: "rgba(255,255,255,.4)", letterSpacing: 1 } }, "STOCK ANALYSIS")
+              React.createElement("div", { style: { fontWeight: 800, fontSize: 17, color: "var(--text)", fontFamily: "var(--font-heading)", letterSpacing: "-0.3px" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
+              React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", letterSpacing: 1.5, fontWeight: 500, textTransform: "uppercase" } }, "Stock Analysis")
             )
           )
         ),
-        React.createElement("div", { style: { padding: "16px 12px", flex: 1, display: "flex", flexDirection: "column", gap: 2 } },
+        React.createElement("div", { style: { padding: "12px 10px", flex: 1, display: "flex", flexDirection: "column", gap: 1 } },
           NAV_ITEMS.map((item) => {
             const active = page === item.key;
             const col = NAV_COLORS[item.key] || "var(--accent)";
             return React.createElement("button", {
               key: item.key, onClick: () => item.external ? window.open(item.url, "_blank", "noopener") : navigate(item.key),
               style: {
-                display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px",
-                borderRadius: 10, border: "none", cursor: "pointer",
-                transition: "background .18s, color .18s, border-color .18s",
-                background: active ? hexAlpha(col, 0.13) : "transparent",
-                color: active ? col : "rgba(255,255,255,.55)",
+                display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 10px",
+                borderRadius: 8, border: "none", cursor: "pointer",
+                transition: "all .2s var(--ease-out)",
+                background: active ? "var(--accentbg)" : "transparent",
+                color: active ? "var(--accent)" : "var(--text5)",
                 fontWeight: active ? 700 : 500, fontSize: 13,
                 fontFamily: "var(--font-body)", textAlign: "left",
-                borderLeft: active ? "3px solid " + col : "3px solid transparent"
+                borderLeft: active ? "3px solid var(--accent)" : "3px solid transparent"
               }
             },
               React.createElement("span", null, item.icon(18)),
@@ -10632,16 +10749,16 @@ function App() {
           })
         ),
         // Market status footer
-        React.createElement("div", { style: { padding: "12px 20px", borderTop: "1px solid rgba(255,255,255,.08)", fontSize: 10, color: "rgba(255,255,255,.35)" } },
+        React.createElement("div", { style: { padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 10, color: "var(--text6)" } },
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
-            React.createElement("div", { style: { width: 6, height: 6, borderRadius: "50%", background: isTradingWeekday() ? "#10b981" : "#6b7280" } }),
-            isTradingWeekday() ? "Market Open" : "Market Closed"
+            React.createElement("div", { style: { width: 6, height: 6, borderRadius: "50%", background: isTradingWeekday() ? "var(--accent)" : "var(--text6)", boxShadow: isTradingWeekday() ? "0 0 6px var(--accentbg5)" : "none" } }),
+            React.createElement("span", { style: { fontWeight: 600, letterSpacing: ".3px" } }, isTradingWeekday() ? "Market Open" : "Market Closed")
           ),
-          React.createElement("div", { style: { marginTop: 4 } }, "NSE \u00b7 BSE")
+          React.createElement("div", { style: { marginTop: 4, letterSpacing: ".5px" } }, "NSE \u00b7 BSE")
         )
       ),
       // Content
-      React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "24px 24px 40px", background: "var(--bg)" } },
+      React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "16px 20px 32px", background: "var(--bg)" } },
         renderPage()
       ),
       React.createElement(ToastHost, null)

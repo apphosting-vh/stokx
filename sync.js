@@ -1069,7 +1069,7 @@ window.FSAStoragePanel = function(props) {
       background: supported ? "rgba(22,163,74,.07)" : isMobileDevice ? "rgba(234,179,8,.07)" : "rgba(239,68,68,.07)",
       border: "1px solid " + (supported ? "rgba(22,163,74,.2)" : isMobileDevice ? "rgba(234,179,8,.3)" : "rgba(239,68,68,.2)")
     }},
-      React.createElement("div", { style: { fontSize: 18 } }, supported ? "\u2705" : isMobileDevice ? "\ud83d\udcf1" : "\u26a0\ufe0f"),
+      React.createElement("div", { style: { fontSize: 18 } }, supported ? Ico.checkCircle(18, "#22c55e") : isMobileDevice ? Ico.smartphone(18) : Ico.alertTriangle(18, "#f59e0b")),
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: supported ? "#16a34a" : isMobileDevice ? "#b45309" : "#ef4444" } },
           supported ? "File System Access API \u2014 Supported" : isMobileDevice ? "Not available on mobile" : "Not supported in this browser"
@@ -1103,7 +1103,7 @@ window.FSAStoragePanel = function(props) {
         ),
         connected && React.createElement("div", { style: { fontSize: 11, marginTop: 4, fontWeight: fileSize != null && fileSize >= 8 * 1048576 ? 700 : 500, color: fileSize != null && fileSize >= 15 * 1048576 ? "#ef4444" : fileSize != null && fileSize >= 8 * 1048576 ? "#d97706" : "var(--text5)" } },
           fileSize != null
-            ? "File size: " + fmtMB(fileSize) + (fileSize >= 15 * 1048576 ? " \u2014 heavy; auto-saves may lag. Consider a fresh file." : fileSize >= 8 * 1048576 ? " \u2014 approaching smooth-save threshold (~10 MB)." : " \u00b7 \u2713 well under the smooth-save threshold.")
+            ? React.createElement(React.Fragment, null, "File size: " + fmtMB(fileSize), fileSize >= 15 * 1048576 ? " \u2014 heavy; auto-saves may lag. Consider a fresh file." : fileSize >= 8 * 1048576 ? " \u2014 approaching smooth-save threshold (~10 MB)." : React.createElement(React.Fragment, null, " \u00b7 ", Ico.check(12, "#22c55e"), " well under the smooth-save threshold."))
             : "File size: measuring..."
         )
       )
@@ -1353,7 +1353,7 @@ window.CloudBackupPanel = function(props) {
             style: { fontFamily: "monospace", fontSize: 12 }
           })
         ),
-        React.createElement("button", { className: "stx-btn stx-btn-primary", onClick: saveCid, disabled: !cidInput.trim(), style: { minWidth: 110 } }, cidSaved ? "\u2713 Saved" : "Save Client ID")
+        React.createElement("button", { className: "stx-btn stx-btn-primary", onClick: saveCid, disabled: !cidInput.trim(), style: { minWidth: 110 } }, cidSaved ? React.createElement(React.Fragment, null, Ico.check(12, "#22c55e"), " Saved") : "Save Client ID")
       ),
       hasCid && React.createElement("div", { style: { marginTop: 8, display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#16a34a" } },
         React.createElement(StatusDot, { on: true }), "Client ID configured"
@@ -1377,7 +1377,7 @@ window.CloudBackupPanel = function(props) {
             })
           )
         ),
-        React.createElement("button", { className: "stx-btn stx-btn-primary", onClick: saveSecret, disabled: !secretInput.trim(), style: { minWidth: 110 } }, secretSaved ? "\u2713 Saved" : "Save Secret")
+        React.createElement("button", { className: "stx-btn stx-btn-primary", onClick: saveSecret, disabled: !secretInput.trim(), style: { minWidth: 110 } }, secretSaved ? React.createElement(React.Fragment, null, Ico.check(12, "#22c55e"), " Saved") : "Save Secret")
       ),
       hasSecret
         ? React.createElement("div", { style: { marginTop: 8, fontSize: 12, color: "#16a34a", display: "flex", alignItems: "center", gap: 6 } }, React.createElement(StatusDot, { on: true }), "Refresh token flow enabled")
@@ -1452,15 +1452,15 @@ window.CloudBackupPanel = function(props) {
         }, pulling ? "Checking Drive..." : "Pull from Drive")
       ),
       (pushMsg || pullMsg) && React.createElement("div", { style: { marginTop: 10 } },
-        pushMsg && React.createElement("div", { style: { fontSize: 12, color: pushMsg.startsWith("\u2713") || pushMsg.startsWith("Pushed") || pushMsg.startsWith("Re-auth") ? "#16a34a" : pushMsg.startsWith("\u2717") || pushMsg.startsWith("Push failed") ? "#ef4444" : "var(--text4)", marginBottom: pullMsg ? 4 : 0 } }, pushMsg),
-        pullMsg && React.createElement("div", { style: { fontSize: 12, color: pullMsg.startsWith("\u2713") || pullMsg.startsWith("Restored") ? "#16a34a" : pullMsg.startsWith("\u2717") || pullMsg.startsWith("Pull failed") ? "#ef4444" : "var(--text4)" } }, pullMsg)
+        pushMsg && React.createElement("div", { style: { fontSize: 12, color: pushMsg.startsWith("Pushed") || pushMsg.startsWith("Re-auth") ? "#16a34a" : pushMsg.startsWith("Push failed") ? "#ef4444" : "var(--text4)", marginBottom: pullMsg ? 4 : 0 } }, pushMsg),
+        pullMsg && React.createElement("div", { style: { fontSize: 12, color: pullMsg.startsWith("Restored") ? "#16a34a" : pullMsg.startsWith("Pull failed") ? "#ef4444" : "var(--text4)" } }, pullMsg)
       )
     ),
     /* Daily Auto-Backup */
     isConfigured && React.createElement("div", { className: "stx-card", style: { marginBottom: 12 } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
-          React.createElement("div", { style: { width: 30, height: 30, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg4)", fontSize: 14 } }, "\ud83d\uddc4\ufe0f"),
+          React.createElement("div", { style: { width: 30, height: 30, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg4)", fontSize: 14 } }, Ico.database(14)),
           React.createElement("div", null,
             React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text2)", fontFamily: "var(--font-heading)" } }, "Daily Auto-Backup"),
             React.createElement("div", { style: { fontSize: 10, color: "var(--text5)" } }, "One automatic backup to Drive each day")
