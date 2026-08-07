@@ -4578,7 +4578,7 @@ const SwingHoldOptimizer=({shares,soldShareSnapshots={}})=>{
             var barW=Math.max(4,Math.abs(b.expectancy)/maxExpectancy*100);
             var isBest=bestExpectancy&&b.key===bestExpectancy.key;
             return React.createElement("div",{key:b.key,style:{display:"grid",gridTemplateColumns:"110px 1fr 80px 70px 65px",gap:8,alignItems:"center",padding:"8px 10px",borderRadius:8,background:isBest?"rgba(22,163,74,.08)":"transparent",border:isBest?"1px solid rgba(22,163,74,.2)":"1px solid transparent"}},
-              React.createElement("div",{style:{fontSize:11,fontWeight:isBest?700:500,color:isBest?"#16a34a":"var(--text4)"}},b.label+(isBest?React.createElement(React.Fragment, null, " ", Ico.star(12, "#f59e0b")):"")),
+              React.createElement("div",{style:{fontSize:11,fontWeight:isBest?700:500,color:isBest?"#16a34a":"var(--text4)"}},[b.label, isBest ? React.createElement(React.Fragment, null, " ", Ico.star(12, "#f59e0b")) : null]),
               React.createElement("div",{style:{display:"flex",alignItems:"center",gap:6}},
                 React.createElement("div",{style:{flex:1,height:18,background:"var(--bg5)",borderRadius:4,overflow:"hidden",position:"relative"}},
                   React.createElement("div",{style:{position:"absolute",left:b.expectancy>=0?"50%":"auto",right:b.expectancy<0?"50%":"auto",top:0,height:"100%",width:barW+"%",background:b.expectancy>=0?"rgba(22,163,74,.4)":"rgba(239,68,68,.4)",borderRadius:4}})

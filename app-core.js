@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.84";
+window.__STOX_APP_VERSION = "2.10.85";
 
 /* Apply saved score config on startup */
 (function() {
@@ -5555,15 +5555,15 @@ const ConfidenceTracker = () => {
             React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center", width: 36 }) },
               React.createElement("input", { type: "checkbox", checked: sorted.length > 0 && sorted.every(function(t) { return selected[t.id]; }), onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 13, height: 13 } })
             ),
-            React.createElement("th", { style: thStyle, title: "Sort by stock", onClick: function() { toggleSort("ticker"); } }, "Stock" + arrow("ticker")),
-            React.createElement("th", { style: thStyle, title: "Sort by date added", onClick: function() { toggleSort("addedAt"); } }, "Date Added" + arrow("addedAt")),
-            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }), title: "Sort by lognormal confidence score", onClick: function() { toggleSort("confidence"); } }, "10DLN" + arrow("confidence")),
+            React.createElement("th", { style: thStyle, title: "Sort by stock", onClick: function() { toggleSort("ticker"); } }, ["Stock", arrow("ticker")]),
+            React.createElement("th", { style: thStyle, title: "Sort by date added", onClick: function() { toggleSort("addedAt"); } }, ["Date Added", arrow("addedAt")]),
+            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }), title: "Sort by lognormal confidence score", onClick: function() { toggleSort("confidence"); } }, ["10DLN", arrow("confidence")]),
             React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }) }, "10DEM"),
-            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }), title: "Sort by entry score", onClick: function() { toggleSort("entryScore"); } }, "Entry Score" + arrow("entryScore")),
-            React.createElement("th", { style: thRight, title: "Sort by price on add", onClick: function() { toggleSort("priceOnAdd"); } }, "Price on Add" + arrow("priceOnAdd")),
-            React.createElement("th", { style: thRight, title: "Sort by days held", onClick: function() { toggleSort("days"); } }, "Days" + arrow("days")),
-            React.createElement("th", { style: thRight, title: "Sort by current price", onClick: function() { toggleSort("currentPrice"); } }, "Current Price" + arrow("currentPrice")),
-            React.createElement("th", { style: thRight, title: "Sort by % change", onClick: function() { toggleSort("pct"); } }, "% Change" + arrow("pct")),
+            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }), title: "Sort by entry score", onClick: function() { toggleSort("entryScore"); } }, ["Entry Score", arrow("entryScore")]),
+            React.createElement("th", { style: thRight, title: "Sort by price on add", onClick: function() { toggleSort("priceOnAdd"); } }, ["Price on Add", arrow("priceOnAdd")]),
+            React.createElement("th", { style: thRight, title: "Sort by days held", onClick: function() { toggleSort("days"); } }, ["Days", arrow("days")]),
+            React.createElement("th", { style: thRight, title: "Sort by current price", onClick: function() { toggleSort("currentPrice"); } }, ["Current Price", arrow("currentPrice")]),
+            React.createElement("th", { style: thRight, title: "Sort by % change", onClick: function() { toggleSort("pct"); } }, ["% Change", arrow("pct")]),
             React.createElement("th", { style: Object.assign({}, thStyle, { width: 40 }) })
           )
         ),
@@ -8747,7 +8747,7 @@ function StockScreener(props) {
                   );
                 }
                 var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", yearChg: "Yearly %", avgTrend: "Trend", avgPullback: "Pullback", avgProb4: "Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10dLog: "Conf 10DLN", conf10dEmp: "Conf 10DEM", actions: "Last Refreshed" };
-                return React.createElement("th", { key: k, title: k === "conf10dLog" ? "10-Day Confidence \u2014 Lognormal Model" : k === "conf10dEmp" ? "10-Day Confidence \u2014 Empirical Model" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" ? "default" : "pointer" }), onClick: k === "actions" ? undefined : function() { toggleSort(k); } }, labels[k] + (k === "actions" ? "" : arrow(k)));
+                return React.createElement("th", { key: k, title: k === "conf10dLog" ? "10-Day Confidence \u2014 Lognormal Model" : k === "conf10dEmp" ? "10-Day Confidence \u2014 Empirical Model" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" ? "default" : "pointer" }), onClick: k === "actions" ? undefined : function() { toggleSort(k); } }, [labels[k], (k === "actions" ? null : arrow(k))]);
               })
             )
           ),
