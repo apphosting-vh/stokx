@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.72";
+window.__STOX_APP_VERSION = "2.10.75";
 
 /* Apply saved score config on startup */
 (function() {
@@ -6797,9 +6797,9 @@ const BacktestSuitePanel = () => {
       (function() {
         var exportRankingCSV = function() {
           if (!d.results || !d.results.length) return;
-          var headers = ["Symbol", "Signals", "Wins", "Losses", "Win Rate %", "Avg Return %", "Profit Factor", "Avg Trend", "Avg Pullback", "Avg Prob4"];
+          var headers = ["Symbol", "Signals", "Wins", "Losses", "Win Rate %", "Avg Return %", "Profit Factor", "Avg Hold Days", "Avg 10DLN", "Avg 10DEM", "Avg Trend", "Avg Pullback", "Avg Prob4"];
           var rows = d.results.map(function(r) {
-            return [r.symbol, r.totalSignals, r.winningTrades, r.losingTrades, r.winRate != null ? r.winRate : "", r.avgReturnPct != null ? r.avgReturnPct : "", r.profitFactor, r.avgTrend != null ? r.avgTrend : "", r.avgPullback != null ? r.avgPullback : "", r.avgProb4 != null ? r.avgProb4 : ""];
+            return [r.symbol, r.totalSignals, r.winningTrades, r.losingTrades, r.winRate != null ? r.winRate : "", r.avgReturnPct != null ? r.avgReturnPct : "", r.profitFactor, r.avgHoldDays != null ? r.avgHoldDays : "", r.avgConfLog != null ? Math.round(r.avgConfLog * 1000) / 10 : "", r.avgConfEmp != null ? Math.round(r.avgConfEmp * 1000) / 10 : "", r.avgTrend != null ? r.avgTrend : "", r.avgPullback != null ? r.avgPullback : "", r.avgProb4 != null ? r.avgProb4 : ""];
           });
           var csv = [headers.join(",")].concat(rows.map(function(r) { return r.map(function(v) { var s = String(v == null ? "" : v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(","); })).join("\r\n");
           var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
@@ -6812,12 +6812,12 @@ const BacktestSuitePanel = () => {
           if (typeof XLSX === "undefined") { showToast("XLSX library still loading — try again in a moment", 3000); return; }
           if (!d.results || !d.results.length) return;
           var rows = d.results.map(function(r) {
-            return { "Symbol": r.symbol, "Signals": r.totalSignals, "Wins": r.winningTrades, "Losses": r.losingTrades, "Win Rate %": r.winRate, "Avg Return %": r.avgReturnPct, "Profit Factor": typeof r.profitFactor === "string" ? r.profitFactor : r.profitFactor, "Avg Trend": r.avgTrend, "Avg Pullback": r.avgPullback, "Avg Prob4": r.avgProb4 };
+            return { "Symbol": r.symbol, "Signals": r.totalSignals, "Wins": r.winningTrades, "Losses": r.losingTrades, "Win Rate %": r.winRate, "Avg Return %": r.avgReturnPct, "Profit Factor": typeof r.profitFactor === "string" ? r.profitFactor : r.profitFactor, "Avg Hold Days": r.avgHoldDays, "Avg 10DLN": r.avgConfLog != null ? Math.round(r.avgConfLog * 1000) / 10 : null, "Avg 10DEM": r.avgConfEmp != null ? Math.round(r.avgConfEmp * 1000) / 10 : null, "Avg Trend": r.avgTrend, "Avg Pullback": r.avgPullback, "Avg Prob4": r.avgProb4 };
           });
           var ws = XLSX.utils.json_to_sheet(rows);
           var wb = XLSX.utils.book_new();
           XLSX.utils.book_append_sheet(wb, ws, "Ranking");
-          var colWidths = [{ wch: 18 }, { wch: 8 }, { wch: 6 }, { wch: 7 }, { wch: 10 }, { wch: 11 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 10 }];
+          var colWidths = [{ wch: 18 }, { wch: 8 }, { wch: 6 }, { wch: 7 }, { wch: 10 }, { wch: 11 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 10 }];
           ws["!cols"] = colWidths;
           XLSX.writeFile(wb, "stox-batch-ranking-" + (d.symbol || "batch") + ".xlsx");
           showToast("Exported ranking XLSX", 3000);
@@ -6835,7 +6835,7 @@ const BacktestSuitePanel = () => {
           React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
             React.createElement("thead", null, React.createElement("tr", null,
-              cell("Symbol", tdL), cell("Signals", td), cell("Wins", td), cell("Losses", td), cell("Win Rate", td), cell("Avg Return", td), cell("Profit Factor", td),
+              cell("Symbol", tdL), cell("Signals", td), cell("Wins", td), cell("Losses", td), cell("Win Rate", td), cell("Avg Return", td), cell("Profit Factor", td), cell("Avg Hold", td), cell("Avg 10DLN", td), cell("Avg 10DEM", td),
               React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average Trend Health pillar score across all trades for this symbol" }, "Avg Trend"),
               React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average Pullback Quality pillar score across all trades for this symbol" }, "Avg Pullback"),
               React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average 4% Probability pillar score across all trades for this symbol" }, "Avg Prob4")
@@ -6845,6 +6845,9 @@ const BacktestSuitePanel = () => {
               cell(React.createElement("span", { style: { color: retColor(r.winRate - 50), fontWeight: 700 } }, fmtPct(r.winRate))),
               cell(React.createElement("span", { style: { color: retColor(r.avgReturnPct) } }, fmtR(r.avgReturnPct))),
               cell(fmtPF(r.profitFactor)),
+              cell(r.avgHoldDays != null ? fmt2(r.avgHoldDays) : "\u2014"),
+              cell(r.avgConfLog != null ? React.createElement("span", { style: { fontWeight: 700, color: r.avgConfLog * 100 >= 50 ? "#22c55e" : "#ef4444" } }, fmt2(r.avgConfLog * 100)) : "\u2014"),
+              cell(r.avgConfEmp != null ? React.createElement("span", { style: { fontWeight: 700, color: r.avgConfEmp * 100 >= 50 ? "#22c55e" : "#ef4444" } }, fmt2(r.avgConfEmp * 100)) : "\u2014"),
               React.createElement("td", { style: Object.assign({}, td, { color: r.avgTrend != null ? "var(--text)" : "var(--text6)" }) }, r.avgTrend != null ? fmt2(r.avgTrend) : "\u2014"),
               React.createElement("td", { style: Object.assign({}, td, { color: r.avgPullback != null ? "var(--text)" : "var(--text6)" }) }, r.avgPullback != null ? fmt2(r.avgPullback) : "\u2014"),
               React.createElement("td", { style: Object.assign({}, td, { color: r.avgProb4 != null ? "var(--text)" : "var(--text6)" }) }, r.avgProb4 != null ? fmt2(r.avgProb4) : "\u2014")
