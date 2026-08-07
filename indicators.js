@@ -2716,6 +2716,8 @@ window.TechIndicators = (function () {
      All thresholds and weights are stored here so the UI can tune them
      without editing source code. Updated via setScoreConfig(). */
   var SCORE_CONFIG = {
+    /* Horizon for confidence calculation */
+    horizonDays: 10,
     /* Pillar max scores */
     pillarMax: { trendHealth: 35, pullbackQuality: 35, prob4: 40 },
     /* MTF weights */
@@ -4484,12 +4486,13 @@ window.TechIndicators = (function () {
      daily ^NSEI candles for RS-vs-Nifty / regime context. */
   function computeTenDayForwardConfidence(hourlyCandles, dailyCandles, indexCandles, entryScoreResult) {
     var entryScoreContext = entryScoreResult || null;
+    var _hd = SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10;
     if (!hourlyCandles || hourlyCandles.length === 0) {
-      return computeHorizonConfidence(hourlyCandles, dailyCandles, { horizonDays: 10, windowSessions: 40, entry_price: 0, indexCandles: indexCandles, entryScoreContext: entryScoreContext });
+      return computeHorizonConfidence(hourlyCandles, dailyCandles, { horizonDays: _hd, windowSessions: 40, entry_price: 0, indexCandles: indexCandles, entryScoreContext: entryScoreContext });
     }
     var cur = hourlyCandles[hourlyCandles.length - 1];
     return computeHorizonConfidence(hourlyCandles, dailyCandles, {
-      horizonDays: 10, windowSessions: 40,
+      horizonDays: _hd, windowSessions: 40,
       entry_price: cur.c,
       targetPct: 4,
       holdingDays: null,
@@ -4708,7 +4711,7 @@ window.TechIndicators = (function () {
 
       /* ── 4. 10-day horizon context from current price ─────────────────── */
       var ctx = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-        horizonDays: 10, windowSessions: 40, entry_price: c, targetPct: 4,
+        horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: c, targetPct: 4,
         holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
       });
       if (ctx.reason !== 'ok' || ctx.confidence == null) { base.reason = ctx.reason || base.reason; return base; }
@@ -4819,7 +4822,7 @@ window.TechIndicators = (function () {
         var P = prices[p2];
         var fp = fillProb(P);
         var res = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-          horizonDays: 10, windowSessions: 40, entry_price: P, targetPct: 4,
+          horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: P, targetPct: 4,
           holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
         });
         var isAggressive = P < floorP;

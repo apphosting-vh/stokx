@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.85";
+window.__STOX_APP_VERSION = "2.10.86";
 
 /* Apply saved score config on startup */
 (function() {
@@ -2838,17 +2838,18 @@ const TenDayConfidencePanel = ({ ticker }) => {
   function confBg(v) { return v != null ? (v >= 70 ? "var(--profitbg)" : v >= 40 ? "var(--warnbg)" : "var(--lossbg)") : "var(--bg5)"; }
   function confBd(v) { return v != null ? (v >= 70 ? "var(--profitborder)" : v >= 40 ? "var(--warnborder)" : "var(--lossborder)") : "var(--border)"; }
   const tone = { c: confColor(sc), bg: confBg(sc), bd: confBd(sc) };
-  const label = sc == null ? "Insufficient hourly data for a 10-day read"
-    : sc >= 70 ? "Strong odds \u2014 expect +4% within 10 trading days"
+  const _hd = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().horizonDays || 10) : 10;
+  const label = sc == null ? "Insufficient hourly data for a " + _hd + "-day read"
+    : sc >= 70 ? "Strong odds \u2014 expect +4% within " + _hd + " trading days"
     : sc >= 40 ? "Moderate \u2014 needs the hourly trend to cooperate"
-    : "Low odds \u2014 unlikely to reach +4% in 10 days";
+    : "Low odds \u2014 unlikely to reach +4% in " + _hd + " days";
   const chips = [
     { k: "Hrly ADX", v: cp.hourlyAdx != null ? cp.hourlyAdx + " (+DI " + cp.hourlyPlusDI + " / \u2212DI " + cp.hourlyMinusDI + ")" : "\u2014", x: "Hourly trend strength (0\u2013100) \u2014 how strongly the stock is trending right now." },
     { k: "Hrly VWAP", v: cp.hourlyVwap != null ? cp.hourlyVwap.toFixed(2) : "\u2014", hint: cp.hourlyVwapSlope != null ? "slope " + (cp.hourlyVwapSlope > 0 ? "+" : "") + cp.hourlyVwapSlope + "%" : null, x: "Intraday average price \u2014 above it means buyers are in control; slope shows direction." },
     { k: "RSI14", v: cp.hourlyRsi14 != null ? cp.hourlyRsi14 + " \u00b7 ROC " + (cp.roc10 != null ? cp.roc10 + "%" : "\u2014") : "\u2014", x: "14-hour momentum gauge \u2014 high = overbought, low = oversold (ROC = 10h change)." },
     { k: "Daily", v: cp.dailyEmaBullish && cp.dailyMacdBullish ? "EMA+MACD bull" : cp.dailyEmaBullish ? "EMA bull" : cp.dailyMacdBullish ? "MACD bull" : "flat/weak", x: "Daily EMA + MACD confirmation \u2014 does the longer-term trend back the hourly move?" },
     { k: "Range", v: cp.atrPct != null ? cp.atrPct + "% ATR" : "\u2014", x: "Daily ATR \u2014 the stock's typical single-day move; higher ATR = more room to reach +4%." },
-    { k: "Reach", v: cp.horizonReachPct != null ? cp.horizonReachPct + "% vs " + (remainingPct != null ? remainingPct + "%" : "\u2014") + " to go" : "\u2014", hint: (cp.driftPct != null ? "drift " + (cp.driftPct > 0 ? "+" : "") + cp.driftPct + "% in window" : "") + (cp.volConfirm != null ? " \u00b7 buy vol " + Math.round(cp.volConfirm * 100) + "%" : ""), x: "Typical 10-day travel (ATR\u00d7\u221a10) vs +4% gap, plus recent drift and buy-volume strength." },
+    { k: "Reach", v: cp.horizonReachPct != null ? cp.horizonReachPct + "% vs " + (remainingPct != null ? remainingPct + "%" : "\u2014") + " to go" : "\u2014", hint: (cp.driftPct != null ? "drift " + (cp.driftPct > 0 ? "+" : "") + cp.driftPct + "% in window" : "") + (cp.volConfirm != null ? " \u00b7 buy vol " + Math.round(cp.volConfirm * 100) + "%" : ""), x: "Typical " + _hd + "-day travel (ATR\u00d7\u221a" + _hd + ") vs +4% gap, plus recent drift and buy-volume strength." },
     { k: "Model", v: cp.empiricalMethod === 'empirical' ? "Empirical (" + cp.empiricalSampleCount + " samples)" : "Lognormal fallback", x: "Whether the model used real historical forward-window hit rates or fell back to the lognormal distribution. 60+ samples needed for empirical." },
     cp.entryScoreUsed ? { k: "Entry Score", v: cp.entryScore != null ? cp.entryScore + "/100" : "\u2014", x: "Entry score blended 60/40 with the raw confidence. Low entry scores (<35) cap the final confidence." } : null,
   ].filter(Boolean);
@@ -2863,7 +2864,7 @@ const TenDayConfidencePanel = ({ ticker }) => {
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)" } }, "Confidence Score \u2014 Next 10 Days"),
-        React.createElement("div", { style: { fontSize: 11.5, color: "var(--text6)", marginTop: 2 } }, "Chance of +4% from current price within 10 trading days \u00b7 15-day hourly read")
+        React.createElement("div", { style: { fontSize: 11.5, color: "var(--text6)", marginTop: 2 } }, "Chance of +4% from current price within " + _hd + " trading days \u00b7 15-day hourly read")
       ),
       sc != null && React.createElement("div", { style: { display: "flex", gap: 16, textAlign: "right" } },
         scLog != null && React.createElement("div", null,
@@ -2901,6 +2902,7 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
   const [loading, setLoading] = React.useState(true);
   const [res, setRes] = React.useState(null);
   const [err, setErr] = React.useState(null);
+  const _hd = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().horizonDays || 10) : 10;
 
   React.useEffect(() => {
     if (!ticker || !DF || !TI) { setLoading(false); return; }
@@ -2954,7 +2956,7 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
     { k: "Drop to Low (LN)", v: res.probToTodayLowLognormal != null ? "\u2248" + res.probToTodayLowLognormal + "%" : (res.todayLow != null && res.todayLow >= res.currentPrice - 0.01 ? "At low" : "\u2014"), x: res.todayLow != null && res.todayLow < res.currentPrice - 0.01 ? "Lognormal model \u2014 probability of price touching " + price(res.todayLow) + " before close." : "Current price is at or near today's low." },
     { k: "Drop to Low (EM)", v: res.probToTodayLowEmpirical != null ? "\u2248" + res.probToTodayLowEmpirical + "%" : (res.todayLow != null && res.todayLow >= res.currentPrice - 0.01 ? "At low" : (cp.empiricalMethod === 'empirical' ? "Insufficient samples" : "\u2014")), x: res.todayLow != null && res.todayLow < res.currentPrice - 0.01 ? "Empirical model (" + cp.empiricalSampleCount + " samples) \u2014 non-parametric estimate using 5m intraday data." : cp.empiricalMethod !== 'empirical' ? "Insufficient 5m data for empirical estimate." : "Current price is at or near today's low." },
     { k: "Optimum Entry", v: price(entry), hint: disc != null && disc > 0 ? "limit " + disc + "% below current" : disc != null ? "at current price" : null, x: "Best limit price \u2014 highest level with strong odds of +4% in 10 sessions." },
-    { k: "Odds @ entry", v: confE != null ? confE + "/100" : "\u2014", hint: confC != null ? "vs " + confC + " at current" : null, x: "10-day +4% confidence if bought at the optimum price." },
+    { k: "Odds @ entry", v: confE != null ? confE + "/100" : "\u2014", hint: confC != null ? "vs " + confC + " at current" : null, x: _hd + "-day +4% confidence if bought at the optimum price." },
     { k: "Advantage", v: res.advantagePct != null ? (res.advantagePct > 0 ? "+" : "") + res.advantagePct + " pts" : "\u2014", x: "Extra confidence gained by buying at the limit instead of market." },
     { k: "VWAP", v: cp.vwap != null ? price(cp.vwap) : "\u2014", x: "Session average price \u2014 natural pullback target." },
     { k: "EMA21", v: cp.ema21 != null ? price(cp.ema21) : "\u2014", x: "21-hour trend average \u2014 bounces here in uptrends." },
@@ -2963,7 +2965,7 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
     { k: "ATR cap", v: cp.atrCapPct != null ? cp.atrCapPct + "%" : "\u2014", x: "Volatility-scaled discount cap (1.5\u00d7 daily ATR%)." },
     { k: "Session left", v: cp.marketClosed ? "Closed" : (cp.sessionFraction != null ? Math.round(cp.sessionFraction * 100) + "%" : "\u2014"), x: cp.marketClosed ? "Market is closed \u2014 fill probabilities are unavailable." : "Fraction of today's 6.25h trading session remaining." },
     { k: "Fill model", v: cp.empiricalMethod === 'empirical' ? "Empirical (" + cp.empiricalSampleCount + " samples)" : "Lognormal", x: cp.empiricalMethod === 'empirical' ? "Non-parametric drawdown model using " + cp.empiricalSampleCount + " historical intraday samples." : "Parametric model (lognormal) \u2014 insufficient 15m data for empirical estimate." },
-    { k: "Range", v: cp.horizonReachPct != null ? cp.horizonReachPct + "% / 10d" : "\u2014", x: "Typical 10-day travel (ATR\u00d7\u221a10)." },
+    { k: "Range", v: cp.horizonReachPct != null ? cp.horizonReachPct + "% / " + _hd + "d" : "\u2014", x: "Typical " + _hd + "-day travel (ATR\u00d7\u221a" + _hd + ")." },
   ];
   const chipRow = (c) => React.createElement("div", { key: c.k, style: { padding: "7px 11px", borderRadius: 7, background: "var(--bg4)", border: "1px solid var(--border)", fontSize: 12, width: 250 } },
     React.createElement("div", { style: { color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600, marginBottom: 2 } }, c.k),
@@ -3009,7 +3011,7 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)" } }, "Optimum Entry Price"),
-        React.createElement("div", { style: { fontSize: 11.5, color: "var(--text6)", marginTop: 2 } }, "Fill probability \u00b7 10-day horizon \u00b7 15-session read")
+        React.createElement("div", { style: { fontSize: 11.5, color: "var(--text6)", marginTop: 2 } }, "Fill probability \u00b7 " + _hd + "-day horizon \u00b7 15-session read")
       ),
       entry != null && React.createElement("div", { style: { textAlign: "right" } },
         React.createElement("div", { style: { fontSize: 26, fontWeight: 800, fontFamily: "var(--font-heading)", color: tone.c, lineHeight: 1 } }, price(entry)),
@@ -5139,8 +5141,8 @@ const EntryScorePanel = ({ shares }) => {
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Stock"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Date Added"),
               React.createElement("th", { colSpan: 6, style: { padding: "8px 10px", textAlign: "center", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Entry Score"),
-              React.createElement("th", { title: "10-day forward confidence (lognormal) frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10DLN"),
-              React.createElement("th", { title: "10-day forward confidence (empirical) frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10DEM"),
+              React.createElement("th", { title: ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "-day forward confidence (lognormal) frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10DLN"),
+              React.createElement("th", { title: ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "-day forward confidence (empirical) frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10DEM"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Price on Add"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Days"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Current Price"),
@@ -5490,7 +5492,7 @@ const ConfidenceTracker = () => {
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "10 Days Confidence Score Performance Tracker"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } },
-          "Tracks whether the 10-day confidence score pays off \u00b7 Confidence, Entry Score & Price frozen at add \u00b7 Current Price & % Change refresh live"
+          "Tracks whether the " + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "-day confidence score pays off \u00b7 Confidence, Entry Score & Price frozen at add \u00b7 Current Price & % Change refresh live"
         )
       ),
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
@@ -5514,7 +5516,7 @@ const ConfidenceTracker = () => {
     showAdd && React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
       React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 4 } }, "Add Stock to Tracker"),
       React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } },
-        "Freezes Date Added, 10-day Confidence Score, Entry Score and price at this moment."
+        "Freezes Date Added, " + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "-day Confidence Score, Entry Score and price at this moment."
       ),
       React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" } },
         React.createElement("div", null,
@@ -5533,7 +5535,7 @@ const ConfidenceTracker = () => {
       addErr && React.createElement("div", { style: { marginTop: 8, fontSize: 11, color: addErr.indexOf("Error") === 0 ? "#ef4444" : "#eab308" } }, addErr)
     ),
     !tracked.length && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
-      "No tracked stocks yet. Click \"+ Add Entry\" to start tracking a stock's 10-day confidence score."
+      "No tracked stocks yet. Click \"+ Add Entry\" to start tracking a stock's " + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "-day confidence score."
     ),
     selectedCount > 0 && React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(6,182,212,.08)", border: "1px solid rgba(6,182,212,.25)" } },
       React.createElement("span", { style: { fontSize: 11, color: "var(--text)", fontWeight: 600 } }, selectedCount + " selected"),
@@ -7767,6 +7769,16 @@ const ScoreTunerPanel = () => {
         ),
         /* Pillar Max Scores */
         React.createElement("div", { style: { marginBottom: 16 } },
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Confidence Horizon"),
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+            React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "Forward horizon (trading days)"),
+            React.createElement("input", { className: "inp", type: "range", min: 3, max: 30, step: 1, value: scoreConfig.horizonDays || 10, onChange: function(e) { updateScoreConfig("horizonDays", e.target.value); }, style: { width: 160, accentColor: "var(--accent)" } }),
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-mono)", minWidth: 30 } }, scoreConfig.horizonDays || 10),
+            React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "days")
+          )
+        ),
+        /* Pillar Max Scores */
+        React.createElement("div", { style: { marginBottom: 16 } },
           React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar Max Scores"),
 
           React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -8746,8 +8758,8 @@ function StockScreener(props) {
                     React.createElement("input", { type: "checkbox", checked: allFilteredSelected, onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
                   );
                 }
-                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", yearChg: "Yearly %", avgTrend: "Trend", avgPullback: "Pullback", avgProb4: "Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10dLog: "Conf 10DLN", conf10dEmp: "Conf 10DEM", actions: "Last Refreshed" };
-                return React.createElement("th", { key: k, title: k === "conf10dLog" ? "10-Day Confidence \u2014 Lognormal Model" : k === "conf10dEmp" ? "10-Day Confidence \u2014 Empirical Model" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" ? "default" : "pointer" }), onClick: k === "actions" ? undefined : function() { toggleSort(k); } }, [labels[k], (k === "actions" ? null : arrow(k))]);
+                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", yearChg: "Yearly %", avgTrend: "Trend", avgPullback: "Pullback", avgProb4: "Prob4", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10dLog: "Conf " + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "DLN", conf10dEmp: "Conf " + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "DEM", actions: "Last Refreshed" };
+                return React.createElement("th", { key: k, title: k === "conf10dLog" ? ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "-Day Confidence \u2014 Lognormal Model" : k === "conf10dEmp" ? ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "-Day Confidence \u2014 Empirical Model" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" ? "default" : "pointer" }), onClick: k === "actions" ? undefined : function() { toggleSort(k); } }, [labels[k], (k === "actions" ? null : arrow(k))]);
               })
             )
           ),
@@ -8822,13 +8834,13 @@ function StockScreener(props) {
                 React.createElement("td", { style: tdStyle }, r.result.daily ? React.createElement("span", { style: { fontWeight: 700, color: r.result.daily.decision.color } }, r.result.daily.total) : "\u2014"),
                 React.createElement("td", { style: tdStyle }, r.result.hourly ? React.createElement("span", { style: { fontWeight: 700, color: r.result.hourly.decision.color } }, r.result.hourly.total) : "\u2014"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
-                  r.conf10dLog != null
-                    ? React.createElement("span", { title: "10-Day Confidence \u2014 Lognormal (" + Number(r.conf10dLog).toFixed(1) + "/100)", style: { fontWeight: 700, fontFamily: "var(--font-mono)", color: r.conf10dLog >= 70 ? "#16a34a" : r.conf10dLog >= 40 ? "#d97706" : "#dc2626", fontSize: 11 } }, Number(r.conf10dLog).toFixed(0))
+                   r.conf10dLog != null
+                    ? React.createElement("span", { title: ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "-Day Confidence \u2014 Lognormal (" + Number(r.conf10dLog).toFixed(1) + "/100)", style: { fontWeight: 700, fontFamily: "var(--font-mono)", color: r.conf10dLog >= 70 ? "#16a34a" : r.conf10dLog >= 40 ? "#d97706" : "#dc2626", fontSize: 11 } }, Number(r.conf10dLog).toFixed(0))
                     : React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "\u2014")
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
-                  r.conf10dEmp != null
-                    ? React.createElement("span", { title: "10-Day Confidence \u2014 Empirical (" + Number(r.conf10dEmp).toFixed(1) + "/100)", style: { fontWeight: 700, fontFamily: "var(--font-mono)", color: r.conf10dEmp >= 70 ? "#16a34a" : r.conf10dEmp >= 40 ? "#d97706" : "#dc2626", fontSize: 11 } }, Number(r.conf10dEmp).toFixed(0))
+                   r.conf10dEmp != null
+                    ? React.createElement("span", { title: ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "-Day Confidence \u2014 Empirical (" + Number(r.conf10dEmp).toFixed(1) + "/100)", style: { fontWeight: 700, fontFamily: "var(--font-mono)", color: r.conf10dEmp >= 70 ? "#16a34a" : r.conf10dEmp >= 40 ? "#d97706" : "#dc2626", fontSize: 11 } }, Number(r.conf10dEmp).toFixed(0))
                     : React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "\u2014")
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { whiteSpace: "nowrap" }) },
@@ -9699,7 +9711,8 @@ function SingleStockAnalysis({ requestedTicker }) {
     var entryTone = r && r.decision && r.decision.color ? r.decision.color : "var(--text5)";
     var oeConf = oe && oe.entryConfidence != null ? oe.entryConfidence : null;
     var oeTone = oeConf != null ? (oeConf >= 70 ? "#16a34a" : oeConf >= 40 ? "#d97706" : "#dc2626") : "var(--text5)";
-    var confLabel = confScore == null ? "No 10-day read"
+    var _hdVal = (TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10;
+    var confLabel = confScore == null ? "No " + _hdVal + "-day read"
       : confScore >= 70 ? "Strong odds \u2014 +4% likely in 10 sessions"
       : confScore >= 40 ? "Moderate odds" : "Low odds";
     var oeLabel = oe == null ? null
@@ -9915,7 +9928,7 @@ function SingleStockAnalysis({ requestedTicker }) {
           }, loading ? "..." : Ico.refresh(14)),
           React.createElement("button", {
             onClick: saveSnapshot, disabled: savingSnap || loading || !candles,
-            title: "Capture current chart, signal, entry score, 10-day confidence and optimum entry",
+            title: "Capture current chart, signal, entry score, " + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10) + "-day confidence and optimum entry",
             style: { padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, border: "1px solid rgba(139,92,246,.4)", background: savingSnap ? "var(--bg4)" : "rgba(139,92,246,.1)", color: "#a78bfa", cursor: savingSnap || loading || !candles ? "wait" : "pointer", opacity: savingSnap || loading || !candles ? 0.6 : 1, whiteSpace: "nowrap" }
           }, savingSnap ? React.createElement(React.Fragment, null, Ico.hourglass(13, "#f59e0b"), " Saving...") : React.createElement(React.Fragment, null, Ico.camera(13), " Snapshot"))
         )
