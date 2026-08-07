@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.65";
+window.__STOX_APP_VERSION = "2.10.66";
 
 /* Apply saved score config on startup */
 (function() {
@@ -5794,10 +5794,10 @@ const BacktestPanel = () => {
 
   const exportCSV = () => {
     if (!result || !result.log || !result.log.length) return;
-    const header = ["Date", "Entry", "EntryScore", "Conf10d", "Fwd5d%", "Fwd10d%", "Fwd20d%", "TouchHit(+4%)", "CloseHit(+4%)", "Loss(\u2264-3%)", "MaxFav%", "MaxAdv%"];
+    const header = ["Date", "Entry", "EntryScore", "Conf10d", "10DLN", "10DEM", "Fwd5d%", "Fwd10d%", "Fwd20d%", "TouchHit(+4%)", "CloseHit(+4%)", "Loss(\u2264-3%)", "MaxFav%", "MaxAdv%"];
     function esc(v) { const s = String(v == null ? "" : Math.round(v * 100) / 100); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
     const lines = [header.join(",")].concat(result.log.map(function (r) {
-      return [r.date, esc(r.entry), r.entryScore != null ? r.entryScore : "", r.conf != null ? r.conf : "",
+      return [r.date, esc(r.entry), r.entryScore != null ? r.entryScore : "", r.conf != null ? r.conf : "", r.confLog != null ? r.confLog : "", r.confEmp != null ? r.confEmp : "",
         esc(r.fwd5), esc(r.fwd10), esc(r.fwd20), r.touchHit ? "1" : "0", r.closeHit ? "1" : "0", r.lossHit ? "1" : "0",
         esc(r.maxFav), esc(r.maxAdv)].join(",");
     }));
@@ -5954,6 +5954,38 @@ const BacktestPanel = () => {
                   cell(b.avgConf != null ? fmtS(b.avgConf) : "\u2014"),
                   cell(React.createElement("span", { style: { color: b.touchRate != null && b.touchRate >= 0.5 ? "#22c55e" : "var(--text2)", fontWeight: b.touchRate != null && b.touchRate >= 0.5 ? 700 : 400 } }, fmtPct(b.touchRate))),
                   cell(fmtPct(b.closeRate))
+                );
+              })
+            )
+          )
+        )
+      ),
+
+      result && result.log && result.log.length > 0 && React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", marginBottom: 10 } }, "Session Log (" + result.log.length + " sessions)"),
+        React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } },
+          "Each row = one backtested date \u00b7 10DLN = Lognormal model \u00b7 10DEM = Empirical model \u00b7 Fwd = buy-and-hold return from that day's close"
+        ),
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null,
+              React.createElement("tr", null,
+                cell("Date", tdL), cell("Entry", td), cell("Score", td), cell("10DLN", td), cell("10DEM", td), cell("5d", td), cell("10d", td), cell("20d", td), cell("+4% Touch", td), cell("+4% Close", td)
+              )
+            ),
+            React.createElement("tbody", null,
+              result.log.map(function (r) {
+                return React.createElement("tr", { key: r.date },
+                  cell(r.date, tdL),
+                  cell(esc(r.entry)),
+                  cell(r.entryScore != null ? fmtS(r.entryScore) : "\u2014"),
+                  cell(r.confLog != null ? React.createElement("span", { style: { fontWeight: 700, color: r.confLog >= 70 ? "#16a34a" : r.confLog >= 40 ? "#d97706" : "#dc2626" } }, fmtS(r.confLog)) : "\u2014"),
+                  cell(r.confEmp != null ? React.createElement("span", { style: { fontWeight: 700, color: r.confEmp >= 70 ? "#16a34a" : r.confEmp >= 40 ? "#d97706" : "#dc2626" } }, fmtS(r.confEmp)) : "\u2014"),
+                  cell(r.fwd5 != null ? React.createElement("span", { style: { color: retColor(r.fwd5) } }, fmtR(r.fwd5)) : "\u2014"),
+                  cell(r.fwd10 != null ? React.createElement("span", { style: { color: retColor(r.fwd10), fontWeight: 700 } }, fmtR(r.fwd10)) : "\u2014"),
+                  cell(r.fwd20 != null ? React.createElement("span", { style: { color: retColor(r.fwd20) } }, fmtR(r.fwd20)) : "\u2014"),
+                  cell(r.touchHit ? React.createElement("span", { style: { color: "#22c55e", fontWeight: 700 } }, "\u2713") : "\u2014"),
+                  cell(r.closeHit ? React.createElement("span", { style: { color: "#22c55e", fontWeight: 700 } }, "\u2713") : "\u2014")
                 );
               })
             )
