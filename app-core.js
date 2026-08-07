@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.71";
+window.__STOX_APP_VERSION = "2.10.72";
 
 /* Apply saved score config on startup */
 (function() {
@@ -795,6 +795,11 @@ const Icons = {
   ),
   star: (s = 20, filled = false) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("polygon", { points: "12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" })
+  ),
+  unicorn: (s = 20, filled = false) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("path", { d: "M12 2C9 8 7 12 7 16c0 3.3 2.2 6 5 6s5-2.7 5-6c0-4-2-8-5-14z" }),
+    React.createElement("path", { d: "M9.5 13h5" }),
+    React.createElement("path", { d: "M10 16h4" })
   ),
   edit: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("path", { d: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
@@ -7885,6 +7890,9 @@ function StockScreener(props) {
   var _s18 = useState({});
   var bookmarks = _s18[0], setBookmarks = _s18[1];
   var _bookmarksLoadedRef = useRef(false);
+  var _s18b = useState({});
+  var unicorns = _s18b[0], setUnicorns = _s18b[1];
+  var _unicornsLoadedRef = useRef(false);
   var _resultsRef = useRef(results);
   _resultsRef.current = results;
 
@@ -7907,7 +7915,12 @@ function StockScreener(props) {
         var bkm = await dbGetSetting("stox_screener_bookmarks");
         if (bkm && typeof bkm === "object") setBookmarks(function(prev) { return Object.assign({}, bkm, prev); });
       } catch(e) {}
+      try {
+        var uni = await dbGetSetting("stox_screener_unicorns");
+        if (uni && typeof uni === "object") setUnicorns(function(prev) { return Object.assign({}, uni, prev); });
+      } catch(e) {}
       _bookmarksLoadedRef.current = true;
+      _unicornsLoadedRef.current = true;
     })();
   }, []);
 
@@ -7925,6 +7938,13 @@ function StockScreener(props) {
       window.dispatchEvent(new CustomEvent("stox:data-changed"));
     });
   }, [bookmarks]);
+
+  React.useEffect(function() {
+    if (!_unicornsLoadedRef.current) return;
+    dbSetSetting("stox_screener_unicorns", unicorns).then(function() {
+      window.dispatchEvent(new CustomEvent("stox:data-changed"));
+    });
+  }, [unicorns]);
 
   /* Sync background refresh state on mount and listen for progress */
   React.useEffect(function() {
@@ -8299,6 +8319,14 @@ function StockScreener(props) {
     });
   };
 
+  var toggleUnicorn = function(ticker) {
+    setUnicorns(function(p) {
+      var c = Object.assign({}, p);
+      if (c[ticker]) { delete c[ticker]; } else { c[ticker] = true; }
+      return c;
+    });
+  };
+
   var selectedCount = Object.keys(selected).filter(function(t) { return selected[t]; }).length;
 
   var batchAddToES = async function() {
@@ -8629,6 +8657,16 @@ function StockScreener(props) {
                         transition: "all .15s"
                       }
                     }, Icons.star(14, !!bookmarks[r.s.t])),
+                    React.createElement("button", {
+                      onClick: function(e) { e.stopPropagation(); toggleUnicorn(r.s.t); },
+                      title: unicorns[r.s.t] ? "Remove unicorn" : "Mark as unicorn stock",
+                      style: {
+                        width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        border: "none", background: "transparent", cursor: "pointer", padding: 0, flexShrink: 0,
+                        color: unicorns[r.s.t] ? "#166534" : "var(--text6)", opacity: unicorns[r.s.t] ? 1 : 0.35,
+                        transition: "all .15s"
+                      }
+                    }, Icons.unicorn(14, !!unicorns[r.s.t])),
                     React.createElement("button", {
                       onClick: function(e) { e.stopPropagation(); if (onOpenStock) onOpenStock(r.s.t.replace(".NS", "")); },
                       title: "Open in Single Stock Analysis",

@@ -99,7 +99,7 @@ function _readFsaFile() {
             var parsed = JSON.parse(text);
             var d = parsed && parsed.data ? parsed.data : null;
             if (d) {
-              var keys = ["holdings", "soldShareSnapshots", "watchlist", "entryScores", "entrySnapshots", "entryPerfPrices", "screenerData", "screenerSnapshots", "screenerBookmarks", "singleStockSnapshots", "confTracker", "confTrackerPrices", "notes", "scoreConfig"];
+              var keys = ["holdings", "soldShareSnapshots", "watchlist", "entryScores", "entrySnapshots", "entryPerfPrices", "screenerData", "screenerSnapshots", "screenerBookmarks", "screenerUnicorns", "singleStockSnapshots", "confTracker", "confTrackerPrices", "notes", "scoreConfig"];
               var sections = [], secTotal = 0;
               keys.forEach(function(k) { var b = _estBytes(d[k]); sections.push({ key: k, bytes: b }); secTotal += b; });
               info.sections = sections;
@@ -122,6 +122,7 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   var screenerResults = [];
   var screenerSnapshots = [];
   var screenerBookmarks = {};
+  var screenerUnicorns = {};
   var singleStockSnapshots = [];
   var confTracker = [];
   var confTrackerPrices = {};
@@ -133,6 +134,7 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   try { screenerResults = (await dbGetSetting("stox_screener_data")) || { results: [], timestamps: {}, scanTime: 0 }; } catch(e) {}
   try { screenerSnapshots = (await dbGetSetting("stox_screener_snapshots")) || []; } catch(e) {}
   try { screenerBookmarks = (await dbGetSetting("stox_screener_bookmarks")) || {}; } catch(e) {}
+  try { screenerUnicorns = (await dbGetSetting("stox_screener_unicorns")) || {}; } catch(e) {}
   try { singleStockSnapshots = (await dbGetSetting("stox_single_stock_snapshots")) || []; } catch(e) {}
   try { confTracker = (await dbGetSetting("stox_conf_tracker")) || []; } catch(e) {}
   try { confTrackerPrices = (await dbGetSetting("stox_conf_tracker_prices")) || {}; } catch(e) {}
@@ -155,6 +157,7 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       screenerStocks: screenerResults.results ? screenerResults.results.length : 0,
       screenerSnapshots: screenerSnapshots.length,
       screenerBookmarks: Object.keys(screenerBookmarks).length,
+      screenerUnicorns: Object.keys(screenerUnicorns).length,
       singleStockSnapshots: singleStockSnapshots.length,
       confTracker: confTracker.length,
       confTrackerPrices: Object.keys(confTrackerPrices).length,
@@ -171,6 +174,7 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       screenerData: screenerResults,
       screenerSnapshots: screenerSnapshots,
       screenerBookmarks: screenerBookmarks,
+      screenerUnicorns: screenerUnicorns,
       singleStockSnapshots: singleStockSnapshots,
       confTracker: confTracker,
       confTrackerPrices: confTrackerPrices,
@@ -232,6 +236,7 @@ async function restoreStoxBackup(fileText) {
   if (d.screenerData) { try { await dbSetSetting("stox_screener_data", d.screenerData); } catch(e) {} }
   if (d.screenerSnapshots) { try { await dbSetSetting("stox_screener_snapshots", d.screenerSnapshots); } catch(e) {} }
   if (d.screenerBookmarks && typeof d.screenerBookmarks === "object") { try { await dbSetSetting("stox_screener_bookmarks", d.screenerBookmarks); } catch(e) {} }
+  if (d.screenerUnicorns && typeof d.screenerUnicorns === "object") { try { await dbSetSetting("stox_screener_unicorns", d.screenerUnicorns); } catch(e) {} }
   if (d.singleStockSnapshots) { try { await dbSetSetting("stox_single_stock_snapshots", d.singleStockSnapshots); } catch(e) {} }
   if (d.confTracker) { try { await dbSetSetting("stox_conf_tracker", d.confTracker); } catch(e) {} }
   if (d.confTrackerPrices && typeof d.confTrackerPrices === "object") { try { await dbSetSetting("stox_conf_tracker_prices", d.confTrackerPrices); } catch(e) {} }
@@ -354,6 +359,7 @@ function DataBackupSection(props) {
   var [notes, setNotes] = React.useState([]);
   var [entryPerfPrices, setEntryPerfPrices] = React.useState({});
   var [screenerBookmarks, setScreenerBookmarks] = React.useState({});
+  var [screenerUnicorns, setScreenerUnicorns] = React.useState({});
   var [confTracker, setConfTracker] = React.useState([]);
   var [confTrackerPrices, setConfTrackerPrices] = React.useState({});
 
@@ -367,6 +373,7 @@ function DataBackupSection(props) {
       try { var nt = await dbGetSetting("stox_notes"); if (nt) setNotes(nt); } catch(e) {}
       try { var epp = await dbGetSetting("mm_entry_perf_prices"); if (epp) setEntryPerfPrices(epp); } catch(e) {}
       try { var sbm = await dbGetSetting("stox_screener_bookmarks"); if (sbm) setScreenerBookmarks(sbm); } catch(e) {}
+      try { var sun = await dbGetSetting("stox_screener_unicorns"); if (sun) setScreenerUnicorns(sun); } catch(e) {}
       try { var ct = await dbGetSetting("stox_conf_tracker"); if (ct) setConfTracker(ct); } catch(e) {}
       try { var ctp = await dbGetSetting("stox_conf_tracker_prices"); if (ctp) setConfTrackerPrices(ctp); } catch(e) {}
     })();
@@ -398,6 +405,7 @@ function DataBackupSection(props) {
     var scB = sz(screenerData);
     var scnB = sz(screenerSnapshots);
     var sbmB = sz(screenerBookmarks);
+    var sunB = sz(screenerUnicorns);
     var sssB = sz(singleStockSnapshots);
     var ntB = sz(notes);
     var ctfB = sz(confTracker);
@@ -405,11 +413,11 @@ function DataBackupSection(props) {
     return {
       holdingsB: holdingsB, snapsB: snapsB, watchB: watchB,
       esB: esB, esnB: esnB, eppB: eppB,
-      scB: scB, scnB: scnB, sbmB: sbmB,
+      scB: scB, scnB: scnB, sbmB: sbmB, sunB: sunB,
       sssB: sssB, ntB: ntB, ctfB: ctfB, ctfpB: ctfpB,
-      totalB: holdingsB + snapsB + watchB + esB + esnB + eppB + scB + scnB + sbmB + sssB + ntB + ctfB + ctfpB
+      totalB: holdingsB + snapsB + watchB + esB + esnB + eppB + scB + scnB + sbmB + sunB + sssB + ntB + ctfB + ctfpB
     };
-  }, [holdings, soldShareSnapshots, watchlist, entryScores, entrySnapshots, entryPerfPrices, screenerData, screenerSnapshots, screenerBookmarks, singleStockSnapshots, notes, confTracker, confTrackerPrices]);
+  }, [holdings, soldShareSnapshots, watchlist, entryScores, entrySnapshots, entryPerfPrices, screenerData, screenerSnapshots, screenerBookmarks, screenerUnicorns, singleStockSnapshots, notes, confTracker, confTrackerPrices]);
 
   var pastTradeCount = Object.values(soldShareSnapshots).reduce(function(s, a) { return s + a.length; }, 0);
 
@@ -484,7 +492,7 @@ function DataBackupSection(props) {
     if (mb >= 1) return mb.toFixed(2) + " MB";
     return mb.toFixed(3) + " MB";
   };
-  var totalCount = holdings.length + pastTradeCount + watchlist.length + entryScores.length + entrySnapshots.length + Object.keys(entryPerfPrices).length + screenerCount + screenerSnapshots.length + Object.keys(screenerBookmarks).length + singleStockSnapshots.length + confTracker.length + Object.keys(confTrackerPrices).length + notes.length;
+  var totalCount = holdings.length + pastTradeCount + watchlist.length + entryScores.length + entrySnapshots.length + Object.keys(entryPerfPrices).length + screenerCount + screenerSnapshots.length + Object.keys(screenerBookmarks).length + Object.keys(screenerUnicorns).length + singleStockSnapshots.length + confTracker.length + Object.keys(confTrackerPrices).length + notes.length;
   var sectionList = [
     { label: "Holdings", val: holdings.length, bytes: storageInfo.holdingsB, color: "#10b981" },
     { label: "Past Trades", val: pastTradeCount, bytes: storageInfo.snapsB, color: "#6d28d9" },
@@ -495,6 +503,7 @@ function DataBackupSection(props) {
     { label: "Screener", val: screenerCount, bytes: storageInfo.scB, color: "#8b5cf6" },
     { label: "Screener Snaps", val: screenerSnapshots.length, bytes: storageInfo.scnB, color: "#ec4899" },
     { label: "Screener Bkmk", val: Object.keys(screenerBookmarks).length, bytes: storageInfo.sbmB, color: "#c084fc" },
+    { label: "Unicorns", val: Object.keys(screenerUnicorns).length, bytes: storageInfo.sunB, color: "#f97316" },
     { label: "Analysis Snaps", val: singleStockSnapshots.length, bytes: storageInfo.sssB, color: "#a78bfa" },
     { label: "Conf Tracker", val: confTracker.length, bytes: storageInfo.ctfB, color: "#22d3ee" },
     { label: "Conf Prices", val: Object.keys(confTrackerPrices).length, bytes: storageInfo.ctfpB, color: "#2dd4bf" },
@@ -521,7 +530,7 @@ function DataBackupSection(props) {
   var FSA_SECTION_LABELS = {
     holdings: "Holdings", soldShareSnapshots: "Past Trades", watchlist: "Watchlist",
     entryScores: "Entry Scores", entrySnapshots: "Entry Snaps", entryPerfPrices: "Perf Prices",
-    screenerData: "Screener", screenerSnapshots: "Screener Snaps", screenerBookmarks: "Screener Bkmk",
+    screenerData: "Screener", screenerSnapshots: "Screener Snaps", screenerBookmarks: "Screener Bkmk", screenerUnicorns: "Unicorns",
     singleStockSnapshots: "Analysis Snaps", confTracker: "Conf Tracker", confTrackerPrices: "Conf Prices",
     notes: "Notes"
   };

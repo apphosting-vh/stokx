@@ -120,6 +120,7 @@ var fsaReadFile = async function(handle) {
       screenerData: d.screenerData || null,
       screenerSnapshots: d.screenerSnapshots || [],
       screenerBookmarks: d.screenerBookmarks || {},
+      screenerUnicorns: d.screenerUnicorns || {},
       singleStockSnapshots: d.singleStockSnapshots || [],
       confTracker: d.confTracker || [],
       confTrackerPrices: d.confTrackerPrices || {},
@@ -174,6 +175,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
   var screenerData = null;
   var screenerSnapshots = [];
   var screenerBookmarks = {};
+  var screenerUnicorns = {};
   var entryPerfPrices = {};
   var singleStockSnapshots = [];
   var confTracker = [];
@@ -185,6 +187,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
   try { screenerData = (await dbGetSetting("stox_screener_data")) || null; } catch (e) {}
   try { screenerSnapshots = (await dbGetSetting("stox_screener_snapshots")) || []; } catch (e) {}
   try { screenerBookmarks = (await dbGetSetting("stox_screener_bookmarks")) || {}; } catch (e) {}
+  try { screenerUnicorns = (await dbGetSetting("stox_screener_unicorns")) || {}; } catch (e) {}
   try { entryPerfPrices = (await dbGetSetting("mm_entry_perf_prices")) || {}; } catch (e) {}
   try { singleStockSnapshots = (await dbGetSetting("stox_single_stock_snapshots")) || []; } catch (e) {}
   try { confTracker = (await dbGetSetting("stox_conf_tracker")) || []; } catch (e) {}
@@ -209,6 +212,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       screenerStocks: screenerData && screenerData.results ? screenerData.results.length : 0,
       screenerSnapshots: screenerSnapshots.length,
       screenerBookmarks: Object.keys(screenerBookmarks).length,
+      screenerUnicorns: Object.keys(screenerUnicorns).length,
       singleStockSnapshots: singleStockSnapshots.length,
       confTracker: confTracker.length,
       confTrackerPrices: Object.keys(confTrackerPrices).length,
@@ -225,6 +229,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       screenerData: screenerData,
       screenerSnapshots: screenerSnapshots,
       screenerBookmarks: screenerBookmarks,
+      screenerUnicorns: screenerUnicorns,
       singleStockSnapshots: singleStockSnapshots,
       confTracker: confTracker,
       confTrackerPrices: confTrackerPrices,
@@ -276,6 +281,7 @@ window.__stoxRestoreFromPayload = async function(data) {
     if (data.screenerData) await dbSetSetting("stox_screener_data", data.screenerData);
     if (data.screenerSnapshots) await dbSetSetting("stox_screener_snapshots", data.screenerSnapshots);
     if (data.screenerBookmarks && typeof data.screenerBookmarks === "object") await dbSetSetting("stox_screener_bookmarks", data.screenerBookmarks);
+    if (data.screenerUnicorns && typeof data.screenerUnicorns === "object") await dbSetSetting("stox_screener_unicorns", data.screenerUnicorns);
     if (data.singleStockSnapshots) await dbSetSetting("stox_single_stock_snapshots", data.singleStockSnapshots);
     if (data.confTracker) await dbSetSetting("stox_conf_tracker", data.confTracker);
     if (data.confTrackerPrices && typeof data.confTrackerPrices === "object") await dbSetSetting("stox_conf_tracker_prices", data.confTrackerPrices);
@@ -700,6 +706,7 @@ var gdriveReadSyncFile = async function(silent) {
         screenerData: data.data.screenerData || null,
         screenerSnapshots: data.data.screenerSnapshots || [],
         screenerBookmarks: data.data.screenerBookmarks || {},
+        screenerUnicorns: data.data.screenerUnicorns || {},
         singleStockSnapshots: data.data.singleStockSnapshots || [],
         confTracker: data.data.confTracker || [],
         confTrackerPrices: data.data.confTrackerPrices || {},
