@@ -382,6 +382,7 @@ window.BacktestEngine = (function () {
               && (r.raw_score == null || r.raw_score >= minRaw)) {
             var trade = simulateTrade(candles, i, r, opts);
             trade.symbol = symbol;
+            trade.entryScore = r.entryScore;
             var c10 = conf10dAt(candles, i, symbol);
             trade.probTouch = c10 ? c10.probTouch : null;
             trade.confLog = c10 ? c10.confLog : null;
@@ -694,9 +695,9 @@ window.BacktestEngine = (function () {
             if (single.error) results.push({ symbol: sym, error: single.error });
             else {
               var trades = single.stats.trades || [];
-              var avgTrend = null, avgPullback = null, avgProb4 = null, avgHoldDays = null, avgConfLog = null, avgConfEmp = null;
+              var avgTrend = null, avgPullback = null, avgProb4 = null, avgHoldDays = null, avgConfLog = null, avgConfEmp = null, avgEntryScore = null;
               if (trades.length > 0) {
-                var tSum = 0, pSum = 0, prSum = 0, tN = 0, pN = 0, prN = 0, hSum = 0, hN = 0, clSum = 0, ceSum = 0, clN = 0, ceN = 0;
+                var tSum = 0, pSum = 0, prSum = 0, tN = 0, pN = 0, prN = 0, hSum = 0, hN = 0, clSum = 0, ceSum = 0, clN = 0, ceN = 0, esSum = 0, esN = 0;
                 for (var ti = 0; ti < trades.length; ti++) {
                   if (trades[ti].trendScore != null) { tSum += trades[ti].trendScore; tN++; }
                   if (trades[ti].pullbackScore != null) { pSum += trades[ti].pullbackScore; pN++; }
@@ -705,6 +706,7 @@ window.BacktestEngine = (function () {
                   hSum += hd; hN++;
                   if (trades[ti].confLog != null) { clSum += trades[ti].confLog; clN++; }
                   if (trades[ti].confEmp != null) { ceSum += trades[ti].confEmp; ceN++; }
+                  if (trades[ti].entryScore != null) { esSum += trades[ti].entryScore; esN++; }
                 }
                 avgTrend = tN > 0 ? Math.round(tSum / tN * 10) / 10 : null;
                 avgPullback = pN > 0 ? Math.round(pSum / pN * 10) / 10 : null;
@@ -712,8 +714,9 @@ window.BacktestEngine = (function () {
                 avgHoldDays = hN > 0 ? Math.round(hSum / hN * 10) / 10 : null;
                 avgConfLog = clN > 0 ? Math.round(clSum / clN * 10) / 10 : null;
                 avgConfEmp = ceN > 0 ? Math.round(ceSum / ceN * 10) / 10 : null;
+                avgEntryScore = esN > 0 ? Math.round(esSum / esN * 10) / 10 : null;
               }
-              results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, avgTrend: avgTrend, avgPullback: avgPullback, avgProb4: avgProb4, avgHoldDays: avgHoldDays, avgConfLog: avgConfLog, avgConfEmp: avgConfEmp, detail: single });
+              results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, avgTrend: avgTrend, avgPullback: avgPullback, avgProb4: avgProb4, avgHoldDays: avgHoldDays, avgConfLog: avgConfLog, avgConfEmp: avgConfEmp, avgEntryScore: avgEntryScore, detail: single });
             }
           } catch (e) {
             results.push({ symbol: sym, error: (e && e.message) || String(e) });
