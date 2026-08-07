@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.58";
+window.__STOX_APP_VERSION = "2.10.59";
 
 /* Apply saved score config on startup */
 (function() {
@@ -4992,25 +4992,25 @@ const EntryScorePanel = ({ shares }) => {
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Stock"),
               React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Date Added"),
               React.createElement("th", { colSpan: 6, style: { padding: "8px 10px", textAlign: "center", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Entry Score"),
-              React.createElement("th", { title: "10-day forward confidence score frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10DLN"),
-              React.createElement("th", { title: "10-day forward confidence (empirical) frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10DEM"),
-              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Price on Add"),
-              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Days"),
-              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Current Price"),
-              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "% Change")
+              React.createElement("th", { title: "10-day forward confidence (lognormal) frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10DLN"),
+              React.createElement("th", { title: "10-day forward confidence (empirical) frozen on the date added", style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "10DEM"),
+              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Price on Add"),
+              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Days"),
+              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "Current Price"),
+              React.createElement("th", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "none", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, "% Change")
             ),
             React.createElement("tr", null,
-              React.createElement("th", { style: { background: "var(--bg3)" } }),
-              React.createElement("th", { style: { background: "var(--bg3)" } }),
+              React.createElement("th", { style: { padding: "4px 10px", background: "var(--bg3)", borderBottom: "2px solid var(--border)" } }),
+              React.createElement("th", { style: { padding: "4px 10px", background: "var(--bg3)", borderBottom: "2px solid var(--border)" } }),
               ["Hourly", "Daily", "Weekly", "Base", "Bonus/Pen", "Final"].map(function(sub) {
                 return React.createElement("th", { key: sub, style: { padding: "4px 10px", textAlign: "center", fontWeight: 600, color: "var(--text5)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" } }, sub);
               }),
-              React.createElement("th", { style: { background: "var(--bg3)" } }),
-              React.createElement("th", { style: { background: "var(--bg3)" } }),
-              React.createElement("th", { style: { background: "var(--bg3)" } }),
-              React.createElement("th", { style: { background: "var(--bg3)" } }),
-              React.createElement("th", { style: { background: "var(--bg3)" } }),
-              React.createElement("th", { style: { background: "var(--bg3)" } })
+              React.createElement("th", { style: { padding: "4px 10px", background: "var(--bg3)", borderBottom: "2px solid var(--border)" } }),
+              React.createElement("th", { style: { padding: "4px 10px", background: "var(--bg3)", borderBottom: "2px solid var(--border)" } }),
+              React.createElement("th", { style: { padding: "4px 10px", background: "var(--bg3)", borderBottom: "2px solid var(--border)" } }),
+              React.createElement("th", { style: { padding: "4px 10px", background: "var(--bg3)", borderBottom: "2px solid var(--border)" } }),
+              React.createElement("th", { style: { padding: "4px 10px", background: "var(--bg3)", borderBottom: "2px solid var(--border)" } }),
+              React.createElement("th", { style: { padding: "4px 10px", background: "var(--bg3)", borderBottom: "2px solid var(--border)" } })
             )
           ),
           React.createElement("tbody", null,
@@ -5271,7 +5271,7 @@ const ConfidenceTracker = () => {
   };
 
   const exportConfCSV = () => {
-    var rows = [["Stock", "Date Added", "Confidence 10D", "Entry Score", "Price on Add", "Days", "Current Price", "% Change"]];
+    var rows = [["Stock", "Date Added", "10DLN", "10DEM", "Entry Score", "Price on Add", "Days", "Current Price", "% Change"]];
     var now = new Date();
     tracked.forEach(function (tr) {
       var addedDate = new Date(tr.addedAt);
@@ -5283,7 +5283,7 @@ const ConfidenceTracker = () => {
       var pct = tr.currentPrice > 0 && current > 0 ? ((current - tr.currentPrice) / tr.currentPrice * 100).toFixed(2) : "";
       var dateStr = addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       function esc(v) { var s = String(v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
-      rows.push([esc(tr.ticker), esc(dateStr), tr.confidence != null ? tr.confidence : "", tr.entryScore != null ? tr.entryScore : "", tr.currentPrice || "", days, current, pct].join(","));
+      rows.push([esc(tr.ticker), esc(dateStr), tr.conf10dLog != null ? tr.conf10dLog : "", tr.conf10dEmp != null ? tr.conf10dEmp : "", tr.entryScore != null ? tr.entryScore : "", tr.currentPrice || "", days, current, pct].join(","));
     });
     var csv = rows.join("\r\n");
     var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
@@ -5317,7 +5317,7 @@ const ConfidenceTracker = () => {
     var av, bv;
     if (sortKey === "ticker") { av = a.ticker; bv = b.ticker; return dir * av.localeCompare(bv); }
     if (sortKey === "addedAt") { av = new Date(a.addedAt).getTime(); bv = new Date(b.addedAt).getTime(); return dir * (av - bv); }
-    if (sortKey === "confidence") { av = a.confidence != null ? a.confidence : -1; bv = b.confidence != null ? b.confidence : -1; }
+    if (sortKey === "confidence") { av = a.conf10dLog != null ? a.conf10dLog : -1; bv = b.conf10dLog != null ? b.conf10dLog : -1; }
     else if (sortKey === "entryScore") { av = a.entryScore != null ? a.entryScore : -1; bv = b.entryScore != null ? b.entryScore : -1; }
     else if (sortKey === "priceOnAdd") { av = a.currentPrice || 0; bv = b.currentPrice || 0; }
     else if (sortKey === "days") { av = tradingDays(a.addedAt); bv = tradingDays(b.addedAt); }
@@ -5426,7 +5426,6 @@ const ConfidenceTracker = () => {
             var currentPrice = prices[tr.ticker] || 0;
             var pctChange = rowPct(tr);
             var pctColor = pctChange === null ? "var(--text6)" : pctChange >= 0 ? "#22c55e" : "#ef4444";
-            var confColor = tr.confidence == null ? "var(--text6)" : tr.confidence >= 70 ? "#16a34a" : tr.confidence >= 40 ? "#d97706" : "#dc2626";
             var esColor = "var(--text6)";
             if (tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision]) esColor = SCREENER_DECISION_MAP[tr.entryDecision].color;
             var rowBg = "rgba(220, 170, 190, 0.10)";
@@ -5436,7 +5435,8 @@ const ConfidenceTracker = () => {
               ),
               React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap" }) }, tr.ticker),
               React.createElement("td", { style: Object.assign({}, tdStyle, { color: "var(--text3)", whiteSpace: "nowrap" }) }, addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })),
-              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", color: confColor }) }, tr.confidence != null ? Number(tr.confidence).toFixed(0) : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", color: tr.conf10dLog != null ? (tr.conf10dLog >= 70 ? "#16a34a" : tr.conf10dLog >= 40 ? "#d97706" : "#dc2626") : "var(--text6)" }) }, tr.conf10dLog != null ? Number(tr.conf10dLog).toFixed(0) : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", color: tr.conf10dEmp != null ? (tr.conf10dEmp >= 70 ? "#16a34a" : tr.conf10dEmp >= 40 ? "#d97706" : "#dc2626") : "var(--text6)" }) }, tr.conf10dEmp != null ? Number(tr.conf10dEmp).toFixed(0) : "\u2014"),
               React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", color: esColor }) }, tr.entryScore != null ? tr.entryScore : "\u2014"),
               React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text2)", fontFamily: "var(--font-mono)" }) }, priceOnAdd > 0 ? INR(priceOnAdd) : "\u2014"),
               React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text4)" }) }, daysElapsed),
