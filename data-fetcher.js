@@ -29,10 +29,11 @@ window.OHLCVFetcher = (function () {
 
   function readBody(r, ms) {
     ms = ms || 8000;
+    var timer;
     return Promise.race([
       r.text(),
-      new Promise(function (_, rej) { setTimeout(function () { rej(new Error("body timeout")); }, ms); }),
-    ]);
+      new Promise(function (_, rej) { timer = setTimeout(function () { rej(new Error("body timeout")); }, ms); }),
+    ]).finally(function () { clearTimeout(timer); });
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -166,13 +167,14 @@ window.OHLCVFetcher = (function () {
   var QUOTE_CACHE_TTL = 15 * 1000; // 15 seconds
 
   async function fetchQuoteCached(ticker) {
-    var key = ticker.toUpperCase();
+    if (!ticker) return null;
+    var key = String(ticker).trim().toUpperCase();
     var entry = _quoteCache[key];
     if (entry && (Date.now() - entry.ts) < QUOTE_CACHE_TTL) {
       return entry.data;
     }
     var result = await Promise.race([
-      fetchQuote(ticker),
+      fetchQuote(ticker).catch(function() { return null; }),
       new Promise(function(r) { setTimeout(function() { r(null); }, 6000); })
     ]);
     if (result && result.price != null) {
@@ -222,7 +224,8 @@ window.OHLCVFetcher = (function () {
   var CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   async function fetchOHLCVCached(ticker, timeframe) {
-    var key = ticker.toUpperCase() + "|" + (timeframe || "daily");
+    if (!ticker) return { data: null, source: null, ts: Date.now() };
+    var key = String(ticker).trim().toUpperCase() + "|" + (timeframe || "daily");
     var entry = _cache[key];
     if (entry && (Date.now() - entry.ts) < CACHE_TTL) {
       return entry;
@@ -237,6 +240,7 @@ window.OHLCVFetcher = (function () {
 
   function clearCache() {
     _cache = {};
+    _quoteCache = {};
   }
 
   return {

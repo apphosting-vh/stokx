@@ -64,8 +64,8 @@ window.TechIndicators = (function () {
     var out = [];
     for (var i = 0; i < arr.length; i++) {
       if (i < period - 1) { out.push(null); continue; }
-      var m = -Infinity;
-      for (var j = i - period + 1; j <= i; j++) { if (arr[j] > m) m = arr[j]; }
+      var m = null;
+      for (var j = i - period + 1; j <= i; j++) { if (arr[j] != null && (m === null || arr[j] > m)) m = arr[j]; }
       out.push(m);
     }
     return out;
@@ -75,8 +75,8 @@ window.TechIndicators = (function () {
     var out = [];
     for (var i = 0; i < arr.length; i++) {
       if (i < period - 1) { out.push(null); continue; }
-      var m = Infinity;
-      for (var j = i - period + 1; j <= i; j++) { if (arr[j] < m) m = arr[j]; }
+      var m = null;
+      for (var j = i - period + 1; j <= i; j++) { if (arr[j] != null && (m === null || arr[j] < m)) m = arr[j]; }
       out.push(m);
     }
     return out;
@@ -1388,11 +1388,11 @@ window.TechIndicators = (function () {
     if (!ind) return {};
     var signals = {};
     var lc = ind.lastClose;
-    signals.sma_20 = lc > ind.sma_20 ? 'bullish' : 'bearish';
-    signals.sma_50 = ind.sma_200 ? (lc > ind.sma_50 ? 'bullish' : 'bearish') : null;
+    signals.sma_20 = ind.sma_20 != null ? (lc > ind.sma_20 ? 'bullish' : 'bearish') : null;
+    signals.sma_50 = ind.sma_50 != null ? (lc > ind.sma_50 ? 'bullish' : 'bearish') : null;
     signals.sma_200 = ind.sma_200 != null ? (lc > ind.sma_200 ? 'bullish' : 'bearish') : null;
-    signals.ema_9 = lc > ind.ema_9 ? 'bullish' : 'bearish';
-    signals.ema_21 = lc > ind.ema_21 ? 'bullish' : 'bearish';
+    signals.ema_9 = ind.ema_9 != null ? (lc > ind.ema_9 ? 'bullish' : 'bearish') : null;
+    signals.ema_21 = ind.ema_21 != null ? (lc > ind.ema_21 ? 'bullish' : 'bearish') : null;
     signals.ema_50 = ind.ema_50 != null ? (lc > ind.ema_50 ? 'bullish' : 'bearish') : null;
     signals.wma_20 = ind.wma_20 != null ? (lc > ind.wma_20 ? 'bullish' : 'bearish') : null;
     signals.vwap = ind.vwap != null ? (lc > ind.vwap ? 'bullish' : 'bearish') : null;
@@ -1947,7 +1947,7 @@ window.TechIndicators = (function () {
     for (var i = sqMomArr.length - 2; i >= 0; i--) { if (sqMomArr[i] !== null) { squeezeMomPrev = sqMomArr[i]; break; } }
     var accumDist = calcAccumDistComposite(candles);
     var accumDistLabel = null;
-    for (var i = accumDist.length - 1; i >= 0; i--) { if (accumDist[i] !== null) { accumDistLabel = accumDist[i]; break; } }
+    if (accumDist) { for (var i = accumDist.length - 1; i >= 0; i--) { if (accumDist[i] !== null) { accumDistLabel = accumDist[i]; break; } } }
 
     var ichRes = calcIchimoku(candles);
     var tenkan = gv(ichRes.tenkan), tenkanPrev = pv(ichRes.tenkan);
@@ -3176,7 +3176,7 @@ window.TechIndicators = (function () {
     /* ── bonuses (Section 11) ── */
     var idxTrendScore = computeIndexTrendScore(indexCandles);
     var bonusItems = buildEntryBonusItems(sn, {
-      hourlyBullish: sn.c > sn.hma16,
+      hourlyBullish: sn.hma16 != null && sn.c > sn.hma16,
       dailyBullish: sn.c > sn.ema21,
       weeklyBullish: sn.sma50 !== null && sn.c > sn.sma50,
       idxTrendScore: idxTrendScore,
@@ -3770,8 +3770,8 @@ window.TechIndicators = (function () {
       var mtfScore = 0;
       var mtfDetails = [];
 
-      // Weekly trend
-      if (indexCandles && indexCandles.length >= 50) {
+      // Weekly trend — requires enough candles to synthesize ~40 weekly bars
+      if (candles.length >= 200) {
         try {
           var weeklyData = synthWeeklyCandles(candles);
           if (weeklyData && weeklyData.length >= 50) {
@@ -4419,7 +4419,7 @@ window.TechIndicators = (function () {
       base.components.calP0 = calP0;
       base.components.calK = calK;
       base.components.sigmaDaily = sigmaDaily != null ? round(sigmaDaily * 100, 2) : null;
-      base.components.muDaily = muLog != null ? round(muLog * 100, 3) : null;
+      base.components.muDaily = muDaily != null ? round(muDaily * 100, 3) : null;
       base.components.driftScore = round(driftScore, 3);
       base.components.zScore = zScore != null ? round(zScore, 3) : null;
       base.components.probTerminal = probTerminal != null ? round(probTerminal * 100, 1) : null;

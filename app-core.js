@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.63";
+window.__STOX_APP_VERSION = "2.10.65";
 
 /* Apply saved score config on startup */
 (function() {
@@ -1859,8 +1859,8 @@ function EntryScoreAnalysis({ entry, onBack }) {
             }
           },
             React.createElement("span", null, tf.label + " (" + tf.weight + ")"),
-            score ? React.createElement("span", { style: { fontSize: 14, fontWeight: 900, fontFamily: "var(--font-heading)", color: isActive ? "#fff" : score.decision.color, lineHeight: 1 } }, score.total) : React.createElement("span", { style: { fontSize: 10 } }, "N/A"),
-            score && React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: isActive ? "rgba(255,255,255,.8)" : score.decision.color } }, score.decision.label)
+            score && score.decision ? React.createElement("span", { style: { fontSize: 14, fontWeight: 900, fontFamily: "var(--font-heading)", color: isActive ? "#fff" : score.decision.color, lineHeight: 1 } }, score.total) : React.createElement("span", { style: { fontSize: 10 } }, "N/A"),
+            score && score.decision && React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: isActive ? "rgba(255,255,255,.8)" : score.decision.color } }, score.decision.label)
           );
         })
       ),
@@ -3135,6 +3135,7 @@ const SnapshotChartPanel = ({ sn, dispatch }) => {
    ══════════════════════════════════════════════════════════════════════════ */
 function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, refreshPrices, setSoldShareSnapshots }) {
   const DF = window.OHLCVFetcher;
+  const TI = window.TechIndicators;
   const [showAdd, setShowAdd] = useState(false);
   const [editShare, setEditShare] = useState(null);
   const [mode, setMode] = useState("active"); /* "active" | "past" */
@@ -3659,14 +3660,14 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
               /* ── Session Confidence Score (reach +4% today, 2.0–4.0% profit band) ── */
               (function () {
                 const ci = exitInfo[h.id] && exitInfo[h.id].conf;
-                if (!ci || ci.confidence == null || !ci.flags.inTargetBand) return null;
+                if (!ci || ci.confidence == null || !ci.flags || !ci.flags.inTargetBand) return null;
                 const sc = ci.confidence;
                 const tone = sc >= 70 ? { c: "#16a34a", bg: "var(--profitbg)", bd: "var(--profitborder)" } : sc >= 40 ? { c: "#d97706", bg: "var(--warnbg)", bd: "var(--warnborder)" } : { c: "#dc2626", bg: "var(--lossbg)", bd: "var(--lossborder)" };
                 const label = sc >= 70 ? "Let it ride \u2014 strong chance of tagging +4% today" : sc >= 40 ? "Wait & watch \u2014 keep a tight stop" : "Low odds \u2014 bank the gain today";
                 return React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "8px 12px", borderRadius: 8, background: tone.bg, border: "1px solid " + tone.bd } },
                   React.createElement("div", { style: { flex: 1, minWidth: 0 } },
                     React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: tone.c } }, "Reach +4% today"),
-                    React.createElement("div", { style: { fontSize: 10.5, color: "var(--text5)", marginTop: 1, lineHeight: 1.4 } }, label + " \u00b7 " + ci.components.timeRemainingMin + " min left")
+                    React.createElement("div", { style: { fontSize: 10.5, color: "var(--text5)", marginTop: 1, lineHeight: 1.4 } }, label + (ci.components && ci.components.timeRemainingMin != null ? " \u00b7 " + ci.components.timeRemainingMin + " min left" : ""))
                   ),
                   React.createElement("div", { style: { fontSize: 17, fontWeight: 800, fontFamily: "var(--font-heading)", color: tone.c, whiteSpace: "nowrap" } }, sc + "/100")
                 );
@@ -5567,10 +5568,11 @@ function _btEvalOne(TI, d1, h1, w1, idxD, i) {
     entryScore = mtf && mtf.multiTF_score != null ? mtf.multiTF_score : null;
   } catch (e) {}
 
-  var conf = null;
+  var conf = null, confLog = null, confEmp = null;
   try {
-    var cr = TI.computeTenDayForwardConfidence(hSliceC, daySlice, idxSlice);
-    conf = cr && cr.confidence != null ? cr.confidence : null;
+    var btEntryCtx = mtf ? { entryScore: mtf.multiTF_score, trendHealth: mtf.trendHealth, pullbackQuality: mtf.pullbackQuality, prob4: mtf.prob4 } : null;
+    var cr = TI.computeTenDayForwardConfidence(hSliceC, daySlice, idxSlice, btEntryCtx);
+    if (cr) { conf = cr.confidence != null ? cr.confidence : null; confLog = cr.confidenceLognormal; confEmp = cr.confidenceEmpirical; }
   } catch (e) {}
 
   var touchHit = false, closeHit = false, maxHi = entry, minLo = entry;
@@ -5584,7 +5586,7 @@ function _btEvalOne(TI, d1, h1, w1, idxD, i) {
   var fwd10 = i + 10 < d1.length ? (d1[i + 10].c / entry - 1) * 100 : null;
   var fwd20 = i + 20 < d1.length ? (d1[i + 20].c / entry - 1) * 100 : null;
   return {
-    date: D, entry: entry, entryScore: entryScore, conf: conf,
+    date: D, entry: entry, entryScore: entryScore, conf: conf, confLog: confLog, confEmp: confEmp,
     fwd5: fwd5, fwd10: fwd10, fwd20: fwd20,
     touchHit: touchHit, closeHit: closeHit,
     lossHit: fwd10 != null && fwd10 <= -3,
@@ -8348,7 +8350,8 @@ function StockScreener(props) {
       setProgress({ done: Math.min(i + BATCH, total), total: total, current: batch.map(function(s) { return s.t.replace(".NS", ""); }).join(", ") });
       if (i + BATCH < stocks.length) await new Promise(function(r) { setTimeout(r, 300); });
     }
-    out.sort(function(a, b) { return b.result.finalScore - a.result.finalScore; });
+    out = out.filter(function(r) { return r && r.result; });
+    out.sort(function(a, b) { return (b.result.finalScore || 0) - (a.result.finalScore || 0); });
     setResults(out);
     var now = Date.now();
     var ts = {};
@@ -8934,8 +8937,8 @@ function SingleStockAnalysis({ requestedTicker }) {
         try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idxD = (_idxR && _idxR.data) || null; } catch (e) {}
         var i15 = null;
         try { var _r15 = await DF.fetchOHLCVCached(ticker, "5m"); i15 = (_r15 && _r15.data) || null; } catch (e) {}
-        tenDayConf = TI.computeTenDayForwardConfidence(h1, d, idxD);
         var _snapEntryCtx = mtf && mtf.entry ? buildEntryScoreContext(mtf.entry) : null;
+        tenDayConf = TI.computeTenDayForwardConfidence(h1, d, idxD, _snapEntryCtx);
         optimumRes = TI.computeOptimumEntryPrice(h1, d, idxD, _snapEntryCtx, i15);
         try { indCompact = pickCompactIndicators(TI.computeAll(d)); } catch (e) {}
       }
@@ -9464,7 +9467,10 @@ function SingleStockAnalysis({ requestedTicker }) {
     var overall = snap.overall;
     var ind = snap.indicators;
     var confScore = td && td.confidence != null ? td.confidence : null;
-    var confTone = confScore != null ? (confScore >= 70 ? "#16a34a" : confScore >= 40 ? "#d97706" : "#dc2626") : "var(--text5)";
+    var confLog = td && td.confidenceLognormal != null ? td.confidenceLognormal : null;
+    var confEmp = td && td.confidenceEmpirical != null ? td.confidenceEmpirical : null;
+    function ssConfColor(v) { return v != null ? (v >= 70 ? "#16a34a" : v >= 40 ? "#d97706" : "#dc2626") : "var(--text5)"; }
+    var confTone = ssConfColor(confScore);
     var entryTone = r && r.decision && r.decision.color ? r.decision.color : "var(--text5)";
     var oeConf = oe && oe.entryConfidence != null ? oe.entryConfidence : null;
     var oeTone = oeConf != null ? (oeConf >= 70 ? "#16a34a" : oeConf >= 40 ? "#d97706" : "#dc2626") : "var(--text5)";
@@ -9475,8 +9481,8 @@ function SingleStockAnalysis({ requestedTicker }) {
       : oe.components && oe.components.marketClosed ? "Market closed"
       : oe.overextended && oe.discountPct > 0 ? "Wait for pullback"
       : oe.discountPct > 0 ? "Limit " + oe.discountPct + "% below" : "Enter at market";
-    var oeFillProb = oe && !oe.components.marketClosed && oe.fillRange && oe.fillRange.moderate ? oe.fillRange.moderate.fillProb : null;
-    if (oeLabel && oeFillProb != null) oeLabel += " \u00b7 \u2248" + oeFillProb + "% fill";
+    var oeFillProb = oe && !oe.components.marketClosed && oe.probToTodayLowEmpirical != null ? oe.probToTodayLowEmpirical : null;
+    if (oeLabel && oeFillProb != null) oeLabel += " \u00b7 \u2248" + oeFillProb + "% today-low fill";
     var hasCharts = (snap.daily && snap.daily.length > 1) || (snap.hourly && snap.hourly.length > 1);
 
     var scoreTile = function (label, value, sub, color) {
@@ -9574,7 +9580,9 @@ function SingleStockAnalysis({ requestedTicker }) {
       overallEl,
       React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 } },
         scoreTile("Entry Score", r ? (r.finalScore != null ? r.finalScore : "\u2014") : "\u2014", r && r.decision ? r.decision.label : "\u2014", entryTone),
-        scoreTile("Conf. Next 10D", confScore != null ? confScore + "/100" : "\u2014", confLabel, confTone),
+        confLog != null && scoreTile("Conf 10DLN", confLog + "/100", confLabel, ssConfColor(confLog)),
+        confEmp != null && scoreTile("Conf 10DEM", confEmp + "/100", td && td.components ? (td.components.empiricalMethod === 'empirical' ? "Empirical (" + td.components.empiricalSampleCount + " samples)" : "Lognormal fallback") : "", ssConfColor(confEmp)),
+        confLog == null && confEmp == null && scoreTile("Conf. Next 10D", confScore != null ? confScore + "/100" : "\u2014", confLabel, confTone),
         scoreTile("Optimum Entry", oe ? ssPrice(oe.optimumEntryPrice) : "\u2014", oeLabel, oeTone)
       ),
       tfRow,
@@ -10555,7 +10563,9 @@ function App() {
 /* 19.1 Entry Scan — run daily after market close (15:30 IST) */
 async function scanEntries(universe) {
   if (!universe || !universe.length) return [];
-  var _scCfg = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig().classification : null;
+  var DF = window.OHLCVFetcher, TI = window.TechIndicators;
+  if (!DF || !TI) return [];
+  var _scCfg = (TI.getScoreConfig) ? TI.getScoreConfig().classification : null;
   var _scanBuyTh = _scCfg ? _scCfg.buy : 65;
   var idxD = await DF.fetchOHLCVCached('^NSEI', 'daily');
   var idxW = await DF.fetchOHLCVCached('^NSEI', 'weekly');
@@ -10590,21 +10600,28 @@ async function scanEntries(universe) {
 /* 19.2 Position Monitoring — run every 15–60 min during market hours (09:15–15:30 IST) */
 async function monitorPositions(portfolio) {
   if (!portfolio || !portfolio.length) return [];
+  var DF = window.OHLCVFetcher, TI = window.TechIndicators;
+  if (!DF || !TI) return [];
   var alerts = [];
   for (var i = 0; i < portfolio.length; i++) {
     var pos = portfolio[i];
     try {
-      var d = await DF.fetchOHLCVCached(pos.symbol, 'daily');
+      var ticker = pos.ticker || pos.symbol || '';
+      var d = await DF.fetchOHLCVCached(ticker, 'daily');
       if (!d || d.length < 50) continue;
       var idxD = await DF.fetchOHLCVCached('^NSEI', 'daily');
       var lastCandle = d[d.length - 1];
       var prevCandle = d.length > 1 ? d[d.length - 2] : null;
+      var entryPrice = pos.buyPrice || pos.avgPrice || pos.entry_price || 0;
+      var currentPrice = pos.currentPrice || pos.current_price || (lastCandle ? lastCandle.c : null);
+      var buyDate = pos.buyDate || pos.buy_date || null;
+      var holdingDays = buyDate ? Math.max(1, Math.floor((Date.now() - new Date(buyDate).getTime()) / 86400000)) : (pos.holding_days || 0);
       var posData = {
-        entry_price: pos.entry_price || pos.entry,
-        current_price: pos.current_price || pos.current || (lastCandle ? lastCandle.c : null),
-        holding_days: pos.holding_days || 0,
+        entry_price: entryPrice,
+        current_price: currentPrice,
+        holding_days: holdingDays,
         current_atr: pos.current_atr || null,
-        entry_score: pos.entry_score != null ? pos.entry_score : 50,
+        entry_score: pos.entryScore || pos.entry_score || 50,
         prev_close: pos.prev_close || (prevCandle ? prevCandle.c : null)
       };
       var exitRes = TI.computeExitScore(d, { entry_price: posData.entry_price, holding_days: posData.holding_days, entry_score: posData.entry_score }, idxD);
@@ -10612,7 +10629,7 @@ async function monitorPositions(portfolio) {
       if (exitRes && exitRes.exit_score >= 55) {
         var pnl = posData.current_price && posData.entry_price ? (posData.current_price - posData.entry_price) / posData.entry_price * 100 : null;
         alerts.push({
-          symbol: pos.symbol,
+          symbol: ticker,
           exit_score: exitRes.exit_score,
           action: integratedRes ? integratedRes.signal : exitRes.signal,
           reason: integratedRes ? integratedRes.reason : 'Score threshold',
