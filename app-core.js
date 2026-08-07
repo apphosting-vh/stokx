@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.82";
+window.__STOX_APP_VERSION = "2.10.84";
 
 /* Apply saved score config on startup */
 (function() {
@@ -452,9 +452,7 @@ const _unwrap = (txt) => { try { const j = JSON.parse(txt); if (typeof j?.conten
 const PROXY_FNS = [
   (u) => "https://api.cors.lol/?url=" + encodeURIComponent(u),
   (u) => "https://corsproxy.io/?" + encodeURIComponent(u),
-  (u) => "https://cors.eu.org/" + u,
   (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-  (u) => "https://thingproxy.freeboard.io/fetch/" + u,
 ];
 
 async function fetchTickerPrice(rawTicker) {
@@ -505,10 +503,7 @@ const fetchHistoricalPrices = async (rawTicker, fromDate) => {
     const proxyFns = [
       u => "https://api.cors.lol/?url=" + encodeURIComponent(u),
       u => "https://corsproxy.io/?" + encodeURIComponent(u),
-      u => "https://cors.eu.org/" + u,
-      u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
       u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-      u => "https://thingproxy.freeboard.io/fetch/" + u,
     ];
     for (const sym of symbols) {
       for (const host of hosts) {
@@ -576,9 +571,8 @@ async function fetchMarketIndices() {
     /* ── NSE India API for all Indian indexes ── */
     const nseUrl = "https://www.nseindia.com/api/allIndices";
     const nseProxies = [
-      "https://corsproxy.io/?" + encodeURIComponent(nseUrl),
       "https://api.cors.lol/?url=" + encodeURIComponent(nseUrl),
-      "https://cors.eu.org/" + nseUrl,
+      "https://corsproxy.io/?" + encodeURIComponent(nseUrl),
       "https://api.allorigins.win/raw?url=" + encodeURIComponent(nseUrl),
     ];
     let nseData = null;
@@ -618,8 +612,8 @@ async function fetchMarketIndices() {
       const stooqUrl = "https://stooq.com/q/l/?s=" + encodeURIComponent(item.stooq) + "&f=sd2t2ohlcv&h&e=csv";
       const proxies = [
         "https://api.cors.lol/?url=" + encodeURIComponent(stooqUrl),
-        "https://cors.eu.org/" + stooqUrl,
-        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(stooqUrl),
+        "https://corsproxy.io/?" + encodeURIComponent(stooqUrl),
+        "https://api.allorigins.win/raw?url=" + encodeURIComponent(stooqUrl),
       ];
       for (const proxyUrl of proxies) {
         try {
@@ -8217,7 +8211,6 @@ function StockScreener(props) {
     setRefreshingMap(function(p) { var c = Object.assign({}, p); c[s.t] = true; return c; });
     try {
       var tk = s.t.replace(".NS", "");
-      DF.clearCache();
       if (!indexDaily) { try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {} }
       if (!indexWeekly) { try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); indexWeekly = (_idxR2 && _idxR2.data) || null; } catch(e) {} }
       var [resW, resD, resH] = await Promise.all([
@@ -8372,7 +8365,6 @@ function StockScreener(props) {
       bg.current = tk;
       window.dispatchEvent(new CustomEvent("stox:screener-bg-progress", { detail: { done: i, total: batch.length, current: tk, active: true } }));
       try {
-        DF.clearCache();
         var [resW, resD, resH] = await Promise.all([
           DF.fetchOHLCVCached(tk, "weekly"),
           DF.fetchOHLCVCached(tk, "daily"),

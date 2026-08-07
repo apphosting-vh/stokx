@@ -8,10 +8,7 @@ window.OHLCVFetcher = (function () {
   var Y_PROXY_FNS = [
     function (u) { return "https://api.cors.lol/?url=" + encodeURIComponent(u); },
     function (u) { return "https://corsproxy.io/?" + encodeURIComponent(u); },
-    function (u) { return "https://cors.eu.org/" + u; },
-    function (u) { return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); },
     function (u) { return "https://api.allorigins.win/raw?url=" + encodeURIComponent(u); },
-    function (u) { return "https://thingproxy.freeboard.io/fetch/" + u; },
   ];
 
   var Y_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
@@ -164,13 +161,14 @@ window.OHLCVFetcher = (function () {
   }
 
   var _quoteCache = {};
-  var QUOTE_CACHE_TTL = 15 * 1000; // 15 seconds
+  var QUOTE_CACHE_TTL_ACTIVE = 15 * 1000; // 15 seconds during market hours
+  var QUOTE_CACHE_TTL_CLOSED = 24 * 60 * 60 * 1000; // 24 hours after close
 
   async function fetchQuoteCached(ticker) {
     if (!ticker) return null;
     var key = String(ticker).trim().toUpperCase();
     var entry = _quoteCache[key];
-    if (entry && (Date.now() - entry.ts) < QUOTE_CACHE_TTL) {
+    if (entry && (Date.now() - entry.ts) < (_isMarketOpen() ? QUOTE_CACHE_TTL_ACTIVE : QUOTE_CACHE_TTL_CLOSED)) {
       return entry.data;
     }
     var result = await Promise.race([
@@ -218,16 +216,33 @@ window.OHLCVFetcher = (function () {
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
-     Simple cache to avoid re-fetching same data within 5 minutes
+     Simple cache to avoid re-fetching same data
+     During market hours: 5-minute TTL (data changes live)
+     After market hours: 24-hour TTL (data is frozen, scores stay stable)
      ═══════════════════════════════════════════════════════════════════════ */
   var _cache = {};
-  var CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  var CACHE_TTL_ACTIVE = 5 * 60 * 1000;   // 5 minutes during market hours
+  var CACHE_TTL_CLOSED = 24 * 60 * 60 * 1000; // 24 hours after market close
+
+  function _isMarketOpen() {
+    var now = new Date();
+    var ist = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+    var day = ist.getUTCDay();
+    if (day === 0 || day === 6) return false;
+    var h = ist.getUTCHours(), m = ist.getUTCMinutes();
+    var mins = h * 60 + m;
+    return mins >= 555 && mins <= 930; // 9:15 to 15:30 IST
+  }
+
+  function _cacheTTL() {
+    return _isMarketOpen() ? CACHE_TTL_ACTIVE : CACHE_TTL_CLOSED;
+  }
 
   async function fetchOHLCVCached(ticker, timeframe) {
     if (!ticker) return { data: null, source: null, ts: Date.now() };
     var key = String(ticker).trim().toUpperCase() + "|" + (timeframe || "daily");
     var entry = _cache[key];
-    if (entry && (Date.now() - entry.ts) < CACHE_TTL) {
+    if (entry && (Date.now() - entry.ts) < _cacheTTL()) {
       return entry;
     }
     var result = await fetchOHLCV(ticker, timeframe);
