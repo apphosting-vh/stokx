@@ -405,31 +405,27 @@ textarea.inp{resize:vertical}
 .stx-btn{
   padding:7px 14px;border-radius:var(--r-md);
   cursor:pointer;font-family:var(--font-body);font-size:var(--fs-sm);font-weight:600;
-  transition:all .2s var(--ease-out);
+  transition:all .15s var(--ease-out);
   border:1px solid transparent;
   white-space:nowrap;
   letter-spacing:.01em;
   position:relative;overflow:hidden;
 }
 .stx-btn:hover:not([disabled]){
-  transform:translateY(-1px);
-  box-shadow:var(--shadow-md);
-  filter:saturate(1.08);
+  filter:brightness(1.06);
 }
 .stx-btn:active:not([disabled]){
-  transform:translateY(0) scale(.97);
+  filter:brightness(0.94);
   transition-duration:.08s;
 }
 .stx-btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accentbg3)}
 .stx-btn:disabled{opacity:.35;cursor:not-allowed}
 .stx-btn-primary{
-  background:linear-gradient(135deg,var(--accent) 0%,var(--accent2) 100%);
+  background:var(--accent);
   color:#fff;border-color:transparent;
-  box-shadow:0 2px 8px rgba(0,0,0,.12),inset 0 1px 0 rgba(255,255,255,.12);
 }
 .stx-btn-primary:hover:not([disabled]){
-  box-shadow:0 4px 16px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.12);
-  filter:brightness(1.08) saturate(1.1);
+  filter:brightness(1.08);
 }
 .stx-btn-ghost{
   background:transparent;color:var(--text4);border-color:var(--border);
@@ -562,10 +558,9 @@ button:focus-visible,a:focus-visible,[role="button"]:focus-visible,select:focus-
 }
 .stx-toast-close:hover{background:var(--accentbg2);color:var(--text)}
 .stx-toast-action{
-  background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+  background:var(--accent);color:#fff;
   border:none;border-radius:var(--r-md);padding:5px 12px;font-size:var(--fs-sm);font-weight:700;
   cursor:pointer;white-space:nowrap;flex-shrink:0;
-  box-shadow:0 2px 6px rgba(0,0,0,.12);
 }
 .stx-toast-action:hover{filter:brightness(1.08)}
 
