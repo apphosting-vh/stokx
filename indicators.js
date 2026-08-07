@@ -2617,7 +2617,7 @@ window.TechIndicators = (function () {
       var sma20Slope5 = sma20_s ? slope(sma20_s, 5) : null;
 
       var swingHigh20 = null;
-      for (var j = Math.max(0, L - 20); j < L; j++) { if (cl[j] != null && (swingHigh20 === null || cl[j] > swingHigh20)) swingHigh20 = cl[j]; }
+      for (var j = Math.max(0, L - 20); j < L; j++) { if (hi[j] != null && (swingHigh20 === null || hi[j] > swingHigh20)) swingHigh20 = hi[j]; }
       var pullbackDepth = (swingHigh20 != null && swingHigh20 > 0 && c != null) ? (swingHigh20 - c) / swingHigh20 : null;
 
       var supportLevels = [sma20, bbLower, anchoredVwap, sma50];
@@ -2628,26 +2628,28 @@ window.TechIndicators = (function () {
         }
       }
 
-      /* Pick nearest support level at or below price as buyRef.
-         If no support is below price, fall back to nearest any-direction support.
+      /* Pick nearest support level at or below the PRIOR bar's close as buyRef.
+         Using pc (not c) avoids same-bar circularity in the undercut & reclaim check.
+         If no support is below pc, fall back to nearest any-direction support.
          Order: SMA(20) → BB Lower → Anchored VWAP → SMA(50) → null */
       var buyRef = null;
-      if (c != null && c > 0) {
+      var refPrice = (L >= 2 && cl[L1 - 1] != null && cl[L1 - 1] > 0) ? cl[L1 - 1] : c;
+      if (refPrice != null && refPrice > 0) {
         var bestDist = Infinity;
         for (var j = 0; j < supportLevels.length; j++) {
           var lv = supportLevels[j];
-          if (lv != null && lv > 0 && lv <= c) {
-            var d = c - lv;
+          if (lv != null && lv > 0 && lv <= refPrice) {
+            var d = refPrice - lv;
             if (d < bestDist) { bestDist = d; buyRef = lv; }
           }
         }
-        /* If no support below price, pick nearest above (least-bad anchor) */
+        /* If no support below refPrice, pick nearest above (least-bad anchor) */
         if (buyRef == null) {
           var bestAbove = Infinity;
           for (var j = 0; j < supportLevels.length; j++) {
             var lv = supportLevels[j];
-            if (lv != null && lv > 0 && lv > c) {
-              var d = lv - c;
+            if (lv != null && lv > 0 && lv > refPrice) {
+              var d = lv - refPrice;
               if (d < bestAbove) { bestAbove = d; buyRef = lv; }
             }
           }
@@ -2834,7 +2836,7 @@ window.TechIndicators = (function () {
     if (window.TechIndicators) window.TechIndicators._scoreConfigClassification = null;
   }
 
-  /* Pillar 1: Trend Health (max 30).
+  /* Pillar 1: Trend Health (max 35).
      Volatility-normalized: ADX threshold stays at 25 (already normalized),
      Mansfield RS threshold tightened to > 0 for cleaner signal. */
   function calcTrendHealthScore(sn) {
@@ -2852,7 +2854,7 @@ window.TechIndicators = (function () {
     return Math.min(s, SCORE_CONFIG.pillarMax.trendHealth);
   }
 
-  /* Pillar 2: Pullback / Setup Quality (max 30).
+  /* Pillar 2: Pullback / Setup Quality (max 35).
      Volatility-normalized: distance to buyRef measured in ATR terms instead of
      fixed percentage. For large cap (1.5% ATR), 1.0 ATR ~ 1.5%. For mid cap
      (3% ATR), 1.0 ATR ~ 3%. This naturally adapts to the stock's volatility. */
@@ -2909,7 +2911,7 @@ window.TechIndicators = (function () {
       else if (sn.upDownVolRatio <= c.upDayVol_low) s += c.upDayVolPenalty;
     }
 
-    if (sn.plusDI != null && sn.minusDI != null) {
+    if (sn.adxL != null && sn.adxL >= 25 && sn.plusDI != null && sn.minusDI != null) {
       if (sn.plusDI > sn.minusDI) s += c.directionalBias;
     }
 
@@ -2934,7 +2936,7 @@ window.TechIndicators = (function () {
       items.push({ reason: "Low beta + low volatility percentile (no expansion)", amount: mc.lowExpansionPenalty });
     }
 
-    if (opts.spikeDay) items.push({ reason: "Spike day (gap or abnormal move)", amount: mc.spikePenalty });
+    if (opts.spikeDay) items.push({ reason: "Spike detected (gap/abnormal move) — also triggers hard cap ≤49", amount: mc.spikePenalty });
 
     if (sn && sn.stability20 != null && sn.stability20 < mc.stabilityThreshold) {
       items.push({ reason: "Unstable price action (stability < " + mc.stabilityThreshold + ")", amount: mc.stabilityPenalty });

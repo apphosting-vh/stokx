@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.87";
+window.__STOX_APP_VERSION = "2.10.88";
 
 /* Apply saved score config on startup */
 (function() {
@@ -7926,6 +7926,7 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles, ind
     var _sc = (TI.getScoreConfig && TI.getScoreConfig()) || {};
     var _pm = _sc.pillarMax || {};
     var _modCfg = _sc.modifiers || {};
+    var _modMax = (_modCfg.mtfAlignBonus || 10) + (_modCfg.highVolBonus || 5);
     var out = {
     finalScore: multi.multiTF_score,
     decision: toDec(multi.classification),
@@ -7948,10 +7949,10 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles, ind
     var scoreObj = {
       total: d.entryScore,
       decision: toDec(d.classification),
-      trendHealthScore: d.trendHealth, trendHealthMax: _pm.trendHealth != null ? _pm.trendHealth : 30,
-      pullbackScore: d.pullbackQuality, pullbackMax: _pm.pullbackQuality != null ? _pm.pullbackQuality : 30,
+      trendHealthScore: d.trendHealth, trendHealthMax: _pm.trendHealth != null ? _pm.trendHealth : 35,
+      pullbackScore: d.pullbackQuality, pullbackMax: _pm.pullbackQuality != null ? _pm.pullbackQuality : 35,
       prob4Score: d.prob4, prob4Max: _pm.prob4 != null ? _pm.prob4 : 40,
-      modifiersScore: d.modifiers != null ? d.modifiers : 0, modifiersMax: _modCfg.max != null ? _modCfg.max : 15,
+      modifiersScore: d.modifiers != null ? d.modifiers : 0, modifiersMax: _modMax,
       penalties: d.penalties, bonuses: d.bonuses, raw_score: d.raw_score,
       spike: d.spike != null ? d.spike : null, stability: d.stability != null ? d.stability : null
     };
