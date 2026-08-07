@@ -2447,7 +2447,7 @@ window.TechIndicators = (function () {
       var atrV = atr14 && atr14[L - 1] != null ? atr14[L - 1] : 0;
       var hi10 = -Infinity, hi10Idx = -1, hi20 = -Infinity;
       for (var i = Math.max(0, L - 11); i < L - 1; i++) { if (cl[i] > hi10) { hi10 = cl[i]; hi10Idx = i; } }
-      for (var i = Math.max(0, L - 21); i < L - 11; i++) { if (cl[i] > hi20) hi20 = cl[i]; }
+      for (var i = Math.max(0, L - 21); i < L - 1; i++) { if (cl[i] > hi20) hi20 = cl[i]; }
       var rsiAtHi = hi10Idx >= 0 ? rsiS[hi10Idx] : null;
       var lastRet = (c - prevC) / prevC * 100;
       var gapPct = (openL - prevC) / prevC * 100;
@@ -2681,14 +2681,14 @@ window.TechIndicators = (function () {
   function calcATRPercentileRank(candles, period) {
     period = period || 14;
     var lookback = 100;
-    if (!candles || candles.length < lookback + period) return 50;
+    if (!candles || candles.length < lookback + period) return null;
     var cl = closes(candles), hi = highs(candles), lo = lows(candles);
     var atrVals = [];
     for (var i = period; i < cl.length; i++) {
       var tr = Math.max(hi[i] - lo[i], Math.abs(hi[i] - cl[i - 1]), Math.abs(lo[i] - cl[i - 1]));
       atrVals.push(tr);
     }
-    if (atrVals.length < 20) return 50;
+    if (atrVals.length < 20) return null;
     /* Use SMA of ATR values over recent window */
     var recentWindow = Math.min(50, atrVals.length);
     var currentATR = 0;
@@ -2700,7 +2700,7 @@ window.TechIndicators = (function () {
       if (atrVals[i] < currentATR) belowCount++;
     }
     var baseCount = atrVals.length - recentWindow;
-    return baseCount > 0 ? Math.round(belowCount / baseCount * 100) : 50;
+    return baseCount > 0 ? Math.round(belowCount / baseCount * 100) : null;
   }
 
   /* Compute volatility regime: { atrPct, atrPercentile, regime }
@@ -2708,7 +2708,7 @@ window.TechIndicators = (function () {
   function calcVolRegime(sn, candles) {
     var atrPct = (sn.atr14 != null && sn.c != null && sn.c > 0) ? sn.atr14 / sn.c * 100 : null;
     var atrPercentile = calcATRPercentileRank(candles, 14);
-    var regime = atrPercentile >= 75 ? 'high' : (atrPercentile <= 25 ? 'low' : 'normal');
+    var regime = atrPercentile == null ? 'normal' : (atrPercentile >= 75 ? 'high' : (atrPercentile <= 25 ? 'low' : 'normal'));
     return { atrPct: atrPct, atrPercentile: atrPercentile, regime: regime };
   }
 
@@ -2899,8 +2899,8 @@ window.TechIndicators = (function () {
       else if (distATR >= c.targetDist_range2_lo && distATR <= c.targetDist_range2_hi) s += c.targetDist_T2;
     }
 
-    if (atrPercentile >= c.volPercentile_lo && atrPercentile <= c.volPercentile_hi) s += c.volSweet_T1;
-    else if (atrPercentile >= c.volPercentile_lo2 && atrPercentile <= c.volPercentile_hi2) s += c.volSweet_T2;
+    if (atrPercentile != null && atrPercentile >= c.volPercentile_lo && atrPercentile <= c.volPercentile_hi) s += c.volSweet_T1;
+    else if (atrPercentile != null && atrPercentile >= c.volPercentile_lo2 && atrPercentile <= c.volPercentile_hi2) s += c.volSweet_T2;
 
     if (sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > c.efficiencyRatioThreshold) s += c.efficiencyRatio;
 
@@ -2930,7 +2930,7 @@ window.TechIndicators = (function () {
     var atrPercentile = volRegime ? volRegime.atrPercentile : 50;
     var mc = SCORE_CONFIG.modifiers;
 
-    if (sn && sn.beta != null && sn.beta < mc.lowBetaThreshold && atrPercentile < mc.lowATRPercentile) {
+    if (sn && sn.beta != null && sn.beta < mc.lowBetaThreshold && atrPercentile != null && atrPercentile < mc.lowATRPercentile) {
       items.push({ reason: "Low beta + low volatility percentile (no expansion)", amount: mc.lowExpansionPenalty });
     }
 
@@ -2945,7 +2945,7 @@ window.TechIndicators = (function () {
       items.push({ reason: "MTF alignment (" + Math.round(opts.mtfAlignFactor * 100) + "%)", amount: mtfAmt });
     }
 
-    if (atrPercentile >= mc.highVolATRPercentile && sn && sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > mc.highVolERThreshold) {
+    if (atrPercentile != null && atrPercentile >= mc.highVolATRPercentile && sn && sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > mc.highVolERThreshold) {
       items.push({ reason: "High momentum in high-vol regime", amount: mc.highVolBonus });
     }
 
