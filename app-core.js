@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.60";
+window.__STOX_APP_VERSION = "2.10.61";
 
 /* Apply saved score config on startup */
 (function() {
@@ -2839,23 +2839,30 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
       React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 } }, "Fill Probability Range"),
       React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", fontWeight: 600 } }, "Market closed \u2014 fill probabilities unavailable until market opens (9:15 AM)")
     );
-  } else if (fr && (fr.aggressive || fr.moderate || fr.conservative)) {
-    var frItems = [];
-    if (fr.conservative) frItems.push({ label: "Conservative", price: fr.conservative.price, prob: fr.conservative.fillProb, tag: fr.conservative.tag, color: "#16a34a" });
-    if (fr.moderate) frItems.push({ label: "Moderate", price: fr.moderate.price, prob: fr.moderate.fillProb, tag: fr.moderate.tag, color: "#d97706" });
-    if (fr.aggressive) frItems.push({ label: "Aggressive", price: fr.aggressive.price, prob: fr.aggressive.fillProb, tag: fr.aggressive.tag, color: "#dc2626" });
+  } else if (res.todayLow != null && res.todayLow < res.currentPrice - 0.01) {
+    var lnFill = res.probToTodayLowLognormal;
+    var emFill = res.probToTodayLowEmpirical;
     fillRangeEl = React.createElement("div", { style: { marginTop: 8, padding: "8px 12px", borderRadius: 7, background: "var(--bg4)", border: "1px solid var(--border)" } },
       React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 } }, "Fill Probability Range (today)"),
       React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
-        frItems.map(function (item) {
-          return React.createElement("div", { key: item.label, style: { flex: "1 1 0", minWidth: 140, textAlign: "center" } },
-            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", fontWeight: 600, marginBottom: 2 } }, item.label),
-            React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: item.color, lineHeight: 1.1 } }, price(item.price)),
-            React.createElement("div", { style: { fontSize: 11, color: item.color, fontWeight: 700, marginTop: 2 } }, "\u2248" + item.prob + "% chance"),
-            React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 1 } }, item.tag)
-          );
-        })
+        React.createElement("div", { style: { flex: "1 1 0", minWidth: 140, textAlign: "center" } },
+          React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", fontWeight: 600, marginBottom: 2 } }, "Drop to Today Low (LN)"),
+          React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: lnFill != null ? (lnFill >= 70 ? "#16a34a" : lnFill >= 40 ? "#d97706" : "#dc2626") : "var(--text6)", lineHeight: 1.1 } }, price(res.todayLow)),
+          React.createElement("div", { style: { fontSize: 11, color: lnFill != null ? (lnFill >= 70 ? "#16a34a" : lnFill >= 40 ? "#d97706" : "#dc2626") : "var(--text6)", fontWeight: 700, marginTop: 2 } }, lnFill != null ? "\u2248" + lnFill + "% chance" : "\u2014"),
+          React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 1 } }, "Lognormal model")
+        ),
+        React.createElement("div", { style: { flex: "1 1 0", minWidth: 140, textAlign: "center" } },
+          React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", fontWeight: 600, marginBottom: 2 } }, "Drop to Today Low (EM)"),
+          React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: emFill != null ? (emFill >= 70 ? "#16a34a" : emFill >= 40 ? "#d97706" : "#dc2626") : "var(--text6)", lineHeight: 1.1 } }, price(res.todayLow)),
+          React.createElement("div", { style: { fontSize: 11, color: emFill != null ? (emFill >= 70 ? "#16a34a" : emFill >= 40 ? "#d97706" : "#dc2626") : "var(--text6)", fontWeight: 700, marginTop: 2 } }, emFill != null ? "\u2248" + emFill + "% chance" : "Insufficient samples"),
+          React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 1 } }, cp.empiricalMethod === 'empirical' ? "Empirical (" + cp.empiricalSampleCount + " samples)" : "Lognormal fallback")
+        )
       )
+    );
+  } else if (res.todayLow != null && res.todayLow >= res.currentPrice - 0.01) {
+    fillRangeEl = React.createElement("div", { style: { marginTop: 8, padding: "8px 12px", borderRadius: 7, background: "var(--bg4)", border: "1px solid var(--border)", textAlign: "center" } },
+      React.createElement("div", { style: { fontSize: 9, fontWeight: 700, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 } }, "Fill Probability Range (today)"),
+      React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", fontWeight: 600 } }, "Current price is at or near today's low \u2014 no further drop expected today")
     );
   }
 
