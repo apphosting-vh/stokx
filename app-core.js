@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.80";
+window.__STOX_APP_VERSION = "2.10.81";
 
 /* Apply saved score config on startup */
 (function() {
@@ -10721,8 +10721,8 @@ function App() {
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
             React.createElement("div", { style: { width: 38, height: 38, borderRadius: 12, background: "linear-gradient(135deg,var(--accent),var(--accent2))", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, color: "#fff", fontFamily: "var(--font-heading)", fontSize: 17, boxShadow: "0 4px 12px var(--accentbg3)" } }, "S"),
             React.createElement("div", null,
-              React.createElement("div", { style: { fontWeight: 800, fontSize: 17, color: "var(--text)", fontFamily: "var(--font-heading)", letterSpacing: "-0.3px" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-              React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", letterSpacing: 1.5, fontWeight: 500, textTransform: "uppercase" } }, "Stock Analysis")
+              React.createElement("div", { style: { fontWeight: 800, fontSize: 17, color: "var(--sidebar-text)", fontFamily: "var(--font-heading)", letterSpacing: "-0.3px" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
+              React.createElement("div", { style: { fontSize: 9, color: "var(--sidebar-text3)", letterSpacing: 1.5, fontWeight: 500, textTransform: "uppercase" } }, "Stock Analysis")
             )
           )
         ),
@@ -10736,8 +10736,8 @@ function App() {
                 display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 10px",
                 borderRadius: 8, border: "none", cursor: "pointer",
                 transition: "all .2s var(--ease-out)",
-                background: active ? "var(--accentbg)" : "transparent",
-                color: active ? "var(--accent)" : "var(--text5)",
+                background: active ? "var(--sidebar-active-bg)" : "transparent",
+                color: active ? "var(--accent)" : "var(--sidebar-text)",
                 fontWeight: active ? 700 : 500, fontSize: 13,
                 fontFamily: "var(--font-body)", textAlign: "left",
                 borderLeft: active ? "3px solid var(--accent)" : "3px solid transparent"
@@ -10749,9 +10749,9 @@ function App() {
           })
         ),
         // Market status footer
-        React.createElement("div", { style: { padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 10, color: "var(--text6)" } },
+        React.createElement("div", { style: { padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 10, color: "var(--sidebar-text4)" } },
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
-            React.createElement("div", { style: { width: 6, height: 6, borderRadius: "50%", background: isTradingWeekday() ? "var(--accent)" : "var(--text6)", boxShadow: isTradingWeekday() ? "0 0 6px var(--accentbg5)" : "none" } }),
+            React.createElement("div", { style: { width: 6, height: 6, borderRadius: "50%", background: isTradingWeekday() ? "var(--accent)" : "var(--sidebar-text4)", boxShadow: isTradingWeekday() ? "0 0 6px var(--accentbg5)" : "none" } }),
             React.createElement("span", { style: { fontWeight: 600, letterSpacing: ".3px" } }, isTradingWeekday() ? "Market Open" : "Market Closed")
           ),
           React.createElement("div", { style: { marginTop: 4, letterSpacing: ".5px" } }, "NSE \u00b7 BSE")

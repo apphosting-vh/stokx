@@ -239,6 +239,9 @@ html[data-mode="dark"]{
   --shadow-lg:0 12px 40px rgba(0,0,0,.30),0 4px 12px rgba(0,0,0,.15);
   --shadow-glow:0 0 20px rgba(52,211,153,.08);
   --sidebar:rgba(8,12,20,.85);
+  --sidebar-text:#e2e8f0;--sidebar-text2:#cbd5e1;--sidebar-text3:#94a3b8;
+  --sidebar-text4:#64748b;--sidebar-text5:#475569;--sidebar-text6:#334155;
+  --sidebar-active-bg:rgba(52,211,153,.12);
 }
 
 /* ════════════════════════════════════════════════
@@ -267,6 +270,9 @@ html[data-mode="light"]{
   --shadow-lg:0 12px 40px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.04);
   --shadow-glow:0 0 20px rgba(5,150,105,.06);
   --sidebar:rgba(15,23,42,.95);
+  --sidebar-text:#e2e8f0;--sidebar-text2:#cbd5e1;--sidebar-text3:#94a3b8;
+  --sidebar-text4:#64748b;--sidebar-text5:#475569;--sidebar-text6:#334155;
+  --sidebar-active-bg:rgba(5,150,105,.15);
 }
 
 /* ════════════════════════════════════════════════
@@ -486,7 +492,7 @@ button:focus-visible,a:focus-visible,[role="button"]:focus-visible,select:focus-
   .stx-botnav-item{
     flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
     background:transparent;border:none;cursor:pointer;padding:5px 2px;border-radius:var(--r-md);
-    color:var(--text5);font-family:var(--font-body);font-size:10px;font-weight:600;
+    color:var(--sidebar-text3);font-family:var(--font-body);font-size:10px;font-weight:600;
     letter-spacing:.15px;transition:all .25s var(--ease-out);min-width:0;
     position:relative;
   }
