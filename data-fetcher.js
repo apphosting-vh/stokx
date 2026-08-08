@@ -40,14 +40,14 @@ window.OHLCVFetcher = (function () {
      
      Supported intervals: 1m, 5m, 15m, 30m, 1h, 1d, 1wk
      
-     Response: timestamps[], indicators.quote[0].{open,high,low,close,volume}
-     Indian stocks: {ticker}.NS (NSE) or {ticker}.BO (BSE)
-     ═══════════════════════════════════════════════════════════════════════ */
+      Response: timestamps[], indicators.quote[0].{open,high,low,close,volume}
+      Indian stocks: {ticker}.NS (NSE only — BSE excluded)
+      ═══════════════════════════════════════════════════════════════════════ */
   async function fetchFromYahooIntraday(ticker, interval, range) {
     interval = interval || "5m";
     range = range || "1mo";
 
-    var symbols = [ticker.toUpperCase() + ".NS", ticker.toUpperCase() + ".BO", ticker.toUpperCase()];
+    var symbols = [ticker.toUpperCase() + ".NS"];
 
     var startTime = Date.now();
     var TOTAL_TIMEOUT = 25000;
@@ -123,7 +123,7 @@ window.OHLCVFetcher = (function () {
      ═══════════════════════════════════════════════════════════════════════ */
   async function fetchQuote(ticker) {
     var cleanTicker = (ticker || "").trim().toUpperCase().replace(/\.(NS|BO)$/i, "");
-    var symbols = [cleanTicker + ".NS", cleanTicker + ".BO", cleanTicker];
+    var symbols = [cleanTicker + ".NS"];
     var ctrl = new AbortController();
     var tid = setTimeout(function () { ctrl.abort(); }, 25000);
     try {
@@ -203,7 +203,7 @@ window.OHLCVFetcher = (function () {
     ticker = (ticker || "").trim().toUpperCase();
     if (!ticker) return null;
 
-    /* Strip .NS / .BO suffix if present — fetchFromYahooIntraday re-appends them */
+    /* Strip .NS / .BO suffix if present — fetchFromYahooIntraday re-appends .NS */
     var cleanTicker = ticker.replace(/\.(NS|BO)$/i, "");
 
     var yfInterval, yfRange;
@@ -219,7 +219,7 @@ window.OHLCVFetcher = (function () {
       default: yfInterval = "5m"; yfRange = "1mo"; break;
     }
     var yfData = await fetchFromYahooIntraday(cleanTicker, yfInterval, yfRange);
-    return { candles: yfData, source: "Yahoo Finance" };
+    return { candles: yfData, source: "Yahoo Finance (NSE)" };
   }
 
   /* ═══════════════════════════════════════════════════════════════════════

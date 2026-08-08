@@ -352,7 +352,13 @@ window.BacktestEngine = (function () {
       try {
         var scoreObj = scoreAt(candles, idx, symbol);
         var entryScoreCtx = scoreObj ? { trendHealth: scoreObj.trendHealth, pullbackQuality: scoreObj.pullbackQuality, prob4: scoreObj.prob4, entryScore: scoreObj.entryScore } : null;
-        var cfg = { horizonDays: holdingPeriodDays, windowSessions: 40, entry_price: bar.c, targetPct: targetProfitPct, indexCandles: idxSlice, entryScoreContext: entryScoreCtx };
+        /* Cost-adjusted target: the actual % gain the model should estimate,
+           matching what simulateTrade treats as hitTarget. Without this,
+           calibration regresses against a harder bar (raw 4%) than the
+           live model quotes, biasing calP0/calK. */
+        var slip = slippagePct, broker = brokeragePct;
+        var costAdjTargetPct = ((1 + slip / 100) * (1 + targetProfitPct / 100) / ((1 - slip / 100) * (1 - broker / 100)) - 1) * 100;
+        var cfg = { horizonDays: holdingPeriodDays, windowSessions: 40, entry_price: bar.c, targetPct: costAdjTargetPct, indexCandles: idxSlice, entryScoreContext: entryScoreCtx };
         var res = window.TechIndicators.computeHorizonConfidence(hSlice, dSlice, cfg);
         if (res && res.components && res.components.probTouch != null) return { probTouch: res.components.probTouch / 100, confLog: res.confidenceLognormal != null ? res.confidenceLognormal / 100 : null, confEmp: res.confidenceEmpirical != null ? res.confidenceEmpirical / 100 : null };
       } catch (e) {}
@@ -388,6 +394,7 @@ window.BacktestEngine = (function () {
             trade.probTouch = c10 ? c10.probTouch : null;
             trade.confLog = c10 ? c10.confLog : null;
             trade.confEmp = c10 ? c10.confEmp : null;
+            trade.driftScore = (c10 && c10.components) ? c10.components.driftScore : null;
             t.push(trade);
           }
         }
@@ -499,7 +506,42 @@ window.BacktestEngine = (function () {
         }
       }
       if (calK == null || calK <= 0) calK = 38;
-      return { buckets: buckets, calP0: calP0, calK: calK, n: withPT.length };
+
+      /* ── Stratified calibration by driftScore tercile ──────────────────
+         Reveals conditional miscalibration that the global calP0/calK
+         can mask (e.g. high-drift setups overconfident while flat ones
+         underconfident, averaging out). */
+      var withDS = withPT.filter(function(t) { return t.driftScore != null && !isNaN(t.driftScore); });
+      var stratified = null;
+      if (withDS.length >= MIN_TOTAL) {
+        var dsSorted = withDS.slice().sort(function(a, b) { return a.driftScore - b.driftScore; });
+        var tercileSize = Math.floor(dsSorted.length / 3);
+        if (tercileSize >= MIN_PER_BUCKET) {
+          stratified = [];
+          var labels = ['LOW_DRIFT', 'MID_DRIFT', 'HIGH_DRIFT'];
+          for (var ti = 0; ti < 3; ti++) {
+            var tStart = ti * tercileSize;
+            var tEnd = ti === 2 ? dsSorted.length : tStart + tercileSize;
+            var tGroup = dsSorted.slice(tStart, tEnd);
+            var tHits = tGroup.filter(function(t) { return t.hitTarget; }).length;
+            var tAvgPT = tGroup.reduce(function(s, t) { return s + t.probTouch; }, 0) / tGroup.length;
+            var tHitRate = Math.round((tHits / tGroup.length) * 1000) / 10;
+            var dsLo = Math.round(tGroup[0].driftScore * 1000) / 1000;
+            var dsHi = Math.round(tGroup[tGroup.length - 1].driftScore * 1000) / 1000;
+            stratified.push({
+              label: labels[ti],
+              driftRange: [dsLo, dsHi],
+              n: tGroup.length,
+              avgProbTouch: Math.round(tAvgPT * 100) / 100,
+              hitRate: tHitRate,
+              hits: tHits,
+              misses: tGroup.length - tHits
+            });
+          }
+        }
+      }
+
+      return { buckets: buckets, calP0: calP0, calK: calK, n: withPT.length, stratified: stratified };
     }
 
     async function runSingle(candles, opts, hooks) {
@@ -545,6 +587,7 @@ window.BacktestEngine = (function () {
               fwd.probTouch = c10 ? c10.probTouch : null;
               fwd.confLog = c10 ? c10.confLog : null;
               fwd.confEmp = c10 ? c10.confEmp : null;
+              fwd.driftScore = (c10 && c10.components) ? c10.components.driftScore : null;
               trades.push(fwd);
             }
           }

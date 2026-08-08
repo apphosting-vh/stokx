@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.90";
+window.__STOX_APP_VERSION = "2.10.93";
 
 /* Apply saved score config on startup */
 (function() {
@@ -458,7 +458,7 @@ const PROXY_FNS = [
 async function fetchTickerPrice(rawTicker) {
   const ticker = (rawTicker || "").trim().toUpperCase();
   if (!ticker) return null;
-  const symbols = [ticker + ".NS", ticker + ".BO", ticker];
+    const symbols = [ticker + ".NS"];
   for (const sym of symbols) {
     for (const proxy of PROXY_FNS) {
       try {
@@ -499,7 +499,7 @@ const fetchHistoricalPrices = async (rawTicker, fromDate) => {
     const period1 = Math.floor(new Date(fromDate + "T00:00:00Z").getTime() / 1000);
     const period2 = Math.floor(Date.now() / 1000) + 86400;
     const hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
-    const symbols = [ticker + ".NS", ticker + ".BO", ticker];
+  const symbols = [ticker + ".NS"];
     const proxyFns = [
       u => "https://api.cors.lol/?url=" + encodeURIComponent(u),
       u => "https://corsproxy.io/?" + encodeURIComponent(u),
@@ -668,7 +668,7 @@ async function fetchOHLCV(ticker, timeframe) {
     case "weekly": yfInterval = "1wk"; yfRange = "5y"; break;
     default: yfInterval = "1d"; yfRange = "2y"; break;
   }
-  var symbols = [ticker + ".NS", ticker + ".BO", ticker];
+  var symbols = [ticker + ".NS"];
   for (var s = 0; s < symbols.length; s++) {
     for (var h = 0; h < Y_HOSTS.length; h++) {
       for (var p = 0; p < PROXY_FNS.length; p++) {
