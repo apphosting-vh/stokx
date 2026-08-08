@@ -4919,6 +4919,60 @@ window.TechIndicators = (function () {
   }
 
   /* --------------------------------------------------------------------------
+     CANDLE PATTERN DETECTION
+     Detects well-established 3-candle bullish and bearish patterns across the
+     visible chart. Returns an array of detected patterns, each with:
+       { name, type: "bullish"|"bearish", desc, bar, startBar, startTime, endTime }
+     Capped at 20 most recent patterns to keep the chart readable.
+     -------------------------------------------------------------------------- */
+  function detectCandlePatterns(candles) {
+    if (!candles || candles.length < 3) return [];
+    var patterns = [];
+    var L = candles.length;
+
+    function body(c) { return Math.abs(c.c - c.o); }
+    function isBullish(c) { return c.c > c.o; }
+    function isBearish(c) { return c.c < c.o; }
+    function mid(c) { return (c.o + c.c) / 2; }
+
+    function add(name, type, desc, endIdx, startIdx) {
+      var si = startIdx != null ? startIdx : endIdx;
+      var startTime = candles[si] ? candles[si].t : "";
+      var endTime = candles[endIdx] ? candles[endIdx].t : "";
+      patterns.push({ name: name, type: type, desc: desc, bar: endIdx, startBar: si, startTime: startTime, endTime: endTime });
+    }
+
+    for (var i = L - 1; i >= 2; i--) {
+      var c = candles[i];
+      var c1 = candles[i - 2];
+      var c2 = candles[i - 1];
+
+      /* Morning Star: bearish, small body star, bullish close above midpoint */
+      if (isBearish(c1) && body(c2) < body(c1) * 0.3 && isBullish(c) && c.c > mid(c1)) {
+        add("Morning Star", "bullish", "Three-candle reversal: bearish, small body, then bullish close above midpoint. Classic bottom pattern.", i, i - 2);
+      }
+
+      /* Evening Star: bullish, small body star, bearish close below midpoint */
+      if (isBullish(c1) && body(c2) < body(c1) * 0.3 && isBearish(c) && c.c < mid(c1)) {
+        add("Evening Star", "bearish", "Three-candle reversal: bullish, small body, then bearish close below midpoint. Classic top pattern.", i, i - 2);
+      }
+
+      /* Three White Soldiers: three consecutive bullish candles with rising closes */
+      if (isBullish(c1) && isBullish(c2) && isBullish(c) && c.c > c2.c && c2.c > c1.c && c.o > c1.o) {
+        add("Three White Soldiers", "bullish", "Three consecutive bullish candles with rising closes. Strong bullish continuation.", i, i - 2);
+      }
+
+      /* Three Black Crows: three consecutive bearish candles with falling closes */
+      if (isBearish(c1) && isBearish(c2) && isBearish(c) && c.c < c2.c && c2.c < c1.c && c.o < c1.o) {
+        add("Three Black Crows", "bearish", "Three consecutive bearish candles with falling closes. Strong bearish continuation.", i, i - 2);
+      }
+    }
+
+    if (patterns.length > 20) patterns = patterns.slice(0, 20);
+    return patterns;
+  }
+
+  /* --------------------------------------------------------------------------
      Public API
      -------------------------------------------------------------------------- */
 
@@ -4962,6 +5016,7 @@ window.TechIndicators = (function () {
     computeHorizonConfidence: computeHorizonConfidence,
     computeOptimumEntryPrice: computeOptimumEntryPrice,
     integratedExitDecision: integratedExitDecision,
+    detectCandlePatterns: detectCandlePatterns,
     getScoreConfig: getScoreConfig,
     getDefaultScoreConfig: getDefaultScoreConfig,
     setScoreConfig: setScoreConfig
