@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.10.94";
+window.__STOX_APP_VERSION = "2.11.0";
 
 /* Apply saved score config on startup */
 (function() {
@@ -2776,6 +2776,69 @@ const PrematureExitPanel = ({ ticker, buyPrice }) => {
         reasons.slice(1).map((r, i) => React.createElement("div", { key: i }, "\u2022 " + r))
       )
     )
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PATTERN MINING PANEL
+   Scans the selected timeframe's candle data for well-established
+   bullish and bearish candlestick patterns. Displays each detected
+   pattern as a chip with type, name, and description.
+   Rendered in Single Stock Analysis (Pulse tab).
+   ══════════════════════════════════════════════════════════════════════════ */
+const PatternMiningPanel = ({ candles, timeframe }) => {
+  const TI = window.TechIndicators;
+
+  if (!candles || candles.length < 3) return null;
+
+  var detected = TI && TI.detectCandlePatterns ? TI.detectCandlePatterns(candles) : [];
+  if (detected.length === 0) return null;
+
+  var bullish = detected.filter(function (p) { return p.type === "bullish"; });
+  var bearish = detected.filter(function (p) { return p.type === "bearish"; });
+
+  var tfLabel = timeframe || "daily";
+  var fmtTs = function (t) {
+    if (!t) return "";
+    var parts = String(t).split(" ");
+    var datePart = parts[0] || "";
+    var timePart = parts[1] || "";
+    var dParts = datePart.split("-");
+    var shortDate = dParts.length === 3 ? dParts[2] + "/" + dParts[1] + "/" + dParts[0].slice(2) : datePart;
+    return shortDate + (timePart ? " " + timePart : "");
+  };
+  var chipRow = function (c) {
+    var isBull = c.type === "bullish";
+    var accentColor = isBull ? "var(--profit)" : "var(--loss)";
+    var bg = isBull ? "rgba(22,163,74,.06)" : "rgba(239,68,68,.06)";
+    var timeLabel = c.startTime && c.endTime
+      ? (c.startTime === c.endTime ? fmtTs(c.startTime) : fmtTs(c.startTime) + " \u2192 " + fmtTs(c.endTime))
+      : "";
+    return React.createElement("div", { key: c.name + "_" + c.bar, style: { padding: "7px 11px", borderRadius: 7, background: bg, border: "1px solid var(--border)", borderLeft: "3px solid " + accentColor, fontSize: 12, width: 250 } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 } },
+        React.createElement("div", { style: { color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 } }, c.name),
+        React.createElement("div", { style: { fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 6, background: accentColor + "22", border: "1px solid " + accentColor, color: accentColor, textTransform: "uppercase" } }, c.type)
+      ),
+      React.createElement("div", { style: { color: "var(--text2)", fontWeight: 700, fontFamily: "var(--font-heading)", fontSize: 12.5 } }, c.desc),
+      timeLabel && React.createElement("div", { style: { color: "var(--text6)", marginTop: 3, fontSize: 10.5, fontFamily: "var(--font-mono)", display: "flex", alignItems: "center", gap: 4 } },
+        React.createElement("span", { style: { fontSize: 9 } }, "\u23f1"),
+        timeLabel
+      )
+    );
+  };
+
+  return React.createElement("div", { className: "stx-card", style: { marginBottom: 14, padding: "12px 16px", border: "1px solid rgba(139,92,246,.25)" } },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)" } }, "Pattern Mining"),
+        React.createElement("div", { style: { fontSize: 11.5, color: "var(--text6)", marginTop: 2 } }, detected.length + " pattern" + (detected.length !== 1 ? "s" : "") + " detected on " + tfLabel + " chart")
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 8 } },
+        bullish.length > 0 && React.createElement("div", { style: { padding: "3px 8px", borderRadius: 6, background: "rgba(22,163,74,.1)", border: "1px solid rgba(22,163,74,.3)", fontSize: 10, fontWeight: 700, color: "var(--profit)" } }, bullish.length + " Bullish"),
+        bearish.length > 0 && React.createElement("div", { style: { padding: "3px 8px", borderRadius: 6, background: "rgba(239,68,68,.1)", border: "1px solid rgba(239,68,68,.3)", fontSize: 10, fontWeight: 700, color: "var(--loss)" } }, bearish.length + " Bearish")
+      )
+    ),
+    React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8 } }, detected.map(chipRow))
   );
 };
 
@@ -9048,6 +9111,8 @@ function SingleStockAnalysis({ requestedTicker }) {
   var _w = useState(null), snapMonth = _w[0], setSnapMonth = _w[1];
   var _x = useState(null), snapDay = _x[0], setSnapDay = _x[1];
   var _y = useState({}), snapOpen = _y[0], setSnapOpen = _y[1];
+  var _z = useState(null), hoverCandle = _z[0], setHoverCandle = _z[1];
+  var _zz = useState(null), mousePos = _zz[0], setMousePos = _zz[1];
 
   useEffect(function () {
     try { localStorage.setItem(_LS_KEY, JSON.stringify({ ticker: ticker, timeframe: timeframe, category: category, autoRefresh: autoRefresh })); } catch (e) {}
@@ -9321,6 +9386,14 @@ function SingleStockAnalysis({ requestedTicker }) {
     var volH = 24;
     var w = 700, padL = 50, padR = 10, padT = 14, padB = 50;
     var ch = 180;
+
+    var _detectedRaw = TI && TI.detectCandlePatterns ? TI.detectCandlePatterns(full) : [];
+    var _visPatterns = _detectedRaw.filter(function (p) {
+      var vs = p.startBar - (full.length - data.length);
+      var ve = p.bar - (full.length - data.length);
+      return ve >= 0 && vs < data.length;
+    });
+
     var cw = w - padL - padR;
     var h = padT + ch + 8 + volH + (oscOn ? 8 + oscH : 0) + padB;
     var priceBottom = padT + ch;
@@ -9431,7 +9504,8 @@ function SingleStockAnalysis({ requestedTicker }) {
     }
 
     var xTickCount = Math.min(6, data.length);
-    var xTickStep = Math.max(1, Math.floor(data.length / xTickCount));
+    var minLabelGap = isIntra ? 80 : 50;
+    var xTickStep = Math.max(1, Math.ceil((minLabelGap / gap)));
     var xTicks = [];
     for (var xi = 0; xi < data.length; xi += xTickStep) {
       xTicks.push(xi);
@@ -9456,6 +9530,59 @@ function SingleStockAnalysis({ requestedTicker }) {
         React.createElement("rect", { x: x - barW / 2, y: bodyTop, width: barW, height: bodyH, fill: color, rx: 0.5 })
       );
     });
+
+    var patternHighlightEls = [];
+    var patternLabelEls = [];
+    var patternColors = { bullish: "#22c55e", bearish: "#ef4444" };
+    var placedLabelYs = [];
+    var highestCandleY = yScale(hi);
+    for (var pi = 0; pi < _visPatterns.length; pi++) {
+      var pat = _visPatterns[pi];
+      var pColor = patternColors[pat.type] || "#6b7280";
+      var visStart = Math.max(0, pat.startBar - startIdx);
+      var visEnd = Math.min(data.length - 1, pat.bar - startIdx);
+      var x0 = padL + visStart * gap;
+      var x1 = padL + visEnd * gap + gap;
+      var bw = x1 - x0;
+      var midX = x0 + bw / 2;
+
+      patternHighlightEls.push(
+        React.createElement("rect", { key: "ph_bg_" + pi, x: x0, y: padT, width: bw, height: ch, fill: pColor, opacity: 0.04, rx: 2 }),
+        React.createElement("line", { key: "ph_ln_" + pi, x1: x0, y1: padT + ch, x2: x1, y2: padT + ch, stroke: pColor, strokeWidth: 2, opacity: 0.6 })
+      );
+
+      var lblText = pat.name;
+      var lblWords = lblText.split(" ");
+      var maxWordLen = 0;
+      for (var wi = 0; wi < lblWords.length; wi++) { if (lblWords[wi].length > maxWordLen) maxWordLen = lblWords[wi].length; }
+      var lblW = maxWordLen * 4.2 + 8;
+      var lineH = 7;
+      var lblLines = lblWords.length;
+      var lblH = lblLines * lineH + 3;
+      var lblY = highestCandleY - lblH - 3;
+      var settled = false;
+      while (!settled) {
+        settled = true;
+        for (var ly = 0; ly < placedLabelYs.length; ly++) {
+          var prev = placedLabelYs[ly];
+          var overlapX = Math.abs(midX - prev.x) < (lblW + prev.w) / 2 + 3;
+          var overlapY = Math.abs(lblY - prev.y) < lblH + 2;
+          if (overlapX && overlapY) { lblY = prev.y - lblH - 2; settled = false; break; }
+        }
+      }
+      if (lblY < 2) lblY = 2;
+      placedLabelYs.push({ x: midX, y: lblY, w: lblW });
+      var bgX = midX - lblW / 2;
+      var lblTSpan = [];
+      for (var li = 0; li < lblWords.length; li++) {
+        lblTSpan.push(React.createElement("tspan", { key: "ls" + pi + "_" + li, x: midX, dy: li === 0 ? "1em" : "1em" }, lblWords[li]));
+      }
+      patternLabelEls.push(
+        React.createElement("rect", { key: "ph_lbl_bg_" + pi, x: bgX, y: lblY, width: lblW, height: lblH, rx: 3, fill: pColor, opacity: 0.85 }),
+        React.createElement("text", { key: "ph_lbl_" + pi, x: midX, y: lblY + 1, fontSize: 6, fill: "#fff", textAnchor: "middle", fontWeight: 700, fontFamily: "var(--font-mono)" }, lblTSpan),
+        React.createElement("line", { key: "ph_pin_" + pi, x1: midX, y1: lblY + lblH, x2: midX, y2: padT + ch, stroke: pColor, strokeWidth: 0.8, strokeDasharray: "2,3", opacity: 0.4 })
+      );
+    }
 
     var overlayEls = [];
     if (overlays.ma) {
@@ -9579,7 +9706,58 @@ function SingleStockAnalysis({ requestedTicker }) {
       return React.createElement("rect", { key: "vol" + ci, x: x - barW / 2, y: volBottom - vh, width: barW, height: Math.max(1, vh), fill: vcolor, opacity: 0.55, rx: 0.5 });
     });
 
-    return React.createElement("div", { style: { background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 12, overflow: "hidden" } },
+    var hoverHitEls = data.map(function (c, ci) {
+      var x = padL + ci * gap + gap / 2;
+      return React.createElement("rect", { key: "hit" + ci, x: x - gap / 2, y: padT, width: gap, height: ch + 8 + volH, fill: "transparent", style: { cursor: "crosshair" },
+        onMouseEnter: function () { setHoverCandle(ci); },
+        onMouseLeave: function () { setHoverCandle(null); setMousePos(null); },
+        onMouseMove: function (e) { var r = e.currentTarget.closest("svg").getBoundingClientRect(); setMousePos({ x: e.clientX - r.left, y: e.clientY - r.top }); }
+      });
+    });
+
+    var hoverEls = [];
+    if (hoverCandle != null && hoverCandle >= 0 && hoverCandle < data.length) {
+      var hc = data[hoverCandle];
+      var hx = padL + hoverCandle * gap + gap / 2;
+      hoverEls.push(
+        React.createElement("line", { key: "hcross", x1: hx, y1: padT, x2: hx, y2: padT + ch, stroke: "var(--text6)", strokeWidth: 0.7, strokeDasharray: "3,3", opacity: 0.6 }),
+        React.createElement("circle", { key: "hdot", cx: hx, cy: yScale(hc.c), r: 3, fill: hc.c >= hc.o ? "var(--profit)" : "var(--loss)", stroke: "#fff", strokeWidth: 1 })
+      );
+    }
+
+    var tooltipEl = null;
+    if (hoverCandle != null && hoverCandle >= 0 && hoverCandle < data.length && mousePos) {
+      var tc = data[hoverCandle];
+      var tcIsUp = tc.c >= tc.o;
+      var tcColor = tcIsUp ? "var(--profit)" : "var(--loss)";
+      var tParts = String(tc.t || "").split(" ");
+      var tDate = tParts[0] || "";
+      var tTime = tParts[1] || "";
+      var tDP = tDate.split("-");
+      var tDateFmt = tDP.length === 3 ? tDP[2] + "/" + tDP[1] + "/" + tDP[0] : tDate;
+      var ttx = mousePos.x + 14;
+      var tty = mousePos.y - 10;
+      if (ttx + 150 > w) ttx = mousePos.x - 160;
+      if (tty < 2) tty = 2;
+      if (tty + 100 > h) tty = h - 100;
+      tooltipEl = React.createElement("div", { style: { position: "absolute", left: ttx, top: tty, background: "var(--bg4)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 10px", fontSize: 10, fontFamily: "var(--font-mono)", lineHeight: 1.6, pointerEvents: "none", zIndex: 10, minWidth: 140, boxShadow: "0 2px 8px rgba(0,0,0,.3)" } },
+        React.createElement("div", { style: { fontWeight: 700, color: "var(--text)", marginBottom: 2, fontSize: 11 } }, tDateFmt + (tTime ? " " + tTime : "")),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "auto 1fr", gap: "0 8px", color: "var(--text5)" } },
+          React.createElement("span", null, "O"),
+          React.createElement("span", { style: { color: "var(--text2)", fontWeight: 600 } }, _fmt(tc.o)),
+          React.createElement("span", null, "H"),
+          React.createElement("span", { style: { color: "var(--text2)", fontWeight: 600 } }, _fmt(tc.h)),
+          React.createElement("span", null, "L"),
+          React.createElement("span", { style: { color: "var(--text2)", fontWeight: 600 } }, _fmt(tc.l)),
+          React.createElement("span", null, "C"),
+          React.createElement("span", { style: { color: tcColor, fontWeight: 700 } }, _fmt(tc.c)),
+          React.createElement("span", null, "Vol"),
+          React.createElement("span", { style: { color: "var(--text2)" } }, tc.v != null ? fmtNum(tc.v) : "\u2014")
+        )
+      );
+    }
+
+    return React.createElement("div", { style: { background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 12, overflow: "hidden", position: "relative" } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: priceColor } }, "\u20b9" + _fmt(lastC.c)),
@@ -9594,12 +9772,17 @@ function SingleStockAnalysis({ requestedTicker }) {
         gridLines,
         daySepEls,
         overlayEls,
+        patternHighlightEls,
         candleEls,
+        hoverEls,
+        patternLabelEls,
         React.createElement("line", { x1: padL, y1: volTop - 4, x2: w - padR, y2: volTop - 4, stroke: "var(--border)", strokeWidth: 0.5, strokeDasharray: "2,2" }),
         volEls,
         oscEls,
-        xTickEls
-      )
+        xTickEls,
+        hoverHitEls
+      ),
+      tooltipEl
     );
   };
 
@@ -9978,6 +10161,7 @@ function SingleStockAnalysis({ requestedTicker }) {
         renderCandleChart(),
         renderGauge(),
         renderMtfCard(),
+        React.createElement(PatternMiningPanel, { candles: candles, timeframe: timeframe }),
         React.createElement(TenDayConfidencePanel, { ticker: ticker }),
         React.createElement(OptimumEntryPanel, { ticker: ticker, entryScoreContext: mtf && mtf.entry ? buildEntryScoreContext(mtf.entry) : null }),
         React.createElement("div", { style: { display: "flex", gap: 3, marginBottom: 10, flexWrap: "wrap" } },
