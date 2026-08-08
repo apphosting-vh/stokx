@@ -2446,8 +2446,8 @@ window.TechIndicators = (function () {
       var atr14 = calcATR(candles, 14);
       var atrV = atr14 && atr14[L - 1] != null ? atr14[L - 1] : 0;
       var hi10 = -Infinity, hi10Idx = -1, hi20 = -Infinity;
-      for (var i = Math.max(0, L - 11); i < L - 1; i++) { if (cl[i] > hi10) { hi10 = cl[i]; hi10Idx = i; } }
-      for (var i = Math.max(0, L - 21); i < L - 1; i++) { if (cl[i] > hi20) hi20 = cl[i]; }
+      for (var i = Math.max(0, L - 11); i < L - 1; i++) { if (hi[i] > hi10) { hi10 = hi[i]; hi10Idx = i; } }
+      for (var i = Math.max(0, L - 21); i < L - 1; i++) { if (hi[i] > hi20) hi20 = hi[i]; }
       var rsiAtHi = hi10Idx >= 0 ? rsiS[hi10Idx] : null;
       var lastRet = (c - prevC) / prevC * 100;
       var gapPct = (openL - prevC) / prevC * 100;
@@ -2475,7 +2475,7 @@ window.TechIndicators = (function () {
 
   /* ══════════════════════════════════════════════════════════════════════════
      NEW ENTRY ENGINE — 3-pillar model (0-100):
-     Trend Health (30) + Pullback Quality (30) + 4% Probability (40),
+      Trend Health (35) + Pullback Quality (30) + 4% Probability (35) = 100,
      then ±15 modifiers. Designed to keep scores stable on shallow 1-1.5%
      dips toward support (pillar inputs are dip-insensitive, pullback pillar
      even gains on a dip to SMA20/lower-BB support).
@@ -2721,7 +2721,7 @@ window.TechIndicators = (function () {
     /* Horizon for confidence calculation */
     horizonDays: 10,
     /* Pillar max scores */
-    pillarMax: { trendHealth: 35, pullbackQuality: 35, prob4: 40 },
+    pillarMax: { trendHealth: 35, pullbackQuality: 30, prob4: 35 },
     /* MTF weights */
     tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
 
@@ -2757,19 +2757,19 @@ window.TechIndicators = (function () {
       pullbackDepthLo: 0.05,
       pullbackDepthHi: 0.15,
       pullbackDepthMax: 0.25,
-      supportConfluence: 5,
+      supportConfluence: 3,
       supportConfluenceThreshold: 2,
     },
     /* Pillar 3: 4% Probability */
     prob4: {
-      targetReachable_T1: 12,
+      targetReachable_T1: 10,
       targetATR_threshold1: 2.0,
-      targetReachable_T2: 10,
+      targetReachable_T2: 8,
       targetATR_threshold2: 1.5,
-      targetReachable_T3: 6,
+      targetReachable_T3: 5,
       targetATR_threshold3: 1.0,
       targetReachable_T4: 2,
-      targetDist_T1: 8,
+      targetDist_T1: 5,
       targetDist_range1_lo: 0.25,
       targetDist_range1_hi: 2.0,
       targetDist_T2: 4,
@@ -2854,7 +2854,7 @@ window.TechIndicators = (function () {
     return Math.min(s, SCORE_CONFIG.pillarMax.trendHealth);
   }
 
-  /* Pillar 2: Pullback / Setup Quality (max 35).
+  /* Pillar 2: Pullback / Setup Quality (max 30).
      Volatility-normalized: distance to buyRef measured in ATR terms instead of
      fixed percentage. For large cap (1.5% ATR), 1.0 ATR ~ 1.5%. For mid cap
      (3% ATR), 1.0 ATR ~ 3%. This naturally adapts to the stock's volatility. */
@@ -2876,29 +2876,34 @@ window.TechIndicators = (function () {
     return Math.min(s, SCORE_CONFIG.pillarMax.pullbackQuality);
   }
 
-  /* Pillar 3: 4% Probability (max 40).
+  /* Pillar 3: 4% Probability (max 35).
      Volatility-normalized: ATR percentile rank replaces fixed ATR% ranges,
-     and target distance is measured in ATR terms. This ensures the same
-     scoring works for large cap (low ATR%) and mid cap (high ATR%). */
+     and target distance is measured in ATR terms. Horizon-aware: reachability
+     thresholds scale with sqrt(horizonDays/10) so a longer holding period
+     gives more time to reach the target at the same daily volatility. */
   function calcProb4Score(sn, volRegime) {
     var c = SCORE_CONFIG.prob4;
     var s = 0;
     var atrPct = volRegime ? volRegime.atrPct : (sn.atr14 != null && sn.c != null && sn.c > 0 ? sn.atr14 / sn.c * 100 : null);
     var atrPercentile = volRegime ? volRegime.atrPercentile : 50;
 
+    /* Horizon scaling: longer horizon → more time → target more reachable at same ATR */
+    var horizonDays = SCORE_CONFIG.horizonDays || 10;
+    var hScale = Math.sqrt(horizonDays / 10);
+
     if (sn.c != null && sn.c > 0 && sn.atr14 != null && sn.atr14 > 0) {
       var targetATR = (c.targetPct * sn.c) / sn.atr14;
-      if (targetATR > c.targetATR_threshold1) s += c.targetReachable_T1;
-      else if (targetATR > c.targetATR_threshold2) s += c.targetReachable_T2;
-      else if (targetATR > c.targetATR_threshold3) s += c.targetReachable_T3;
+      if (targetATR > c.targetATR_threshold1 * hScale) s += c.targetReachable_T1;
+      else if (targetATR > c.targetATR_threshold2 * hScale) s += c.targetReachable_T2;
+      else if (targetATR > c.targetATR_threshold3 * hScale) s += c.targetReachable_T3;
       else s += c.targetReachable_T4;
     }
 
     if (sn.c != null && sn.c > 0 && sn.buyRef != null && sn.buyRef > 0 && sn.atr14 != null && sn.atr14 > 0) {
       var target4 = sn.buyRef * (1 + c.targetPct);
       var distATR = (target4 - sn.c) / sn.atr14;
-      if (distATR >= c.targetDist_range1_lo && distATR <= c.targetDist_range1_hi) s += c.targetDist_T1;
-      else if (distATR >= c.targetDist_range2_lo && distATR <= c.targetDist_range2_hi) s += c.targetDist_T2;
+      if (distATR >= c.targetDist_range1_lo * hScale && distATR <= c.targetDist_range1_hi * hScale) s += c.targetDist_T1;
+      else if (distATR >= c.targetDist_range2_lo * hScale && distATR <= c.targetDist_range2_hi * hScale) s += c.targetDist_T2;
     }
 
     if (atrPercentile != null && atrPercentile >= c.volPercentile_lo && atrPercentile <= c.volPercentile_hi) s += c.volSweet_T1;
@@ -4114,37 +4119,31 @@ window.TechIndicators = (function () {
     return { score: score, momentum: momentum, level: level, rs: rsArr[rsArr.length - 1] };
   }
 
-  /* ── Horizon Confidence Score (Next N Days) ────────────────────────────────
+   /* ── Horizon Confidence Score (Next N Days) ────────────────────────────────
      "Will the stock reach the target % within the NEXT N trading days?"
-     0–100. Statistical core: the N-day forward return is modelled as
-     lognormal with daily vol σ and daily drift μ:
+     0–100. Statistical core: touch probability via the reflection principle:
 
-       σ  = realized vol of daily log returns blended 50/50 with ATR-derived
-            vol (ATR ≈ σ·√(2/π) → σ ≈ ATR·√(π/2)), floored at 0.8%/day.
-       μ  = driftScore × 0.0025, where driftScore is ONE composite of the
-            stock's own daily trend (EMA stack, price vs EMA21, MACD > 0),
-            hourly trend/structure/momentum, RS-vs-Nifty (slope + position,
-            optional cfg.indexCandles), recent drift and up-bar volume — with
-            the directional signals damped by a daily-ADX regime multiplier
-            (a +DI/−DI cross in a choppy regime counts for far less — ADX
-            strength is gated by how cleanly price trends, R² of a line fit
-            to ln closes, so range chop with a temporarily positive DI reads
-            weak even when ADX is moderate).
-            No separate additive votes, no capped-ratio heuristic.
-       b  = ln(1 + remainingPct/100)   (gap still left to the target)
-       z  = (b − μ·N) / (σ·√N)
-       confidence ≈ 100 × (1 − Φ(z))   [terminal probability]
+       P(touch b) = N(−d₁) + exp(2μb/σ²) × N(−d₂)
 
-     Remaining time decays with days held (N_rem = N − daysHeld). Touch
-     probability (ever crossing b by day N, reflection principle) is computed
-     for reference only — it saturates near 1 at typical NSE vol, so the
-     terminal form drives the score. For display, P is logit-scaled so a
-     neutral stock (P ≈ 0.20) reads ~50 and the familiar 0–100 thresholds keep
-     meaning; the raw probability stays in components.probTerminal (anchor and
-     slope are tunable via cfg.cal_p0 / cfg.cal_k). Missing vol data → neutral
-     50 fill so early/low-data reads stay conservative. Overextension penalty
-     (continuous RSI + price-VWAP stretch, amplified near target) applies a
-     larger haircut to stretched entries.
+     where b = ln(1 + remainingPct/100), d₁ = (b − μN)/(σ√N),
+     d₂ = (b + μN)/(σ√N), μ = daily drift, σ = daily vol.
+
+     σ = realized vol of daily log returns blended 50/50 with ATR-derived vol
+     (ATR ≈ σ·√(2/π) → σ ≈ ATR·√(π/2)), floored at 0.8%/day.
+     μ = driftScore × 0.0025, a composite of daily trend (EMA stack, price vs
+     EMA21, MACD > 0), hourly trend/structure/momentum, RS-vs-Nifty (slope +
+     position), recent drift and up-bar volume — damped by a daily-ADX regime
+     multiplier (a +DI/−DI cross in a choppy regime counts for far less).
+
+     Remaining time decays with days held (N_rem = N − daysHeld). The
+     displayScore is logit-calibrated against empirical hit rates:
+       displayScore = 50 + (logit(P) − logit(calP0)) × calK
+     where calP0 / calK are OLS-calibrated constants from the backtest
+     harness (calibrateConfidence). A neutral stock (P ≈ 0.20) reads ~50.
+     The raw probability stays in components.probTouch. Missing vol data →
+     neutral 50 fill. Overextension penalty (continuous RSI + price-VWAP
+     stretch, amplified near target) applies a larger haircut to stretched
+     entries.
      Returns { confidence, reason, components, flags }. */
   function computeHorizonConfidence(hourlyCandles, dailyCandles, cfg) {
     cfg = cfg || {};
@@ -4380,8 +4379,8 @@ window.TechIndicators = (function () {
       }
       displayScore = displayScoreEmp != null ? displayScoreEmp : displayScoreLog;
 
+      var pen = 0;
       if (displayScore != null) {
-        var pen = 0;
         if (rsi14 != null && rsi14 > 85) pen += 5 * clamp((rsi14 - 85) / 10, 0, 1);
         if (vwap != null && atrPct != null) {
           var vwScale = atrPct / 100 * c;

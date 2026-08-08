@@ -116,7 +116,8 @@ window.BacktestEngine = (function () {
       curve: curve,
       finalEquity: ROUND2(equity),
       maxDrawdown: computeDrawdown(curve),
-      sharpeApprox: approximateSharpe(sorted)
+      sharpeApprox: approximateSharpe(sorted),
+      sharpeLabel: 'Per-trade Sharpe (not annualized)'
     };
   }
 
@@ -351,8 +352,7 @@ window.BacktestEngine = (function () {
       try {
         var scoreObj = scoreAt(candles, idx, symbol);
         var entryScoreCtx = scoreObj ? { trendHealth: scoreObj.trendHealth, pullbackQuality: scoreObj.pullbackQuality, prob4: scoreObj.prob4, entryScore: scoreObj.entryScore } : null;
-        var _hd = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().horizonDays || 10) : 10;
-        var cfg = { horizonDays: _hd, windowSessions: 40, entry_price: bar.c, targetPct: targetProfitPct, indexCandles: idxSlice, entryScoreContext: entryScoreCtx };
+        var cfg = { horizonDays: holdingPeriodDays, windowSessions: 40, entry_price: bar.c, targetPct: targetProfitPct, indexCandles: idxSlice, entryScoreContext: entryScoreCtx };
         var res = window.TechIndicators.computeHorizonConfidence(hSlice, dSlice, cfg);
         if (res && res.components && res.components.probTouch != null) return { probTouch: res.components.probTouch / 100, confLog: res.confidenceLognormal != null ? res.confidenceLognormal / 100 : null, confEmp: res.confidenceEmpirical != null ? res.confidenceEmpirical / 100 : null };
       } catch (e) {}
@@ -424,19 +424,20 @@ window.BacktestEngine = (function () {
       var withPT = trades.filter(function(t) { return t.probTouch != null && !isNaN(t.probTouch); });
       var MIN_TOTAL = 50;
       var TARGET_PER_BUCKET = 15;
+      var MIN_PER_BUCKET = 5;
       var MIN_BUCKETS = 3;
       var MAX_BUCKETS = 10;
       if (withPT.length < MIN_TOTAL) return null;
       var bucketCount = Math.max(MIN_BUCKETS, Math.min(MAX_BUCKETS, Math.floor(withPT.length / TARGET_PER_BUCKET)));
       var sorted = withPT.slice().sort(function(a, b) { return a.probTouch - b.probTouch; });
       var bucketSize = Math.floor(sorted.length / bucketCount);
-      if (bucketSize < 3) { bucketCount = Math.floor(sorted.length / 3); if (bucketCount < MIN_BUCKETS) return null; bucketSize = Math.floor(sorted.length / bucketCount); }
+      if (bucketSize < MIN_PER_BUCKET) { bucketCount = Math.floor(sorted.length / MIN_PER_BUCKET); if (bucketCount < MIN_BUCKETS) return null; bucketSize = Math.floor(sorted.length / bucketCount); }
       var buckets = [];
       for (var i = 0; i < bucketCount; i++) {
         var start = i * bucketSize;
         var end = i === bucketCount - 1 ? sorted.length : start + bucketSize;
         var group = sorted.slice(start, end);
-        if (group.length < 3) continue;
+        if (group.length < MIN_PER_BUCKET) continue;
         var hits = group.filter(function(t) { return t.hitTarget; }).length;
         var avgPT = group.reduce(function(s, t) { return s + t.probTouch; }, 0) / group.length;
         buckets.push({
@@ -511,7 +512,8 @@ window.BacktestEngine = (function () {
       candles._symbol = symbol;
 
       var L = candles.length;
-      var endIdx = Math.min(L - 1, L - holdingPeriodDays - 1);
+      var useRealistic = opts.realisticEntry !== undefined ? opts.realisticEntry : realisticEntry;
+      var endIdx = Math.min(L - 1, L - holdingPeriodDays - 1 - (useRealistic ? 1 : 0));
       var startIdx = Math.min(warmup, endIdx);
       if (endIdx < startIdx) {
         return { symbol: symbol, error: "Not enough forward data for a " + holdingPeriodDays + "-day hold" };
@@ -588,7 +590,8 @@ window.BacktestEngine = (function () {
       candles._symbol = symbol;
 
       var L = candles.length;
-      var matureEnd = L - holdingPeriodDays - 1;
+      var useRealisticWF = opts.realisticEntry !== undefined ? opts.realisticEntry : realisticEntry;
+      var matureEnd = L - holdingPeriodDays - 1 - (useRealisticWF ? 1 : 0);
       var regionStart = Math.min(warmup, matureEnd);
       var regionLen = matureEnd - regionStart + 1;
 

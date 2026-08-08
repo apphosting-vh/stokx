@@ -124,40 +124,47 @@ window.OHLCVFetcher = (function () {
   async function fetchQuote(ticker) {
     var cleanTicker = (ticker || "").trim().toUpperCase().replace(/\.(NS|BO)$/i, "");
     var symbols = [cleanTicker + ".NS", cleanTicker + ".BO", cleanTicker];
-    for (var s = 0; s < symbols.length; s++) {
-      for (var h = 0; h < Y_HOSTS.length; h++) {
-        for (var p = 0; p < Y_PROXY_FNS.length; p++) {
-          try {
-            var yUrl = "https://" + Y_HOSTS[h] + "/v6/finance/quote?symbols=" + encodeURIComponent(symbols[s]);
-            var proxyUrl = Y_PROXY_FNS[p](yUrl);
-            var r = await fetchWithTimeout(proxyUrl, {}, 10000);
-            if (!r.ok) continue;
-            var txt = await readBody(r, 8000);
-            var json;
-            try { json = JSON.parse(txt); } catch (e) { continue; }
-            var payload = json && json.contents ? (function () { try { return JSON.parse(json.contents); } catch (e) { return json; } })() : json;
-            var result = payload && payload.quoteResponse && payload.quoteResponse.result && payload.quoteResponse.result[0];
-            if (!result || result.regularMarketPrice == null) continue;
-            return {
-              price: result.regularMarketPrice,
-              change: result.regularMarketChange != null ? result.regularMarketChange : null,
-              changePercent: result.regularMarketChangePercent != null ? result.regularMarketChangePercent : null,
-              dayHigh: result.regularMarketDayHigh != null ? result.regularMarketDayHigh : null,
-              dayLow: result.regularMarketDayLow != null ? result.regularMarketDayLow : null,
-              high52: result.fiftyTwoWeekHigh != null ? result.fiftyTwoWeekHigh : null,
-              low52: result.fiftyTwoWeekLow != null ? result.fiftyTwoWeekLow : null,
-              marketCap: result.marketCap != null ? result.marketCap : null,
-              pe: result.trailingPE != null ? result.trailingPE : null,
-              volume: result.regularMarketVolume != null ? result.regularMarketVolume : null,
-              avgVolume: result.averageDailyVolume10Day != null ? result.averageDailyVolume10Day : (result.averageVolume != null ? result.averageVolume : null)
-            };
-          } catch (e) {
-            continue;
+    var ctrl = new AbortController();
+    var tid = setTimeout(function () { ctrl.abort(); }, 25000);
+    try {
+      for (var s = 0; s < symbols.length; s++) {
+        for (var h = 0; h < Y_HOSTS.length; h++) {
+          for (var p = 0; p < Y_PROXY_FNS.length; p++) {
+            try {
+              if (ctrl.signal.aborted) return null;
+              var yUrl = "https://" + Y_HOSTS[h] + "/v6/finance/quote?symbols=" + encodeURIComponent(symbols[s]);
+              var proxyUrl = Y_PROXY_FNS[p](yUrl);
+              var r = await fetchWithTimeout(proxyUrl, { signal: ctrl.signal }, 10000);
+              if (!r.ok) continue;
+              var txt = await readBody(r, 8000);
+              var json;
+              try { json = JSON.parse(txt); } catch (e) { continue; }
+              var payload = json && json.contents ? (function () { try { return JSON.parse(json.contents); } catch (e) { return json; } })() : json;
+              var result = payload && payload.quoteResponse && payload.quoteResponse.result && payload.quoteResponse.result[0];
+              if (!result || result.regularMarketPrice == null) continue;
+              return {
+                price: result.regularMarketPrice,
+                change: result.regularMarketChange != null ? result.regularMarketChange : null,
+                changePercent: result.regularMarketChangePercent != null ? result.regularMarketChangePercent : null,
+                dayHigh: result.regularMarketDayHigh != null ? result.regularMarketDayHigh : null,
+                dayLow: result.regularMarketDayLow != null ? result.regularMarketDayLow : null,
+                high52: result.fiftyTwoWeekHigh != null ? result.fiftyTwoWeekHigh : null,
+                low52: result.fiftyTwoWeekLow != null ? result.fiftyTwoWeekLow : null,
+                marketCap: result.marketCap != null ? result.marketCap : null,
+                pe: result.trailingPE != null ? result.trailingPE : null,
+                volume: result.regularMarketVolume != null ? result.regularMarketVolume : null,
+                avgVolume: result.averageDailyVolume10Day != null ? result.averageDailyVolume10Day : (result.averageVolume != null ? result.averageVolume : null)
+              };
+            } catch (e) {
+              continue;
+            }
           }
         }
       }
+      return null;
+    } finally {
+      clearTimeout(tid);
     }
-    return null;
   }
 
   var _quoteCache = {};
@@ -242,15 +249,21 @@ window.OHLCVFetcher = (function () {
     if (!ticker) return { data: null, source: null, ts: Date.now() };
     var key = String(ticker).trim().toUpperCase() + "|" + (timeframe || "daily");
     var entry = _cache[key];
-    if (entry && (Date.now() - entry.ts) < _cacheTTL()) {
-      return entry;
+    if (entry) {
+      /* Failed entries use a shorter 60s TTL regardless of market hours */
+      var ttl = entry.failed ? 60000 : _cacheTTL();
+      if ((Date.now() - entry.ts) < ttl) {
+        return entry;
+      }
     }
     var result = await fetchOHLCV(ticker, timeframe);
     if (result && result.candles) {
       _cache[key] = { data: result.candles, source: result.source, ts: Date.now() };
       return _cache[key];
     }
-    return { data: null, source: null, ts: Date.now() };
+    /* Cache failures briefly (60s) to avoid re-hammering bad symbols */
+    _cache[key] = { data: null, source: null, ts: Date.now(), failed: true };
+    return _cache[key];
   }
 
   function clearCache() {
