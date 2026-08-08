@@ -4159,6 +4159,12 @@ window.TechIndicators = (function () {
     };
     try {
       if (!hourlyCandles || hourlyCandles.length < 60) return base;
+      /* ── Hourly data-quality ramp ─────────────────────────────────────
+         60 bars: ADX/EMA/RSI are noisier → scale hourly contribution to 50%
+         120+ bars: full 100% contribution
+         Linear interpolation between. Prevents a 65-bar result from getting
+         the same hourDrift weight as a 250-bar result. */
+      var hourlyDataQuality = clamp((hourlyCandles.length - 60) / 60, 0.5, 1.0);
       var entry = cfg.entry_price || cfg.entry || 0;
       if (entry <= 0) { base.reason = 'no_entry_price'; return base; }
       var cur = hourlyCandles[hourlyCandles.length - 1];
@@ -4290,6 +4296,7 @@ window.TechIndicators = (function () {
       hourDrift = clamp(hourDrift, -1, 1);
       var hourDecay = clamp(Math.pow(Math.min(1, 10 / horizonDays), 1.2), 0.3, 1.0);
       hourDrift *= hourDecay;
+      hourDrift *= hourlyDataQuality;
       var dayDrift;
       if (ctx.trendHealth != null) {
         dayDrift = clamp((ctx.trendHealth - 15) / 15, -1, 1);
