@@ -2722,75 +2722,76 @@ window.TechIndicators = (function () {
   var SCORE_CONFIG = {
     /* Horizon for confidence calculation */
     horizonDays: 10,
-    /* Pillar max scores (existing pillars scaled 80% to accommodate 4th pillar) */
-    pillarMax: { trendHealth: 28, pullbackQuality: 24, prob4: 28, swingPotential: 20 },
+    /* Pillar max scores — original 3 pillars (100 total) + Swing Potential (20 bonus).
+       Raw total can exceed 100; final score is clamped to [0, 100]. */
+    pillarMax: { trendHealth: 35, pullbackQuality: 30, prob4: 35, swingPotential: 20 },
     /* MTF weights */
     tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
 
-    /* Pillar 1: Trend Health (max 28) */
+    /* Pillar 1: Trend Health (max 35) */
     trendHealth: {
-      priceAboveSMA50: 4,
-      SMA20AboveSMA50: 4,
-      priceAboveSMA20_or_VWAP: 4,
-      ADX_DI: 4,
+      priceAboveSMA50: 5,
+      SMA20AboveSMA50: 5,
+      priceAboveSMA20_or_VWAP: 5,
+      ADX_DI: 5,
       adxThreshold: 25,
-      mansfieldRS: 4,
+      mansfieldRS: 5,
       mansfieldRSThreshold: 0,
-      macdCross: 4,
-      weeklyHABullish: 2,
-      sma20Slope: 2,
+      macdCross: 5,
+      weeklyHABullish: 2.5,
+      sma20Slope: 2.5,
       sma20SlopeThreshold: 0,
     },
-    /* Pillar 2: Pullback Quality (max 24) */
+    /* Pillar 2: Pullback Quality (max 30) */
     pullbackQuality: {
-      distATR_inner: 5.6,
+      distATR_inner: 7,
       distATR_innerRange: 1.0,
-      distATR_outer: 2.4,
+      distATR_outer: 3,
       distATR_outerRange: 1.5,
-      candleColor: 3.2,
-      bbWidthSqueeze: 2.4,
-      rsiOversold: 2.4,
+      candleColor: 4,
+      bbWidthSqueeze: 3,
+      rsiOversold: 3,
       stochRSIThreshold: 20,
       rsiOversoldNormal: 40,
       rsiOversoldHighVol: 35,
-      volumeConfirm: 3.2,
+      volumeConfirm: 4,
       volRatioThreshold: 1.5,
-      pullbackDepthIdeal: 4.8,
+      pullbackDepthIdeal: 6,
       pullbackDepthLo: 0.05,
       pullbackDepthHi: 0.15,
       pullbackDepthMax: 0.25,
-      supportConfluence: 2.4,
+      supportConfluence: 3,
       supportConfluenceThreshold: 2,
     },
-    /* Pillar 3: 4% Probability (max 28) */
+    /* Pillar 3: 4% Probability (max 35) */
     prob4: {
-      targetReachable_T1: 8,
+      targetReachable_T1: 10,
       targetATR_threshold1: 2.0,
-      targetReachable_T2: 6.4,
+      targetReachable_T2: 8,
       targetATR_threshold2: 1.5,
-      targetReachable_T3: 4,
+      targetReachable_T3: 5,
       targetATR_threshold3: 1.0,
-      targetReachable_T4: 1.6,
-      targetDist_T1: 4,
+      targetReachable_T4: 2,
+      targetDist_T1: 5,
       targetDist_range1_lo: 0.25,
       targetDist_range1_hi: 2.0,
-      targetDist_T2: 3.2,
+      targetDist_T2: 4,
       targetDist_range2_lo: 0,
       targetDist_range2_hi: 3.0,
-      volSweet_T1: 6.4,
+      volSweet_T1: 8,
       volPercentile_lo: 30,
       volPercentile_hi: 70,
-      volSweet_T2: 3.2,
+      volSweet_T2: 4,
       volPercentile_lo2: 20,
       volPercentile_hi2: 80,
-      efficiencyRatio: 3.2,
+      efficiencyRatio: 4,
       efficiencyRatioThreshold: 0.4,
-      upDayVolBonus: 4,
+      upDayVolBonus: 5,
       upDayVol_threshold: 1.2,
-      upDayVolPenalty: -4,
+      upDayVolPenalty: -5,
       upDayVol_low: 0.7,
-      directionalBias: 4,
-      resistancePenalty: -4,
+      directionalBias: 5,
+      resistancePenalty: -5,
       resistanceThreshold: 0.04,
       targetPct: 0.04,
     },
@@ -2822,7 +2823,11 @@ window.TechIndicators = (function () {
   };
 
   var SCORE_CONFIG_DEFAULTS = JSON.parse(JSON.stringify(SCORE_CONFIG));
+  /* Bump this whenever pillarMax or any pillar's sub-score weights change.
+     Used to auto-discard stale localStorage configs. */
+  var SCORE_CONFIG_VERSION = 2;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
+  function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
   function getDefaultScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG_DEFAULTS)); }
   function setScoreConfig(patch) {
     if (!patch) return;
@@ -2858,7 +2863,7 @@ window.TechIndicators = (function () {
     return Math.min(s, SCORE_CONFIG.pillarMax.trendHealth);
   }
 
-  /* Pillar 2: Pullback / Setup Quality (max 30).
+   /* Pillar 2: Pullback / Setup Quality (max 30).
      Volatility-normalized: distance to buyRef measured in ATR terms instead of
      fixed percentage. For large cap (1.5% ATR), 1.0 ATR ~ 1.5%. For mid cap
      (3% ATR), 1.0 ATR ~ 3%. This naturally adapts to the stock's volatility. */
@@ -2880,7 +2885,7 @@ window.TechIndicators = (function () {
     return Math.min(s, SCORE_CONFIG.pillarMax.pullbackQuality);
   }
 
-  /* Pillar 3: 4% Probability (max 35).
+   /* Pillar 3: 4% Probability (max 35).
      Volatility-normalized: ATR percentile rank replaces fixed ATR% ranges,
      and target distance is measured in ATR terms. Horizon-aware: reachability
      thresholds scale with sqrt(horizonDays/10) so a longer holding period
@@ -3038,6 +3043,9 @@ window.TechIndicators = (function () {
     var r3 = lastVals(calcRSI(candles, 14), 3);
     if (r3.length === 3 && r3[0] != null && r3[2] != null && r3[0] < 40 && r3[2] > r3[0]) turnScore += c.rsiUpturn;
 
+    /* Cap turn confirmation sub-components at turnConfirm max */
+    turnScore = Math.min(turnScore, c.turnConfirm);
+
     return Math.min(SCORE_CONFIG.pillarMax.swingPotential, probScore + turnScore);
   }
 
@@ -3081,7 +3089,10 @@ window.TechIndicators = (function () {
       trendHealth: calcTrendHealthScore(sn),
       pullbackQuality: calcPullbackScore(sn, volRegime),
       prob4: calcProb4Score(sn, volRegime),
-      swingPotential: calcSwingPotentialScore(candles, sn),
+      /* Swing Potential is daily-only: the 2–15 bar pullback window is
+         inherently a daily-scale judgment. Returning null for H/W lets
+         the MTF aggregation's wSum exclusion handle it — no dilution. */
+      swingPotential: tf === 'D' ? calcSwingPotentialScore(candles, sn) : null,
       spike: sn.spikeLast === true ? 5 : 0,
       stability: round(Math.max(0, Math.min(10, (1 - (sn.stability20 != null ? sn.stability20 : 1)) * 10)), 1),
       volRegime: volRegime,
@@ -3144,7 +3155,7 @@ window.TechIndicators = (function () {
    /* Multi-timeframe Entry Score — new 4-pillar model:
       each pillar is computed per timeframe, then each pillar is aggregated across
       timeframes as D*0.55 + H*0.30 + W*0.15 (renormalized over available timeframes
-      via wSum division) and capped at its pillar max (28 / 24 / 28 / 20) at the combined
+      via wSum division) and capped at its pillar max (35 / 30 / 35 / 20) at the combined
      level. Modifiers run once on the Daily snapshot only (the primary decision
      frame); the MTF +10 needs weekly+daily ≥ 65. */
   function computeMultiTFEntryScore(tfResults, indexCandles, indexWeeklyCandles) {
@@ -3200,8 +3211,11 @@ window.TechIndicators = (function () {
       baseSn = (perTF[fbLabel] && perTF[fbLabel].sn) || buildEntrySnapshot(fbTF.candles, indexCandles, fbLabel);
     }
 
-    var wRaw = perTF.W ? (perTF.W.trendHealth + perTF.W.pullbackQuality + perTF.W.prob4 + perTF.W.swingPotential) : null;
-    var dRaw = perTF.D ? (perTF.D.trendHealth + perTF.D.pullbackQuality + perTF.D.prob4 + perTF.D.swingPotential) : null;
+    /* Alignment check: "is the core trend aligned daily-vs-weekly?"
+       Excludes Swing Potential entirely — it's a daily-only reversal bonus,
+       not a trend-alignment signal. Both ceilings are 100, no normalization. */
+    var wRaw = perTF.W ? (perTF.W.trendHealth + perTF.W.pullbackQuality + perTF.W.prob4) : null;
+    var dRaw = perTF.D ? (perTF.D.trendHealth + perTF.D.pullbackQuality + perTF.D.prob4) : null;
     var mc = SCORE_CONFIG.modifiers;
     var _mtfFloor = mc.mtfAlignFloor != null ? mc.mtfAlignFloor : 50;
     var _mtfRange = (mc.mtfAlignThreshold || 65) - _mtfFloor;
@@ -5179,6 +5193,7 @@ window.TechIndicators = (function () {
     integratedExitDecision: integratedExitDecision,
     detectCandlePatterns: detectCandlePatterns,
     getScoreConfig: getScoreConfig,
+    getScoreConfigVersion: getScoreConfigVersion,
     getDefaultScoreConfig: getDefaultScoreConfig,
     setScoreConfig: setScoreConfig
   };

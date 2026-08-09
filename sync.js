@@ -287,12 +287,18 @@ window.__stoxRestoreFromPayload = async function(data) {
     if (data.confTrackerPrices && typeof data.confTrackerPrices === "object") await dbSetSetting("stox_conf_tracker_prices", data.confTrackerPrices);
     if (data.notes) await dbSetSetting("stox_notes", data.notes);
     if (data.scoreConfig && typeof data.scoreConfig === "object") {
-      try {
-        localStorage.setItem("stox_score_config", JSON.stringify(data.scoreConfig));
-        if (window.TechIndicators && window.TechIndicators.setScoreConfig) {
-          window.TechIndicators.setScoreConfig(data.scoreConfig);
-        }
-      } catch (e) {}
+      var curVer = (window.TechIndicators && window.TechIndicators.getScoreConfigVersion) ? window.TechIndicators.getScoreConfigVersion() : null;
+      if (curVer != null && data.scoreConfig._v !== curVer) {
+        data.scoreConfig = null; // discard stale score config from import
+      }
+      if (data.scoreConfig) {
+        try {
+          localStorage.setItem("stox_score_config", JSON.stringify(data.scoreConfig));
+          if (window.TechIndicators && window.TechIndicators.setScoreConfig) {
+            window.TechIndicators.setScoreConfig(data.scoreConfig);
+          }
+        } catch (e) {}
+      }
     }
     if (window.__fsa) window.__fsa.state = {
       holdings: data.holdings || [],

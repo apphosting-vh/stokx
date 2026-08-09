@@ -242,12 +242,18 @@ async function restoreStoxBackup(fileText) {
   if (d.confTrackerPrices && typeof d.confTrackerPrices === "object") { try { await dbSetSetting("stox_conf_tracker_prices", d.confTrackerPrices); } catch(e) {} }
   if (d.notes) { try { await dbSetSetting("stox_notes", d.notes); } catch(e) {} }
   if (d.scoreConfig && typeof d.scoreConfig === "object") {
-    try {
-      localStorage.setItem("stox_score_config", JSON.stringify(d.scoreConfig));
-      if (window.TechIndicators && window.TechIndicators.setScoreConfig) {
-        window.TechIndicators.setScoreConfig(d.scoreConfig);
-      }
-    } catch(e) {}
+    var curVer = (window.TechIndicators && window.TechIndicators.getScoreConfigVersion) ? window.TechIndicators.getScoreConfigVersion() : null;
+    if (curVer != null && d.scoreConfig._v !== curVer) {
+      d.scoreConfig = null; // discard stale score config from import
+    }
+    if (d.scoreConfig) {
+      try {
+        localStorage.setItem("stox_score_config", JSON.stringify(d.scoreConfig));
+        if (window.TechIndicators && window.TechIndicators.setScoreConfig) {
+          window.TechIndicators.setScoreConfig(d.scoreConfig);
+        }
+      } catch(e) {}
+    }
   }
   var snaps = d.soldShareSnapshots || {};
   Object.keys(snaps).forEach(function(fyKey) {
