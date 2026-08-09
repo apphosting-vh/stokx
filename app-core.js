@@ -7926,6 +7926,21 @@ const ScoreTunerPanel = () => {
             )
           )
         ),
+        /* Pillar 4: Swing Potential */
+        React.createElement("div", { style: { marginBottom: 16 } },
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 4: Swing Potential"),
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 } },
+            [["swingPotential.reversalProbability", "Reversal Probability", 0, 20], ["swingPotential.turnConfirm", "Turn Confirm", 0, 10],
+             ["swingPotential.higherLow", "Higher Low", 0, 5], ["swingPotential.reversalCandle", "Reversal Candle", 0, 5],
+             ["swingPotential.rsiUpturn", "RSI Upturn", 0, 3]
+            ].map(([path, label, min, max]) =>
+              React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
+                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 140 } }, label),
+                React.createElement("input", { className: "inp", type: "number", step: 0.5, min: min, max: max, value: scoreConfig.swingPotential[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 75, fontSize: 11 } })
+              )
+            )
+          )
+        ),
         /* Modifiers */
         React.createElement("div", { style: { marginBottom: 16 } },
           React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Modifiers"),
