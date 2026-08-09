@@ -9774,6 +9774,20 @@ function SingleStockAnalysis({ requestedTicker }) {
         React.createElement("line", { key: "hcross", x1: hx, y1: padT, x2: hx, y2: padT + ch, stroke: "var(--text6)", strokeWidth: 0.7, strokeDasharray: "3,3", opacity: 0.6 }),
         React.createElement("circle", { key: "hdot", cx: hx, cy: yScale(hc.c), r: 3, fill: hc.c >= hc.o ? "var(--profit)" : "var(--loss)", stroke: "#fff", strokeWidth: 1 })
       );
+      if (mousePos) {
+        var svgEl = document.querySelector && document.querySelector("svg[viewBox]");
+        if (svgEl) {
+          var svgRect = svgEl.getBoundingClientRect();
+          var svgY = (mousePos.y / svgRect.height) * h;
+          var clampedSvgY = Math.max(padT, Math.min(padT + ch, svgY));
+          var hoverPrice = lo + ((padT + ch - clampedSvgY) / ch) * range;
+          hoverEls.push(
+            React.createElement("line", { key: "vcross", x1: padL, y1: clampedSvgY, x2: padL + cw, y2: clampedSvgY, stroke: "var(--text6)", strokeWidth: 0.7, strokeDasharray: "3,3", opacity: 0.6 }),
+            React.createElement("rect", { key: "hprice_bg", x: 0, y: clampedSvgY - 7, width: padL - 2, height: 14, rx: 2, fill: "var(--bg4)", stroke: "var(--border)", strokeWidth: 0.5 }),
+            React.createElement("text", { key: "hprice_tx", x: padL - 4, y: clampedSvgY + 3.5, fontSize: 8, fill: "var(--text4)", textAnchor: "end", fontFamily: "var(--font-mono)" }, _fmt(hoverPrice))
+          );
+        }
+      }
     }
 
     var tooltipEl = null;
