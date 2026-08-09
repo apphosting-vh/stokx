@@ -9139,6 +9139,11 @@ function SingleStockAnalysis({ requestedTicker }) {
   var _y = useState({}), snapOpen = _y[0], setSnapOpen = _y[1];
   var _z = useState(null), hoverCandle = _z[0], setHoverCandle = _z[1];
   var _zz = useState(null), mousePos = _zz[0], setMousePos = _zz[1];
+  var _zm = useState(null), zoomCandles = _zm[0], setZoomCandles = _zm[1];
+  var _zp = useState(0), panOffset = _zp[0], setPanOffset = _zp[1];
+  var _zd = useState(false), isDragging = _zd[0], setIsDragging = _zd[1];
+  var _dl = useState(null), dragStartX = _dl[0], setDragStartX = _dl[1];
+  var _dp = useState(null), dragStartPan = _dp[0], setDragStartPan = _dp[1];
 
   useEffect(function () {
     try { localStorage.setItem(_LS_KEY, JSON.stringify({ ticker: ticker, timeframe: timeframe, category: category, autoRefresh: autoRefresh })); } catch (e) {}
@@ -9404,9 +9409,15 @@ function SingleStockAnalysis({ requestedTicker }) {
     });
     if (data.length < 2) return null;
     var full = data;
-    var maxCandles = timeframe === "5m" ? 390 : timeframe === "15m" ? 300 : timeframe === "1m" ? 200 : timeframe === "1h" ? 200 : 80;
-    data = data.slice(-maxCandles);
-    var startIdx = full.length - data.length;
+    var defaultMax = timeframe === "5m" ? 390 : timeframe === "15m" ? 300 : timeframe === "1m" ? 200 : timeframe === "1h" ? 200 : 80;
+    var maxCandles = zoomCandles != null ? Math.max(10, Math.min(full.length, zoomCandles)) : defaultMax;
+    var visCount = Math.min(maxCandles, full.length);
+    var maxPan = full.length - visCount;
+    var effectivePan = Math.max(0, Math.min(maxPan, panOffset));
+    var sliceEnd = full.length - effectivePan;
+    var sliceStart = Math.max(0, sliceEnd - visCount);
+    data = full.slice(sliceStart, sliceEnd);
+    var startIdx = sliceStart;
     var oscOn = oscPane === "rsi" || oscPane === "macd";
     var oscH = oscOn ? 64 : 0;
     var volH = 24;
@@ -9715,6 +9726,20 @@ function SingleStockAnalysis({ requestedTicker }) {
       return React.createElement("span", { key: it.label, style: { display: "inline-flex", alignItems: "center", gap: 3 } },
         React.createElement("span", { style: { width: 8, height: 2, background: it.c, display: "inline-block" } }), it.label);
     })) : null;
+    var isZoomed = zoomCandles != null && zoomCandles !== defaultMax;
+    var zoomBar = React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 4, fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--text5)" } },
+      React.createElement("span", { style: { cursor: "pointer", padding: "1px 5px", borderRadius: 3, background: "var(--bg4)", border: "1px solid var(--border)", color: "var(--text4)" },
+        onClick: function () { var cur = zoomCandles != null ? zoomCandles : defaultMax; setZoomCandles(Math.max(10, Math.round(cur * 0.7))); } }, "\u2212"),
+      React.createElement("span", { style: { flex: 1, height: 3, borderRadius: 2, background: "var(--bg5)", position: "relative", cursor: "pointer" },
+        onClick: function (e) { var r = e.currentTarget.getBoundingClientRect(); var pct = (e.clientX - r.left) / r.width; setZoomCandles(Math.max(10, Math.round(full.length * (1 - pct * 0.9)))); setPanOffset(0); } },
+        React.createElement("span", { style: { position: "absolute", left: 0, top: 0, height: "100%", width: ((zoomCandles != null ? zoomCandles : defaultMax) / full.length * 100) + "%", borderRadius: 2, background: "var(--accent)", opacity: 0.6 } })
+      ),
+      React.createElement("span", { style: { cursor: "pointer", padding: "1px 5px", borderRadius: 3, background: "var(--bg4)", border: "1px solid var(--border)", color: "var(--text4)" },
+        onClick: function () { var cur = zoomCandles != null ? zoomCandles : defaultMax; setZoomCandles(Math.min(full.length, Math.round(cur * 1.4))); } }, "+"),
+      React.createElement("span", null, data.length + "/" + full.length),
+      isZoomed && React.createElement("span", { style: { cursor: "pointer", padding: "1px 4px", borderRadius: 3, background: "var(--bg4)", border: "1px solid var(--border)", color: "var(--accent)", fontSize: 8 },
+        onClick: function () { setZoomCandles(null); setPanOffset(0); } }, "Reset")
+    );
 
     var lastC = data[data.length - 1];
     var firstC = data[0];
@@ -9783,7 +9808,34 @@ function SingleStockAnalysis({ requestedTicker }) {
       );
     }
 
-    return React.createElement("div", { style: { background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 12, overflow: "hidden", position: "relative" } },
+    function handleWheel(e) {
+      e.preventDefault();
+      var dir = e.deltaY > 0 ? 1 : -1;
+      var cur = zoomCandles != null ? zoomCandles : defaultMax;
+      var step = Math.max(5, Math.round(cur * 0.15));
+      var next = Math.max(10, Math.min(full.length, cur + dir * step));
+      setZoomCandles(next);
+      setPanOffset(function (prev) { return Math.max(0, Math.min(full.length - next, prev)); });
+    }
+    function handleMouseDown(e) {
+      if (e.button !== 0) return;
+      setIsDragging(true);
+      setDragStartX(e.clientX);
+      setDragStartPan(panOffset);
+    }
+    function handleMouseMove(e) {
+      if (!isDragging || dragStartX == null) return;
+      var svgRect = e.currentTarget.querySelector("svg").getBoundingClientRect();
+      var pxPerCandle = svgRect.width / visCount;
+      var dx = dragStartX - e.clientX;
+      var candleDx = Math.round(dx / pxPerCandle);
+      var newPan = Math.max(0, Math.min(full.length - visCount, dragStartPan + candleDx));
+      setPanOffset(newPan);
+    }
+    function handleMouseUp() { setIsDragging(false); setDragStartX(null); setDragStartPan(null); }
+
+    return React.createElement("div", { style: { background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 12, overflow: "hidden", position: "relative", cursor: isDragging ? "grabbing" : "default" },
+      onWheel: handleWheel, onMouseDown: handleMouseDown, onMouseMove: handleMouseMove, onMouseUp: handleMouseUp, onMouseLeave: handleMouseUp,
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: priceColor } }, "\u20b9" + _fmt(lastC.c)),
@@ -9792,7 +9844,8 @@ function SingleStockAnalysis({ requestedTicker }) {
         )
       ),
       legendEl,
-      React.createElement("svg", { viewBox: "0 0 " + w + " " + h, style: { width: "100%", height: "auto" } },
+      zoomBar,
+      React.createElement("svg", { viewBox: "0 0 " + w + " " + h, style: { width: "100%", height: "auto", cursor: isDragging ? "grabbing" : "crosshair" } },
         React.createElement("text", { x: 8, y: padT + ch / 2, fontSize: 8, fill: "var(--text6)", textAnchor: "middle", fontFamily: "var(--font-mono)", transform: "rotate(-90, 8, " + (padT + ch / 2) + ")" }, yLabel),
         React.createElement("text", { x: padL + cw / 2, y: h - 2, fontSize: 8, fill: "var(--text6)", textAnchor: "middle", fontFamily: "var(--font-mono)" }, xLabel),
         gridLines,
