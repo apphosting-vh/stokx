@@ -351,7 +351,7 @@ window.BacktestEngine = (function () {
       }
       try {
         var scoreObj = scoreAt(candles, idx, symbol);
-        var entryScoreCtx = scoreObj ? { trendHealth: scoreObj.trendHealth, pullbackQuality: scoreObj.pullbackQuality, prob4: scoreObj.prob4, entryScore: scoreObj.entryScore } : null;
+        var entryScoreCtx = scoreObj ? { trendHealth: scoreObj.trendHealth, pullbackQuality: scoreObj.pullbackQuality, prob4: scoreObj.prob4, swingPotential: scoreObj.swingPotential, entryScore: scoreObj.entryScore } : null;
         /* Cost-adjusted target: the actual % gain the model should estimate,
            matching what simulateTrade treats as hitTarget. Without this,
            calibration regresses against a harder bar (raw 4%) than the
@@ -375,6 +375,7 @@ window.BacktestEngine = (function () {
       var minTH = opts.minTrendHealth != null ? opts.minTrendHealth : -Infinity;
       var minPQ = opts.minPullbackQuality != null ? opts.minPullbackQuality : -Infinity;
       var minP4 = opts.minProb4 != null ? opts.minProb4 : -Infinity;
+      var minSW = opts.minSwingPotential != null ? opts.minSwingPotential : -Infinity;
       var minRaw = opts.minRawScore != null ? opts.minRawScore : -Infinity;
       for (var i = startIdx; i <= endIdx; i++) {
         if (skip[i]) { if (onBar) onBar(i - startIdx + 1, endIdx - startIdx + 1); continue; }
@@ -386,6 +387,7 @@ window.BacktestEngine = (function () {
               && (r.trendHealth == null || r.trendHealth >= minTH)
               && (r.pullbackQuality == null || r.pullbackQuality >= minPQ)
               && (r.prob4 == null || r.prob4 >= minP4)
+              && (r.swingPotential == null || r.swingPotential >= minSW)
               && (r.raw_score == null || r.raw_score >= minRaw)) {
             var trade = simulateTrade(candles, i, r, opts);
             trade.symbol = symbol;
@@ -566,6 +568,7 @@ window.BacktestEngine = (function () {
       var minTH = opts.minTrendHealth != null ? opts.minTrendHealth : -Infinity;
       var minPQ = opts.minPullbackQuality != null ? opts.minPullbackQuality : -Infinity;
       var minP4 = opts.minProb4 != null ? opts.minProb4 : -Infinity;
+      var minSW = opts.minSwingPotential != null ? opts.minSwingPotential : -Infinity;
       var minRaw = opts.minRawScore != null ? opts.minRawScore : -Infinity;
       for (var i = startIdx; i <= endIdx; i++) {
         if ((i - startIdx) % step === 0) {
@@ -581,6 +584,7 @@ window.BacktestEngine = (function () {
                 && (r.trendHealth == null || r.trendHealth >= minTH)
                 && (r.pullbackQuality == null || r.pullbackQuality >= minPQ)
                 && (r.prob4 == null || r.prob4 >= minP4)
+                && (r.swingPotential == null || r.swingPotential >= minSW)
                 && (r.raw_score == null || r.raw_score >= minRaw)) {
               fwd.symbol = symbol;
               var c10 = conf10dAt(candles, i, symbol);
@@ -603,7 +607,7 @@ window.BacktestEngine = (function () {
       var currentScore = null;
       if (L >= warmup) {
         var cur = scoreAt(candles, L - 1, symbol);
-        if (cur) currentScore = { entryScore: ROUND2(cur.entryScore), classification: cur.classification || classifyScore(cur.entryScore), rawScore: cur.raw_score != null ? ROUND2(cur.raw_score) : null, trendHealth: cur.trendHealth != null ? ROUND2(cur.trendHealth) : null, pullbackQuality: cur.pullbackQuality != null ? ROUND2(cur.pullbackQuality) : null, prob4: cur.prob4 != null ? ROUND2(cur.prob4) : null, modifiers: cur.modifiers != null ? ROUND2(cur.modifiers) : null };
+        if (cur) currentScore = { entryScore: ROUND2(cur.entryScore), classification: cur.classification || classifyScore(cur.entryScore), rawScore: cur.raw_score != null ? ROUND2(cur.raw_score) : null, trendHealth: cur.trendHealth != null ? ROUND2(cur.trendHealth) : null, pullbackQuality: cur.pullbackQuality != null ? ROUND2(cur.pullbackQuality) : null, prob4: cur.prob4 != null ? ROUND2(cur.prob4) : null, swingPotential: cur.swingPotential != null ? ROUND2(cur.swingPotential) : null, modifiers: cur.modifiers != null ? ROUND2(cur.modifiers) : null };
       }
       return {
         symbol: symbol,
@@ -885,7 +889,8 @@ window.BacktestEngine = (function () {
       var totalPillarSteps = pillarSweep
         ? (pillarSweep.trendHealth || [0,5,10,15,20,25]).length
           + (pillarSweep.pullbackQuality || [0,5,10,15,20,25]).length
-          + (pillarSweep.prob4 || [0,5,10,15,20,25,30,35]).length
+          + (pillarSweep.prob4 || [0,5,10,15,20,25,30]).length
+          + (pillarSweep.swingPotential || [0,5,10,15,20]).length
         : 0;
       var totalSteps = thRange.length + totalPillarSteps;
       var thResults = [];
@@ -912,9 +917,10 @@ window.BacktestEngine = (function () {
         var pillarSweepCfg = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig().pillarMax : null;
         if (!pillarSweepCfg && window.TechIndicators && window.TechIndicators.getDefaultScoreConfig) pillarSweepCfg = window.TechIndicators.getDefaultScoreConfig().pillarMax;
         var pillars = [
-          { key: 'trendHealth', optKey: 'minTrendHealth', label: 'Trend Health', max: pillarSweepCfg ? pillarSweepCfg.trendHealth : 35, values: pillarSweep.trendHealth || [0, 5, 10, 15, 20, 25,30] },
-          { key: 'pullbackQuality', optKey: 'minPullbackQuality', label: 'Pullback Quality', max: pillarSweepCfg ? pillarSweepCfg.pullbackQuality : 30, values: pillarSweep.pullbackQuality || [0, 5, 10, 15, 20, 25] },
-          { key: 'prob4', optKey: 'minProb4', label: '4% Probability', max: pillarSweepCfg ? pillarSweepCfg.prob4 : 40, values: pillarSweep.prob4 || [0, 5, 10, 15, 20, 25, 30, 35] }
+          { key: 'trendHealth', optKey: 'minTrendHealth', label: 'Trend Health', max: pillarSweepCfg ? pillarSweepCfg.trendHealth : 28, values: pillarSweep.trendHealth || [0, 5, 10, 15, 20, 25,30] },
+          { key: 'pullbackQuality', optKey: 'minPullbackQuality', label: 'Pullback Quality', max: pillarSweepCfg ? pillarSweepCfg.pullbackQuality : 24, values: pillarSweep.pullbackQuality || [0, 5, 10, 15, 20, 25] },
+          { key: 'prob4', optKey: 'minProb4', label: '4% Probability', max: pillarSweepCfg ? pillarSweepCfg.prob4 : 28, values: pillarSweep.prob4 || [0, 5, 10, 15, 20, 25, 30] },
+          { key: 'swingPotential', optKey: 'minSwingPotential', label: 'Swing Potential', max: pillarSweepCfg ? pillarSweepCfg.swingPotential : 20, values: pillarSweep.swingPotential || [0, 5, 10, 15, 20] }
         ];
         // Single engine with threshold=0 — scores are cached and reused across all pillar values
         var pillarEng = create({ scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: 0 });
@@ -998,7 +1004,7 @@ window.BacktestEngine = (function () {
         }
       }
 
-      var components = ['trendHealth', 'pullbackQuality', 'prob4', 'entryScore'];
+      var components = ['trendHealth', 'pullbackQuality', 'prob4', 'swingPotential', 'entryScore'];
       var result = {};
 
       components.forEach(function (comp) {
@@ -1058,7 +1064,7 @@ window.BacktestEngine = (function () {
       });
 
       /* Compute pillar consumption stats */
-      var pillars = ['trendHealth', 'pullbackQuality', 'prob4'];
+      var pillars = ['trendHealth', 'pullbackQuality', 'prob4', 'swingPotential'];
       var _sc = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
       var pillarMax = _sc.pillarMax || (window.TechIndicators && window.TechIndicators.getDefaultScoreConfig ? window.TechIndicators.getDefaultScoreConfig().pillarMax : {});
       var pillarConsumption = {};

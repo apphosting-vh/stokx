@@ -2616,8 +2616,9 @@ window.TechIndicators = (function () {
 
       var sma20Slope5 = sma20_s ? slope(sma20_s, 5) : null;
 
-      var swingHigh20 = null;
-      for (var j = Math.max(0, L - 20); j < L; j++) { if (hi[j] != null && (swingHigh20 === null || hi[j] > swingHigh20)) swingHigh20 = hi[j]; }
+      var swingHigh20 = null, swingHigh20Idx = null;
+      for (var j = Math.max(0, L - 20); j < L; j++) { if (hi[j] != null && (swingHigh20 === null || hi[j] > swingHigh20)) { swingHigh20 = hi[j]; swingHigh20Idx = j; } }
+      var barsSinceHigh20 = swingHigh20Idx != null ? (L1 - swingHigh20Idx) : null;
       var pullbackDepth = (swingHigh20 != null && swingHigh20 > 0 && c != null) ? (swingHigh20 - c) / swingHigh20 : null;
 
       var supportLevels = [sma20, bbLower, anchoredVwap, sma50];
@@ -2668,7 +2669,8 @@ window.TechIndicators = (function () {
         beta: beta, stability20: stability20, spikeLast: spikeLast, gapPct: gapPct,
         weeklyHABullish: weeklyHABullish,
         buyRef: buyRef,
-        pullbackDepth: pullbackDepth, nearSupportCount: nearSupportCount
+        pullbackDepth: pullbackDepth, nearSupportCount: nearSupportCount,
+        swingHigh20: swingHigh20, barsSinceHigh20: barsSinceHigh20
       };
     } catch (e) { return null; }
   }
@@ -2720,78 +2722,80 @@ window.TechIndicators = (function () {
   var SCORE_CONFIG = {
     /* Horizon for confidence calculation */
     horizonDays: 10,
-    /* Pillar max scores */
-    pillarMax: { trendHealth: 35, pullbackQuality: 30, prob4: 35 },
+    /* Pillar max scores (existing pillars scaled 80% to accommodate 4th pillar) */
+    pillarMax: { trendHealth: 28, pullbackQuality: 24, prob4: 28, swingPotential: 20 },
     /* MTF weights */
     tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
 
-    /* Pillar 1: Trend Health */
+    /* Pillar 1: Trend Health (max 28) */
     trendHealth: {
-      priceAboveSMA50: 5,
-      SMA20AboveSMA50: 5,
-      priceAboveSMA20_or_VWAP: 5,
-      ADX_DI: 5,
+      priceAboveSMA50: 4,
+      SMA20AboveSMA50: 4,
+      priceAboveSMA20_or_VWAP: 4,
+      ADX_DI: 4,
       adxThreshold: 25,
-      mansfieldRS: 5,
+      mansfieldRS: 4,
       mansfieldRSThreshold: 0,
-      macdCross: 5,
-      weeklyHABullish: 2.5,
-      sma20Slope: 2.5,
+      macdCross: 4,
+      weeklyHABullish: 2,
+      sma20Slope: 2,
       sma20SlopeThreshold: 0,
     },
-    /* Pillar 2: Pullback Quality */
+    /* Pillar 2: Pullback Quality (max 24) */
     pullbackQuality: {
-      distATR_inner: 7,
+      distATR_inner: 5.6,
       distATR_innerRange: 1.0,
-      distATR_outer: 3,
+      distATR_outer: 2.4,
       distATR_outerRange: 1.5,
-      candleColor: 4,
-      bbWidthSqueeze: 3,
-      rsiOversold: 3,
+      candleColor: 3.2,
+      bbWidthSqueeze: 2.4,
+      rsiOversold: 2.4,
       stochRSIThreshold: 20,
       rsiOversoldNormal: 40,
       rsiOversoldHighVol: 35,
-      volumeConfirm: 4,
+      volumeConfirm: 3.2,
       volRatioThreshold: 1.5,
-      pullbackDepthIdeal: 6,
+      pullbackDepthIdeal: 4.8,
       pullbackDepthLo: 0.05,
       pullbackDepthHi: 0.15,
       pullbackDepthMax: 0.25,
-      supportConfluence: 3,
+      supportConfluence: 2.4,
       supportConfluenceThreshold: 2,
     },
-    /* Pillar 3: 4% Probability */
+    /* Pillar 3: 4% Probability (max 28) */
     prob4: {
-      targetReachable_T1: 10,
+      targetReachable_T1: 8,
       targetATR_threshold1: 2.0,
-      targetReachable_T2: 8,
+      targetReachable_T2: 6.4,
       targetATR_threshold2: 1.5,
-      targetReachable_T3: 5,
+      targetReachable_T3: 4,
       targetATR_threshold3: 1.0,
-      targetReachable_T4: 2,
-      targetDist_T1: 5,
+      targetReachable_T4: 1.6,
+      targetDist_T1: 4,
       targetDist_range1_lo: 0.25,
       targetDist_range1_hi: 2.0,
-      targetDist_T2: 4,
+      targetDist_T2: 3.2,
       targetDist_range2_lo: 0,
       targetDist_range2_hi: 3.0,
-      volSweet_T1: 8,
+      volSweet_T1: 6.4,
       volPercentile_lo: 30,
       volPercentile_hi: 70,
-      volSweet_T2: 4,
+      volSweet_T2: 3.2,
       volPercentile_lo2: 20,
       volPercentile_hi2: 80,
-      efficiencyRatio: 4,
+      efficiencyRatio: 3.2,
       efficiencyRatioThreshold: 0.4,
-      upDayVolBonus: 5,
+      upDayVolBonus: 4,
       upDayVol_threshold: 1.2,
-      upDayVolPenalty: -5,
+      upDayVolPenalty: -4,
       upDayVol_low: 0.7,
-      directionalBias: 5,
-      resistancePenalty: -5,
+      directionalBias: 4,
+      resistancePenalty: -4,
       resistanceThreshold: 0.04,
       targetPct: 0.04,
     },
+    /* Pillar 4: Swing Potential (max 20) */
+    swingPotential: { reversalProbability: 14, turnConfirm: 6, higherLow: 2.5, reversalCandle: 2, rsiUpturn: 1.5 },
     /* Modifiers */
     modifiers: {
       lowBetaThreshold: 0.5,
@@ -2928,6 +2932,115 @@ window.TechIndicators = (function () {
     return Math.min(s, SCORE_CONFIG.pillarMax.prob4);
   }
 
+  /* ── Pillar 4: Swing Potential (max 20) ──────────────────────────────────
+     Reversal-from-pullback probability, not breakout/momentum. Zero unless
+     the stock is structurally in a pullback right now. */
+
+  /* Gate only — no scoring here. Uses sn.pullbackDepth / sn.swingHigh20 /
+     sn.barsSinceHigh20, all computed once in buildEntrySnapshot (FIX-1). */
+  function detectPullbackState(sn) {
+    if (sn.pullbackDepth == null || sn.barsSinceHigh20 == null || sn.swingHigh20 == null) return null;
+    var inPullback = sn.pullbackDepth >= 0.04 && sn.pullbackDepth <= 0.25 &&
+                      sn.barsSinceHigh20 >= 2 && sn.barsSinceHigh20 <= 15;
+    return { inPullback: inPullback, barsSinceHigh: sn.barsSinceHigh20, swingHigh20: sn.swingHigh20 };
+  }
+
+  function empiricalReversalRate(candles, horizonDays) {
+    var cl = closes(candles), hi = highs(candles), L = cl.length;
+    if (L < 80) return null;
+    var hits = 0, total = 0;
+    for (var i = 25; i < L - horizonDays; i++) {
+      var swHi = -Infinity, hIdx = i;
+      for (var j = Math.max(0, i - 19); j <= i; j++) { if (hi[j] > swHi) { swHi = hi[j]; hIdx = j; } }
+      var depth = swHi > 0 ? (swHi - cl[i]) / swHi : null;
+      var barsSince = i - hIdx;
+      if (depth == null || depth < 0.04 || depth > 0.25 || barsSince < 2 || barsSince > 15) continue;
+      var maxFwd = -Infinity;
+      for (var k = i + 1; k <= i + horizonDays && k < L; k++) { if (hi[k] > maxFwd) maxFwd = hi[k]; }
+      total++;
+      if (maxFwd >= swHi * 0.98) hits++;
+    }
+    return total >= 8 ? { rate: hits / total, n: total } : null;
+  }
+
+  /* Mean-reversion-adjusted GBM barrier touch. Same closed-form reflection
+     formula as computeHorizonConfidence's logProbTouch, reversion drift
+     instead of trend drift, recovery barrier instead of +4% target.
+     Sigma now comes from the SHARED helper (FIX-2). */
+  function lognormalReversalProb(candles, sn, pbState, horizonDays) {
+    var cl = closes(candles), L = cl.length;
+    if (L < 60) return null;
+    var sma20 = calcSMA(candles, 20);
+    var rets = [], dev = [];
+    for (var i = L - 60; i < L - 1; i++) {
+      if (cl[i] > 0 && cl[i + 1] > 0 && sma20[i] != null && sma20[i] > 0) {
+        rets.push(Math.log(cl[i + 1] / cl[i]));
+        dev.push(Math.log(cl[i] / sma20[i]));
+      }
+    }
+    if (rets.length < 30) return null;
+    var n = rets.length, sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (var i = 0; i < n; i++) { sx += dev[i]; sy += rets[i]; sxx += dev[i] * dev[i]; sxy += dev[i] * rets[i]; }
+    var denom = n * sxx - sx * sx;
+    if (denom === 0) return null;
+    var theta = (n * sxy - sx * sy) / denom;
+    var alpha = (sy - theta * sx) / n;
+    var atrPct = (sn.atr14 != null && sn.c > 0) ? sn.atr14 / sn.c * 100 : null;
+    var sigmaDaily = calcBlendedDailySigma(candles, atrPct);
+    if (!sigmaDaily || sigmaDaily <= 0) return null;
+
+    var curDev = Math.log(cl[L - 1] / sma20[L - 1]);
+    var muDaily = alpha + theta * curDev;
+    var muLog = muDaily - 0.5 * sigmaDaily * sigmaDaily;
+    var b = Math.log(pbState.swingHigh20 / cl[L - 1]);
+    if (b <= 0) return { prob: 0.95 };
+    var sdN = sigmaDaily * Math.sqrt(horizonDays);
+    var muT = muLog * horizonDays;
+    var p = normCdf((muT - b) / sdN) + Math.exp(2 * muLog * b / (sigmaDaily * sigmaDaily)) * normCdf((-muT - b) / sdN);
+    return { prob: Math.max(1e-6, Math.min(1 - 1e-6, p)) };
+  }
+
+  var SWING_CAL = { p0: 0.30, k: 34.0 };
+
+  function calcSwingPotentialScore(candles, sn) {
+    var c = SCORE_CONFIG.swingPotential;
+    var horizonDays = SCORE_CONFIG.horizonDays || 10;
+    var pbState = detectPullbackState(sn);
+    if (!pbState || !pbState.inPullback) return 0;
+
+    var emp = empiricalReversalRate(candles, horizonDays);
+    var logM = lognormalReversalProb(candles, sn, pbState, horizonDays);
+    var p = emp ? emp.rate : (logM ? logM.prob : null);
+    if (p == null) return 0;
+
+    var display = 50 + (Math.log(p / (1 - p)) - Math.log(SWING_CAL.p0 / (1 - SWING_CAL.p0))) * SWING_CAL.k;
+    var probScore = (clamp(display, 0, 100) / 100) * c.reversalProbability;
+
+    var cl = closes(candles), hi = highs(candles), lo = lows(candles), op = opens(candles), L = cl.length;
+
+    var priorLow = Infinity;
+    for (var i = Math.max(0, L - pbState.barsSinceHigh - 5); i < L - 1; i++) { if (lo[i] < priorLow) priorLow = lo[i]; }
+    var turnScore = 0;
+    if (lo[L - 1] > priorLow) turnScore += c.higherLow;
+
+    /* [FIX-3] Pure hammer shape — body near top of range, long lower wick,
+       short upper wick. No close>open requirement, so this no longer
+       duplicates Pullback Quality's candleColor condition. */
+    var body = Math.abs(cl[L - 1] - op[L - 1]);
+    var lowerWick = Math.min(cl[L - 1], op[L - 1]) - lo[L - 1];
+    var upperWick = hi[L - 1] - Math.max(cl[L - 1], op[L - 1]);
+    var range = hi[L - 1] - lo[L - 1];
+    if (range > 0 && lowerWick > 2 * body && upperWick < body &&
+        (Math.max(cl[L - 1], op[L - 1]) - lo[L - 1]) / range > 0.6) {
+      turnScore += c.reversalCandle;
+    }
+
+    var r3 = lastVals(calcRSI(candles, 14), 3);
+    if (r3.length === 3 && r3[0] != null && r3[2] != null && r3[0] < 40 && r3[2] > r3[0]) turnScore += c.rsiUpturn;
+
+    return Math.min(SCORE_CONFIG.pillarMax.swingPotential, probScore + turnScore);
+  }
+
   /* Modifiers (±15 each): low-expansion, spike day, stability, MTF alignment (gradient).
      Volatility-normalized: use ATR percentile rank instead of fixed ATR%. */
   function buildEntryModifiers(sn, opts) {
@@ -2968,6 +3081,7 @@ window.TechIndicators = (function () {
       trendHealth: calcTrendHealthScore(sn),
       pullbackQuality: calcPullbackScore(sn, volRegime),
       prob4: calcProb4Score(sn, volRegime),
+      swingPotential: calcSwingPotentialScore(candles, sn),
       spike: sn.spikeLast === true ? 5 : 0,
       stability: round(Math.max(0, Math.min(10, (1 - (sn.stability20 != null ? sn.stability20 : 1)) * 10)), 1),
       volRegime: volRegime,
@@ -2985,7 +3099,8 @@ window.TechIndicators = (function () {
     var trendHealth = calcTrendHealthScore(sn);
     var pullbackQuality = calcPullbackScore(sn, volRegime);
     var prob4 = calcProb4Score(sn, volRegime);
-    var rawTotal = trendHealth + pullbackQuality + prob4;
+    var swingPotential = calcSwingPotentialScore(candles, sn);
+    var rawTotal = trendHealth + pullbackQuality + prob4 + swingPotential;
 
     var spikeDay = sn.spikeLast === true || (sn.gapPct != null && Math.abs(sn.gapPct) > SCORE_CONFIG.modifiers.spikeGapThreshold);
     var modifierItems = buildEntryModifiers(sn, { spikeDay: spikeDay, volRegime: volRegime });
@@ -3010,6 +3125,7 @@ window.TechIndicators = (function () {
       trendHealth: round(trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
       pullbackQuality: round(pullbackQuality, 1), pullbackQualityMax: SCORE_CONFIG.pillarMax.pullbackQuality,
       prob4: round(prob4, 1), prob4Max: SCORE_CONFIG.pillarMax.prob4,
+      swingPotential: round(swingPotential, 1), swingPotentialMax: SCORE_CONFIG.pillarMax.swingPotential,
       modifiers: round(modifiers, 1),
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
       penalty_items: penaltyItems, bonus_items: bonusItems,
@@ -3018,7 +3134,7 @@ window.TechIndicators = (function () {
       dominanceRatio: guard.dominanceRatio, efficiencyRatio10: guard.efficiencyRatio10,
       volRegime: volRegime,
       details: {
-        trendHealth: round(trendHealth, 2), pullbackQuality: round(pullbackQuality, 2), prob4: round(prob4, 2),
+        trendHealth: round(trendHealth, 2), pullbackQuality: round(pullbackQuality, 2), prob4: round(prob4, 2), swingPotential: round(swingPotential, 2),
         spike: sn.spikeLast === true ? 5 : 0,
         stability: round(Math.max(0, Math.min(10, (1 - (sn.stability20 != null ? sn.stability20 : 1)) * 10)), 1)
       }
@@ -3060,7 +3176,8 @@ window.TechIndicators = (function () {
     var PILLARS = [
       { key: 'trendHealth', max: SCORE_CONFIG.pillarMax.trendHealth },
       { key: 'pullbackQuality', max: SCORE_CONFIG.pillarMax.pullbackQuality },
-      { key: 'prob4', max: SCORE_CONFIG.pillarMax.prob4 }
+      { key: 'prob4', max: SCORE_CONFIG.pillarMax.prob4 },
+      { key: 'swingPotential', max: SCORE_CONFIG.pillarMax.swingPotential }
     ];
     var agg = {};
     PILLARS.forEach(function (pillar) {
@@ -3071,7 +3188,7 @@ window.TechIndicators = (function () {
       });
       agg[pillar.key] = wSum > 0 ? Math.min(pillar.max, acc / wSum) : 0;
     });
-    var rawTotal = agg.trendHealth + agg.pullbackQuality + agg.prob4;
+    var rawTotal = agg.trendHealth + agg.pullbackQuality + agg.prob4 + agg.swingPotential;
 
     var baseSn = null;
     if (dTF && dTF.candles && dTF.candles.length >= 50) {
@@ -3083,8 +3200,8 @@ window.TechIndicators = (function () {
       baseSn = (perTF[fbLabel] && perTF[fbLabel].sn) || buildEntrySnapshot(fbTF.candles, indexCandles, fbLabel);
     }
 
-    var wRaw = perTF.W ? (perTF.W.trendHealth + perTF.W.pullbackQuality + perTF.W.prob4) : null;
-    var dRaw = perTF.D ? (perTF.D.trendHealth + perTF.D.pullbackQuality + perTF.D.prob4) : null;
+    var wRaw = perTF.W ? (perTF.W.trendHealth + perTF.W.pullbackQuality + perTF.W.prob4 + perTF.W.swingPotential) : null;
+    var dRaw = perTF.D ? (perTF.D.trendHealth + perTF.D.pullbackQuality + perTF.D.prob4 + perTF.D.swingPotential) : null;
     var mc = SCORE_CONFIG.modifiers;
     var _mtfFloor = mc.mtfAlignFloor != null ? mc.mtfAlignFloor : 50;
     var _mtfRange = (mc.mtfAlignThreshold || 65) - _mtfFloor;
@@ -3117,7 +3234,7 @@ window.TechIndicators = (function () {
       var tf = findTF(label);
       var p = perTF[label];
       if (tf && p) {
-        var tRaw = p.trendHealth + p.pullbackQuality + p.prob4;
+        var tRaw = p.trendHealth + p.pullbackQuality + p.prob4 + p.swingPotential;
         var tCls = classifyScore(tRaw);
         tfDetails.push({
           timeframe: tf.timeframe,
@@ -3126,6 +3243,7 @@ window.TechIndicators = (function () {
           trendHealth: round(p.trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
           pullbackQuality: round(p.pullbackQuality, 1), pullbackQualityMax: SCORE_CONFIG.pillarMax.pullbackQuality,
           prob4: round(p.prob4, 1), prob4Max: SCORE_CONFIG.pillarMax.prob4,
+          swingPotential: round(p.swingPotential, 1), swingPotentialMax: SCORE_CONFIG.pillarMax.swingPotential,
           modifiers: 0,
           penalties: 0, bonuses: 0,
           raw_score: round(tRaw, 1),
@@ -3144,6 +3262,7 @@ window.TechIndicators = (function () {
       trendHealth: round(agg.trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
       pullbackQuality: round(agg.pullbackQuality, 1), pullbackQualityMax: SCORE_CONFIG.pillarMax.pullbackQuality,
       prob4: round(agg.prob4, 1), prob4Max: SCORE_CONFIG.pillarMax.prob4,
+      swingPotential: round(agg.swingPotential, 1), swingPotentialMax: SCORE_CONFIG.pillarMax.swingPotential,
       modifiers: round(modifiers, 1),
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
       penalty_items: penaltyItems, bonus_items: bonusItems,
@@ -4065,6 +4184,27 @@ window.TechIndicators = (function () {
     for (var j = 0; j < arr.length; j++) { var d = arr[j] - mean; sq += d * d; }
     return Math.sqrt(sq / (arr.length - 1));
   }
+  function calcBlendedDailySigma(dailyCandles, atrPct) {
+    var sigmaDaily = null;
+    if (dailyCandles && dailyCandles.length >= 31) {
+      var rets = [];
+      for (var r = dailyCandles.length - 1; r > 0 && rets.length < 60; r--) {
+        var pc0 = dailyCandles[r - 1].c, pc1 = dailyCandles[r].c;
+        if (pc0 > 0 && pc1 > 0) rets.push(Math.log(pc1 / pc0));
+      }
+      var longVol = sampleStdDev(rets);
+      if (rets.length >= 40) {
+        var shortVol = sampleStdDev(rets.slice(0, 20));
+        sigmaDaily = shortVol != null ? 0.7 * shortVol + 0.3 * longVol : longVol;
+      } else { sigmaDaily = longVol; }
+    }
+    if (atrPct != null) {
+      var atrSigma = atrPct / 100 * Math.sqrt(Math.PI / 8);
+      sigmaDaily = sigmaDaily != null ? (sigmaDaily + atrSigma) / 2 : atrSigma;
+    }
+    if (sigmaDaily != null) sigmaDaily = Math.max(0.008, sigmaDaily);
+    return sigmaDaily;
+  }
   /* R² of a straight-line fit over a numeric series (e.g. ln closes): 1 = the
      series marches in a clean line (trending regime), →0 = squiggly range
      (chop). Used to gate the ADX trend-strength boost. */
@@ -4263,24 +4403,7 @@ window.TechIndicators = (function () {
         base.components.reachRatio = round(reachRatio, 2);
         base.flags.withinReach = reachRatio >= 1;
       }
-      var sigmaDaily = null;
-      if (dailyCandles && dailyCandles.length >= 31) {
-        var rets = [];
-        for (var r = dailyCandles.length - 1; r > 0 && rets.length < 60; r--) {
-          var pc0 = dailyCandles[r - 1].c, pc1 = dailyCandles[r].c;
-          if (pc0 > 0 && pc1 > 0) rets.push(Math.log(pc1 / pc0));
-        }
-        var longVol = sampleStdDev(rets);
-        if (rets.length >= 40) {
-          var shortVol = sampleStdDev(rets.slice(0, 20));
-          sigmaDaily = shortVol != null ? 0.7 * shortVol + 0.3 * longVol : longVol;
-        } else { sigmaDaily = longVol; }
-      }
-      if (atrPct != null) {
-        var atrSigma = atrPct / 100 * Math.sqrt(Math.PI / 8);
-        sigmaDaily = sigmaDaily != null ? (sigmaDaily + atrSigma) / 2 : atrSigma;
-      }
-      if (sigmaDaily != null) sigmaDaily = Math.max(0.008, sigmaDaily);
+      var sigmaDaily = calcBlendedDailySigma(dailyCandles, atrPct);
       var hourDrift = 0;
       if (adx != null && plusDI != null && minusDI != null) {
         var dirH = plusDI > minusDI ? 1 : -1;
