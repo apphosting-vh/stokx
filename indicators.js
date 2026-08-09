@@ -5089,6 +5089,44 @@ window.TechIndicators = (function () {
       if (isBearish(c1) && isBearish(c2) && isBearish(c) && c.c < c2.c && c2.c < c1.c && c.o < c1.o) {
         add("Three Black Crows", "bearish", "Three consecutive bearish candles with falling closes. Strong bearish continuation.", i, i - 2);
       }
+
+      /* Bullish Abandoned Baby: bearish candle, doji gaps below, bullish candle gaps above doji */
+      var c1Low = Math.min(c1.o, c1.c);
+      var c3High = Math.max(c.o, c.c);
+      if (isBearish(c1) && body(c2) < body(c1) * 0.1 && c2.c < c1Low && c2.o < c1Low &&
+          isBullish(c) && c.o > c3High && c.o > Math.max(c2.o, c2.c)) {
+        add("Bullish Abandoned Baby", "bullish", "Bearish candle, doji gaps below, bullish candle gaps above. High-reliability bottom reversal.", i, i - 2);
+      }
+
+      /* Bearish Abandoned Baby: bullish candle, doji gaps above, bearish candle gaps below doji */
+      var c1High = Math.max(c1.o, c1.c);
+      var c3Low = Math.min(c.o, c.c);
+      if (isBullish(c1) && body(c2) < body(c1) * 0.1 && c2.o > c1High && c2.c > c1High &&
+          isBearish(c) && c.o < c3Low && c.o < Math.min(c2.o, c2.c)) {
+        add("Bearish Abandoned Baby", "bearish", "Bullish candle, doji gaps above, bearish candle gaps below. High-reliability top reversal.", i, i - 2);
+      }
+
+      /* Three Inside Up: bearish candle, bullish inside candle, then bullish close above first candle */
+      if (isBearish(c1) && isBullish(c2) && c2.c < c1.o && c2.o > c1.c && isBullish(c) && c.c > c1.o) {
+        add("Three Inside Up", "bullish", "Bearish, bullish inside bar, then close above first candle high. Confirmation reversal pattern.", i, i - 2);
+      }
+
+      /* Three Inside Down: bullish candle, bearish inside candle, then bearish close below first candle */
+      if (isBullish(c1) && isBearish(c2) && c2.c > c1.o && c2.o < c1.c && isBearish(c) && c.c < c1.o) {
+        add("Three Inside Down", "bearish", "Bullish, bearish inside bar, then close below first candle low. Confirmation reversal pattern.", i, i - 2);
+      }
+
+      /* Three-Line Strike (bullish): three bearish candles then a single bullish candle engulfing all three */
+      if (isBearish(c1) && isBearish(c2) && isBearish(c) && c.c < c2.c && c2.c < c1.c &&
+          isBullish(c) && c.c > c1.o && c.o < c.c) {
+        add("Three-Line Strike", "bullish", "Three bearish candles followed by a bullish engulfing candle. Counter-trend continuation signal.", i, i - 2);
+      }
+
+      /* Three-Line Strike (bearish): three bullish candles then a single bearish candle engulfing all three */
+      if (isBullish(c1) && isBullish(c2) && isBullish(c) && c.c > c2.c && c2.c > c1.c &&
+          isBearish(c) && c.c < c1.o && c.o > c.c) {
+        add("Three-Line Strike", "bearish", "Three bullish candles followed by a bearish engulfing candle. Counter-trend continuation signal.", i, i - 2);
+      }
     }
 
     if (patterns.length > 20) patterns = patterns.slice(0, 20);
