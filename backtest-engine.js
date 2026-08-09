@@ -1,6 +1,6 @@
 /* ══════════════════════════════════════════════════════════════════════════
    StoX Backtesting Engine – Fixed & Enhanced
-   Tests the 3‑pillar Entry Score against a fixed profit target over a
+   Tests the 4‑pillar Entry Score against a fixed profit target over a
    holding window. Score‑agnostic – caller injects scoreFn.
 
    New options (passed to create()):
@@ -322,6 +322,7 @@ window.BacktestEngine = (function () {
         trendScore: score.trendHealth != null ? ROUND2(score.trendHealth) : null,
         pullbackScore: score.pullbackQuality != null ? ROUND2(score.pullbackQuality) : null,
         probabilityScore: score.prob4 != null ? ROUND2(score.prob4) : null,
+        swingScore: score.swingPotential != null ? ROUND2(score.swingPotential) : null,
         modifiers: score.modifiers != null ? ROUND2(score.modifiers) : null
       };
     }
@@ -746,13 +747,14 @@ window.BacktestEngine = (function () {
             if (single.error) results.push({ symbol: sym, error: single.error });
             else {
               var trades = single.stats.trades || [];
-              var avgTrend = null, avgPullback = null, avgProb4 = null, avgHoldDays = null, avgConfLog = null, avgConfEmp = null, avgEntryScore = null;
+              var avgTrend = null, avgPullback = null, avgProb4 = null, avgSwing = null, avgHoldDays = null, avgConfLog = null, avgConfEmp = null, avgEntryScore = null;
               if (trades.length > 0) {
-                var tSum = 0, pSum = 0, prSum = 0, tN = 0, pN = 0, prN = 0, hSum = 0, hN = 0, clSum = 0, ceSum = 0, clN = 0, ceN = 0, esSum = 0, esN = 0;
+                var tSum = 0, pSum = 0, prSum = 0, swSum = 0, tN = 0, pN = 0, prN = 0, swN = 0, hSum = 0, hN = 0, clSum = 0, ceSum = 0, clN = 0, ceN = 0, esSum = 0, esN = 0;
                 for (var ti = 0; ti < trades.length; ti++) {
                   if (trades[ti].trendScore != null) { tSum += trades[ti].trendScore; tN++; }
                   if (trades[ti].pullbackScore != null) { pSum += trades[ti].pullbackScore; pN++; }
                   if (trades[ti].probabilityScore != null) { prSum += trades[ti].probabilityScore; prN++; }
+                  if (trades[ti].swingScore != null) { swSum += trades[ti].swingScore; swN++; }
                   var hd = trades[ti].daysToTarget != null ? trades[ti].daysToTarget : holdingPeriodDays;
                   hSum += hd; hN++;
                   if (trades[ti].confLog != null) { clSum += trades[ti].confLog; clN++; }
@@ -762,12 +764,13 @@ window.BacktestEngine = (function () {
                 avgTrend = tN > 0 ? Math.round(tSum / tN * 10) / 10 : null;
                 avgPullback = pN > 0 ? Math.round(pSum / pN * 10) / 10 : null;
                 avgProb4 = prN > 0 ? Math.round(prSum / prN * 10) / 10 : null;
+                avgSwing = swN > 0 ? Math.round(swSum / swN * 10) / 10 : null;
                 avgHoldDays = hN > 0 ? Math.round(hSum / hN * 10) / 10 : null;
                 avgConfLog = clN > 0 ? Math.round(clSum / clN * 10) / 10 : null;
                 avgConfEmp = ceN > 0 ? Math.round(ceSum / ceN * 10) / 10 : null;
                 avgEntryScore = esN > 0 ? Math.round(esSum / esN * 10) / 10 : null;
               }
-              results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, avgTrend: avgTrend, avgPullback: avgPullback, avgProb4: avgProb4, avgHoldDays: avgHoldDays, avgConfLog: avgConfLog, avgConfEmp: avgConfEmp, avgEntryScore: avgEntryScore, detail: single });
+              results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, avgTrend: avgTrend, avgPullback: avgPullback, avgProb4: avgProb4, avgSwing: avgSwing, avgHoldDays: avgHoldDays, avgConfLog: avgConfLog, avgConfEmp: avgConfEmp, avgEntryScore: avgEntryScore, detail: single });
             }
           } catch (e) {
             results.push({ symbol: sym, error: (e && e.message) || String(e) });
@@ -823,9 +826,9 @@ window.BacktestEngine = (function () {
 
     function exportSingleCSV(res) {
       var st = res.stats;
-      var headers = ["Symbol", "Entry Date", "Exit Date", "Entry Price", "Exit Price", "Entry Score", "10DLN", "10DEM", "Signal", "Target", "Hit Target", "Days", "Return %", "Max Fav %", "Max Adv %", "Trend", "Pullback", "Prob4", "Modifiers"];
+      var headers = ["Symbol", "Entry Date", "Exit Date", "Entry Price", "Exit Price", "Entry Score", "10DLN", "10DEM", "Signal", "Target", "Hit Target", "Days", "Return %", "Max Fav %", "Max Adv %", "Trend", "Pullback", "Prob4", "Swing", "Modifiers"];
       var rows = (st && st.trades ? st.trades : []).map(function (t) {
-        return [res.symbol, t.entryDate, t.exitDate, t.entryPrice, t.exitPrice, t.entryScore, t.confLog != null ? Math.round(t.confLog * 1000) / 10 : null, t.confEmp != null ? Math.round(t.confEmp * 1000) / 10 : null, t.signal, t.targetPrice, t.hitTarget ? "YES" : "NO", t.daysToTarget || "", t.finalReturnPct, t.maxProfitPct, t.maxLossPct, t.trendScore, t.pullbackScore, t.probabilityScore, t.modifiers];
+        return [res.symbol, t.entryDate, t.exitDate, t.entryPrice, t.exitPrice, t.entryScore, t.confLog != null ? Math.round(t.confLog * 1000) / 10 : null, t.confEmp != null ? Math.round(t.confEmp * 1000) / 10 : null, t.signal, t.targetPrice, t.hitTarget ? "YES" : "NO", t.daysToTarget || "", t.finalReturnPct, t.maxProfitPct, t.maxLossPct, t.trendScore, t.pullbackScore, t.probabilityScore, t.swingScore, t.modifiers];
       });
       return csvRows(headers, rows);
     }
@@ -864,7 +867,7 @@ window.BacktestEngine = (function () {
      * opts:
      *   dataMap       : { symbol: candles[] }
      *   scoreThresholds : number[] (default [40, 50, 55, 60, 65, 70, 75, 80])
-     *   pillarSweep   : { trendHealth?: number[], pullbackQuality?: number[], prob4?: number[] }
+     *   pillarSweep   : { trendHealth?: number[], pullbackQuality?: number[], prob4?: number[], swingPotential?: number[] }
      *                   If set, for each threshold in scoreThresholds, also sweeps
      *                   each pillar independently while holding others at -Infinity.
      *   symbols       : string[] subset of dataMap keys
@@ -993,6 +996,7 @@ window.BacktestEngine = (function () {
               trendHealth: r.trendHealth != null ? r.trendHealth : null,
               pullbackQuality: r.pullbackQuality != null ? r.pullbackQuality : null,
               prob4: r.prob4 != null ? r.prob4 : null,
+              swingPotential: r.swingPotential != null ? r.swingPotential : null,
               hit: fwd.hitTarget,
               fwdReturn: fwd.finalReturnPct
             });

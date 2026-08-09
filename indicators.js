@@ -2474,8 +2474,8 @@ window.TechIndicators = (function () {
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
-     NEW ENTRY ENGINE — 3-pillar model (0-100):
-      Trend Health (35) + Pullback Quality (30) + 4% Probability (35) = 100,
+     NEW ENTRY ENGINE — 4-pillar model (0-100):
+      Trend Health (28) + Pullback Quality (24) + 4% Probability (28) + Swing Potential (20) = 100,
      then ±15 modifiers. Designed to keep scores stable on shallow 1-1.5%
      dips toward support (pillar inputs are dip-insensitive, pullback pillar
      even gains on a dip to SMA20/lower-BB support).
@@ -2530,7 +2530,7 @@ window.TechIndicators = (function () {
     } catch (e) { return null; }
   }
 
-  /* Slim entry snapshot: only the fields the 3 pillars + modifiers consume.
+   /* Slim entry snapshot: only the fields the 4 pillars + modifiers consume.
      (Exit scoring keeps the full buildTFSnapshot.) `tf` controls the weekly-HA
      component: real weekly candles for W, synthesized weekly from daily for D,
      none for H. */
@@ -3072,7 +3072,7 @@ window.TechIndicators = (function () {
     return items;
   }
 
-  /* Per-timeframe 3-pillar scoring. `tf` is 'H' | 'D' | 'W'. */
+   /* Per-timeframe 4-pillar scoring. `tf` is 'H' | 'D' | 'W'. */
   function scoreEntryPillarsForTF(candles, indexCandles, tf) {
     var sn = buildEntrySnapshot(candles, indexCandles, tf);
     if (!sn) return null;
@@ -3089,7 +3089,7 @@ window.TechIndicators = (function () {
     };
   }
 
-  /* Entry Score (single timeframe, daily) — new 3-pillar model. */
+   /* Entry Score (single timeframe, daily) — new 4-pillar model. */
   function computeEntryScore(candles, indexCandles) {
     if (!candles || candles.length < 50) return { entry_score: null, reason: 'insufficient_data', need: 50, got: candles ? candles.length : 0 };
     var sn = buildEntrySnapshot(candles, indexCandles, 'D');
@@ -3141,10 +3141,10 @@ window.TechIndicators = (function () {
     };
   }
 
-  /* Multi-timeframe Entry Score — new 3-pillar model:
-     each pillar is computed per timeframe, then each pillar is aggregated across
-     timeframes as D*0.55 + H*0.30 + W*0.15 (renormalized over available timeframes
-     via wSum division) and capped at its pillar max (30 / 30 / 40) at the combined
+   /* Multi-timeframe Entry Score — new 4-pillar model:
+      each pillar is computed per timeframe, then each pillar is aggregated across
+      timeframes as D*0.55 + H*0.30 + W*0.15 (renormalized over available timeframes
+      via wSum division) and capped at its pillar max (28 / 24 / 28 / 20) at the combined
      level. Modifiers run once on the Daily snapshot only (the primary decision
      frame); the MTF +10 needs weekly+daily ≥ 65. */
   function computeMultiTFEntryScore(tfResults, indexCandles, indexWeeklyCandles) {
@@ -3353,7 +3353,7 @@ window.TechIndicators = (function () {
   /* ══════════════════════════════════════════════════════════════════════════
      LEGACY Multi-timeframe Entry Score — old 12-sub-score model (7.1-10.3).
      Kept only for regression/back-compat harnesses. Production entry scoring
-     uses the new 3-pillar computeMultiTFEntryScore above.
+     uses the new 4-pillar computeMultiTFEntryScore above.
      ══════════════════════════════════════════════════════════════════════════ */
   function computeMultiTFEntryScoreLegacy(tfResults, indexCandles, indexWeeklyCandles) {
     if (!tfResults || tfResults.length === 0) return { multiTF_score: null, reason: 'no_timeframes' };

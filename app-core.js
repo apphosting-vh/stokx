@@ -2065,7 +2065,7 @@ function EntryScoreAnalysis({ entry, onBack }) {
                   _sc("darvasBox", price >= activeInd.darvasBox.boxTop)
                 ),
                 React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)", fontSize: 9, color: "var(--text6)" } },
-                  "Signals are rule-based (price vs indicator). Scores aggregate across the Trend Health, Pullback, and 4% Probability pillars. Switch timeframes above for multi-TF context."
+                  "Signals are rule-based (price vs indicator). Scores aggregate across the Trend Health, Pullback Quality, 4% Probability, and Swing Potential pillars. Switch timeframes above for multi-TF context."
                 )
               )
             )
@@ -6977,9 +6977,9 @@ const BacktestSuitePanel = () => {
       (function() {
         var exportRankingCSV = function() {
           if (!d.results || !d.results.length) return;
-          var headers = ["Symbol", "Signals", "Wins", "Losses", "Win Rate %", "Avg Return %", "Profit Factor", "Avg Hold Days", "Avg 10DLN", "Avg 10DEM", "Avg Score", "Avg Trend", "Avg Pullback", "Avg Prob4"];
+          var headers = ["Symbol", "Signals", "Wins", "Losses", "Win Rate %", "Avg Return %", "Profit Factor", "Avg Hold Days", "Avg 10DLN", "Avg 10DEM", "Avg Score", "Avg Trend", "Avg Pullback", "Avg Prob4", "Avg Swing"];
           var rows = d.results.map(function(r) {
-            return [r.symbol, r.totalSignals, r.winningTrades, r.losingTrades, r.winRate != null ? r.winRate : "", r.avgReturnPct != null ? r.avgReturnPct : "", r.profitFactor, r.avgHoldDays != null ? r.avgHoldDays : "", r.avgConfLog != null ? Math.round(r.avgConfLog * 1000) / 10 : "", r.avgConfEmp != null ? Math.round(r.avgConfEmp * 1000) / 10 : "", r.avgEntryScore != null ? r.avgEntryScore : "", r.avgTrend != null ? r.avgTrend : "", r.avgPullback != null ? r.avgPullback : "", r.avgProb4 != null ? r.avgProb4 : ""];
+            return [r.symbol, r.totalSignals, r.winningTrades, r.losingTrades, r.winRate != null ? r.winRate : "", r.avgReturnPct != null ? r.avgReturnPct : "", r.profitFactor, r.avgHoldDays != null ? r.avgHoldDays : "", r.avgConfLog != null ? Math.round(r.avgConfLog * 1000) / 10 : "", r.avgConfEmp != null ? Math.round(r.avgConfEmp * 1000) / 10 : "", r.avgEntryScore != null ? r.avgEntryScore : "", r.avgTrend != null ? r.avgTrend : "", r.avgPullback != null ? r.avgPullback : "", r.avgProb4 != null ? r.avgProb4 : "", r.avgSwing != null ? r.avgSwing : ""];
           });
           var csv = [headers.join(",")].concat(rows.map(function(r) { return r.map(function(v) { var s = String(v == null ? "" : v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(","); })).join("\r\n");
           var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
@@ -6992,12 +6992,12 @@ const BacktestSuitePanel = () => {
           if (typeof XLSX === "undefined") { showToast("XLSX library still loading — try again in a moment", 3000); return; }
           if (!d.results || !d.results.length) return;
           var rows = d.results.map(function(r) {
-            return { "Symbol": r.symbol, "Signals": r.totalSignals, "Wins": r.winningTrades, "Losses": r.losingTrades, "Win Rate %": r.winRate, "Avg Return %": r.avgReturnPct, "Profit Factor": typeof r.profitFactor === "string" ? r.profitFactor : r.profitFactor, "Avg Hold Days": r.avgHoldDays, "Avg 10DLN": r.avgConfLog != null ? Math.round(r.avgConfLog * 1000) / 10 : null, "Avg 10DEM": r.avgConfEmp != null ? Math.round(r.avgConfEmp * 1000) / 10 : null, "Avg Score": r.avgEntryScore, "Avg Trend": r.avgTrend, "Avg Pullback": r.avgPullback, "Avg Prob4": r.avgProb4 };
+            return { "Symbol": r.symbol, "Signals": r.totalSignals, "Wins": r.winningTrades, "Losses": r.losingTrades, "Win Rate %": r.winRate, "Avg Return %": r.avgReturnPct, "Profit Factor": typeof r.profitFactor === "string" ? r.profitFactor : r.profitFactor, "Avg Hold Days": r.avgHoldDays, "Avg 10DLN": r.avgConfLog != null ? Math.round(r.avgConfLog * 1000) / 10 : null, "Avg 10DEM": r.avgConfEmp != null ? Math.round(r.avgConfEmp * 1000) / 10 : null, "Avg Score": r.avgEntryScore, "Avg Trend": r.avgTrend, "Avg Pullback": r.avgPullback, "Avg Prob4": r.avgProb4, "Avg Swing": r.avgSwing };
           });
           var ws = XLSX.utils.json_to_sheet(rows);
           var wb = XLSX.utils.book_new();
           XLSX.utils.book_append_sheet(wb, ws, "Ranking");
-          var colWidths = [{ wch: 18 }, { wch: 8 }, { wch: 6 }, { wch: 7 }, { wch: 10 }, { wch: 11 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 10 }];
+          var colWidths = [{ wch: 18 }, { wch: 8 }, { wch: 6 }, { wch: 7 }, { wch: 10 }, { wch: 11 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 10 }];
           ws["!cols"] = colWidths;
           XLSX.writeFile(wb, "stox-batch-ranking-" + (d.symbol || "batch") + ".xlsx");
           showToast("Exported ranking XLSX", 3000);
@@ -7018,7 +7018,8 @@ const BacktestSuitePanel = () => {
               cell("Symbol", tdL), cell("Signals", td), cell("Wins", td), cell("Losses", td), cell("Win Rate", td), cell("Avg Return", td), cell("Profit Factor", td), cell("Avg Hold", td), cell("Avg 10DLN", td), cell("Avg 10DEM", td), cell("Avg Score", td),
               React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average Trend Health pillar score across all trades for this symbol" }, "Avg Trend"),
               React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average Pullback Quality pillar score across all trades for this symbol" }, "Avg Pullback"),
-              React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average 4% Probability pillar score across all trades for this symbol" }, "Avg Prob4")
+              React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average 4% Probability pillar score across all trades for this symbol" }, "Avg Prob4"),
+              React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average Swing Potential pillar score across all trades for this symbol" }, "Avg Swing")
             )),
             React.createElement("tbody", null, (d.results || []).map((r) => React.createElement("tr", { key: r.symbol },
               cell(symName(r.symbol), tdL), cell(r.totalSignals), cell(r.winningTrades), cell(r.losingTrades),
@@ -7031,7 +7032,8 @@ const BacktestSuitePanel = () => {
               cell(r.avgEntryScore != null ? React.createElement("span", { style: { fontWeight: 700, color: retColor(r.avgEntryScore - 50) } }, fmt2(r.avgEntryScore)) : "\u2014"),
               React.createElement("td", { style: Object.assign({}, td, { color: r.avgTrend != null ? "var(--text)" : "var(--text6)" }) }, r.avgTrend != null ? fmt2(r.avgTrend) : "\u2014"),
               React.createElement("td", { style: Object.assign({}, td, { color: r.avgPullback != null ? "var(--text)" : "var(--text6)" }) }, r.avgPullback != null ? fmt2(r.avgPullback) : "\u2014"),
-              React.createElement("td", { style: Object.assign({}, td, { color: r.avgProb4 != null ? "var(--text)" : "var(--text6)" }) }, r.avgProb4 != null ? fmt2(r.avgProb4) : "\u2014")
+              React.createElement("td", { style: Object.assign({}, td, { color: r.avgProb4 != null ? "var(--text)" : "var(--text6)" }) }, r.avgProb4 != null ? fmt2(r.avgProb4) : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, td, { color: r.avgSwing != null ? "var(--text)" : "var(--text6)" }) }, r.avgSwing != null ? fmt2(r.avgSwing) : "\u2014")
             )))
           )
         )
@@ -8252,6 +8254,7 @@ function StockScreener(props) {
       function(r) { return r.result ? r.result.aggTrendHealth : null; },
       function(r) { return r.result ? r.result.aggPullbackQuality : null; },
       function(r) { return r.result ? r.result.aggProb4 : null; },
+      function(r) { return r.result ? r.result.aggSwingPotential : null; },
       function(r) { return r.result ? r.result.finalScore : null; },
       function(r) { return r.result ? r.result.weekly : null; },
       function(r) { return r.result ? r.result.daily : null; },
@@ -8259,7 +8262,7 @@ function StockScreener(props) {
       function(r) { return r.conf10dLog; },
       function(r) { return r.conf10dEmp; }
     ];
-    var headers = ["Ticker","Company","Cap","Price","Today %","1D Chg %","1W Chg %","1M Chg %","Yearly %","Trend","Pullback","Prob4","Score","Weekly","Daily","Hourly","Conf 10DLN","Conf 10DEM"];
+    var headers = ["Ticker","Company","Cap","Price","Today %","1D Chg %","1W Chg %","1M Chg %","Yearly %","Trend","Pullback","Prob4","Swing","Score","Weekly","Daily","Hourly","Conf 10DLN","Conf 10DEM"];
     function csvEsc(v) { if (v == null) return ""; var s = String(v); if (s.indexOf(",") !== -1 || s.indexOf('"') !== -1 || s.indexOf("\n") !== -1) return '"' + s.replace(/"/g, '""') + '"'; return s; }
     var rows = [headers.join(",")];
     results.forEach(function(r) {
