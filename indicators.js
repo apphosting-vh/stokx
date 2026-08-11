@@ -404,8 +404,15 @@ window.TechIndicators = (function () {
       var hl2 = (candles[i].h + candles[i].l) / 2;
       var rawUpper = hl2 + multiplier * atr[i];
       var rawLower = hl2 - multiplier * atr[i];
-      var upperBand = (prevUpper !== null && rawUpper < prevUpper) ? rawUpper : (prevUpper !== null ? Math.min(rawUpper, prevUpper) : rawUpper);
-      var lowerBand = (prevLower !== null && rawLower > prevLower) ? rawLower : (prevLower !== null ? Math.max(rawLower, prevLower) : rawLower);
+      var prevClose = i > 0 ? candles[i - 1].c : null;
+      var upperBand = rawUpper;
+      if (prevUpper !== null && prevClose !== null && rawUpper >= prevUpper && prevClose <= prevUpper) {
+        upperBand = prevUpper;
+      }
+      var lowerBand = rawLower;
+      if (prevLower !== null && prevClose !== null && rawLower <= prevLower && prevClose >= prevLower) {
+        lowerBand = prevLower;
+      }
       var st;
       if (prevST === null) { st = candles[i].c > upperBand ? lowerBand : upperBand; }
       else if (prevST === prevUpper) { st = candles[i].c > upperBand ? lowerBand : upperBand; }
@@ -1060,12 +1067,31 @@ window.TechIndicators = (function () {
   function calcZigZag(candles, pct) {
     pct = pct || 5;
     var cl = closes(candles);
-    var pivots = [0], direction = 0;
+    if (cl.length < 2) return [0];
+    var pivots = [0];
+    var upTrend = null;
+    var extremeVal = cl[0], extremeIdx = 0;
     for (var i = 1; i < cl.length; i++) {
-      var prevP = cl[pivots[pivots.length - 1]];
-      var change = prevP > 0 ? (cl[i] - prevP) / prevP * 100 : 0;
-      if (direction >= 0 && change <= -pct) { pivots.push(i); direction = -1; }
-      else if (direction <= 0 && change >= pct) { pivots.push(i); direction = 1; }
+      if (upTrend === null) {
+        if (cl[i] > extremeVal) { extremeVal = cl[i]; extremeIdx = i; }
+        else if (cl[i] < extremeVal) { extremeVal = cl[i]; extremeIdx = i; }
+        var upChg = (extremeVal - cl[0]) / cl[0] * 100;
+        var dnChg = (cl[0] - extremeVal) / cl[0] * 100;
+        if (upChg >= pct) { upTrend = true; }
+        else if (dnChg >= pct) { upTrend = false; }
+      } else if (upTrend) {
+        if (cl[i] > extremeVal) { extremeVal = cl[i]; extremeIdx = i; }
+        if (extremeVal > 0 && (extremeVal - cl[i]) / extremeVal * 100 >= pct) {
+          pivots.push(extremeIdx);
+          upTrend = false; extremeVal = cl[i]; extremeIdx = i;
+        }
+      } else {
+        if (cl[i] < extremeVal) { extremeVal = cl[i]; extremeIdx = i; }
+        if (extremeVal > 0 && (cl[i] - extremeVal) / extremeVal * 100 >= pct) {
+          pivots.push(extremeIdx);
+          upTrend = true; extremeVal = cl[i]; extremeIdx = i;
+        }
+      }
     }
     return pivots.slice(-12);
   }
@@ -4372,9 +4398,7 @@ window.TechIndicators = (function () {
       if (dailyAvailable) {
         var dAdxRes = calcADX(dailyCandles, 14);
         if (dAdxRes) dailyAdx = last(dAdxRes.adx);
-        if (ctx.trendHealth != null) {
-          regimeQuality = clamp(ctx.trendHealth / 25, 0.2, 1.0);
-        } else if (dailyCandles.length >= 25) {
+        if (dailyCandles.length >= 25) {
           var logC = [];
           for (var q = dailyCandles.length - 20; q < dailyCandles.length; q++) logC.push(Math.log(dailyCandles[q].c));
           var r2 = rSquaredFit(logC);
@@ -4435,26 +4459,20 @@ window.TechIndicators = (function () {
       hourDrift *= hourDecay;
       hourDrift *= hourlyDataQuality;
       var dayDrift;
-      if (ctx.trendHealth != null) {
-        dayDrift = clamp((ctx.trendHealth - 15) / 15, -1, 1);
-      } else if (dailyAvailable) {
+      if (dailyAvailable) {
         var dS = (dailyEmaBullish ? 1 : 0) + (dailyPriceAboveEma21 ? 1 : 0) + (dailyMacdAboveZero ? 1 : 0);
         dayDrift = dS / 3 * 2 - 1;
       } else { dayDrift = 0; }
-      var pullbackBoost = 0;
-      if (ctx.pullbackQuality != null) pullbackBoost = clamp((ctx.pullbackQuality - 15) / 15, -0.1, 0.15);
       var driftS = clamp(driftPct / 2, -1, 1);
       var volFlowS = clamp((volConfirm - 0.5) * 2, -1, 1);
       var volGate = 0.5 + 0.5 * (regimeQuality != null ? regimeQuality : 1);
-      var prob4Adjust = 0;
-      if (ctx.prob4 != null) prob4Adjust = clamp((ctx.prob4 - 20) / 200, -0.1, 0.1);
       var driftScore;
       if (rsScore !== 0 && !isNaN(rsScore)) {
         driftScore = regimeMult * (0.15 * hourDrift + 0.15 * rsScore + 0.10 * driftS) +
-                     0.35 * dayDrift + 0.15 * volFlowS * volGate + 0.10 * pullbackBoost + prob4Adjust;
+                     0.35 * dayDrift + 0.15 * volFlowS * volGate;
       } else {
         driftScore = regimeMult * (0.20 * hourDrift + 0.10 * driftS) +
-                     0.40 * dayDrift + 0.20 * volFlowS * volGate + 0.10 * pullbackBoost + prob4Adjust;
+                     0.40 * dayDrift + 0.20 * volFlowS * volGate;
       }
       driftScore = clamp(driftScore, -1, 1);
       base.components.driftPct = round(driftPct, 2);
