@@ -362,34 +362,71 @@ window.TechIndicators = (function () {
   function calcATR(candles, period) {
     period = period || 14;
     var tr = calcTrueRange(candles);
-    return ewmAlpha(tr, 1 / period).map(function (v) {
-      return v === null ? null : round(v, 4);
-    });
+    if (tr.length < period) return tr.map(function () { return null; });
+    var out = [];
+    var sum = 0;
+    for (var i = 0; i < period; i++) sum += tr[i];
+    var prevATR = sum / period;
+    for (var i = 0; i < period - 1; i++) out.push(null);
+    out.push(round(prevATR, 4));
+    for (var i = period; i < tr.length; i++) {
+      prevATR = (prevATR * (period - 1) + tr[i]) / period;
+      out.push(round(prevATR, 4));
+    }
+    return out;
   }
 
   function calcADX(candles, period) {
     period = period || 14;
     if (candles.length < period + 1) return null;
-    var plusDM = [0], minusDM = [0], trArr = [candles[0].h - candles[0].l];
-    for (var i = 1; i < candles.length; i++) {
+    var plusDM = [], minusDM = [], trArr = [];
+    for (var i = 0; i < candles.length; i++) {
+      if (i === 0) { trArr.push(candles[i].h - candles[i].l); plusDM.push(0); minusDM.push(0); continue; }
       var upMove = candles[i].h - candles[i - 1].h;
       var downMove = candles[i - 1].l - candles[i].l;
       plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
       minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
       trArr.push(Math.max(candles[i].h - candles[i].l, Math.abs(candles[i].h - candles[i - 1].c), Math.abs(candles[i].l - candles[i - 1].c)));
     }
-    var atrArr = ewmAlpha(trArr, 1 / period);
-    var pdmSmooth = ewmAlpha(plusDM, 1 / period);
-    var mdmSmooth = ewmAlpha(minusDM, 1 / period);
-    var plusDI = [], minusDI = [], dx = [];
-    for (var i = 0; i < trArr.length; i++) {
-      var pd = atrArr[i] > 0 ? 100 * pdmSmooth[i] / atrArr[i] : 0;
-      var md = atrArr[i] > 0 ? 100 * mdmSmooth[i] / atrArr[i] : 0;
-      plusDI.push(pd); minusDI.push(md);
-      var sum = pd + md;
-      dx.push(sum > 0 ? 100 * Math.abs(pd - md) / sum : 0);
+    var n = candles.length;
+    var atr1 = [], pdm1 = [], mdm1 = [];
+    var sumTR = 0, sumPDM = 0, sumMDM = 0;
+    for (var i = 0; i < period; i++) { sumTR += trArr[i]; sumPDM += plusDM[i]; sumMDM += minusDM[i]; }
+    var prevATR = sumTR / period, prevPDM = sumPDM / period, prevMDM = sumMDM / period;
+    for (var i = 0; i < period - 1; i++) { atr1.push(null); pdm1.push(null); mdm1.push(null); }
+    atr1.push(round(prevATR, 4)); pdm1.push(round(prevPDM, 4)); mdm1.push(round(prevMDM, 4));
+    for (var i = period; i < n; i++) {
+      prevATR = (prevATR * (period - 1) + trArr[i]) / period;
+      prevPDM = (prevPDM * (period - 1) + plusDM[i]) / period;
+      prevMDM = (prevMDM * (period - 1) + minusDM[i]) / period;
+      atr1.push(round(prevATR, 4)); pdm1.push(round(prevPDM, 4)); mdm1.push(round(prevMDM, 4));
     }
-    var adxArr = ewmAlpha(dx, 1 / period).map(function (v) { return v === null ? null : round(v, 2); });
+    var plusDI = [], minusDI = [], dx = [];
+    for (var i = 0; i < n; i++) {
+      if (atr1[i] === null || atr1[i] === 0) { plusDI.push(null); minusDI.push(null); dx.push(null); continue; }
+      var pd = 100 * pdm1[i] / atr1[i];
+      var md = 100 * mdm1[i] / atr1[i];
+      plusDI.push(round(pd, 2)); minusDI.push(round(md, 2));
+      var denom = pd + md;
+      dx.push(denom > 0 ? round(100 * Math.abs(pd - md) / denom, 2) : 0);
+    }
+    var adxArr = [];
+    var dxValid = [];
+    for (var i = 0; i < dx.length; i++) { if (dx[i] !== null) dxValid.push(dx[i]); }
+    if (dxValid.length < period) {
+      for (var i = 0; i < n; i++) adxArr.push(null);
+    } else {
+      var sumDX = 0;
+      for (var i = 0; i < period; i++) sumDX += dxValid[i];
+      var prevADX = sumDX / period;
+      var adxNullCount = n - dxValid.length;
+      for (var i = 0; i < adxNullCount + period - 1; i++) adxArr.push(null);
+      adxArr.push(round(prevADX, 2));
+      for (var i = period; i < dxValid.length; i++) {
+        prevADX = (prevADX * (period - 1) + dxValid[i]) / period;
+        adxArr.push(round(prevADX, 2));
+      }
+    }
     return { adx: adxArr, plusDI: plusDI, minusDI: minusDI };
   }
 
@@ -621,19 +658,23 @@ window.TechIndicators = (function () {
   function calcRSI(candles, period) {
     period = period || 14;
     var cl = closes(candles);
-    if (cl.length < 2) return cl.map(function () { return null; });
+    if (cl.length < period + 1) return cl.map(function () { return null; });
     var gains = [0], losses = [0];
     for (var i = 1; i < cl.length; i++) {
       var diff = cl[i] - cl[i - 1];
       gains.push(diff > 0 ? diff : 0);
       losses.push(diff < 0 ? -diff : 0);
     }
-    var avgGain = ewmAlpha(gains, 1 / period);
-    var avgLoss = ewmAlpha(losses, 1 / period);
+    var sumG = 0, sumL = 0;
+    for (var i = 1; i <= period; i++) { sumG += gains[i]; sumL += losses[i]; }
+    var avgGain = sumG / period, avgLoss = sumL / period;
     var out = [];
-    for (var i = 0; i < cl.length; i++) {
-      if (avgLoss[i] === 0) out.push(100);
-      else out.push(round(100 - 100 / (1 + avgGain[i] / avgLoss[i]), 2));
+    for (var i = 0; i < period; i++) out.push(null);
+    out.push(avgLoss === 0 ? 100 : round(100 - 100 / (1 + avgGain / avgLoss), 2));
+    for (var i = period + 1; i < gains.length; i++) {
+      avgGain = (avgGain * (period - 1) + gains[i]) / period;
+      avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+      out.push(avgLoss === 0 ? 100 : round(100 - 100 / (1 + avgGain / avgLoss), 2));
     }
     return out;
   }
@@ -1632,7 +1673,7 @@ window.TechIndicators = (function () {
     return Math.min(s, 9);
   }
 
-  /* ── 14.2 VWAP + Anchored VWAP Break (7 pts) ── */
+  /* ── 14.2 Rolling VWAP(10) + Anchored VWAP Break (7 pts) ── */
   function scoreExitVwapAvwap(sn) {
     var s = 0;
     if (sn.c < sn.vwap10 && sn.prevVwap10 !== null && sn.pc >= sn.prevVwap10) s += 2.0;
@@ -2230,7 +2271,7 @@ window.TechIndicators = (function () {
     return Math.min(s, 8);
   }
 
-  /* ── 9.2 VWAP + Anchored VWAP (0-6) ── */
+  /* ── 9.2 Rolling VWAP(10) + Anchored VWAP (0-6) ── */
   function scoreVwapAnchored(sn) {
     var s = 0;
     if (sn.c !== null && sn.vwap10 !== null && sn.c > sn.vwap10) {

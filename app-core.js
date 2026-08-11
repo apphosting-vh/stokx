@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.15.0";
+window.__STOX_APP_VERSION = "2.16.0";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -669,7 +669,6 @@ async function fetchOHLCV(ticker, timeframe) {
     case "15m": yfInterval = "15m"; yfRange = "1mo"; break;
     case "30m": yfInterval = "30m"; yfRange = "1mo"; break;
     case "1h": yfInterval = "1h"; yfRange = "3mo"; break;
-    case "2h": yfInterval = "2h"; yfRange = "3mo"; break;
     case "weekly": yfInterval = "1wk"; yfRange = "5y"; break;
     default: yfInterval = "1d"; yfRange = "2y"; break;
   }
@@ -723,7 +722,7 @@ var ALL_INDS = [
   { name: "EMA (21)", key: "ema_21", cat: "Trend", type: "line" },
   { name: "EMA (50)", key: "ema_50", cat: "Trend", type: "line" },
   { name: "WMA (20)", key: "wma_20", cat: "Trend", type: "line" },
-  { name: "VWAP", key: "vwap", cat: "Volume", type: "line" },
+  { name: "Rolling VWAP(10)", key: "vwap", cat: "Volume", type: "line" },
   { name: "RSI (14)", key: "rsi_14", cat: "Momentum", type: "oscillator", range: [0, 100] },
   { name: "MACD", key: "macd", cat: "Momentum", type: "macd" },
   { name: "ATR (14)", key: "atr_14", cat: "Volatility", type: "line" },
@@ -773,7 +772,7 @@ var ALL_CATS = ["Trend", "Momentum", "Volatility", "Volume", "Structure"];
 var CHART_OVERLAY_DEFS = [
   { key: "ma", label: "MA" },
   { key: "bb", label: "Bollinger" },
-  { key: "vwap", label: "VWAP" },
+  { key: "vwap", label: "Roll VWAP" },
   { key: "st", label: "SuperTrend" },
   { key: "sar", label: "PSAR" },
   { key: "lvl", label: "Levels" }
@@ -1557,7 +1556,7 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
         ),
         React.createElement("div", { style: { marginBottom: 6 } },
           React.createElement("span", { style: { fontWeight: 600, color: "var(--text)" } }, "Categories: "),
-          "Trend \u2014 MAs, MACD, ADX, SuperTrend. Momentum \u2014 RSI, CCI, MFI. Volume \u2014 VWAP, OBV, TTM Squeeze. ",
+          "Trend \u2014 MAs, MACD, ADX, SuperTrend. Momentum \u2014 RSI, CCI, MFI. Volume \u2014 Rolling VWAP, OBV, TTM Squeeze. ",
           "Volatility \u2014 Bollinger, ATR, Donchian. Structure \u2014 Ichimoku, Pivots, Choppiness."
         ),
         React.createElement("div", null,
@@ -2060,7 +2059,7 @@ function EntryScoreAnalysis({ entry, onBack }) {
                   _sc("ichimoku", price > Math.max((activeInd.ichimoku.senkouA ?? activeInd.ichimoku.senkou_span_a) || 0, (activeInd.ichimoku.senkouB ?? activeInd.ichimoku.senkou_span_b) || 0))
                 ),
                 activeInd.vwap != null && React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)" } },
-                  "VWAP: ", React.createElement("span", { style: { fontWeight: 600, color: price > activeInd.vwap ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.vwap)),
+                  "Roll VWAP: ", React.createElement("span", { style: { fontWeight: 600, color: price > activeInd.vwap ? "#16a34a" : "#ef4444" } }, _fmt(activeInd.vwap)),
                   " \u2014 price ", price > activeInd.vwap ? "above (bullish)" : "below (bearish)",
                   _sc("vwap", price > activeInd.vwap)
                 ),
@@ -2534,7 +2533,7 @@ const SessionConfidencePanel = ({ ticker, buyPrice, buyDate, entryScore }) => {
     : "Low odds \u2014 bank the gain today";
   const cp = conf.components;
   const chips = [
-    { k: "VWAP", v: cp.vwap != null ? cp.vwap.toFixed(2) : "\u2014", hint: cp.vwapSlope != null ? "slope " + (cp.vwapSlope > 0 ? "+" : "") + cp.vwapSlope + "%" : null },
+    { k: "Roll VWAP", v: cp.vwap != null ? cp.vwap.toFixed(2) : "\u2014", hint: cp.vwapSlope != null ? "slope " + (cp.vwapSlope > 0 ? "+" : "") + cp.vwapSlope + "%" : null },
     { k: "ADX", v: cp.adx != null ? cp.adx + " (+DI " + cp.plusDI + " / \u2212DI " + cp.minusDI + ")" : "\u2014" },
     { k: "MFI", v: cp.mfi != null ? cp.mfi : "\u2014" },
     { k: "ROC5", v: cp.roc5 != null ? cp.roc5 + "%" : "\u2014" },
@@ -3027,7 +3026,7 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
     { k: "Optimum Entry", v: price(entry), hint: disc != null && disc > 0 ? "limit " + disc + "% below current" : disc != null ? "at current price" : null, x: "Best limit price \u2014 highest level with strong odds of +4% in 10 sessions." },
     { k: "Odds @ entry", v: confE != null ? confE + "/100" : "\u2014", hint: confC != null ? "vs " + confC + " at current" : null, x: _hd + "-day +4% confidence if bought at the optimum price." },
     { k: "Advantage", v: res.advantagePct != null ? (res.advantagePct > 0 ? "+" : "") + res.advantagePct + " pts" : "\u2014", x: "Extra confidence gained by buying at the limit instead of market." },
-    { k: "VWAP", v: cp.vwap != null ? price(cp.vwap) : "\u2014", x: "Session average price \u2014 natural pullback target." },
+    { k: "Roll VWAP", v: cp.vwap != null ? price(cp.vwap) : "\u2014", x: "10-bar rolling VWAP \u2014 mean-reversion target." },
     { k: "EMA21", v: cp.ema21 != null ? price(cp.ema21) : "\u2014", x: "21-hour trend average \u2014 bounces here in uptrends." },
     { k: "Dip (median)", v: cp.dipDepthPct != null ? cp.dipDepthPct + "%" : "\u2014", x: "Median intraday pullback from session open (excl. today)." },
     { k: "Support", v: cp.swingLow != null ? price(cp.swingLow) : "\u2014", x: "Lowest low of last 3 sessions \u2014 below this the setup breaks." },
@@ -3111,7 +3110,7 @@ const SS_IND_KEYS = [
   ["stochRSI", "Stoch RSI"], ["ema_9", "EMA 9"], ["ema_21", "EMA 21"],
   ["ema_50", "EMA 50"], ["sma_20", "SMA 20"], ["sma_50", "SMA 50"],
   ["supertrend", "Supertrend"], ["psar", "PSAR"], ["atr_14", "ATR(14)"],
-  ["vwap", "VWAP"], ["bb", "Bollinger"], ["cci_20", "CCI(20)"],
+  ["vwap", "Roll VWAP"], ["bb", "Bollinger"], ["cci_20", "CCI(20)"],
   ["mfi_14", "MFI(14)"], ["obv", "OBV"], ["roc_12", "ROC(12)"],
   ["cmf_20", "CMF(20)"], ["williamsR", "Williams %R"], ["choppiness", "Choppiness"],
   ["tsi", "TSI"], ["stc", "STC"], ["week52HL", "52W"]
@@ -4836,7 +4835,7 @@ const EntryScorePanel = ({ shares }) => {
         indRow("BB Upper", indData.bb ? indData.bb.upper : null),
         indRow("BB Lower", indData.bb ? indData.bb.lower : null),
         indRow("OBV", indData.obv),
-        indRow("VWAP", indData.vwap),
+        indRow("Roll VWAP", indData.vwap),
         indRow("ROC (12)", indData.roc_12, indData.roc_12 > 0 ? "bullish" : "bearish"),
         indRow("PSAR", indData.psar, lc && indData.psar ? lc > indData.psar ? "bullish" : "bearish" : null),
         indRow("WMA 20", indData.wma_20),
@@ -9733,7 +9732,7 @@ function SingleStockAnalysis({ requestedTicker }) {
     var legendItems = [];
     if (overlays.ma) { legendItems.push({ label: "EMA9", c: "#38bdf8" }, { label: "EMA21", c: "#22c55e" }, { label: "SMA20", c: "#3b82f6" }, { label: "SMA50", c: "#a855f7" }, { label: "SMA200", c: "#f59e0b" }); }
     if (overlays.bb) legendItems.push({ label: "BB(20,2)", c: "#94a3b8" });
-    if (overlays.vwap) legendItems.push({ label: "VWAP", c: "#fb923c" });
+    if (overlays.vwap) legendItems.push({ label: "Roll VWAP(10)", c: "#fb923c" });
     if (overlays.st) legendItems.push({ label: "ST", c: "#ec4899" });
     if (overlays.sar) legendItems.push({ label: "SAR", c: "#22d3ee" });
     if (overlays.lvl) legendItems.push({ label: "Pivot", c: "#fbbf24" }, { label: "Fib", c: "#818cf8" }, { label: "POC", c: "#f472b6" });
