@@ -15,9 +15,12 @@ window.TechIndicators = (function () {
     var out = [];
     for (var i = 0; i < arr.length; i++) {
       if (i < period - 1) { out.push(null); continue; }
-      var sum = 0;
-      for (var j = i - period + 1; j <= i; j++) sum += arr[j];
-      out.push(sum / period);
+      var sum = 0, valid = true;
+      for (var j = i - period + 1; j <= i; j++) {
+        if (arr[j] == null || isNaN(arr[j])) { valid = false; break; }
+        sum += arr[j];
+      }
+      out.push(valid ? sum / period : null);
     }
     return out;
   }
@@ -112,11 +115,13 @@ window.TechIndicators = (function () {
     var denom = period * (period + 1) / 2;
     for (var i = 0; i < cl.length; i++) {
       if (i < period - 1) { out.push(null); continue; }
-      var sum = 0;
+      var sum = 0, valid = true;
       for (var j = 0; j < period; j++) {
-        sum += cl[i - period + 1 + j] * (j + 1);
+        var v = cl[i - period + 1 + j];
+        if (v == null || isNaN(v)) { valid = false; break; }
+        sum += v * (j + 1);
       }
-      out.push(sum / denom);
+      out.push(valid ? sum / denom : null);
     }
     return out;
   }
@@ -4071,13 +4076,13 @@ window.TechIndicators = (function () {
      constraints of the session itself (time left, average range consumed).
      Deliberately excludes index, beta and daily-trend inputs.
 
-       +20  VWAP position + slope      (session VWAP anchor, 15m)
+       +20  Session VWAP position + slope  (session VWAP anchor, 15m)
        +20  Intraday ADX/±DI           (trend strength & direction, 15m)
        +15  MFI(14) money flow         (volume-confirmed buying, not exhausted)
        +10  ROC(5) acceleration        (short-term momentum still rising)
        +15  ADR headroom               (avg daily range not yet consumed)
        +10  Time remaining in session  (09:15–15:30 IST)
-       −10  Overextension penalty      (intraday RSI(5) stretched / too far > VWAP)
+       −10  Overextension penalty      (intraday RSI(5) stretched / too far > Session VWAP)
 
      Returns { confidence, reason, components, flags }.
      Confidence is normalized to the weight actually available when data is
@@ -4197,7 +4202,7 @@ window.TechIndicators = (function () {
       }
       total += headScore;
 
-      /* VWAP position + slope (20) */
+      /* Session VWAP position + slope (20) */
       var vwapScore = 10;
       if (vwap != null) {
         var distPct = (c - vwap) / vwap * 100;
@@ -4362,7 +4367,7 @@ window.TechIndicators = (function () {
      where calP0 / calK are OLS-calibrated constants from the backtest
      harness (calibrateConfidence). A neutral stock (P ≈ 0.20) reads ~50.
      The raw probability stays in components.probTouch. Missing vol data →
-     neutral 50 fill. Overextension penalty (continuous RSI + price-VWAP
+     neutral 50 fill. Overextension penalty (continuous RSI + price-Session VWAP
      stretch, amplified near target) applies a larger haircut to stretched
      entries.
      Returns { confidence, reason, components, flags }. */
@@ -4985,14 +4990,14 @@ window.TechIndicators = (function () {
       for (var sk3 in last3) if (last3[sk3] < swingLow) swingLow = last3[sk3];
       base.components.swingLow = swingLow === Infinity ? null : round(swingLow, 2);
 
-      /* ── 8. VWAP distance, high gap ────────────────────────────────────── */
+      /* ── 8. Session VWAP distance, high gap ────────────────────────────── */
       var vwap = cp.hourlyVwap;
       var vDistPct = vwap != null && vwap > 0 ? (c - vwap) / vwap * 100 : null;
       var highGapPct = (high15 - c) / high15 * 100;
       base.components.vDistPct = vDistPct != null ? round(vDistPct, 2) : null;
       base.components.highGapPct = round(highGapPct, 2);
 
-      /* ── 9. Overextended: ATR-normalized VWAP stretch + RSI ────────────── */
+      /* ── 9. Overextended: ATR-normalized Session VWAP stretch + RSI ────── */
       var vwapExt = 0;
       if (vwap != null && atrPct != null) {
         var vwScale = atrPct / 100 * c;
