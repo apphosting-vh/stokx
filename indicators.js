@@ -415,21 +415,18 @@ window.TechIndicators = (function () {
       var denom = pd + md;
       dx.push(denom > 0 ? round(100 * Math.abs(pd - md) / denom, 2) : 0);
     }
-    var adxArr = [];
-    var dxValid = [];
-    for (var i = 0; i < dx.length; i++) { if (dx[i] !== null) dxValid.push(dx[i]); }
-    if (dxValid.length < period) {
-      for (var i = 0; i < n; i++) adxArr.push(null);
-    } else {
+    var adxArr = new Array(n);
+    for (var i = 0; i < n; i++) adxArr[i] = null;
+    var dxValid = [], dxIndices = [];
+    for (var i = 0; i < dx.length; i++) { if (dx[i] !== null) { dxValid.push(dx[i]); dxIndices.push(i); } }
+    if (dxValid.length >= period) {
       var sumDX = 0;
       for (var i = 0; i < period; i++) sumDX += dxValid[i];
       var prevADX = sumDX / period;
-      var adxNullCount = n - dxValid.length;
-      for (var i = 0; i < adxNullCount + period - 1; i++) adxArr.push(null);
-      adxArr.push(round(prevADX, 2));
+      adxArr[dxIndices[period - 1]] = round(prevADX, 2);
       for (var i = period; i < dxValid.length; i++) {
         prevADX = (prevADX * (period - 1) + dxValid[i]) / period;
-        adxArr.push(round(prevADX, 2));
+        adxArr[dxIndices[i]] = round(prevADX, 2);
       }
     }
     return { adx: adxArr, plusDI: plusDI, minusDI: minusDI };
@@ -997,7 +994,7 @@ window.TechIndicators = (function () {
       if (mid[i] === null) { upper.push(null); lower.push(null); continue; }
       var sumSq = 0;
       for (var j = i - period + 1; j <= i; j++) { sumSq += Math.pow(cl[j] - mid[i], 2); }
-      var std = Math.sqrt(sumSq / (period - 1));
+      var std = Math.sqrt(sumSq / period);
       upper.push(round(mid[i] + mult * std, 2));
       lower.push(round(mid[i] - mult * std, 2));
     }

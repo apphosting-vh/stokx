@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.16.0";
+window.__STOX_APP_VERSION = "2.17.0";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -1019,15 +1019,13 @@ const applyFont = id => {
   document.documentElement.style.setProperty("--font-body", font.stack);
 };
 
-var _confirmResolve = null;
 function showConfirm(msg) {
   return new Promise(function(resolve) {
-    _confirmResolve = resolve;
     var el = document.createElement("div");
     el.className = "modal-bd";
     el.id = "stox-confirm-modal";
     el.style.zIndex = "3000";
-    el.onclick = function(e) { if (e.target === e.currentTarget) { el.remove(); _confirmResolve = null; resolve(false); } };
+    el.onclick = function(e) { if (e.target === e.currentTarget) { el.remove(); resolve(false); } };
     el.innerHTML = '<div class="stx-card stx-fu" style="max-width:400px;margin:40px auto;width:92vw;padding:24px;text-align:center">'
       + '<p style="font-size:14px;font-weight:600;color:var(--text);margin:0 0 20px;line-height:1.5">' + msg + '</p>'
       + '<div style="display:flex;gap:10px;justify-content:center">'
@@ -1035,8 +1033,8 @@ function showConfirm(msg) {
       + '<button id="stox-confirm-ok" class="stx-btn" style="padding:8px 20px;font-size:13px;background:#ef4444;color:#fff;border-color:#ef4444">Confirm</button>'
       + '</div></div>';
     document.body.appendChild(el);
-    document.getElementById("stox-confirm-cancel").onclick = function() { el.remove(); _confirmResolve = null; resolve(false); };
-    document.getElementById("stox-confirm-ok").onclick = function() { el.remove(); _confirmResolve = null; resolve(true); };
+    document.getElementById("stox-confirm-cancel").onclick = function() { el.remove(); resolve(false); };
+    document.getElementById("stox-confirm-ok").onclick = function() { el.remove(); resolve(true); };
   });
 }
 window.showConfirm = showConfirm;
