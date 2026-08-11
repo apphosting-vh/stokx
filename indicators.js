@@ -520,7 +520,7 @@ window.TechIndicators = (function () {
     for (var i = 0; i < candles.length; i++) {
       if (i < period) { up.push(null); down.push(null); osc.push(null); continue; }
       var bestIdx = i, worstIdx = i;
-      for (var j = i - period; j <= i; j++) { if (hi[j] > hi[bestIdx]) bestIdx = j; if (lo[j] < lo[worstIdx]) worstIdx = j; }
+      for (var j = i - period + 1; j <= i; j++) { if (hi[j] > hi[bestIdx]) bestIdx = j; if (lo[j] < lo[worstIdx]) worstIdx = j; }
       var upVal = round((period - (i - bestIdx)) / period * 100, 2);
       var dnVal = round((period - (i - worstIdx)) / period * 100, 2);
       up.push(upVal); down.push(dnVal); osc.push(round(upVal - dnVal, 2));
@@ -569,9 +569,16 @@ window.TechIndicators = (function () {
     }
     var validMacd = [], validIdx = [];
     for (var i = 0; i < macdLine.length; i++) { if (macdLine[i] !== null) { validMacd.push(macdLine[i]); validIdx.push(i); } }
-    var sigEma = ema(validMacd, signal);
+    var sigEmaInput = validMacd.map(function () { return null; });
+    if (validMacd.length >= signal) {
+      var seedSum = 0;
+      for (var i = 0; i < signal; i++) seedSum += validMacd[i];
+      sigEmaInput[signal - 1] = seedSum / signal;
+      for (var i = signal; i < validMacd.length; i++) sigEmaInput[i] = validMacd[i];
+    }
+    var sigEma = ema(sigEmaInput, signal);
     var signalLine = macdLine.map(function () { return null; });
-    for (var i = 0; i < sigEma.length; i++) { signalLine[validIdx[i]] = sigEma[i]; }
+    for (var i = 0; i < sigEma.length; i++) { if (sigEma[i] !== null) signalLine[validIdx[i]] = sigEma[i]; }
     var histogram = [];
     for (var i = 0; i < cl.length; i++) {
       if (macdLine[i] === null || signalLine[i] === null) { histogram.push(null); continue; }
@@ -688,7 +695,7 @@ window.TechIndicators = (function () {
     var n = rsi.length;
     var rawK = [];
     for (var i = 0; i < n; i++) {
-      if (rsi[i] === null || i < rsiPeriod - 1) { rawK.push(null); continue; }
+      if (rsi[i] === null || i < 2 * rsiPeriod - 1) { rawK.push(null); continue; }
       var hi = -Infinity, lo = Infinity;
       for (var j = i - rsiPeriod + 1; j <= i; j++) {
         if (rsi[j] === null) continue;
@@ -697,16 +704,10 @@ window.TechIndicators = (function () {
       }
       rawK.push(hi - lo > 0 ? 100 * (rsi[i] - lo) / (hi - lo) : 50);
     }
-    var validK = [], validIdx = [];
-    for (var i = 0; i < rawK.length; i++) { if (rawK[i] !== null) { validK.push(rawK[i]); validIdx.push(i); } }
-    var smK = sma(validK, kSmooth);
-    var kOut = rawK.map(function () { return null; });
-    for (var i = 0; i < smK.length; i++) { kOut[validIdx[i]] = smK[i] !== null ? round(smK[i], 2) : null; }
-    var validK2 = [], validIdx2 = [];
-    for (var i = 0; i < kOut.length; i++) { if (kOut[i] !== null) { validK2.push(kOut[i]); validIdx2.push(i); } }
-    var smD = sma(validK2, dSmooth);
-    var dOut = kOut.map(function () { return null; });
-    for (var i = 0; i < smD.length; i++) { dOut[validIdx2[i]] = smD[i] !== null ? round(smD[i], 2) : null; }
+    var kOut = sma(rawK, kSmooth);
+    for (var i = 0; i < kOut.length; i++) { if (kOut[i] !== null) kOut[i] = round(kOut[i], 2); }
+    var dOut = sma(kOut, dSmooth);
+    for (var i = 0; i < dOut.length; i++) { if (dOut[i] !== null) dOut[i] = round(dOut[i], 2); }
     return { k: kOut, d: dOut };
   }
 
@@ -1117,11 +1118,9 @@ window.TechIndicators = (function () {
     for (var i = 1; i < cl.length; i++) {
       if (upTrend === null) {
         if (cl[i] > extremeVal) { extremeVal = cl[i]; extremeIdx = i; }
-        else if (cl[i] < extremeVal) { extremeVal = cl[i]; extremeIdx = i; }
-        var upChg = (extremeVal - cl[0]) / cl[0] * 100;
-        var dnChg = (cl[0] - extremeVal) / cl[0] * 100;
-        if (upChg >= pct) { upTrend = true; }
-        else if (dnChg >= pct) { upTrend = false; }
+        if (extremeVal > 0 && (extremeVal - cl[0]) / extremeVal * 100 >= pct) { upTrend = true; continue; }
+        if (cl[i] < extremeVal) { extremeVal = cl[i]; extremeIdx = i; }
+        if (extremeVal > 0 && (cl[0] - extremeVal) / cl[0] * 100 >= pct) { upTrend = false; continue; }
       } else if (upTrend) {
         if (cl[i] > extremeVal) { extremeVal = cl[i]; extremeIdx = i; }
         if (extremeVal > 0 && (extremeVal - cl[i]) / extremeVal * 100 >= pct) {
@@ -4143,7 +4142,7 @@ window.TechIndicators = (function () {
           if (session[k].h > dayHigh) dayHigh = session[k].h;
           if (session[k].l < dayLow) dayLow = session[k].l;
         }
-        var prevClose = dailyCandles[dailyCandles.length - 1].c;
+        var prevClose = dailyCandles.length >= 2 ? dailyCandles[dailyCandles.length - 2].c : dailyCandles[dailyCandles.length - 1].c;
         if (prevClose > 0 && dayLow < Infinity) {
           rangeUsedPct = (dayHigh - dayLow) / prevClose * 100;
           var atrV = last(calcATR(dailyCandles, 14));
@@ -4773,7 +4772,7 @@ window.TechIndicators = (function () {
       /* ── 2. ATR + intraday sigma ───────────────────────────────────────── */
       var atrPct = null, atrAbs = null;
       if (dailyCandles && dailyCandles.length >= 30) {
-        var prevClose = dailyCandles[dailyCandles.length - 1].c;
+        var prevClose = dailyCandles.length >= 2 ? dailyCandles[dailyCandles.length - 2].c : dailyCandles[dailyCandles.length - 1].c;
         var atrV = last(calcATR(dailyCandles, 14));
         if (prevClose > 0 && atrV != null) {
           atrPct = atrV / prevClose * 100;
