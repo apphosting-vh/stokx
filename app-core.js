@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.18.0";
+window.__STOX_APP_VERSION = "2.19.0";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -252,6 +252,9 @@ const OfflineOHLCV = {
     });
   }
 };
+
+/* Expose OfflineOHLCV globally for use by other modules (batch-backtest, etc.) */
+window.OfflineOHLCV = OfflineOHLCV;
 
 const NSE_HOLIDAYS = new Set([
   "2025-01-26","2025-02-19","2025-03-14","2025-03-31",
@@ -941,6 +944,10 @@ const Icons = {
   ),
   pen: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("path", { d: "M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" })
+  ),
+  flask: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("path", { d: "M9 3h6" }),
+    React.createElement("path", { d: "M10 9V3h4v6l5 8a2 2 0 0 1-1.7 3H6.7A2 2 0 0 1 5 17l5-8z" })
   ),
 };
 
@@ -8341,9 +8348,10 @@ function StockScreener(props) {
       var lastDailyClose = dc[_yi].c;
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
+      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(_e) {}
       var conf10d = null, conf10dLog = null, conf10dEmp = null;
-      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10) { conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
+      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -8354,10 +8362,11 @@ function StockScreener(props) {
       var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
+      var _patMeta = result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight, calibrated: result._patternHasCalibration } : null;
       setResults(function(p) {
         var idx = p.findIndex(function(r) { return r.s.t === s.t; });
-        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp }; return copy; }
-        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp }]);
+        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta }; return copy; }
+        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta }]);
       });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[s.t] = Date.now(); return c; });
     } catch(e) {}
@@ -8392,9 +8401,10 @@ function StockScreener(props) {
       var lastDailyClose = dc[_yi].c;
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
-      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
+      var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
+      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(_e) {}
       var conf10d = null, conf10dLog = null, conf10dEmp = null;
-      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10) { conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
+      try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
       var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
       var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -8405,7 +8415,8 @@ function StockScreener(props) {
       var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
-      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp }]); });
+      var _patMeta = result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight, calibrated: result._patternHasCalibration } : null;
+      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta }]); });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[stockObj.t] = Date.now(); return c; });
     } catch(e) { setScanErr("Failed to fetch " + tk); }
     setManualLoading(false); setManualTicker("");
@@ -8491,9 +8502,10 @@ function StockScreener(props) {
           var lastDailyClose = dc[_yi].c;
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
-          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
+          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
+           try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(_e) {}
            var conf10d = null, conf10dLog = null, conf10dEmp = null;
-           try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10) { conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
+           try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
            var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
            var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
            var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -8504,8 +8516,9 @@ function StockScreener(props) {
            var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
            var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
            var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
+           var _patMeta = result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight, calibrated: result._patternHasCalibration } : null;
            var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
-           if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp };
+           if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta };
           bg.timestamps[stk.t] = Date.now();
         }
       } catch(e) {}
@@ -8657,9 +8670,10 @@ function StockScreener(props) {
           var lastDailyClose = dc[_yi].c;
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
-          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly);
+          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
+          try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(_e) {}
           var conf10d = null, conf10dLog = null, conf10dEmp = null;
-          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result)); if (_c10) { conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
+          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -8670,7 +8684,8 @@ function StockScreener(props) {
           var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
           var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
           var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
-          return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp };
+          var _patMeta = result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight, calibrated: result._patternHasCalibration } : null;
+          return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta };
         } catch(e) { return null; }
       });
       var batchResults = await Promise.all(promises);
@@ -8806,6 +8821,40 @@ function StockScreener(props) {
           className: "stx-btn stx-btn-primary",
           style: { padding: "8px 18px", fontSize: 12, fontWeight: 700, cursor: scanning ? "wait" : "pointer" }
         }, scanning ? "Scanning... (" + progress.done + "/" + progress.total + ")" : "Scan Nifty 200"),
+        (function() {
+          var _pc = 0;
+          var _intelReady = false;
+          var _cacheCount = 0;
+          try {
+            if (window.TechIndicators && window.TechIndicators.hasPattern) {
+              _intelReady = true;
+              _cacheCount = window.TechIndicators._patCacheCount || 0;
+              results.forEach(function(r){ if(window.TechIndicators.hasPattern(r.s.t.replace(/\\.NS$/,""))) _pc++; });
+            }
+          } catch(e){}
+          if (_pc > 0) {
+            return React.createElement("span", {
+              title: _pc + " of " + results.length + " stocks have calibrated pattern data (cache: " + _cacheCount + ")",
+              style: { fontSize: 9, fontWeight: 700, padding: "3px 8px", borderRadius: 4, background: "#16a34a18", color: "#16a34a", border: "1px solid #16a34a33", whiteSpace: "nowrap" }
+            }, "Pattern Intel (" + _pc + ")");
+          } else if (_intelReady && _cacheCount > 0 && results.length > 0) {
+            return React.createElement("span", {
+              title: "Pattern cache has " + _cacheCount + " patterns but none matched current screener results. Check symbol format in console: [PatIntel]",
+              style: { fontSize: 9, fontWeight: 700, padding: "3px 8px", borderRadius: 4, background: "#f59e0b18", color: "#f59e0b", border: "1px solid #f59e0b33", whiteSpace: "nowrap", cursor: "pointer" }
+            }, "Pattern Intel (0/" + _cacheCount + ")");
+          } else if (_intelReady && _cacheCount === 0) {
+            return React.createElement("span", {
+              title: "No patterns loaded. Run Batch Backtest from Pattern Lab or Import Patterns JSON.",
+              style: { fontSize: 9, fontWeight: 700, padding: "3px 8px", borderRadius: 4, background: "#6b728018", color: "#6b7280", border: "1px solid #6b728033", whiteSpace: "nowrap", cursor: "pointer" }
+            }, "No Patterns");
+          } else if (!window.applyPatternIntel) {
+            return React.createElement("span", {
+              title: "Pattern Intel module not loaded. Check if pattern-integration.js loaded successfully.",
+              style: { fontSize: 9, fontWeight: 700, padding: "3px 8px", borderRadius: 4, background: "#dc262618", color: "#dc2626", border: "1px solid #dc262633", whiteSpace: "nowrap", cursor: "pointer" }
+            }, "PatIntel Off");
+          }
+          return null;
+        })(),
         React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
           React.createElement("input", {
             type: "text", placeholder: "Add ticker...", value: manualTicker,
@@ -8933,7 +8982,13 @@ function StockScreener(props) {
                 React.createElement("td", { style: tdStyle },
                   React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 6 } },
                     React.createElement("span", { style: { fontSize: 13, fontWeight: 900, color: d.color, fontFamily: "var(--font-heading)" } }, r.result.finalScore),
-                    React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: d.color, padding: "2px 6px", borderRadius: 4, background: d.color + "18" } }, d.label)
+                    React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: d.color, padding: "2px 6px", borderRadius: 4, background: d.color + "18" } }, d.label),
+                    r.patMeta && r.patMeta.applied
+                      ? React.createElement("span", {
+                          title: "Pattern-adjusted (original: " + r.patMeta.originalScore + ", \u0394: " + (r.patMeta.delta > 0 ? "+" : "") + r.patMeta.delta + ", WR: " + (r.patMeta.winRate != null ? r.patMeta.winRate.toFixed(0) + "%, " + r.patMeta.trades + " trades" : "N/A") + (r.patMeta.topWeight ? ", top: " + r.patMeta.topWeight.component : "") + ")",
+                          style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: r.patMeta.delta > 0 ? "#16a34a22" : r.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: r.patMeta.delta > 0 ? "#16a34a" : r.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (r.patMeta.delta > 0 ? "#16a34a44" : r.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
+                        }, "P" + (r.patMeta.delta > 0 ? "+" + r.patMeta.delta : r.patMeta.delta < 0 ? r.patMeta.delta : ""))
+                      : null
                   )
                 ),
                 React.createElement("td", { style: tdStyle }, r.result.weekly ? React.createElement("span", { style: { fontWeight: 700, color: r.result.weekly.decision.color } }, r.result.weekly.total) : "\u2014"),
@@ -10384,6 +10439,17 @@ function PulsePage({ holdings }) {
 
   const openStock = (tk) => { setPendingTicker(tk); setActiveTab("singlestock"); };
 
+  // Listen for stox:navigate events (e.g., from openPatternLab())
+  React.useEffect(function() {
+    var handler = function(e) {
+      if (e.detail && e.detail.tab === "patternlab") {
+        setActiveTab("patternlab");
+      }
+    };
+    window.addEventListener("stox:navigate", handler);
+    return function() { window.removeEventListener("stox:navigate", handler); };
+  }, []);
+
   const TABS = [
     { key: "screener", label: "Stock Screener", icon: Icons.chart },
     { key: "entryscore", label: "Entry Score", icon: Icons.trendingUp },
@@ -10391,6 +10457,7 @@ function PulsePage({ holdings }) {
     { key: "singlestock", label: "Single Stock Analysis", icon: Icons.search },
     { key: "backtest", label: "Backtesting", icon: Icons.clock },
     { key: "scoretuner", label: "Score Tuner", icon: Icons.settings },
+    { key: "patternlab", label: "Pattern Lab", icon: Icons.flask },
   ];
 
   return React.createElement("div", null,
@@ -10420,7 +10487,12 @@ function PulsePage({ holdings }) {
       activeTab === "confidencescore" && React.createElement(ConfidenceTracker, null),
       activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker }),
       React.createElement("div", { style: { display: activeTab === "backtest" ? "" : "none" } }, React.createElement(BacktestSuitePanel, null)),
-      React.createElement("div", { style: { display: activeTab === "scoretuner" ? "" : "none" } }, React.createElement(ScoreTunerPanel, null))
+      React.createElement("div", { style: { display: activeTab === "scoretuner" ? "" : "none" } }, React.createElement(ScoreTunerPanel, null)),
+      React.createElement("div", { style: { display: activeTab === "patternlab" ? "" : "none" } },
+        window.PatternDashboard
+          ? React.createElement(window.PatternDashboard.Dashboard, { stocks: window.NIFTY_200 || undefined })
+          : React.createElement("div", { style: { padding: 40, textAlign: "center", color: "var(--text5)" } }, "Pattern Lab module loading...")
+      )
     )
   );
 }

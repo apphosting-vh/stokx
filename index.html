@@ -482,15 +482,20 @@ button:focus-visible,a:focus-visible,[role="button"]:focus-visible,select:focus-
     background:var(--sidebar-bg);
     backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
     border-top:1px solid var(--border);
-    padding:4px 4px calc(4px + env(safe-area-inset-bottom,0px));
+    padding:4px 2px calc(4px + env(safe-area-inset-bottom,0px));
     box-shadow:0 -4px 24px rgba(0,0,0,.12);
+    overflow-x:auto;overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;-ms-overflow-style:none;
+    flex-wrap:nowrap;
   }
+  .stx-botnav::-webkit-scrollbar{display:none}
   .stx-botnav-item{
-    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
-    background:transparent;border:none;cursor:pointer;padding:5px 2px;border-radius:var(--r-md);
-    color:var(--sidebar-text3);font-family:var(--font-body);font-size:10px;font-weight:600;
-    letter-spacing:.15px;transition:all .25s var(--ease-out);min-width:0;
-    position:relative;
+    flex:0 0 auto;min-width:60px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    background:transparent;border:none;cursor:pointer;padding:5px 6px;border-radius:var(--r-md);
+    color:var(--sidebar-text3);font-family:var(--font-body);font-size:9px;font-weight:600;
+    letter-spacing:.1px;transition:all .25s var(--ease-out);min-width:0;
+    position:relative;white-space:nowrap;
   }
   .stx-botnav-item.active{color:var(--accent)}
   .stx-botnav-item.active::after{
@@ -847,6 +852,11 @@ html,body,.stx-card,.stx-statcard,.stx-btn,.inp,.stx-botnav,.stx-botnav-item,
 <script type="text/babel" src="./indicators.js"></script>
 <script type="text/babel" src="./data-fetcher.js"></script>
 <script type="text/babel" src="./backtest-engine.js"></script>
+<script type="text/babel" src="./pattern-store.js"></script>
+<script type="text/babel" src="./batch-backtest.js"></script>
+<script type="text/babel" src="./pattern-scoring.js"></script>
+<script type="text/babel" src="./ml-trainer.js"></script>
+<script type="text/babel" src="./pattern-dashboard.js"></script>
 <script type="text/babel" src="./technical-panel.js"></script>
 <script type="text/babel" src="./reports.js"></script>
 <script type="text/babel" src="./backup.js"></script>
@@ -854,5 +864,6 @@ html,body,.stx-card,.stx-statcard,.stx-btn,.inp,.stx-botnav,.stx-botnav-item,
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script type="text/babel" src="./notepad.js"></script>
 <script type="text/babel" src="./app-core.js"></script>
+<script type="text/babel" src="./pattern-integration.js"></script>
 </body>
 </html>

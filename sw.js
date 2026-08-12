@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stox-v224';
+const CACHE_NAME = 'stox-v237';
 const urlsToCache = [
   './',
   './index.html',
@@ -6,6 +6,12 @@ const urlsToCache = [
   './indicators.js',
   './data-fetcher.js',
   './backtest-engine.js',
+  './pattern-store.js',
+  './batch-backtest.js',
+  './pattern-scoring.js',
+  './ml-trainer.js',
+  './pattern-dashboard.js',
+  './pattern-integration.js',
   './technical-panel.js',
   './reports.js',
   './backup.js',

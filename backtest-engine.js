@@ -18,7 +18,7 @@ window.BacktestEngine = (function () {
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-  function yieldToUI() { return new Promise(function (r) { setTimeout(r, 0); }); }
+  function yieldToUI() { return new Promise(function (r) { requestAnimationFrame(function () { setTimeout(r, 0); }); }); }
 
   function classifyScore(s) {
     if (s == null) return null;

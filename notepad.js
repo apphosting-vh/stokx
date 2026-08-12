@@ -231,8 +231,7 @@ window.NotepadPage = (function () {
         },
         style: {
           width: 22, height: 22, borderRadius: "50%", border: isActive ? "2px solid var(--accent)" : "2px solid transparent",
-          cursor: "pointer", background: c || "var(--bg5)", padding: 0, outline: "none",
-          boxShadow: isActive ? "0 0 0 2px var(--accent2)" : "none"
+          cursor: "pointer", background: c || "var(--bg5)", padding: 0, outline: "none"
         }
       });
     });
