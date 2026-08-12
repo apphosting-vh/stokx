@@ -883,17 +883,22 @@ window.TechIndicators = (function () {
     if (!candles || candles.length < 2) return null;
     var start = Math.max(0, candles.length - lookback);
     var hi = -Infinity, lo = Infinity;
-    var cl = closes(candles);
-    for (var i = start; i < cl.length; i++) { if (cl[i] > hi) hi = cl[i]; if (cl[i] < lo) lo = cl[i]; }
+    var hiArr = highs(candles), loArr = lows(candles);
+    for (var i = start; i < candles.length; i++) { if (hiArr[i] != null && hiArr[i] > hi) hi = hiArr[i]; if (loArr[i] != null && loArr[i] < lo) lo = loArr[i]; }
     if (hi === lo) return null;
     var binSize = (hi - lo) / numBins;
     var bins = [];
     for (var b = 0; b < numBins; b++) {
       bins.push({ priceFrom: round(lo + b * binSize, 2), priceTo: round(lo + (b + 1) * binSize, 2), volume: 0 });
     }
-    for (var i = start; i < cl.length; i++) {
-      var binIdx = Math.min(numBins - 1, Math.max(0, Math.floor((cl[i] - lo) / binSize)));
-      bins[binIdx].volume += candles[i].v;
+    for (var i = start; i < candles.length; i++) {
+      var barLo = loArr[i] != null ? loArr[i] : candles[i].c;
+      var barHi = hiArr[i] != null ? hiArr[i] : candles[i].c;
+      var lowBin = Math.min(numBins - 1, Math.max(0, Math.floor((barLo - lo) / binSize)));
+      var highBin = Math.min(numBins - 1, Math.max(0, Math.floor((barHi - lo) / binSize)));
+      var numBinsTouched = highBin - lowBin + 1;
+      var volPerBin = numBinsTouched > 0 ? candles[i].v / numBinsTouched : candles[i].v;
+      for (var b = lowBin; b <= highBin; b++) { bins[b].volume += volPerBin; }
     }
     var maxVol = 0;
     for (var b = 0; b < bins.length; b++) { if (bins[b].volume > maxVol) maxVol = bins[b].volume; }
@@ -1779,7 +1784,7 @@ window.TechIndicators = (function () {
     if (ctx.indexTrendScore !== null && ctx.indexTrendScore >= 65) items.push({ reason: "Index trend score >=65", amount: -8 });
     else if (sn.ema9 !== null && sn.ema21 !== null && sn.macdL !== null && sn.sigL !== null && sn.ema9 > sn.ema21 && sn.macdL > sn.sigL) items.push({ reason: "EMA9>EMA21 + MACD bullish", amount: -5 });
     var priceDecl3 = true;
-    for (var i = L - 3; i < L; i++) { if (i > L - 3 && cl[i] >= cl[i - 1]) { priceDecl3 = false; break; } }
+    for (var i = L - 3; i < L; i++) { if (cl[i] >= cl[i - 1]) { priceDecl3 = false; break; } }
     var avgVol20 = 0;
     for (var i = L - 20; i < L; i++) avgVol20 += vo[i];
     avgVol20 /= 20;
@@ -3921,9 +3926,9 @@ window.TechIndicators = (function () {
       // OBV trend
       var obv = calcOBV(candles);
       if (obv && obv.length >= 20) {
-        var obvSlice = obv.slice(-20);
+        var obvSlice = obv.length >= 21 ? obv.slice(-21, -1) : obv.slice(0, -1);
         var obvSum = obvSlice.reduce(function (a, b) { return a + b; }, 0);
-        var obvSma20 = obvSum / 20;
+        var obvSma20 = obvSum / obvSlice.length;
         var obvLast = lastVal(obv);
         if (obvLast != null && obvLast > obvSma20) { volScore += 6; volDetails.push('OBV above SMA20 (accumulation)'); }
         else { volDetails.push('OBV below SMA20'); }
@@ -4555,6 +4560,7 @@ window.TechIndicators = (function () {
           empiricalMethod = 'empirical';
           empiricalSampleCount = totalWindows;
           empProbTouch = hitsTouch / totalWindows;
+          probTerminal = hitsTerminal / totalWindows;
           empProbTouch = Math.max(1e-6, Math.min(1 - 1e-6, empProbTouch));
         }
       }
@@ -4885,7 +4891,7 @@ window.TechIndicators = (function () {
         var sdN = sigmaIntraday;
         if (sdN < 1e-10) return null;
         var z = b / sdN;
-        var raw = normCdf(z) + Math.exp(2 * 0 * b / (sigmaIntraday * sigmaIntraday)) * normCdf((-0 - b) / sdN);
+        var raw = normCdf(-z) + Math.exp(2 * 0 * b / (sigmaIntraday * sigmaIntraday)) * normCdf((-0 - b) / sdN);
         raw = Math.max(0, Math.min(1, raw));
         var weighted = Math.pow(raw, Math.sqrt(fraction));
         return Math.max(0, Math.min(1, weighted));
@@ -5191,13 +5197,13 @@ window.TechIndicators = (function () {
       }
 
       /* Three-Line Strike (bullish): three bearish candles then a single bullish candle engulfing all three */
-      if (isBearish(c1) && isBearish(c2) && isBearish(c) && c.c < c2.c && c2.c < c1.c &&
+      if (isBearish(c1) && isBearish(c2) && c.c < c2.c && c2.c < c1.c &&
           isBullish(c) && c.c > c1.o && c.o < c.c) {
         add("Three-Line Strike", "bullish", "Three bearish candles followed by a bullish engulfing candle. Counter-trend continuation signal.", i, i - 2);
       }
 
       /* Three-Line Strike (bearish): three bullish candles then a single bearish candle engulfing all three */
-      if (isBullish(c1) && isBullish(c2) && isBullish(c) && c.c > c2.c && c2.c > c1.c &&
+      if (isBullish(c1) && isBullish(c2) && c.c > c2.c && c2.c > c1.c &&
           isBearish(c) && c.c < c1.o && c.o > c.c) {
         add("Three-Line Strike", "bearish", "Three bullish candles followed by a bearish engulfing candle. Counter-trend continuation signal.", i, i - 2);
       }

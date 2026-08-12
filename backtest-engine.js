@@ -199,7 +199,12 @@ window.BacktestEngine = (function () {
       var key = getCacheKey(candles, symbol);
       if (key) {
         var per = scoreCache.get(key);
-        if (per && per.has(idx)) return per.get(idx);
+        if (per && per.has(idx)) {
+          // Promote to most-recently-used
+          var idx2 = cacheOrder.indexOf(key);
+          if (idx2 > -1) { cacheOrder.splice(idx2, 1); cacheOrder.push(key); }
+          return per.get(idx);
+        }
       }
 
       var res = null;
@@ -247,7 +252,7 @@ window.BacktestEngine = (function () {
         entryDateIdx = entryIdx;
       }
 
-      var entryPriceAdj = entryPrice * (1 + slip / 100);
+      var entryPriceAdj = entryPrice * (1 + slip / 100) * (1 + broker / 100);
       // Exact target: raw price level that yields targetProfitPct net after exit slippage + brokerage
       // exitProceeds = targetPrice * (1 - slip/100) * (1 - broker/100) = entryPriceAdj * (1 + targetProfitPct/100)
       var exitCostFactor = (1 - slip / 100) * (1 - broker / 100);
@@ -280,17 +285,19 @@ window.BacktestEngine = (function () {
             break;
           }
         } else {
-          // Original optimistic: exit at target high without costs
-          if (cur.h >= targetPrice) {
+          // Original optimistic: exit at raw target high without costs
+          var targetPriceRaw = entryPriceAdj * (1 + targetProfitPct / 100);
+          if (cur.h >= targetPriceRaw) {
             hitTarget = true;
             daysToTarget = j;
             exitDate = String(cur.t).slice(0, 10);
-            exitPrice = targetPrice;
+            exitPrice = targetPriceRaw;
             break;
           }
         }
-        // Track max profit/loss before exit (based on close, adjusted for costs)
-        var pnl = (cur.c - entryPriceAdj) / entryPriceAdj * 100;
+        // Track max profit/loss before exit (based on close, adjusted for exit costs)
+        var pnlClose = cur.c * exitCostFactor;
+        var pnl = (pnlClose - entryPriceAdj) / entryPriceAdj * 100;
         if (pnl > maxProfitPct) maxProfitPct = pnl;
         if (pnl < maxLossPct) maxLossPct = pnl;
 
@@ -358,10 +365,10 @@ window.BacktestEngine = (function () {
            calibration regresses against a harder bar (raw 4%) than the
            live model quotes, biasing calP0/calK. */
         var slip = slippagePct, broker = brokeragePct;
-        var costAdjTargetPct = ((1 + slip / 100) * (1 + targetProfitPct / 100) / ((1 - slip / 100) * (1 - broker / 100)) - 1) * 100;
+        var costAdjTargetPct = ((1 + slip / 100) * (1 + broker / 100) * (1 + targetProfitPct / 100) / ((1 - slip / 100) * (1 - broker / 100)) - 1) * 100;
         var cfg = { horizonDays: holdingPeriodDays, windowSessions: 40, entry_price: bar.c, targetPct: costAdjTargetPct, indexCandles: idxSlice, entryScoreContext: entryScoreCtx };
         var res = window.TechIndicators.computeHorizonConfidence(hSlice, dSlice, cfg);
-        if (res && res.components && res.components.probTouch != null) return { probTouch: res.components.probTouch / 100, confLog: res.confidenceLognormal != null ? res.confidenceLognormal / 100 : null, confEmp: res.confidenceEmpirical != null ? res.confidenceEmpirical / 100 : null };
+        if (res && res.components && res.components.probTouch != null) return { probTouch: res.components.probTouch / 100, confLog: res.confidenceLognormal != null ? res.confidenceLognormal / 100 : null, confEmp: res.confidenceEmpirical != null ? res.confidenceEmpirical / 100 : null, components: res.components };
       } catch (e) {}
       return null;
     }
@@ -392,7 +399,6 @@ window.BacktestEngine = (function () {
               && (r.raw_score == null || r.raw_score >= minRaw)) {
             var trade = simulateTrade(candles, i, r, opts);
             trade.symbol = symbol;
-            trade.entryScore = r.entryScore;
             var c10 = conf10dAt(candles, i, symbol);
             trade.probTouch = c10 ? c10.probTouch : null;
             trade.confLog = c10 ? c10.confLog : null;
@@ -900,7 +906,7 @@ window.BacktestEngine = (function () {
       for (var ti = 0; ti < thRange.length; ti++) {
         var th = thRange[ti];
         if (hooks.onProgress) hooks.onProgress(ti, totalSteps, "Sweeping total score ≥ " + th);
-        var eng = create({ threshold: th, scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays });
+        var eng = create({ threshold: th, scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, multiTFMap: cfg.multiTFMap, indexCandles: cfg.indexCandles, realisticEntry: cfg.realisticEntry, realisticExit: cfg.realisticExit, slippagePct: cfg.slippagePct, brokeragePct: cfg.brokeragePct });
         var batch = await eng.runBatch(subMap, { symbols: symbols, sampleEvery: opts.sampleEvery || 2 });
         var sm = batch.summary;
         thResults.push({
@@ -926,7 +932,7 @@ window.BacktestEngine = (function () {
           { key: 'swingPotential', optKey: 'minSwingPotential', label: 'Swing Potential', max: pillarSweepCfg ? pillarSweepCfg.swingPotential : 20, values: pillarSweep.swingPotential || [0, 5, 10, 15, 20] }
         ];
         // Single engine with threshold=0 — scores are cached and reused across all pillar values
-        var pillarEng = create({ scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: 0 });
+        var pillarEng = create({ scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: 0, multiTFMap: cfg.multiTFMap, indexCandles: cfg.indexCandles, realisticEntry: cfg.realisticEntry, realisticExit: cfg.realisticExit, slippagePct: cfg.slippagePct, brokeragePct: cfg.brokeragePct });
         var pillarOffset = 0;
         for (var pi = 0; pi < pillars.length; pi++) {
           var p = pillars[pi];
@@ -984,7 +990,8 @@ window.BacktestEngine = (function () {
         if (!candles || candles.length < warmupBars + 10) continue;
         candles._symbol = sym;
         var L = candles.length;
-        var endIdx = Math.min(L - 1, L - 2);
+        var useRealBt = opts.realisticEntry !== undefined ? opts.realisticEntry : realisticEntry;
+        var endIdx = Math.min(L - 1, L - holdingPeriodDays - 1 - (useRealBt ? 1 : 0));
         var step = opts.sampleEvery || 2;
         for (var i = warmupBars; i <= endIdx; i += step) {
           var r = scoreAt(candles, i, sym);

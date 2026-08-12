@@ -28,6 +28,8 @@ const _ico = (size, color, paths, extra) => {
   const props = Object.assign({ width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: color || "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }, extra || {});
   return React.createElement("svg", props, paths.map((d, i) => {
     if (typeof d === "string") return React.createElement("path", { key: i, d: d });
+    if (d.path) return React.createElement("path", { key: i, d: d.path, fill: d.fill || "none", stroke: d.stroke || color || "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" });
+    if (d.ellipse) return React.createElement("ellipse", { key: i, cx: d.ellipse[0], cy: d.ellipse[1], rx: d.ellipse[2], ry: d.ellipse[3], fill: d.fill || "none", stroke: d.stroke || color || "currentColor", strokeWidth: 2 });
     if (d.circle) return React.createElement("circle", { key: i, cx: d.circle[0], cy: d.circle[1], r: d.circle[2], fill: d.fill || color || "currentColor", stroke: d.stroke || "none" });
     if (d.line) return React.createElement("line", { key: i, x1: d.line[0], y1: d.line[1], x2: d.line[2], y2: d.line[3] });
     if (d.polyline) return React.createElement("polyline", { key: i, points: d.polyline });
@@ -1559,7 +1561,7 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
         ),
         React.createElement("div", null,
           React.createElement("span", { style: { fontWeight: 600, color: "var(--text)" } }, "Scoring: "),
-          "The Entry/Exit Score (0\u2013100) aggregates all indicators into four pillars. " + (holding ? "Your holding: entry $" + INR(holding.buyPrice, 2) + " on " + new Date(holding.buyDate).toLocaleDateString() + "." : "")
+          "The Entry/Exit Score (0\u2013100) aggregates all indicators into four pillars. " + (holding ? "Your holding: entry " + INR(holding.buyPrice, 2) + " on " + new Date(holding.buyDate).toLocaleDateString() + "." : "")
         )
       )
     ),
@@ -4861,6 +4863,7 @@ const EntryScorePanel = ({ shares }) => {
         indRow("52W Low", indData.week52HL ? indData.week52HL.low52w : null)
       );
     };
+    var dec = r.decision || { color: "var(--text6)", label: "N/A", position: "" };
     return React.createElement("div", { key: snap.id, style: { padding: 12, borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", marginBottom: 8 } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 } },
         React.createElement("div", null,
@@ -4871,14 +4874,14 @@ const EntryScorePanel = ({ shares }) => {
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
           React.createElement("div", { textAlign: "right" },
             React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, "Score"),
-            React.createElement("div", { style: { fontSize: 20, fontWeight: 900, color: r.decision.color, fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore)
+            React.createElement("div", { style: { fontSize: 20, fontWeight: 900, color: dec.color, fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore)
           ),
           React.createElement("div", { onClick: () => deleteSnapshot(snap.id), style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--text6)", title: "Delete snapshot", display: "inline-flex" } }, Ico.x(14))
         )
       ),
-      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 6, background: r.decision.color + "12", marginBottom: 6 } },
-        React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: r.decision.color, fontFamily: "var(--font-heading)" } }, r.decision.label),
-        React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--text5)", fontStyle: "italic" } }, r.decision.position),
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 6, background: dec.color + "12", marginBottom: 6 } },
+        React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: dec.color, fontFamily: "var(--font-heading)" } }, dec.label),
+        React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--text5)", fontStyle: "italic" } }, dec.position),
         r.hardFilters && r.hardFilters.length > 0 && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: "#ef4444", padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,.1)" } }, r.hardFilters.length + " filter")
       ),
       React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 } },
@@ -5075,10 +5078,11 @@ const EntryScorePanel = ({ shares }) => {
         }
       };
       var renderEntryCard = function(entry) {
-        var r = entry.result;
+        var r = entry.result || {};
+        var decE = r.decision || { color: "var(--text6)", label: "N/A", position: "" };
         var isExpanded = !!expandedIds[entry.id];
         var capStock = NIFTY_200_UNIQUE.find(function(s) { return s.t === entry.ticker.replace(/\.NS$|\.BO$/, "") + ".NS"; });
-        return React.createElement("div", { key: entry.id, className: "stx-card", style: { border: "2px solid " + r.decision.color + "33" } },
+        return React.createElement("div", { key: entry.id, className: "stx-card", style: { border: "2px solid " + decE.color + "33" } },
           React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 } },
             React.createElement("div", null,
               React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
@@ -5090,15 +5094,15 @@ const EntryScorePanel = ({ shares }) => {
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
               React.createElement("div", { textAlign: "right" },
                 React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, "Final Score"),
-                React.createElement("div", { style: { fontSize: 22, fontWeight: 900, color: r.decision.color, fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore)
+                React.createElement("div", { style: { fontSize: 22, fontWeight: 900, color: decE.color, fontFamily: "var(--font-heading)", lineHeight: 1 } }, r.finalScore)
               ),
               React.createElement("div", { onClick: function() { saveSnapshot(entry); }, style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--accent)", fontSize: 13, title: "Save Snapshot" } }, Icons.save(14)),
               React.createElement("div", { onClick: function() { deleteEntry(entry.id); }, style: { cursor: "pointer", padding: 4, borderRadius: 6, color: "var(--text6)", fontSize: 14 }, title: "Delete" }, Icons.trash(14))
             )
           ),
-          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "6px 10px", borderRadius: 8, background: r.decision.color + "12" } },
-            React.createElement("span", { style: { fontSize: 12, fontWeight: 800, color: r.decision.color, fontFamily: "var(--font-heading)" } }, r.decision.label),
-            React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--text5)", fontStyle: "italic" } }, r.decision.position),
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "6px 10px", borderRadius: 8, background: decE.color + "12" } },
+            React.createElement("span", { style: { fontSize: 12, fontWeight: 800, color: decE.color, fontFamily: "var(--font-heading)" } }, decE.label),
+            React.createElement("span", { style: { fontSize: 9, fontWeight: 600, color: "var(--text5)", fontStyle: "italic" } }, decE.position),
             r.todaySpike && React.createElement("span", { title: "Abnormal single-session spike or gap \u2014 score capped at Neutral", style: { fontSize: 8, fontWeight: 700, color: "#f97316", padding: "2px 5px", borderRadius: 3, background: "rgba(249,115,22,.12)", border: "1px solid rgba(249,115,22,.25)", display: "inline-flex", alignItems: "center", gap: 3 } }, Ico.alertTriangle(8, "#f97316"), " Spike Day"),
             r.hardFilters && r.hardFilters.length > 0 && React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: "#ef4444", padding: "2px 5px", borderRadius: 3, background: "rgba(239,68,68,.1)" } }, r.hardFilters.length + " filter" + (r.hardFilters.length > 1 ? "s" : ""))
           ),
@@ -11137,10 +11141,11 @@ async function monitorPositions(portfolio) {
     try {
       var ticker = pos.ticker || pos.symbol || '';
       var d = await DF.fetchOHLCVCached(ticker, 'daily');
-      if (!d || d.length < 50) continue;
+      var candles = d && d.data ? d.data : (Array.isArray(d) ? d : null);
+      if (!candles || candles.length < 50) continue;
       var idxD = await DF.fetchOHLCVCached('^NSEI', 'daily');
-      var lastCandle = d[d.length - 1];
-      var prevCandle = d.length > 1 ? d[d.length - 2] : null;
+      var lastCandle = candles[candles.length - 1];
+      var prevCandle = candles.length > 1 ? candles[candles.length - 2] : null;
       var entryPrice = pos.buyPrice || pos.avgPrice || pos.entry_price || 0;
       var currentPrice = pos.currentPrice || pos.current_price || (lastCandle ? lastCandle.c : null);
       var buyDate = pos.buyDate || pos.buy_date || null;
@@ -11153,8 +11158,8 @@ async function monitorPositions(portfolio) {
         entry_score: pos.entryScore || pos.entry_score || 50,
         prev_close: pos.prev_close || (prevCandle ? prevCandle.c : null)
       };
-      var exitRes = TI.computeExitScore(d, { entry_price: posData.entry_price, holding_days: posData.holding_days, entry_score: posData.entry_score }, idxD);
-      var integratedRes = TI.integratedExitDecision(posData, d, idxD);
+      var exitRes = TI.computeExitScore(candles, { entry_price: posData.entry_price, holding_days: posData.holding_days, entry_score: posData.entry_score }, idxD);
+      var integratedRes = TI.integratedExitDecision(posData, candles, idxD);
       if (exitRes && exitRes.exit_score >= 55) {
         var pnl = posData.current_price && posData.entry_price ? (posData.current_price - posData.entry_price) / posData.entry_price * 100 : null;
         alerts.push({

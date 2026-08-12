@@ -20,7 +20,12 @@ window.OHLCVFetcher = (function () {
     var tid = setTimeout(function () { ctrl.abort(); }, ms);
     var isExt = typeof location !== "undefined" && url.startsWith("http") && !url.startsWith(location.origin);
     var baseOpts = isExt ? { credentials: "omit" } : {};
-    return fetch(url, Object.assign({}, baseOpts, opts || {}, { signal: ctrl.signal, cache: "no-store" }))
+    var mergedSignal = (opts && opts.signal && ctrl.signal)
+      ? (typeof AbortSignal !== 'undefined' && AbortSignal.any
+        ? AbortSignal.any([opts.signal, ctrl.signal])
+        : opts.signal)
+      : (opts && opts.signal ? opts.signal : ctrl.signal);
+    return fetch(url, Object.assign({}, baseOpts, opts || {}, { signal: mergedSignal, cache: "no-store" }))
       .finally(function () { clearTimeout(tid); });
   }
 
@@ -66,7 +71,11 @@ window.OHLCVFetcher = (function () {
             var txt = await readBody(r, 8000);
             var json;
             try { json = JSON.parse(txt); } catch (e) { continue; }
-            var payload = json && json.contents ? (function () { try { return JSON.parse(json.contents); } catch (e) { return json; } })() : json;
+            var payload = json && json.contents
+              ? (typeof json.contents === "string"
+                  ? (function(){ try { return JSON.parse(json.contents); } catch(e) { return json; } })()
+                  : json.contents)
+              : json;
             var result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
             if (!result) continue;
 
@@ -88,16 +97,20 @@ window.OHLCVFetcher = (function () {
               var istMs = timestamps[i] * 1000 + (5.5 * 60 * 60 * 1000);
               var istDate = new Date(istMs).toISOString().split("T")[0];
               var istTime = new Date(istMs).toISOString().split("T")[1].substring(0, 5);
+              // Validate OHLC consistency
+              if (h != null && l != null && h < l) continue;
+              if (h != null && c > h) c = h;
+              if (l != null && c < l) c = l;
               candles.push({
                 t: istDate + " " + istTime,
-                o: Math.round((o || c) * 100) / 100,
-                h: Math.round((h || c) * 100) / 100,
-                l: Math.round((l || c) * 100) / 100,
+                o: Math.round((o != null ? o : c) * 100) / 100,
+                h: Math.round((h != null ? h : c) * 100) / 100,
+                l: Math.round((l != null ? l : c) * 100) / 100,
                 c: Math.round(c * 100) / 100,
                 v: v || 0
               });
             }
-            if (candles.length >= 20) return candles;
+            if (candles.length > 0) return candles;
           } catch (e) {
             continue;
           }
@@ -139,8 +152,12 @@ window.OHLCVFetcher = (function () {
               var txt = await readBody(r, 8000);
               var json;
               try { json = JSON.parse(txt); } catch (e) { continue; }
-              var payload = json && json.contents ? (function () { try { return JSON.parse(json.contents); } catch (e) { return json; } })() : json;
-              var result = payload && payload.quoteResponse && payload.quoteResponse.result && payload.quoteResponse.result[0];
+              var payload2 = json && json.contents
+                ? (typeof json.contents === "string"
+                    ? (function(){ try { return JSON.parse(json.contents); } catch(e) { return json; } })()
+                    : json.contents)
+                : json;
+              var result = payload2 && payload2.quoteResponse && payload2.quoteResponse.result && payload2.quoteResponse.result[0];
               if (!result || result.regularMarketPrice == null) continue;
               return {
                 price: result.regularMarketPrice,
@@ -175,7 +192,8 @@ window.OHLCVFetcher = (function () {
     if (!ticker) return null;
     var key = String(ticker).trim().toUpperCase();
     var entry = _quoteCache[key];
-    if (entry && (Date.now() - entry.ts) < (_isMarketOpen() ? QUOTE_CACHE_TTL_ACTIVE : QUOTE_CACHE_TTL_CLOSED)) {
+    var entryTTL = entry && entry.ttl ? entry.ttl : (_isMarketOpen() ? QUOTE_CACHE_TTL_ACTIVE : QUOTE_CACHE_TTL_CLOSED);
+    if (entry && (Date.now() - entry.ts) < entryTTL) {
       return entry.data;
     }
     var result = await Promise.race([
@@ -183,7 +201,7 @@ window.OHLCVFetcher = (function () {
       new Promise(function(r) { setTimeout(function() { r(null); }, 6000); })
     ]);
     if (result && result.price != null) {
-      _quoteCache[key] = { data: result, ts: Date.now() };
+      _quoteCache[key] = { data: result, ts: Date.now(), ttl: _isMarketOpen() ? QUOTE_CACHE_TTL_ACTIVE : QUOTE_CACHE_TTL_CLOSED };
       return result;
     }
     return null;
@@ -213,7 +231,7 @@ window.OHLCVFetcher = (function () {
       case "5m": yfInterval = "5m"; yfRange = "5d"; break;
       case "15m": yfInterval = "15m"; yfRange = "1mo"; break;
       case "30m": yfInterval = "30m"; yfRange = "1mo"; break;
-      case "1h": yfInterval = "1h"; yfRange = "2y"; break;
+      case "1h": yfInterval = "1h"; yfRange = "6mo"; break;
       case "weekly": yfInterval = "1wk"; yfRange = "5y"; break;
       default: yfInterval = "5m"; yfRange = "1mo"; break;
     }
@@ -250,18 +268,18 @@ window.OHLCVFetcher = (function () {
     var entry = _cache[key];
     if (entry) {
       /* Failed entries use a shorter 60s TTL regardless of market hours */
-      var ttl = entry.failed ? 60000 : _cacheTTL();
-      if ((Date.now() - entry.ts) < ttl) {
+      var entryTTL = entry.ttl ? entry.ttl : (entry.failed ? 60000 : (_isMarketOpen() ? CACHE_TTL_ACTIVE : CACHE_TTL_CLOSED));
+      if ((Date.now() - entry.ts) < entryTTL) {
         return entry;
       }
     }
     var result = await fetchOHLCV(ticker, timeframe);
     if (result && result.candles) {
-      _cache[key] = { data: result.candles, source: result.source, ts: Date.now() };
+      _cache[key] = { data: result.candles, source: result.source, ts: Date.now(), ttl: _isMarketOpen() ? CACHE_TTL_ACTIVE : CACHE_TTL_CLOSED };
       return _cache[key];
     }
     /* Cache failures briefly (60s) to avoid re-hammering bad symbols */
-    _cache[key] = { data: null, source: null, ts: Date.now(), failed: true };
+    _cache[key] = { data: null, source: null, ts: Date.now(), failed: true, ttl: 60000 };
     return _cache[key];
   }
 
