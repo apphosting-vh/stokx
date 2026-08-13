@@ -472,6 +472,67 @@ window.PatternStore = (function () {
     return data.patterns.length;
   }
 
+  /* ── Full export/import for backup & sync payloads ─────────────────────── */
+
+  /**
+   * Export everything (patterns, raw feature records, meta records) as a
+   * plain object for embedding in backup / sync / FSA payloads.
+   */
+  async function exportAll() {
+    var patterns = await getAll();
+    var featureRecords = await new Promise(function (resolve, reject) {
+      if (!_db) { reject(new Error("PatternStore not initialized")); return; }
+      var t = _tx(STORE_FEATURES, "readonly");
+      var req = t.store.getAll();
+      req.onsuccess = function (e) { resolve(e.target.result || []); };
+      req.onerror = function (e) { reject(e.target.error); };
+    });
+    var metaRecords = await new Promise(function (resolve, reject) {
+      if (!_db) { reject(new Error("PatternStore not initialized")); return; }
+      var t = _tx(STORE_META, "readonly");
+      var req = t.store.getAll();
+      req.onsuccess = function (e) { resolve(e.target.result || []); };
+      req.onerror = function (e) { reject(e.target.error); };
+    });
+    return { patterns: patterns, features: featureRecords, meta: metaRecords };
+  }
+
+  /**
+   * Import everything from an exportAll() payload.
+   * When replace is true, clears all three stores first (restore semantics);
+   * otherwise merges by key (sync semantics — keeps local extras).
+   */
+  async function importAll(data, replace) {
+    if (!data || !data.patterns) throw new Error("Invalid pattern data");
+    if (replace) {
+      await clearAll();
+      await clearAllFeatures();
+      await clearAllMeta();
+    }
+    if (data.patterns.length > 0) await putMany(data.patterns);
+    if (data.features && data.features.length) {
+      for (var i = 0; i < data.features.length; i++) {
+        var f = data.features[i];
+        if (!f || f.symbol == null) continue;
+        await new Promise(function (resolve, reject) {
+          if (!_db) { reject(new Error("PatternStore not initialized")); return; }
+          var t = _tx(STORE_FEATURES, "readwrite");
+          t.store.put(f);
+          t.tx.oncomplete = function () { resolve(); };
+          t.tx.onerror = function (e) { reject(e.target.error); };
+        });
+      }
+    }
+    if (data.meta && data.meta.length) {
+      for (var j = 0; j < data.meta.length; j++) {
+        var m = data.meta[j];
+        if (!m || m.key == null) continue;
+        await setMeta(m.key, m.value);
+      }
+    }
+    return data.patterns.length;
+  }
+
   /**
    * Get estimated storage size in bytes.
    */
@@ -510,6 +571,8 @@ window.PatternStore = (function () {
     getWeightClusters: getWeightClusters,
     exportJSON: exportJSON,
     importJSON: importJSON,
+    exportAll: exportAll,
+    importAll: importAll,
     getStorageSize: getStorageSize
   };
 })();

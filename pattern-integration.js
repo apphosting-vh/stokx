@@ -164,7 +164,13 @@
     if (_cachedMLModel && window.MLTrainer && window.MLTrainer.predictSync) {
       try {
         var mlFeatures = computeMLFeaturesFromCompat(compatResult);
-        mlPrediction = window.MLTrainer.predictSync(mlFeatures, _cachedMLModel);
+        // Gate: model was trained on entry scores >= entryScoreMin (scores of
+        // actual opened trades). Below that, fall back to pattern-weighted only.
+        if (_cachedMLModel.entryScoreMin != null && (mlFeatures.entry_score == null || mlFeatures.entry_score < _cachedMLModel.entryScoreMin)) {
+          mlPrediction = null;
+        } else {
+          mlPrediction = window.MLTrainer.predictSync(mlFeatures, _cachedMLModel);
+        }
         if (mlPrediction && mlPrediction.winProbability != null) {
           var mlScore = mlPrediction.winProbability * 100;
           // Blend: 60% pattern-weighted + 40% ML (more ML weight if confident)

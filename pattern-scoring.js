@@ -343,6 +343,16 @@ window.PatternScoring = (function () {
         regime = window.MLOptimizer.detectRegimeFromCandles(candles, opts.indexCandles);
       }
 
+      // Gate: the model was trained on entry scores >= entryScoreMin (scores
+      // of actual opened trades). Live scores below that extrapolate into
+      // untrained territory — skip ML enhancement there.
+      try {
+        var activeModel = await ML.getActiveModel();
+        if (activeModel && activeModel.entryScoreMin != null && (features.entry_score == null || features.entry_score < activeModel.entryScoreMin)) {
+          return null;
+        }
+      } catch (e) {}
+
       // Get ML prediction
       var prediction;
       if (regime && window.MLOptimizer) {

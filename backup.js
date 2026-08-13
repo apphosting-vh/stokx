@@ -99,7 +99,7 @@ function _readFsaFile() {
             var parsed = JSON.parse(text);
             var d = parsed && parsed.data ? parsed.data : null;
             if (d) {
-              var keys = ["holdings", "soldShareSnapshots", "watchlist", "entryScores", "entrySnapshots", "entryPerfPrices", "screenerData", "screenerSnapshots", "screenerBookmarks", "screenerUnicorns", "singleStockSnapshots", "confTracker", "confTrackerPrices", "notes", "scoreConfig"];
+              var keys = ["holdings", "soldShareSnapshots", "watchlist", "entryScores", "entrySnapshots", "entryPerfPrices", "screenerData", "screenerSnapshots", "screenerBookmarks", "screenerUnicorns", "singleStockSnapshots", "confTracker", "confTrackerPrices", "notes", "scoreConfig", "patterns"];
               var sections = [], secTotal = 0;
               keys.forEach(function(k) { var b = _estBytes(d[k]); sections.push({ key: k, bytes: b }); secTotal += b; });
               info.sections = sections;
@@ -143,6 +143,13 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
     var saved = localStorage.getItem("stox_score_config");
     if (saved) scoreConfig = JSON.parse(saved);
   } catch(e) {}
+  var patternData = null;
+  try {
+    if (window.PatternStore && window.PatternStore.exportAll) {
+      await window.PatternStore.init();
+      patternData = await window.PatternStore.exportAll();
+    }
+  } catch(e) {}
   return {
     app: "StoX",
     version: 3,
@@ -162,7 +169,10 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       confTracker: confTracker.length,
       confTrackerPrices: Object.keys(confTrackerPrices).length,
       notes: notes.length,
-      scoreConfig: !!scoreConfig
+      scoreConfig: !!scoreConfig,
+      patterns: patternData ? patternData.patterns.length : 0,
+      patternFeatures: patternData && patternData.features ? patternData.features.length : 0,
+      patternMeta: patternData && patternData.meta ? patternData.meta.length : 0
     },
     data: {
       holdings: holdings,
@@ -179,7 +189,8 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       confTracker: confTracker,
       confTrackerPrices: confTrackerPrices,
       notes: notes,
-      scoreConfig: scoreConfig
+      scoreConfig: scoreConfig,
+      patterns: patternData
     }
   };
 }
@@ -264,6 +275,12 @@ async function restoreStoxBackup(fileText) {
       }
     });
   });
+  if (d.patterns && window.PatternStore && window.PatternStore.importAll) {
+    try {
+      await window.PatternStore.init();
+      await window.PatternStore.importAll(d.patterns, true);
+    } catch(e) {}
+  }
   return {
     holdings: d.holdings || [],
     soldShareSnapshots: snaps,
@@ -538,7 +555,7 @@ function DataBackupSection(props) {
     entryScores: "Entry Scores", entrySnapshots: "Entry Snaps", entryPerfPrices: "Perf Prices",
     screenerData: "Screener", screenerSnapshots: "Screener Snaps", screenerBookmarks: "Screener Bkmk", screenerUnicorns: "Unicorns",
     singleStockSnapshots: "Analysis Snaps", confTracker: "Conf Tracker", confTrackerPrices: "Conf Prices",
-    notes: "Notes"
+    notes: "Notes", patterns: "Patterns"
   };
 
   var est = ss.est || null;

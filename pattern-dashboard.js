@@ -93,7 +93,24 @@ window.PatternDashboard = (function () {
     var error = _error[0], setError = _error[1];
 
     // Run Batch tab state (must be at component top-level — Rules of Hooks)
-    var _btConfig = useState({ targetProfitPct: 4, holdingPeriodDays: 14, threshold: 65, sampleEvery: 2 });
+    var _btConfig = useState(function () {
+      var defaults = { targetProfitPct: 4, holdingPeriodDays: 14, threshold: 65, sampleEvery: 2 };
+      try {
+        var saved = localStorage.getItem("stox_best_bt_config");
+        if (saved) {
+          var c = JSON.parse(saved);
+          var v = {};
+          if (typeof c.targetProfitPct === "number" && isFinite(c.targetProfitPct) && c.targetProfitPct > 0) v.targetProfitPct = c.targetProfitPct;
+          if (typeof c.holdingPeriodDays === "number" && isFinite(c.holdingPeriodDays) && c.holdingPeriodDays > 0) v.holdingPeriodDays = c.holdingPeriodDays;
+          if (typeof c.threshold === "number" && isFinite(c.threshold) && c.threshold > 0 && c.threshold <= 100) v.threshold = c.threshold;
+          if (typeof c.sampleEvery === "number" && isFinite(c.sampleEvery) && c.sampleEvery >= 1) v.sampleEvery = c.sampleEvery;
+          if (v.targetProfitPct != null && v.holdingPeriodDays != null && v.threshold != null && v.sampleEvery != null) {
+            return Object.assign({}, defaults, v);
+          }
+        }
+      } catch (e) {}
+      return defaults;
+    });
     var btConfig = _btConfig[0], setBtConfig = _btConfig[1];
     var _btRunning = useState(false);
     var btRunning = _btRunning[0], setBtRunning = _btRunning[1];
@@ -847,15 +864,26 @@ window.PatternDashboard = (function () {
           onIteration: function (iter, total, config, iterResult) {
             setMlLog(function (prev) {
               var n = prev.slice(-50);
-              n.push({ time: new Date().toLocaleTimeString(), msg: "Iter " + iter + "/" + total + ": TP=" + config.targetProfitPct + "% HP=" + config.holdingPeriodDays + "d → Sharpe=" + iterResult.sharpe + " WR=" + iterResult.winRate + "%" });
+              n.push({ time: new Date().toLocaleTimeString(), msg: "Iter " + iter + "/" + total + ": TP=" + config.targetProfitPct + "% HP=" + config.holdingPeriodDays + "d → Sharpe=" + iterResult.sharpe + " WR=" + iterResult.winRate + "% Trades=" + iterResult.tradesEvaluated + (iterResult.evalErrors && iterResult.evalErrors.length ? " (" + iterResult.evalErrors.length + " errors)" : "") });
               return n;
             });
           }
         });
 
+        if (result.warning) {
+          setMlLog(function (prev) {
+            var n = prev.slice(-50);
+            n.push({ time: new Date().toLocaleTimeString(), msg: "ABORTED: " + result.warning });
+            return n;
+          });
+          setError(result.warning);
+          setTimeout(function () { setError(null); }, 8000);
+          return;
+        }
+
         setMlLog(function (prev) {
           var n = prev.slice(-50);
-          n.push({ time: new Date().toLocaleTimeString(), msg: "Best Config: TP=" + result.bestConfig.targetProfitPct + "%, HP=" + result.bestConfig.holdingPeriodDays + "d, Thr=" + result.bestConfig.threshold + " → Sharpe=" + result.bestSharpe });
+          n.push({ time: new Date().toLocaleTimeString(), msg: "Best Config: TP=" + result.bestConfig.targetProfitPct + "%, HP=" + result.bestConfig.holdingPeriodDays + "d, Thr=" + result.bestConfig.threshold + " → Sharpe=" + result.bestSharpe + " (trades=" + result.bestTradesEvaluated + ")" });
           return n;
         });
 
@@ -867,7 +895,11 @@ window.PatternDashboard = (function () {
           sampleEvery: result.bestConfig.sampleEvery
         }));
 
-        setError("Optimal config applied to Backtest Configuration");
+        try {
+          localStorage.setItem("stox_best_bt_config", JSON.stringify(result.bestConfig));
+        } catch (e) {}
+
+        setError("Optimal config applied & saved to Backtest Configuration");
         setTimeout(function () { setError(null); }, 5000);
       } catch (err) {
         setError("Optimization failed: " + err.message);

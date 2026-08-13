@@ -284,6 +284,7 @@ window.MLOptimizer = (function () {
 
     var optimizer = createBayesianOptimizer(PARAM_SPACE);
     var results = [];
+    var zeroTradeStreak = 0;
 
     onProgress(0, iterations, "Starting Bayesian optimization...");
 
@@ -297,7 +298,7 @@ window.MLOptimizer = (function () {
       } else if (window.BatchBacktest && symbols.length > 0) {
         evalResult = await _evaluateConfigWithBacktest(config, symbols, opts);
       } else {
-        evalResult = { sharpe: 0, winRate: 0, avgReturn: 0 };
+        evalResult = { sharpe: 0, winRate: 0, avgReturn: 0, tradesEvaluated: 0 };
       }
 
       // Objective: Sharpe ratio (primary) + bonus for high win rate
@@ -310,37 +311,58 @@ window.MLOptimizer = (function () {
         objective: Math.round(objective * 1000) / 1000,
         sharpe: evalResult.sharpe,
         winRate: evalResult.winRate,
-        avgReturn: evalResult.avgReturn
+        avgReturn: evalResult.avgReturn,
+        tradesEvaluated: evalResult.tradesEvaluated != null ? evalResult.tradesEvaluated : 0,
+        evalErrors: evalResult.evalErrors || []
       };
       results.push(iterResult);
 
       onIteration(iter + 1, iterations, config, iterResult);
       await new Promise(function (r) { setTimeout(r, 0); });
+
+      // Abort early if no trades are being generated — the search is meaningless
+      if (evalResult.tradesEvaluated === 0) {
+        zeroTradeStreak++;
+        if (zeroTradeStreak >= 3) {
+          onProgress(iter + 1, iterations, "Aborting: no trades generated in the last 3 configs");
+          break;
+        }
+      } else {
+        zeroTradeStreak = 0;
+      }
     }
 
-    // Find best config
-    results.sort(function (a, b) { return b.objective - a.objective; });
+    // Find best config: objective primary, tradesEvaluated as tiebreak
+    results.sort(function (a, b) {
+      if (b.objective !== a.objective) return b.objective - a.objective;
+      return (b.tradesEvaluated || 0) - (a.tradesEvaluated || 0);
+    });
     var best = results[0];
+    var zeroTradeAbort = zeroTradeStreak >= 3;
 
     // Save optimization results
     if (window.PatternStore) {
       await PatternStore.init();
       await PatternStore.setMeta("ml_optimization_results", {
         timestamp: Date.now(),
-        iterations: iterations,
-        bestConfig: best.config,
-        bestObjective: best.objective,
+        iterations: zeroTradeAbort ? results.length : iterations,
+        abortedEarly: zeroTradeAbort,
+        bestConfig: best ? best.config : null,
+        bestObjective: best ? best.objective : 0,
         allResults: results
       });
     }
 
     return {
-      success: true,
-      iterations: iterations,
-      bestConfig: best.config,
-      bestObjective: best.objective,
-      bestSharpe: best.sharpe,
-      bestWinRate: best.winRate,
+      success: !zeroTradeAbort,
+      warning: zeroTradeAbort ? "No trades were generated in any evaluated config (check offline data / network). The best config is meaningless." : null,
+      abortedEarly: zeroTradeAbort,
+      iterations: zeroTradeAbort ? results.length : iterations,
+      bestConfig: best ? best.config : null,
+      bestObjective: best ? best.objective : 0,
+      bestSharpe: best ? best.sharpe : 0,
+      bestWinRate: best ? best.winRate : 0,
+      bestTradesEvaluated: best ? best.tradesEvaluated : 0,
       allResults: results
     };
   }
@@ -356,11 +378,16 @@ window.MLOptimizer = (function () {
 
       var totalTrades = 0, totalWins = 0, totalReturns = 0;
       var returns = [];
+      var evalErrors = [];
 
       // Quick evaluation: load from offline data if available
       for (var i = 0; i < evalSymbols.length; i++) {
         try {
-          var singleResult = await runner.runSingle(evalSymbols[i], { silent: true });
+          var singleResult = await runner.runSingle(evalSymbols[i], {
+            silent: true,
+            storePatterns: false,
+            extractFeatures: false
+          });
           if (singleResult && singleResult.stats && singleResult.stats.trades) {
             var trades = singleResult.stats.trades;
             totalTrades += trades.length;
@@ -372,7 +399,9 @@ window.MLOptimizer = (function () {
               }
             });
           }
-        } catch (e) { /* skip failed stocks */ }
+        } catch (e) {
+          evalErrors.push(evalSymbols[i] + ": " + (e.message || e));
+        }
       }
 
       var winRate = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 0;
@@ -391,10 +420,11 @@ window.MLOptimizer = (function () {
         sharpe: Math.round(sharpe * 100) / 100,
         winRate: Math.round(winRate * 10) / 10,
         avgReturn: Math.round(avgReturn * 100) / 100,
-        tradesEvaluated: totalTrades
+        tradesEvaluated: totalTrades,
+        evalErrors: evalErrors
       };
     } catch (e) {
-      return { sharpe: 0, winRate: 0, avgReturn: 0, error: e.message };
+      return { sharpe: 0, winRate: 0, avgReturn: 0, tradesEvaluated: 0, error: e.message, evalErrors: [e.message] };
     }
   }
 

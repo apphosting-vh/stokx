@@ -351,6 +351,15 @@ window.BatchBacktest = (function () {
 
           if (opts.onProgress) opts.onProgress(si + 1, totalSymbols, symbol, "analyzing");
 
+          if (opts.silent) {
+            results[symbol] = { symbol: symbol, trades: trades.length };
+            summary.successCount++;
+            summary.totalTrades += trades.length;
+            if (opts.onProgress) opts.onProgress(si + 1, totalSymbols, symbol, "done");
+            await yieldToUI();
+            continue;
+          }
+
           // ── Analyze component power ──
           var powerResult = null;
           try {
@@ -614,7 +623,7 @@ window.BatchBacktest = (function () {
       return {
         symbol: symbol,
         backtestDate: Date.now(),
-        backtestVersion: window.__STOX_APP_VERSION || "3.0.2",
+        backtestVersion: window.__STOX_APP_VERSION || "3.0.5",
         indicatorWeights: indicatorWeights,
         indicatorPowers: indicatorPowers,
         calibration: calibration,

@@ -234,6 +234,47 @@ window.MLTrainer = (function () {
     return predicted;
   }
 
+  /* Deep-copy a network's weights for best-model snapshot/restore. */
+  function snapshotWeights(nn) {
+    return nn.layers.map(function (layer) {
+      return { W: layer.W.map(function (row) { return row.slice(); }), b: layer.b.slice() };
+    });
+  }
+
+  /* Restore a snapshot taken by snapshotWeights. */
+  function restoreWeights(nn, snap) {
+    for (var l = 0; l < nn.layers.length; l++) {
+      if (!snap[l]) continue;
+      nn.layers[l].b = snap[l].b.slice();
+      nn.layers[l].W = snap[l].W.map(function (row) { return row.slice(); });
+    }
+  }
+
+  /* Evaluate a model on samples (no dropout). Returns per-fold metrics. */
+  function validateSamples(nn, normalizer, samples) {
+    var valCorrect = 0, valTP = 0, valFP = 0, valFN = 0, valTN = 0;
+    var preds = [];
+    samples.forEach(function (sample) {
+      var normalized = normalizer.transform(sample.features);
+      var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
+      var result = forward(nn, inputVector, false);
+      var predClass = result.output >= 0.5 ? 1 : 0;
+      var actual = sample.label.is_winner ? 1 : 0;
+      if (predClass === actual) valCorrect++;
+      if (predClass === 1 && actual === 1) valTP++;
+      if (predClass === 1 && actual === 0) valFP++;
+      if (predClass === 0 && actual === 1) valFN++;
+      if (predClass === 0 && actual === 0) valTN++;
+      preds.push({ predicted: result.output, actual: actual });
+    });
+    return {
+      valCorrect: valCorrect,
+      valTP: valTP, valFP: valFP, valFN: valFN, valTN: valTN,
+      valAcc: samples.length > 0 ? (valCorrect / samples.length) * 100 : 0,
+      foldPredictions: preds
+    };
+  }
+
   /* Zeroed gradient accumulator matching the network shape. */
   function makeGradAccum(nn) {
     var acc = { deltas: [], weights: [] };
@@ -266,6 +307,19 @@ window.MLTrainer = (function () {
         }
       }
     }
+  }
+
+  /* Rank-based AUC via Mann-Whitney U on predicted probabilities. */
+  function computeAUC(preds) {
+    var nPos = 0, nNeg = 0;
+    preds.forEach(function (p) { if (p.actual === 1) nPos++; else nNeg++; });
+    if (nPos === 0 || nNeg === 0) return 0.5;
+    var sorted = preds.slice().sort(function (a, b) { return a.predicted - b.predicted; });
+    var sumRanks = 0;
+    for (var i = 0; i < sorted.length; i++) {
+      if (sorted[i].actual === 1) sumRanks += (i + 1);
+    }
+    return (sumRanks - nPos * (nPos + 1) / 2) / (nPos * nNeg);
   }
 
   /* ── Feature Keys ──────────────────────────────────────────────────── */
@@ -351,7 +405,11 @@ window.MLTrainer = (function () {
     if (!registry || !registry.versions) registry = { versions: [], nextId: 1 };
     versionMeta.versionId = versionMeta.versionId || ("v" + registry.nextId);
     registry.nextId = (registry.nextId || 1) + 1;
-    registry.versions.push(versionMeta);
+    // Keep only a lean summary in the registry — heavy fields (weights,
+    // fold logs, predictions) stay in the version's own meta store.
+    var lean = Object.assign({}, versionMeta);
+    ["modelData", "foldResults", "trainingLog", "predictions", "predictionDistribution", "featureImportance"].forEach(function (k) { delete lean[k]; });
+    registry.versions.push(lean);
     // Keep only last 10 versions
     if (registry.versions.length > 10) registry.versions = registry.versions.slice(-10);
     await PatternStore.setMeta("ml_model_registry", registry);
@@ -564,6 +622,14 @@ window.MLTrainer = (function () {
     });
     if (validSamples.length < 50) throw new Error("Valid samples too few: " + validSamples.length);
 
+    // Minimum entry score seen in training — live predictions below this
+    // extrapolate into untrained territory and should be gated.
+    var entryScoreMin = validSamples.reduce(function (mn, s) {
+      var v = s.features.entry_score != null ? s.features.entry_score : Infinity;
+      return v < mn ? v : mn;
+    }, Infinity);
+    if (entryScoreMin === Infinity) entryScoreMin = null;
+
     // Sort by entryDate for temporal split
     validSamples.sort(function (a, b) {
       var da = a.entryDate || "";
@@ -610,6 +676,7 @@ window.MLTrainer = (function () {
       var bestValAcc = 0;
       var patienceCounter = 0;
       var maxPatience = opts.earlyStoppingPatience || 8;
+      var bestWeights = null;
 
       for (var epoch = 0; epoch < foldEpochs; epoch++) {
         var epochLoss = 0;
@@ -632,6 +699,7 @@ window.MLTrainer = (function () {
             if ((predicted >= 0.5 ? 1 : 0) === target) epochCorrect++;
           }
           if (gradCount > 0) applyGrads(foldNN, gradAccum, effectiveLR, gradCount);
+          if (b % 4 === 0) await new Promise(function (r) { setTimeout(r, 0); });
         }
 
         var avgLoss = epochLoss / trainSamples.length;
@@ -661,6 +729,7 @@ window.MLTrainer = (function () {
         if (valAcc > bestValAcc + 0.5) {
           bestValAcc = valAcc;
           patienceCounter = 0;
+          bestWeights = snapshotWeights(foldNN);
         } else {
           patienceCounter++;
         }
@@ -670,33 +739,39 @@ window.MLTrainer = (function () {
         if (epoch % 5 === 0) await new Promise(function (r) { setTimeout(r, 0); });
       }
 
-      // Final fold metrics
-      var precision = (valTP + valFP) > 0 ? valTP / (valTP + valFP) : 0;
-      var recall = (valTP + valFN) > 0 ? valTP / (valTP + valFN) : 0;
+      // Restore the best-epoch weights so the retained model is the one
+      // the reported metrics describe (avoids reporting a trained-then-
+      // forgotten model).
+      if (bestWeights) restoreWeights(foldNN, bestWeights);
+
+      // Final fold metrics from the retained model
+      var finalVal = validateSamples(foldNN, foldNormalizer, valSamples);
+      var finalValAcc = finalVal.valAcc;
+      var precision = (finalVal.valTP + finalVal.valFP) > 0 ? finalVal.valTP / (finalVal.valTP + finalVal.valFP) : 0;
+      var recall = (finalVal.valTP + finalVal.valFN) > 0 ? finalVal.valTP / (finalVal.valTP + finalVal.valFN) : 0;
       var f1 = (precision + recall) > 0 ? 2 * precision * recall / (precision + recall) : 0;
-      // Approximate AUC
-      var auc = valTP + valTN;
-      auc = (valTP + valFP + valFN + valTN) > 0 ? (valTP + valTN) / (valTP + valFP + valFN + valTN) : 0;
+      // Rank-based AUC (Mann-Whitney U) from fold predictions
+      var auc = computeAUC(finalVal.foldPredictions);
 
       var foldResult = {
         fold: fold + 1,
         trainSize: trainSamples.length,
         valSize: valSamples.length,
-        finalValAcc: Math.round(bestValAcc * 10) / 10,
+        finalValAcc: Math.round(finalValAcc * 10) / 10,
         precision: Math.round(precision * 1000) / 1000,
         recall: Math.round(recall * 1000) / 1000,
         f1: Math.round(f1 * 1000) / 1000,
         auc: Math.round(auc * 1000) / 1000,
         trainingLog: foldLog,
-        predictions: foldPredictions
+        predictions: finalVal.foldPredictions
       };
       foldResults.push(foldResult);
-      allFoldPredictions = allFoldPredictions.concat(foldPredictions);
-      totalAcc += bestValAcc;
+      allFoldPredictions = allFoldPredictions.concat(finalVal.foldPredictions);
+      totalAcc += finalValAcc;
       totalAuc += auc;
 
-      if (bestValAcc > bestFoldAcc) {
-        bestFoldAcc = bestValAcc;
+      if (finalValAcc > bestFoldAcc) {
+        bestFoldAcc = finalValAcc;
         bestFoldIdx = fold;
       }
 
@@ -705,6 +780,9 @@ window.MLTrainer = (function () {
 
     // Average metrics across folds
     var completedFolds = foldResults.filter(function (f) { return !f.skipped; });
+    if (completedFolds.length === 0) {
+      throw new Error("All folds were skipped — insufficient training data. Need at least " + minTrainSamples + " train samples and 20 validation samples per fold. Available valid samples: " + validSamples.length + ". Run batch backtests to collect more features.");
+    }
     var avgAcc = completedFolds.length > 0 ? totalAcc / completedFolds.length : 0;
     var avgAuc = completedFolds.length > 0 ? totalAuc / completedFolds.length : 0;
 
@@ -736,7 +814,8 @@ window.MLTrainer = (function () {
       },
       trainedAt: Date.now(),
       featureKeys: FEATURE_KEYS,
-      hiddenUnits: opts.hiddenUnits || [32, 16]
+      hiddenUnits: opts.hiddenUnits || [32, 16],
+      entryScoreMin: entryScoreMin
     };
 
     // Save the best fold's model as candidate
@@ -772,13 +851,16 @@ window.MLTrainer = (function () {
             gradCount++;
           }
           if (gradCount > 0) applyGrads(fullNN, gradAccum, fullLR, gradCount);
+          if (fb % 4 === 0) await new Promise(function (r) { setTimeout(r, 0); });
         }
       }
 
       // Feature importance
       var importance = computePermutationImportance(fullNN, fullNormalizer, validSamples.slice(0, Math.min(200, validSamples.length)));
 
-      var serializedModel = serialize(fullNN, fullNormalizer);
+      // Record the minimum entry score seen in training — live predictions
+      // below this extrapolate into untrained territory and should be gated.
+      var serializedModel = serialize(fullNN, fullNormalizer, entryScoreMin);
 
       resultSummary.featureImportance = importance;
       resultSummary.modelData = serializedModel;
@@ -841,27 +923,35 @@ window.MLTrainer = (function () {
         if (recentMeta && recentMeta.predictions) recentPredictions = recentMeta.predictions;
       } catch (e) {}
 
-      if (recentPredictions.length >= 20) {
-        var refDist = null;
-        try {
-          var champMeta = await PatternStore.getMeta("ml_model_champion_meta");
-          if (champMeta && champMeta.predictionDistribution) refDist = champMeta.predictionDistribution;
-        } catch (e) {}
-
-        if (refDist) {
-          refDist.driftThreshold = driftThreshold;
-          var driftResult = detectDrift(recentPredictions, refDist);
-          result.drift = driftResult;
-          result.actions.push("drift_check: " + driftResult.reason);
-
-          if (!driftResult.drifted && !forceRetrain) {
-            result.retrained = false;
-            result.actions.push("No drift detected — skipping retrain");
-            return result;
-          }
-          result.actions.push("Drift detected (" + driftResult.score.toFixed(3) + ") — triggering retrain");
-        }
+      if (recentPredictions.length < 20) {
+        result.retrained = false;
+        result.actions.push("Insufficient recent predictions (" + recentPredictions.length + "/20) — skipping retrain");
+        return result;
       }
+
+      var refDist = null;
+      try {
+        var champMeta = await PatternStore.getMeta("ml_model_champion_meta");
+        if (champMeta && champMeta.predictionDistribution) refDist = champMeta.predictionDistribution;
+      } catch (e) {}
+
+      if (!refDist) {
+        result.retrained = false;
+        result.actions.push("No reference prediction distribution on champion model — skipping retrain");
+        return result;
+      }
+
+      refDist.driftThreshold = driftThreshold;
+      var driftResult = detectDrift(recentPredictions, refDist);
+      result.drift = driftResult;
+      result.actions.push("drift_check: " + driftResult.reason);
+
+      if (!driftResult.drifted) {
+        result.retrained = false;
+        result.actions.push("No drift detected — skipping retrain");
+        return result;
+      }
+      result.actions.push("Drift detected (" + driftResult.score.toFixed(3) + ") — triggering retrain");
     }
 
     // Step 2: Retrain with walk-forward
@@ -971,6 +1061,7 @@ window.MLTrainer = (function () {
       var bestValAcc = 0;
       var patienceCounter = 0;
       var maxPatience = cfg.earlyStoppingPatience || 10;
+      var bestWeights = null;
 
       for (var epoch = 0; epoch < epochs; epoch++) {
         var epochLoss = 0;
@@ -995,6 +1086,7 @@ window.MLTrainer = (function () {
             if ((predicted >= 0.5 ? 1 : 0) === target) epochCorrect++;
           }
           if (gradCount > 0) applyGrads(nn, gradAccum, lr, gradCount);
+          if (b % 4 === 0) await new Promise(function (r) { setTimeout(r, 0); });
         }
 
         var avgLoss = epochLoss / trainSamples.length;
@@ -1011,7 +1103,7 @@ window.MLTrainer = (function () {
         var valAcc = (valCorrect / valSamples.length) * 100;
 
         // Early stopping
-        if (valAcc > bestValAcc + 0.3) { bestValAcc = valAcc; patienceCounter = 0; }
+        if (valAcc > bestValAcc + 0.3) { bestValAcc = valAcc; patienceCounter = 0; bestWeights = snapshotWeights(nn); }
         else patienceCounter++;
         if (patienceCounter >= maxPatience) {
           trainingLog.push({ epoch: epoch + 1, loss: Math.round(avgLoss * 1000) / 1000, trainAcc: Math.round(trainAcc * 10) / 10, valAcc: Math.round(valAcc * 10) / 10, earlyStop: true });
@@ -1025,8 +1117,17 @@ window.MLTrainer = (function () {
         if (epoch % 5 === 0) await new Promise(function (r) { setTimeout(r, 0); });
       }
 
+      // Retain the best-epoch weights and report their real validation score
+      if (bestWeights) restoreWeights(nn, bestWeights);
+      var retainedValAcc = validateSamples(nn, normalizer, valSamples).valAcc;
+
       onProgress(1, 1, "Saving model...");
-      var model = serialize(nn, normalizer);
+      var entryScoreMin = validSamples.reduce(function (mn, s) {
+        var v = s.features && s.features.entry_score != null ? s.features.entry_score : Infinity;
+        return v < mn ? v : mn;
+      }, Infinity);
+      if (entryScoreMin === Infinity) entryScoreMin = null;
+      var model = serialize(nn, normalizer, entryScoreMin);
       var importance = computePermutationImportance(nn, normalizer, valSamples.length > 100 ? valSamples.slice(0, 100) : valSamples);
 
       if (window.PatternStore) {
@@ -1038,11 +1139,12 @@ window.MLTrainer = (function () {
           finalLoss: trainingLog[trainingLog.length - 1].loss,
           finalTrainAcc: trainingLog[trainingLog.length - 1].trainAcc,
           finalValAcc: trainingLog[trainingLog.length - 1].valAcc,
-          bestValAcc: bestValAcc,
+          bestValAcc: Math.round(retainedValAcc * 10) / 10,
           featureKeys: FEATURE_KEYS,
           hiddenUnits: hiddenUnits,
           featureImportance: importance,
           method: "single_split",
+          entryScoreMin: entryScoreMin,
           versionId: "legacy"
         };
 
@@ -1186,8 +1288,8 @@ window.MLTrainer = (function () {
      Serialization
      ════════════════════════════════════════════════════════════════════════ */
 
-  function serialize(nn, normalizer) {
-    return {
+  function serialize(nn, normalizer, entryScoreMin) {
+    var out = {
       version: 2,
       network: {
         inputSize: nn.inputSize,
@@ -1199,6 +1301,8 @@ window.MLTrainer = (function () {
       normalizer: normalizer.getParams(),
       featureKeys: FEATURE_KEYS
     };
+    if (entryScoreMin != null) out.entryScoreMin = entryScoreMin;
+    return out;
   }
 
   function deserialize(data) {
@@ -1224,7 +1328,7 @@ window.MLTrainer = (function () {
       // Fallback to legacy
       return PatternStore.getMeta("ml_model");
     }).then(function (model) {
-      _cachedModel = model;
+      if (model) _cachedModel = model;
       return model;
     }).catch(function () { return null; });
   }
@@ -1242,6 +1346,7 @@ window.MLTrainer = (function () {
     create: create,
     predict: predict,
     predictSync: predictSync,
+    getActiveModel: _loadModel,
     getModelInfo: getModelInfo,
     hasModel: hasModel,
     hasCachedModel: hasCachedModel,

@@ -124,7 +124,8 @@ var fsaReadFile = async function(handle) {
       singleStockSnapshots: d.singleStockSnapshots || [],
       confTracker: d.confTracker || [],
       confTrackerPrices: d.confTrackerPrices || {},
-      notes: d.notes || []
+      notes: d.notes || [],
+      patterns: d.patterns || null
     };
   } catch (e) {
     console.warn("[FSA] Read failed:", e);
@@ -197,6 +198,13 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
     var saved = localStorage.getItem("stox_score_config");
     if (saved) scoreConfig = JSON.parse(saved);
   } catch (e) {}
+  var patterns = null;
+  try {
+    if (window.PatternStore && window.PatternStore.exportAll) {
+      await window.PatternStore.init();
+      patterns = await window.PatternStore.exportAll();
+    }
+  } catch (e) {}
 
   return {
     app: "StoX",
@@ -217,7 +225,10 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       confTracker: confTracker.length,
       confTrackerPrices: Object.keys(confTrackerPrices).length,
       notes: notes.length,
-      scoreConfig: !!scoreConfig
+      scoreConfig: !!scoreConfig,
+      patterns: patterns ? patterns.patterns.length : 0,
+      patternFeatures: patterns && patterns.features ? patterns.features.length : 0,
+      patternMeta: patterns && patterns.meta ? patterns.meta.length : 0
     },
     data: {
       holdings: stateData.holdings || [],
@@ -234,7 +245,8 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       confTracker: confTracker,
       confTrackerPrices: confTrackerPrices,
       notes: notes,
-      scoreConfig: scoreConfig
+      scoreConfig: scoreConfig,
+      patterns: patterns
     }
   };
 };
@@ -286,6 +298,12 @@ window.__stoxRestoreFromPayload = async function(data) {
     if (data.confTracker) await dbSetSetting("stox_conf_tracker", data.confTracker);
     if (data.confTrackerPrices && typeof data.confTrackerPrices === "object") await dbSetSetting("stox_conf_tracker_prices", data.confTrackerPrices);
     if (data.notes) await dbSetSetting("stox_notes", data.notes);
+    if (data.patterns && window.PatternStore && window.PatternStore.importAll) {
+      try {
+        await window.PatternStore.init();
+        await window.PatternStore.importAll(data.patterns, false);
+      } catch (e) {}
+    }
     if (data.scoreConfig && typeof data.scoreConfig === "object") {
       var curVer = (window.TechIndicators && window.TechIndicators.getScoreConfigVersion) ? window.TechIndicators.getScoreConfigVersion() : null;
       if (curVer != null && data.scoreConfig._v !== curVer) {
