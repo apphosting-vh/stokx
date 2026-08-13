@@ -141,7 +141,7 @@
     var powerBonusTotal = 0;
 
     ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
-      var w = weights[p] || 0.25;
+      var w = weights[p] != null ? weights[p] : 0.25;
       var max = pillarMax[p] || 25;
       var normalizedPillar = clamp(pillars[p] / max, 0, 1);
       var weighted = normalizedPillar * w;
@@ -199,7 +199,9 @@
     compatResult._patternOriginalScore = compatResult.finalScore;
     compatResult._patternDelta = delta;
     compatResult.finalScore = adjustedScore;
-    compatResult.decision = SCREENER_DECISION_MAP[classification] || compatResult.decision;
+    var decisionObj = SCREENER_DECISION_MAP[classification];
+    compatResult.decision = decisionObj ? decisionObj.label : (classification || compatResult.decision);
+    compatResult.decisionColor = decisionObj ? decisionObj.color : null;
     compatResult._patternClassification = classification;
     compatResult._patternWinRate = pattern.tradeStats ? pattern.tradeStats.winRate : null;
     compatResult._patternTrades = pattern.tradeStats ? pattern.tradeStats.totalTrades : null;
@@ -243,10 +245,12 @@
         if (cal.stratified[tercile]) {
           var stratum = cal.stratified[tercile];
           var stratumWR = stratum.hitRate / 100;
-          var globalWR = cal.global.buckets
-            ? cal.global.buckets.reduce(function (s, b) { return s + b.hitRate * b.n; }, 0) /
-              cal.global.buckets.reduce(function (s, b) { return s + b.n; }, 0) / 100
-            : 0.5;
+          var globalWR = 0.5;
+          if (cal.global.buckets && cal.global.buckets.length > 0) {
+            var totalHits = cal.global.buckets.reduce(function (s, b) { return s + (b.hitRate || 0) * (b.n || 0); }, 0);
+            var totalN = cal.global.buckets.reduce(function (s, b) { return s + (b.n || 0); }, 0);
+            globalWR = totalN > 0 ? totalHits / totalN / 100 : 0.5;
+          }
           var stratAdj = stratumWR / (globalWR || 0.5);
           calibrated = clamp(calibrated * 0.7 + (rawProbTouch * stratAdj) * 0.3, 0.01, 0.99);
         }
@@ -380,12 +384,12 @@
 
     observer.observe(document.documentElement, { childList: true, subtree: true });
 
-    // Also try immediately in case the DOM is already ready
+    // Safety timeout: disconnect observer if nav never appears (prevents memory leak)
     setTimeout(function () {
+      observer.disconnect();
       var nav = document.querySelector('[data-stox-nav]') || document.querySelector('nav');
       if (nav) {
         injectPatternLabTab(nav.closest('[class*="root"]') || document.body);
-        observer.disconnect();
       }
     }, 2000);
   }
@@ -539,7 +543,7 @@
 
     var result = await trainer.train({
       onEpoch: function (epoch, loss, trainAcc, valAcc) {
-        if (epoch % 10 === 0 || epoch === 50) {
+        if (epoch % 10 === 0) {
           console.log("[ML] Epoch " + epoch + ": loss=" + loss.toFixed(4) + " train=" + trainAcc + "% val=" + valAcc + "%");
         }
       }
@@ -593,7 +597,7 @@
     console.log("[PatternIntel] Starting continuous ML retrain...");
     var result = await window.MLTrainer.continuousRetrain(Object.assign({}, config || {}, {
       onProgress: function (current, total, msg) {
-        console.log("[ML-RETRAIN] " + Math.round(current / total * 100) + "% — " + msg);
+        console.log("[ML-RETRAIN] " + (total > 0 ? Math.round(current / total * 100) : 0) + "% — " + msg);
       }
     }));
 

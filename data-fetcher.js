@@ -226,12 +226,12 @@ window.OHLCVFetcher = (function () {
 
     var yfInterval, yfRange;
     switch (timeframe) {
-      case "daily": yfInterval = "1d"; yfRange = "2y"; break;
+      case "daily": yfInterval = "1d"; yfRange = "5y"; break;
       case "1m": yfInterval = "1m"; yfRange = "1d"; break;
       case "5m": yfInterval = "5m"; yfRange = "5d"; break;
       case "15m": yfInterval = "15m"; yfRange = "1mo"; break;
       case "30m": yfInterval = "30m"; yfRange = "1mo"; break;
-      case "1h": yfInterval = "1h"; yfRange = "6mo"; break;
+      case "1h": yfInterval = "1h"; yfRange = "2y"; break;
       case "weekly": yfInterval = "1wk"; yfRange = "5y"; break;
       default: yfInterval = "5m"; yfRange = "1mo"; break;
     }

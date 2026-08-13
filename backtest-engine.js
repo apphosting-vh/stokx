@@ -29,7 +29,10 @@ window.BacktestEngine = (function () {
       t = window.TechIndicators.getScoreConfig().classification;
       window.TechIndicators._scoreConfigClassification = t;
     }
-    var sb = t ? t.strongBuy : 80, b = t ? t.buy : 65, wl = t ? t.watchlist : 50, n = t ? t.neutral : 35;
+    var sb = (t && t.strongBuy != null) ? t.strongBuy : 80;
+    var b  = (t && t.buy != null)       ? t.buy       : 65;
+    var wl = (t && t.watchlist != null) ? t.watchlist : 50;
+    var n  = (t && t.neutral != null)    ? t.neutral   : 35;
     if (s >= sb) return "STRONG_BUY";
     if (s >= b) return "BUY";
     if (s >= wl) return "WATCHLIST";
@@ -85,14 +88,14 @@ window.BacktestEngine = (function () {
     var maxDD = 0;
     for (var i = 1; i < curve.length; i++) {
       if (curve[i].equity > peak) peak = curve[i].equity;
-      var dd = (peak - curve[i].equity) / peak * 100;
+      var dd = peak > 0 ? (peak - curve[i].equity) / peak * 100 : 0;
       if (dd > maxDD) maxDD = dd;
     }
     return Math.round(maxDD * 100) / 100;
   }
 
   function approximateSharpe(trades, riskFreeRate) {
-    riskFreeRate = riskFreeRate || 0;
+    riskFreeRate = riskFreeRate != null ? riskFreeRate : 0;
     if (!trades || trades.length < 2) return null;
     var returns = trades.map(function (t) { return t.finalReturnPct; });
     var mean = returns.reduce(function (s, r) { return s + r; }, 0) / returns.length;
@@ -122,7 +125,7 @@ window.BacktestEngine = (function () {
   }
 
   function calculateStats(trades, symbol) {
-    if (!trades.length) {
+    if (!trades || !trades.length) {
       return { symbol: symbol, totalSignals: 0, trades: [], message: "No trade signals generated" };
     }
     var n = trades.length;
@@ -242,6 +245,8 @@ window.BacktestEngine = (function () {
       var useRealisticExit = opts.realisticExit !== undefined ? opts.realisticExit : realisticExit;
       var slip = opts.slippagePct != null ? opts.slippagePct : slippagePct;
       var broker = opts.brokeragePct != null ? opts.brokeragePct : brokeragePct;
+      var lookAheadNeeded = useRealisticEntry ? 2 : 1;
+      if (entryIdx + lookAheadNeeded > candles.length) return null;
 
       var entryPrice, entryDateIdx;
       if (useRealisticEntry && entryIdx + 1 < candles.length) {
@@ -369,7 +374,11 @@ window.BacktestEngine = (function () {
         var cfg = { horizonDays: holdingPeriodDays, windowSessions: 40, entry_price: bar.c, targetPct: costAdjTargetPct, indexCandles: idxSlice, entryScoreContext: entryScoreCtx };
         var res = window.TechIndicators.computeHorizonConfidence(hSlice, dSlice, cfg);
         if (res && res.components && res.components.probTouch != null) return { probTouch: res.components.probTouch / 100, confLog: res.confidenceLognormal != null ? res.confidenceLognormal / 100 : null, confEmp: res.confidenceEmpirical != null ? res.confidenceEmpirical / 100 : null, components: res.components };
-      } catch (e) {}
+      } catch (e) {
+        if (errorLogging) {
+          scoreErrors.push({ idx: idx, symbol: symbol, context: 'conf10dAt', msg: e.message, stack: e.stack });
+        }
+      }
       return null;
     }
 
@@ -398,6 +407,7 @@ window.BacktestEngine = (function () {
               && (r.swingPotential == null || r.swingPotential >= minSW)
               && (r.raw_score == null || r.raw_score >= minRaw)) {
             var trade = simulateTrade(candles, i, r, opts);
+            if (!trade) continue;
             trade.symbol = symbol;
             var c10 = conf10dAt(candles, i, symbol);
             trade.probTouch = c10 ? c10.probTouch : null;
@@ -415,7 +425,10 @@ window.BacktestEngine = (function () {
     function liftBuckets(scored) {
       var ORDER = ["STRONG_BUY", "BUY", "WATCHLIST", "NEUTRAL", "AVOID"];
       var grouped = {};
-      scored.forEach(function (r) { (grouped[r.classification || classifyScore(r.entryScore)] = grouped[r.classification || classifyScore(r.entryScore)] || []).push(r); });
+      scored.forEach(function (r) {
+        var key = r.classification || classifyScore(r.entryScore);
+        (grouped[key] = grouped[key] || []).push(r);
+      });
       return ORDER.map(function (k) {
         var g = grouped[k];
         if (!g || !g.length) return { bucket: k, n: 0, winRate: null, avgReturn: null };
@@ -560,12 +573,10 @@ window.BacktestEngine = (function () {
       if (!candles || candles.length < warmup + 2) {
         return { symbol: symbol, error: "Need at least " + (warmup + 2) + " candles for backtesting" };
       }
-      candles._symbol = symbol;
-
       var L = candles.length;
       var useRealistic = opts.realisticEntry !== undefined ? opts.realisticEntry : realisticEntry;
       var endIdx = Math.min(L - 1, L - holdingPeriodDays - 1 - (useRealistic ? 1 : 0));
-      var startIdx = Math.min(warmup, endIdx);
+      var startIdx = Math.max(0, Math.min(warmup, endIdx));
       if (endIdx < startIdx) {
         return { symbol: symbol, error: "Not enough forward data for a " + holdingPeriodDays + "-day hold" };
       }
@@ -581,18 +592,20 @@ window.BacktestEngine = (function () {
         if ((i - startIdx) % step === 0) {
           var r = scoreAt(candles, i, symbol);
           if (r && r.entryScore != null) {
+            var rc = Object.assign({}, r);
             var fwd = simulateTrade(candles, i, r, opts);
-            r._idx = i;
-            r.hit = fwd.hitTarget;
-            r.fwdReturn = fwd.finalReturnPct;
-            scored.push(r);
+            if (!fwd) { if (hooks.onBar && (i - startIdx) % 25 === 0) { hooks.onBar(i - startIdx + 1, totalBars); await yieldToUI(); } continue; }
+            rc._idx = i;
+            rc.hit = fwd.hitTarget;
+            rc.fwdReturn = fwd.finalReturnPct;
+            scored.push(rc);
             scoredBars++;
-            if (r.entryScore >= threshold
-                && (r.trendHealth == null || r.trendHealth >= minTH)
-                && (r.pullbackQuality == null || r.pullbackQuality >= minPQ)
-                && (r.prob4 == null || r.prob4 >= minP4)
-                && (r.swingPotential == null || r.swingPotential >= minSW)
-                && (r.raw_score == null || r.raw_score >= minRaw)) {
+            if (rc.entryScore >= threshold
+                && (rc.trendHealth == null || rc.trendHealth >= minTH)
+                && (rc.pullbackQuality == null || rc.pullbackQuality >= minPQ)
+                && (rc.prob4 == null || rc.prob4 >= minP4)
+                && (rc.swingPotential == null || rc.swingPotential >= minSW)
+                && (rc.raw_score == null || rc.raw_score >= minRaw)) {
               fwd.symbol = symbol;
               var c10 = conf10dAt(candles, i, symbol);
               fwd.probTouch = c10 ? c10.probTouch : null;
@@ -641,12 +654,10 @@ window.BacktestEngine = (function () {
       if (!candles || candles.length < warmup + holdingPeriodDays + 20) {
         return { symbol: symbol, error: "Not enough history for walk-forward (need ~" + (warmup + holdingPeriodDays + 20) + " candles)" };
       }
-      candles._symbol = symbol;
-
       var L = candles.length;
       var useRealisticWF = opts.realisticEntry !== undefined ? opts.realisticEntry : realisticEntry;
       var matureEnd = L - holdingPeriodDays - 1 - (useRealisticWF ? 1 : 0);
-      var regionStart = Math.min(warmup, matureEnd);
+      var regionStart = Math.max(0, Math.min(warmup, matureEnd));
       var regionLen = matureEnd - regionStart + 1;
 
       // Anchored walk-forward: growing in-sample
@@ -896,10 +907,10 @@ window.BacktestEngine = (function () {
 
       // ── 1. Total score threshold sweep ──
       var totalPillarSteps = pillarSweep
-        ? (pillarSweep.trendHealth || [0,5,10,15,20,25]).length
-          + (pillarSweep.pullbackQuality || [0,5,10,15,20,25]).length
-          + (pillarSweep.prob4 || [0,5,10,15,20,25,30]).length
-          + (pillarSweep.swingPotential || [0,5,10,15,20]).length
+        ? (pillarSweep.trendHealth || [0, 5, 10, 15, 20, 25, 30]).length
+          + (pillarSweep.pullbackQuality || [0, 5, 10, 15, 20, 25]).length
+          + (pillarSweep.prob4 || [0, 5, 10, 15, 20, 25, 30]).length
+          + (pillarSweep.swingPotential || [0, 5, 10, 15, 20]).length
         : 0;
       var totalSteps = thRange.length + totalPillarSteps;
       var thResults = [];
@@ -988,7 +999,6 @@ window.BacktestEngine = (function () {
         var sym = symbols[si];
         var candles = dataMap[sym];
         if (!candles || candles.length < warmupBars + 10) continue;
-        candles._symbol = sym;
         var L = candles.length;
         var useRealBt = opts.realisticEntry !== undefined ? opts.realisticEntry : realisticEntry;
         var endIdx = Math.min(L - 1, L - holdingPeriodDays - 1 - (useRealBt ? 1 : 0));
@@ -997,6 +1007,7 @@ window.BacktestEngine = (function () {
           var r = scoreAt(candles, i, sym);
           if (r && r.entryScore != null) {
             var fwd = simulateTrade(candles, i, r, opts);
+            if (!fwd) continue;
             allScored.push({
               symbol: sym,
               entryScore: r.entryScore,

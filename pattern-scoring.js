@@ -19,7 +19,7 @@ window.PatternScoring = (function () {
 
   function round2(v) { return v != null ? Math.round(v * 100) / 100 : null; }
   function round3(v) { return v != null ? Math.round(v * 1000) / 1000 : null; }
-  function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+  function clamp(v, lo, hi) { return Number.isNaN(v) ? lo : v < lo ? lo : v > hi ? hi : v; }
 
   /* ── In-memory pattern cache (avoids IDB read on every call) ────────── */
   var _patternCache = new Map();
@@ -204,7 +204,7 @@ window.PatternScoring = (function () {
     var breakdown = {};
 
     ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
-      var w = weights[p] || 0.25;
+      var w = weights[p] != null ? weights[p] : 0.25;
       var max = pillarMax[p] || 25;
       var normalizedPillar = clamp(pillars[p] / max, 0, 1);  // 0-1 scale
       var weighted = normalizedPillar * w;
@@ -327,7 +327,7 @@ window.PatternScoring = (function () {
           ? Math.round(((close - (bbObj.lower[n] || 0)) / Math.max(0.01, (bbObj.upper[n] || 0) - (bbObj.lower[n] || 0))) * 1000) / 1000
           : 0.5,
         atr_pct: atrArr[n] && close > 0 ? Math.round((atrArr[n] / close) * 100 * 1000) / 1000 : 0,
-        obv_trend: n > 0 && obvArr[n - 1] ? Math.round((obvArr[n] || 0) / obvArr[n - 1] * 1000) / 1000 : 1,
+        obv_trend: n > 0 && obvArr[n - 1] != null && obvArr[n - 1] !== 0 ? Math.round((obvArr[n] || 0) / obvArr[n - 1] * 1000) / 1000 : 1,
         supertrend_dir: stObj && stObj.trend ? stObj.trend[n] : 0,
         adx: adxObj && adxObj.adx ? Math.round((adxObj.adx[n] || 0) * 100) / 100 : 0,
         ema_slope: emaFastArr[n] != null && emaFastArr[Math.max(0, n - 3)] != null
@@ -442,7 +442,7 @@ window.PatternScoring = (function () {
           var entryScoreCtx = baseResult ? {
             trendHealth: baseResult.trendHealth != null ? baseResult.trendHealth : baseResult.trend_health,
             pullbackQuality: baseResult.pullbackQuality != null ? baseResult.pullbackQuality : baseResult.pullback_quality,
-            prob4: baseResult.prob4 != null ? baseResult.prob4 : baseResult.prob4,
+            prob4: baseResult.prob4 != null ? baseResult.prob4 : 0,
             swingPotential: baseResult.swingPotential != null ? baseResult.swingPotential : baseResult.swing_potential,
             entryScore: baseResult.entry_score != null ? baseResult.entry_score : baseResult.entryScore
           } : null;
@@ -518,10 +518,12 @@ window.PatternScoring = (function () {
         var tercile = driftScore < 0.33 ? 0 : driftScore < 0.66 ? 1 : 2;
         if (cal.stratified[tercile]) {
           var stratum = cal.stratified[tercile];
-          var stratumWR = stratum.hitRate / 100;
-          var globalWR = cal.global.buckets
-            ? cal.global.buckets.reduce(function (s, b) { return s + b.hitRate * b.n; }, 0) /
-              cal.global.buckets.reduce(function (s, b) { return s + b.n; }, 0) / 100
+          var stratumWR = (stratum.hitRate != null ? stratum.hitRate : 50) / 100;
+          var totalN = cal.global.buckets
+            ? cal.global.buckets.reduce(function (s, b) { return s + b.n; }, 0)
+            : 0;
+          var globalWR = (totalN > 0 && isFinite(totalN))
+            ? cal.global.buckets.reduce(function (s, b) { return s + b.hitRate * b.n; }, 0) / totalN / 100
             : 0.5;
 
           // Blend: 70% logistic calibrated + 30% stratified adjustment
@@ -542,7 +544,7 @@ window.PatternScoring = (function () {
       if (cal.stratified[tercile]) {
         var stratum = cal.stratified[tercile];
         // Use the stratum's empirical hit rate as adjustment factor
-        var adjustment = stratum.hitRate / 100;
+        var adjustment = (stratum.hitRate != null ? stratum.hitRate : 50) / 100;
         var adjusted = rawProbTouch * (adjustment / 0.5);  // normalize around 50%
         return {
           probTouch: round3(clamp(adjusted, 0.01, 0.99)),
@@ -611,7 +613,9 @@ window.PatternScoring = (function () {
         if (opts.getCandles) {
           candles = await opts.getCandles(symbol);
         } else if (window.OHLCVFetcher && window.OHLCVFetcher.fetchOHLCVCached) {
-          var fetched = await window.OHLCVFetcher.fetchOHLCVCached(symbol.toUpperCase() + ".NS", "1h", "2y");
+          var sym = symbol.toUpperCase();
+          if (!sym.endsWith(".NS")) sym += ".NS";
+          var fetched = await window.OHLCVFetcher.fetchOHLCVCached(sym, "1h", "2y");
           candles = fetched && fetched.data ? fetched.data : (Array.isArray(fetched) ? fetched : null);
         }
 
@@ -679,7 +683,7 @@ window.PatternScoring = (function () {
       hasCalibration: !!(pattern.calibration && pattern.calibration.global),
       calP0: pattern.calibration && pattern.calibration.global ? pattern.calibration.global.calP0 : null,
       stratifiedLabels: pattern.calibration && pattern.calibration.stratified
-        ? pattern.calibration.stratified.map(function (s) { return s.label + ": " + s.hitRate + "%"; })
+        ? (Array.isArray(pattern.calibration.stratified) ? pattern.calibration.stratified : Object.values(pattern.calibration.stratified)).map(function (s) { return (s.label || "?") + ": " + (s.hitRate != null ? s.hitRate : "?") + "%"; })
         : [],
       scoreDistribution: pattern.scoreDistribution || null
     };

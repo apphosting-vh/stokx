@@ -87,7 +87,7 @@ window.BatchBacktest = (function () {
             if (mtf && mtf.multiTF_score != null) {
               return { entryScore: mtf.multiTF_score, raw_score: mtf.raw_score, classification: mtf.classification, trendHealth: mtf.trendHealth, pullbackQuality: mtf.pullbackQuality, prob4: mtf.prob4, swingPotential: mtf.swingPotential, modifiers: mtf.modifiers };
             }
-          } catch (e) {}
+          } catch (e) { console.warn("Multi-TF scoring failed:", e.message); }
         }
       }
 
@@ -170,7 +170,7 @@ window.BatchBacktest = (function () {
           var idxKey = "^NSEI";
           if (offlineKeyMap["^NSEI"]) indexCandles = offlineKeyMap["^NSEI"].daily || offlineKeyMap["^NSEI"].data || null;
           else if (offlineKeyMap["^NSEI.NS"]) indexCandles = offlineKeyMap["^NSEI.NS"].daily || offlineKeyMap["^NSEI.NS"].data || null;
-        } catch (e) {}
+        } catch (e) { console.warn("Index candle load failed:", e.message); }
 
         // Load all stock candles
         for (var i = 0; i < symbols.length; i++) {
@@ -199,26 +199,29 @@ window.BatchBacktest = (function () {
       var loadedSymbols = Object.keys(dataMap);
       var missingSymbols = symbols.filter(function(s) { return loadedSymbols.indexOf(s) === -1; });
 
-      if (missingSymbols.length > 0 && !hasOffline) {
-        // Fetch NIFTY index
+      if (missingSymbols.length > 0) {
+        // Fetch NIFTY index if not already loaded
         try {
-          if (window.OHLCVFetcher) {
-            var idxRes = await window.OHLCVFetcher.fetchOHLCVCached("^NSEI.NS", "daily", "2y");
+          if (window.OHLCVFetcher && !indexCandles) {
+            var idxRes = await window.OHLCVFetcher.fetchOHLCVCached("^NSEI.NS", "daily", range);
             indexCandles = idxRes && idxRes.data ? idxRes.data : null;
           }
-        } catch (e) {}
+        } catch (e) { console.warn("Index fetch failed:", e.message); }
 
         for (var j = 0; j < missingSymbols.length; j++) {
           var sym2 = missingSymbols[j];
           try {
             if (window.OHLCVFetcher && window.OHLCVFetcher.fetchOHLCVCached) {
-              var r = await window.OHLCVFetcher.fetchOHLCVCached(sym2 + ".NS", "daily", "2y");
+              var r = await window.OHLCVFetcher.fetchOHLCVCached(sym2 + ".NS", "daily", range);
               var c = r && r.data ? r.data : (Array.isArray(r) ? r : null);
               if (c && c.length >= warmup + 20) {
                 dataMap[sym2] = c;
                 // Fetch hourly + weekly in parallel
-                var hRes = await window.OHLCVFetcher.fetchOHLCVCached(sym2 + ".NS", "1h", "1y").catch(function() { return null; });
-                var wRes = await window.OHLCVFetcher.fetchOHLCVCached(sym2 + ".NS", "weekly", "5y").catch(function() { return null; });
+                var tfResults = await Promise.all([
+                  window.OHLCVFetcher.fetchOHLCVCached(sym2 + ".NS", "1h", "1y").catch(function() { return null; }),
+                  window.OHLCVFetcher.fetchOHLCVCached(sym2 + ".NS", "weekly", "5y").catch(function() { return null; })
+                ]);
+                var hRes = tfResults[0], wRes = tfResults[1];
                 multiTFMap[sym2] = {
                   daily: c,
                   hourly: hRes && hRes.data ? hRes.data : null,
@@ -228,6 +231,7 @@ window.BatchBacktest = (function () {
             }
           } catch (e) {
             console.warn("Fetch failed for " + sym2 + ":", e.message);
+            errors.push({ symbol: sym2, error: e.message });
           }
           if (opts.onProgress) opts.onProgress(j + 1, missingSymbols.length, sym2, "fetching");
           if (j % 5 === 0) await yieldToUI();
@@ -289,7 +293,7 @@ window.BatchBacktest = (function () {
 
       // Initialize PatternStore
       if (storePatterns && window.PatternStore) {
-        try { await window.PatternStore.init(); } catch (e) {}
+        try { await window.PatternStore.init(); } catch (e) { console.warn("PatternStore.init failed:", e.message); }
       }
 
       // Build score function using multi-TF data
@@ -328,8 +332,6 @@ window.BatchBacktest = (function () {
         }
 
         try {
-          candles._symbol = symbol;
-
           // ── Run single stock backtest (pass hooks so engine yields every 25 bars) ──
           var btResult = await engine.runSingle(candles, {
             symbol: symbol,
@@ -421,7 +423,7 @@ window.BatchBacktest = (function () {
             config: { targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: threshold },
             summary: summary
           });
-        } catch (e) {}
+        } catch (e) { console.warn("setMeta failed:", e.message); }
       }
 
       return { results: results, errors: errors, summary: summary };
@@ -448,8 +450,8 @@ window.BatchBacktest = (function () {
       }
 
       var staleSymbols = symbols
-        ? stale.filter(function (s) { return symbols.indexOf(s.symbol) !== -1; }).map(function (s) { return s.symbol; })
-        : stale.map(function (s) { return s.symbol; });
+        ? stale.filter(function (s) { return s && s.symbol && symbols.indexOf(s.symbol) !== -1; }).map(function (s) { return s.symbol; })
+        : stale.filter(function (s) { return s && s.symbol; }).map(function (s) { return s.symbol; });
 
       var result = await runBatch(staleSymbols, opts);
       result.refreshed = result.summary.successCount;
@@ -487,14 +489,20 @@ window.BatchBacktest = (function () {
 
         // Renormalize only among components that had valid power data.
         // Errored components keep a fair share (1/4) instead of being over-weighted.
-        if (totalIV > 0) {
-          var validCount = 4 - erroredComponents;
+        if (totalIV > 0 && erroredComponents > 0) {
+          var erroredShare = erroredComponents * 0.1;
+          var validShare = 1 - erroredShare;
+          Object.keys(indicatorWeights).forEach(function (c) {
+            if (comps[c] && !comps[c].error) {
+              indicatorWeights[c] = round3(indicatorWeights[c] / totalIV * validShare);
+            } else {
+              indicatorWeights[c] = round3(erroredShare / erroredComponents);
+            }
+          });
+        } else if (totalIV > 0) {
           Object.keys(indicatorWeights).forEach(function (c) {
             if (comps[c] && !comps[c].error) {
               indicatorWeights[c] = round3(indicatorWeights[c] / totalIV);
-            } else {
-              // Give errored components their proportional fair share
-              indicatorWeights[c] = round3((1 - totalIV) / erroredComponents);
             }
           });
         }
@@ -525,7 +533,10 @@ window.BatchBacktest = (function () {
         for (var j = 1; j < buckets.length; j++) {
           if (buckets[j - 1].hitRate < 50 && buckets[j].hitRate >= 50) {
             var prev = buckets[j - 1], curr = buckets[j];
-            calP0 = round3(prev.avgProbTouch + ((50 - prev.hitRate) / (curr.hitRate - prev.hitRate)) * (curr.avgProbTouch - prev.avgProbTouch));
+            var denom = curr.hitRate - prev.hitRate;
+            if (Math.abs(denom) > 0.001) {
+              calP0 = round3(prev.avgProbTouch + ((50 - prev.hitRate) / denom) * (curr.avgProbTouch - prev.avgProbTouch));
+            }
             break;
           }
         }
@@ -547,7 +558,7 @@ window.BatchBacktest = (function () {
             calibration.stratified.push({
               label: label,
               driftRange: [round3(tGroup[0].driftScore), round3(tGroup[tGroup.length - 1].driftScore)],
-              avgProbTouch: round3(tGroup.reduce(function (s, t) { return s + t.probTouch; }, 0) / tGroup.length),
+              avgProbTouch: round3(tGroup.reduce(function (s, t) { return s + (t.probTouch != null && !isNaN(t.probTouch) ? t.probTouch : 0); }, 0) / tGroup.length),
               hitRate: round2((tHits / tGroup.length) * 100),
               n: tGroup.length
             });
@@ -566,8 +577,10 @@ window.BatchBacktest = (function () {
             var p33 = atrVals[Math.floor(atrVals.length * 0.33)];
             var p66 = atrVals[Math.floor(atrVals.length * 0.66)];
             var regimes = { low_vol: [], mid_vol: [], high_vol: [] };
+            var dateMap = {};
+            candles.forEach(function (c, ci) { var d = String(c.t).slice(0, 10); if (!dateMap[d]) dateMap[d] = ci; });
             trades.forEach(function (t) {
-              var entryIdx = candles.findIndex(function (c) { return String(c.t).slice(0, 10) === t.entryDate; });
+              var entryIdx = dateMap[t.entryDate] != null ? dateMap[t.entryDate] : -1;
               if (entryIdx >= 0 && entryIdx < atrArr.length && atrArr[entryIdx] != null) {
                 var atr = atrArr[entryIdx];
                 if (atr <= p33) regimes.low_vol.push(t);
@@ -586,7 +599,7 @@ window.BatchBacktest = (function () {
               }
             });
           }
-        } catch (e) {}
+        } catch (e) { console.warn("Regime analysis failed for " + symbol + ":", e.message); }
       }
 
       // ── 4. Score Distribution ──
@@ -595,20 +608,20 @@ window.BatchBacktest = (function () {
       if (allScores.length > 5) {
         allScores.sort(function (a, b) { return a - b; });
         var mean = allScores.reduce(function (s, v) { return s + v; }, 0) / allScores.length;
-        scoreDist = { mean: round2(mean), std: round2(Math.sqrt(allScores.reduce(function (s, v) { return s + (v - mean) * (v - mean); }, 0) / allScores.length)), median: round2(allScores[Math.floor(allScores.length / 2)]) };
+        scoreDist = { mean: round2(mean), std: round2(Math.sqrt(allScores.reduce(function (s, v) { return s + (v - mean) * (v - mean); }, 0) / (allScores.length - 1))), median: round2(allScores[Math.floor(allScores.length / 2)]) };
       }
 
       return {
         symbol: symbol,
         backtestDate: Date.now(),
-        backtestVersion: window.__STOX_APP_VERSION || "3.0.0",
+        backtestVersion: window.__STOX_APP_VERSION || "3.0.1",
         indicatorWeights: indicatorWeights,
         indicatorPowers: indicatorPowers,
         calibration: calibration,
         regimeBehavior: regimeBehavior,
         scoreDistribution: scoreDist,
         tradeStats: {
-          totalTrades: stats.totalSignals || trades.length,
+          totalTrades: stats.totalSignals != null ? stats.totalSignals : trades.length,
           winRate: stats.winRate || 0,
           avgReturn: stats.avgReturnPct || 0,
           avgWin: stats.avgWinPct || 0,
@@ -622,7 +635,7 @@ window.BatchBacktest = (function () {
         },
         pillarConsumption: powerResult && powerResult.pillarConsumption ? powerResult.pillarConsumption : {},
         backtestConfig: { targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: threshold, slippagePct: slippagePct, brokeragePct: brokeragePct },
-        dataQuality: { candleCount: candles ? candles.length : 0, dateRange: candles && candles.length > 1 ? candles[0].t + " to " + candles[candles.length - 1].t : null, timeframe: timeframe }
+        dataQuality: { candleCount: candles ? candles.length : 0, dateRange: candles && candles.length > 1 && candles[0].t != null && candles[candles.length - 1].t != null ? candles[0].t + " to " + candles[candles.length - 1].t : null, timeframe: "daily" }
       };
     }
 
@@ -644,11 +657,10 @@ window.BatchBacktest = (function () {
         var adx = TI.adx(candles, 14);
         var volSma = TI.sma(TI.volumes(candles), 20);
 
+        var featureDateMap = {};
+        candles.forEach(function (c, ci) { var d = String(c.t).slice(0, 10); if (!featureDateMap[d]) featureDateMap[d] = ci; });
         trades.forEach(function (trade) {
-          var entryIdx = -1;
-          for (var i = 0; i < candles.length; i++) {
-            if (String(candles[i].t).slice(0, 10) === trade.entryDate) { entryIdx = i; break; }
-          }
+          var entryIdx = featureDateMap[trade.entryDate] != null ? featureDateMap[trade.entryDate] : -1;
           if (entryIdx < 0) return;
 
           var close = candles[entryIdx].c;

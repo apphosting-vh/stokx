@@ -851,7 +851,7 @@ window.TechIndicators = (function () {
     }
     var emaFast = ema(vf, fast), emaSlow = ema(vf, slow);
     var line = [];
-    for (var i = 0; i < n; i++) line.push(round(emaFast[i] - emaSlow[i], 0));
+    for (var i = 0; i < n; i++) line.push(emaFast[i] !== null && emaSlow[i] !== null ? round(emaFast[i] - emaSlow[i], 0) : null);
     var signalArr = ema(line, signal).map(function (v) { return v === null ? null : round(v, 0); });
     return { line: line, signal: signalArr };
   }
@@ -941,7 +941,7 @@ window.TechIndicators = (function () {
     var ll = rollingMin(lows(candles), period);
     var series = [];
     for (var i = 0; i < cl.length; i++) {
-      series.push(hh[i] !== null ? cl[i] - (hh[i] + ll[i]) / 2 : null);
+      series.push(hh[i] !== null && ll[i] !== null ? cl[i] - (hh[i] + ll[i]) / 2 : null);
     }
     var out = [];
     for (var i = 0; i < cl.length; i++) {
@@ -1280,7 +1280,7 @@ window.TechIndicators = (function () {
     var atr14 = calcATR(candles, 14);
     var out = [];
     for (var i = 0; i < cl.length; i++) {
-      var atrPct = (i > 0 && cl[i - 1] !== 0) ? atr14[i] / cl[i - 1] : null;
+      var atrPct = (i > 0 && cl[i - 1] !== 0 && atr14[i] != null) ? atr14[i] / cl[i - 1] : null;
       if (ret[i] === null || rollStd[i] === null || atrPct === null) { out.push(null); continue; }
       var rAbs = Math.abs(ret[i]);
       out.push(rAbs > spikeStdMult * rollStd[i] && rAbs > atrMult * atrPct);

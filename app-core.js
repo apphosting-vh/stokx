@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "3.0.0";
+window.__STOX_APP_VERSION = "3.0.1";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -7375,8 +7375,13 @@ const ScoreTunerPanel = () => {
     setDownloading(true); setDownloadProgress({ phase: "Starting...", done: 0, total: 0 }); cancelRef.current = false;
     try {
       var stockList = NIFTY_200.slice();
-      var symbols = stockList.map(function(s) { return s.t; });
+      var symbols = stockList.map(function(s) { return s.t.replace(/\.(NS|BO)$/i, ""); });
       var timeframes = ["daily", "1h", "weekly"];
+      var tfCfg = {
+        daily: { interval: "1d", range: "5y", minBars: 80 },
+        "1h": { interval: "1h", range: "2y", minBars: 40 },
+        weekly: { interval: "1wk", range: "5y", minBars: 30 }
+      };
       var totalFetches = symbols.length * timeframes.length;
       setDownloadProgress({ phase: "Fetching " + timeframes.join("+") + " candles for " + symbols.length + " stocks...", done: 0, total: totalFetches });
       var dataMap = {};
@@ -7387,16 +7392,23 @@ const ScoreTunerPanel = () => {
         for (var ti = 0; ti < timeframes.length; ti++) {
           if (cancelRef.current) throw new Error("cancelled");
           var tf = timeframes[ti];
-          try {
-            var r = await DF.fetchOHLCVCached(symbols[i], tf);
-            var c = (r && r.data) || null;
-            var minBars = tf === "daily" ? 80 : tf === "1h" ? 40 : 30;
-            if (c && c.length >= minBars) {
-              dataMap[symbols[i]][tf] = c;
-            } else {
-              errors.push(symbols[i] + " " + tf + ": " + (c ? c.length + " bars" : "no data"));
-            }
-          } catch (e) { errors.push(symbols[i] + " " + tf + ": " + (e.message || e)); }
+          var cfg = tfCfg[tf];
+          var c = null;
+          var errMsg = "no data";
+          /* Retry up to 3 times — free CORS proxies rate-limit and drop bursts */
+          for (var attempt = 0; attempt < 3; attempt++) {
+            if (attempt > 0) await new Promise(function(r) { setTimeout(r, 700 * attempt); });
+            try {
+              var r = await DF.fetchFromYahooIntraday(symbols[i], cfg.interval, cfg.range);
+              if (r && r.length >= cfg.minBars) { c = r; break; }
+              errMsg = r ? r.length + " bars" : "no data";
+            } catch (e) { errMsg = (e && e.message) || String(e); }
+          }
+          if (c) {
+            dataMap[symbols[i]][tf] = c;
+          } else {
+            errors.push(symbols[i] + " " + tf + ": " + errMsg);
+          }
           fetchIdx++;
           setDownloadProgress({ phase: "Fetching " + tf + " candles...", done: fetchIdx, total: totalFetches });
           await new Promise(function(r) { setTimeout(r, 0); });

@@ -295,7 +295,7 @@ window.PatternStore = (function () {
       avgWinRate = Math.round((avgWinRate / totalPatterns) * 10) / 10;
       avgSharpe = Math.round((avgSharpe / totalPatterns) * 100) / 100;
     }
-    if (oldestPattern === Infinity) oldestPattern = null;
+    if (oldestPattern === Infinity) { oldestPattern = null; newestPattern = null; }
 
     return {
       totalPatterns: totalPatterns,
@@ -399,8 +399,8 @@ window.PatternStore = (function () {
     });
 
     for (var iter = 0; iter < 10; iter++) {
-      clusters = DIMS.map(function () { return []; });
-      for (var i = 0; i < DIMS.length; i++) clusters.push([]);
+      clusters = [];
+      for (var i = 0; i < MAX_CLUSTERS; i++) clusters.push([]);
 
       // Assign to nearest centroid
       valid.forEach(function (p) {
@@ -430,21 +430,24 @@ window.PatternStore = (function () {
       });
     }
 
-    return clusters.filter(function (c) { return c.length > 0; }).map(function (members, i) {
+    var result = [];
+    clusters.forEach(function (members, ci) {
+      if (members.length === 0) return;
       var memberPatterns = members.map(function (sym) {
         return valid.find(function (v) { return v.symbol === sym; });
       }).filter(Boolean);
       var avgWR = memberPatterns.length > 0
         ? Math.round(memberPatterns.reduce(function (s, p) { return s + (p.tradeStats ? p.tradeStats.winRate || 0 : 0); }, 0) / memberPatterns.length * 10) / 10
         : 0;
-      return {
-        clusterId: i + 1,
+      result.push({
+        clusterId: result.length + 1,
         members: members,
         size: members.length,
-        centroid: centroids[i] ? DIMS.reduce(function (o, d, di) { o[d] = Math.round((centroids[i][di] || 0) * 100) / 100; return o; }, {}) : {},
+        centroid: centroids[ci] ? DIMS.reduce(function (o, d, di) { o[d] = Math.round((centroids[ci][di] || 0) * 100) / 100; return o; }, {}) : {},
         avgWinRate: avgWR
-      };
+      });
     });
+    return result;
   }
 
   /**

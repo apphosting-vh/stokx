@@ -105,9 +105,9 @@ window.MLTrainer = (function () {
     function transform(features) {
       var result = {};
       Object.keys(features).forEach(function (k) {
-        var val = features[k] || 0;
+        var val = features[k] != null ? features[k] : 0;
         // Use robust scaling: (val - median) / IQR — less sensitive to outliers
-        result[k] = ((val - (medians[k] || 0)) / (iqrs[k] || 1));
+        result[k] = ((val - (medians[k] != null ? medians[k] : 0)) / (iqrs[k] != null ? iqrs[k] : 1));
       });
       return result;
     }
@@ -125,7 +125,7 @@ window.MLTrainer = (function () {
 
   function createDenseNN(inputSize, hiddenUnits, dropoutRate) {
     hiddenUnits = hiddenUnits || [32, 16];
-    dropoutRate = dropoutRate || 0.2;
+    dropoutRate = (dropoutRate != null) ? dropoutRate : 0.2;
     var layers = [];
     var prevSize = inputSize;
 
@@ -431,7 +431,9 @@ window.MLTrainer = (function () {
 
     recentPredictions.forEach(function (p) {
       for (var i = 0; i < bins.length - 1; i++) {
-        if (p >= bins[i] && p < bins[i + 1]) { recentHist[i]++; break; }
+        // Last bin is inclusive on the upper bound so that a prediction of
+        // exactly 1.0 (possible from sigmoid clamp) is not silently dropped.
+        if (p >= bins[i] && (i < bins.length - 2 ? p < bins[i + 1] : p <= bins[i + 1])) { recentHist[i]++; break; }
       }
     });
 
@@ -483,6 +485,7 @@ window.MLTrainer = (function () {
         baselineCorrect++;
       }
     });
+    if (!samples || samples.length === 0) return [];
     var baselineAcc = baselineCorrect / samples.length;
 
     var importances = FEATURE_KEYS.map(function (featKey) {
@@ -710,7 +713,9 @@ window.MLTrainer = (function () {
     var predDist = new Array(predBins.length - 1).fill(0);
     allFoldPredictions.forEach(function (p) {
       for (var i = 0; i < predBins.length - 1; i++) {
-        if (p.predicted >= predBins[i] && p.predicted < predBins[i + 1]) { predDist[i]++; break; }
+        // Last bin is inclusive on the upper bound so that a prediction of
+        // exactly 1.0 (possible from sigmoid clamp) is not silently dropped.
+        if (p.predicted >= predBins[i] && (i < predBins.length - 2 ? p.predicted < predBins[i + 1] : p.predicted <= predBins[i + 1])) { predDist[i]++; break; }
       }
     });
 
@@ -735,8 +740,15 @@ window.MLTrainer = (function () {
     };
 
     // Save the best fold's model as candidate
-    if (bestFoldIdx >= 0 && completedFolds[bestFoldIdx]) {
-      var bestFold = completedFolds[bestFoldIdx];
+    // NOTE: bestFoldIdx is a raw fold number (0-based), but completedFolds is
+    // a filtered array that omits skipped folds.  We must look up the correct
+    // entry by fold number, not by raw index.
+    var bestFoldResult = null;
+    for (var fi = 0; fi < foldResults.length; fi++) {
+      if (foldResults[fi].fold === bestFoldIdx + 1) { bestFoldResult = foldResults[fi]; break; }
+    }
+    if (bestFoldIdx >= 0 && bestFoldResult) {
+      var bestFold = bestFoldResult;
       // Retrain on full dataset up to best fold's validation boundary for best model
       var bestTrainEnd = Math.min((bestFoldIdx + 1) * foldSize, validSamples.length);
       var fullTrainSamples = validSamples.slice(0, bestTrainEnd);
@@ -1086,7 +1098,7 @@ window.MLTrainer = (function () {
 
       var normalized = {};
       FEATURE_KEYS.forEach(function (k) {
-        normalized[k] = ((features[k] || 0) - (normParams.medians[k] || normParams.means[k] || 0)) / (normParams.iqrs[k] || normParams.stds[k] || 1);
+        normalized[k] = ((features[k] != null ? features[k] : 0) - (normParams.medians[k] != null ? normParams.medians[k] : (normParams.means[k] != null ? normParams.means[k] : 0))) / (normParams.iqrs[k] != null ? normParams.iqrs[k] : (normParams.stds[k] != null ? normParams.stds[k] : 1));
       });
 
       var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
@@ -1116,7 +1128,7 @@ window.MLTrainer = (function () {
     var normParams = loadedModel.normalizer;
     var normalized = {};
     FEATURE_KEYS.forEach(function (k) {
-      normalized[k] = ((features[k] || 0) - (normParams.medians[k] || normParams.means[k] || 0)) / (normParams.iqrs[k] || normParams.stds[k] || 1);
+      normalized[k] = ((features[k] != null ? features[k] : 0) - (normParams.medians[k] != null ? normParams.medians[k] : (normParams.means[k] != null ? normParams.means[k] : 0))) / (normParams.iqrs[k] != null ? normParams.iqrs[k] : (normParams.stds[k] != null ? normParams.stds[k] : 1));
     });
     var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
     var result = forward(nn, inputVector, false);

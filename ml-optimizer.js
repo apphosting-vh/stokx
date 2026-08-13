@@ -208,7 +208,7 @@ window.MLOptimizer = (function () {
      * Generates candidates and picks the one with highest EI.
      */
     function suggestNext(numCandidates) {
-      numCandidates = numCandidates || 50;
+      numCandidates = (numCandidates != null) ? numCandidates : 50;
       if (observations.length < 1) {
         // First point: use defaults
         return denormalizeParams(paramNames.map(function (n) { return 0.5; }));
@@ -278,7 +278,7 @@ window.MLOptimizer = (function () {
   async function optimizeConfig(opts) {
     opts = opts || {};
     var symbols = opts.symbols || [];
-    var iterations = opts.iterations || 15;
+    var iterations = (opts.iterations != null) ? opts.iterations : 15;
     var onIteration = opts.onIteration || function () {};
     var onProgress = opts.onProgress || function () {};
 
@@ -460,10 +460,10 @@ window.MLOptimizer = (function () {
           score *= 1.0;
           matchCount++;
         } else if (val < lo) {
-          var dist = (lo - val) / Math.max(1, lo);
+          var dist = (lo - val) / Math.max(1, Math.abs(lo));
           score *= Math.max(0, 1 - dist);
         } else {
-          var dist = (val - hi) / Math.max(1, hi);
+          var dist = (val - hi) / Math.max(1, Math.abs(hi));
           score *= Math.max(0, 1 - dist);
         }
       });
@@ -569,7 +569,8 @@ window.MLOptimizer = (function () {
       Object.keys(def.indicators).forEach(function (ind) {
         var range = def.indicators[ind];
         var val = s.features[ind];
-        if (val == null || val < range[0] * 0.8 || val > range[1] * 1.2) matches = false;
+        var rangeWidth = Math.abs(range[1] - range[0]);
+        if (val == null || val < range[0] - 0.2 * rangeWidth || val > range[1] + 0.2 * rangeWidth) matches = false;
       });
       return matches;
     });
@@ -596,7 +597,7 @@ window.MLOptimizer = (function () {
       // Save as regime-specific model
       if (result.success) {
         var modelData = await PatternStore.getMeta("ml_model");
-        var modelMeta = await PatternStore.getMeta("ml_model_meta");
+        var modelMeta = await PatternStore.getMeta("ml_model_meta") || {};
         if (modelData) {
           var key = "ml_model_champion" + regimeSuffix;
           await PatternStore.setMeta(key, modelData);

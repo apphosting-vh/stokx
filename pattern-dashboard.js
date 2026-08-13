@@ -469,7 +469,14 @@ window.PatternDashboard = (function () {
               var isActive = String(btCap) === c[0];
               return React.createElement("button", {
                 key: c[0],
-                onClick: function () { setBtCap(c[0]); setBtSelectedCount(effectiveCount); },
+                onClick: function () {
+                  var newCap = c[0];
+                  var newCount = newCap === "all" || newCap === "200" ? universe.length
+                    : newCap === "nifty100" ? universe.filter(function(s) { return s.cap === "L"; }).length
+                    : Math.min(parseInt(newCap, 10) || 20, universe.length);
+                  setBtCap(newCap);
+                  setBtSelectedCount(newCount);
+                },
                 style: {
                   padding: "6px 12px", fontSize: 11, fontWeight: 700, borderRadius: 6, cursor: "pointer",
                   border: "1px solid " + (isActive ? "var(--accent, #16a34a)" : "var(--border, #e5e7eb)"),
@@ -562,7 +569,7 @@ window.PatternDashboard = (function () {
     }
 
     function renderInsights() {
-      if (!report || patterns.length === 0) {
+      if (!report || !patterns || patterns.length === 0) {
         return React.createElement("div", { style: cardStyle },
           React.createElement("p", { style: { color: "var(--text2)", textAlign: "center" } }, "No insights available yet.")
         );
@@ -713,7 +720,7 @@ window.PatternDashboard = (function () {
               setMlLog(function (prev) {
                 var n = prev.slice(-50);
                 if (typeof current === "number" && Math.floor(current) !== Math.floor(prev[prev.length - 1] ? prev[prev.length - 1].current || 0 : -1)) {
-                  n.push({ time: new Date().toLocaleTimeString(), msg: "[" + Math.round(current / total * 100) + "%] " + msg });
+                  n.push({ time: new Date().toLocaleTimeString(), msg: "[" + Math.round((total > 0 ? current / total * 100 : 0)) + "%] " + msg });
                 }
                 return n;
               });
@@ -744,7 +751,7 @@ window.PatternDashboard = (function () {
 
           result = await trainer.train({
             onEpoch: function (epoch, loss, trainAcc, valAcc) {
-              if (epoch % 10 === 0 || epoch % 10 === 0) {
+              if (epoch % 10 === 0 || epoch === 1) {
                 setMlLog(function (prev) {
                   var n = prev.slice(-50);
                   n.push({ time: new Date().toLocaleTimeString(), msg: "Epoch " + epoch + ": loss=" + loss.toFixed(4) + " train=" + trainAcc + "% val=" + valAcc + "%" });
