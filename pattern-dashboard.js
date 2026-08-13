@@ -803,7 +803,7 @@ window.PatternDashboard = (function () {
             statCard("Last Collect", liveStatus && liveStatus.lastCollect ? new Date(liveStatus.lastCollect).toLocaleString() : "Never"),
             statCard("Last Retrain", liveStatus && liveStatus.lastRetrain ? new Date(liveStatus.lastRetrain).toLocaleString() : "Never"),
             statCard("WF Accuracy", liveStatus && liveStatus.walkForwardAcc != null ? liveStatus.walkForwardAcc + "%" : "N/A"),
-            statCard("Avg AUC", liveStatus && liveStatus.avgAuc != null ? liveStatus.avgAuc : "N/A")
+            statCard("Avg AUC", liveStatus && liveStatus.avgAuc != null ? (liveStatus.avgAuc * 100).toFixed(1) + "%" : "N/A")
           ),
           React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" } },
             React.createElement("button", {
