@@ -342,7 +342,7 @@ window.BatchBacktest = (function () {
             }
           });
 
-          var trades = btResult.trades || [];
+          var trades = btResult.trades || (btResult.stats && btResult.stats.trades) || [];
           if (trades.length < 5) {
             summary.skippedCount++;
             if (opts.onProgress) opts.onProgress(si + 1, totalSymbols, symbol, "insufficient_trades");
@@ -461,7 +461,7 @@ window.BatchBacktest = (function () {
     /* ── Pattern Extraction ─────────────────────────────────────────────── */
 
     function extractPattern(symbol, btResult, powerResult, candles, dailyCandles, btCfg) {
-      var trades = btResult.trades || [];
+      var trades = btResult.trades || (btResult.stats && btResult.stats.trades) || [];
       var stats = btResult.stats || {};
 
       // ── 1. Indicator Weights from component power ──
