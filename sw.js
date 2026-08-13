@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stox-v307';
+const CACHE_NAME = 'stox-v313';
 const urlsToCache = [
   './',
   './index.html',
@@ -12,6 +12,7 @@ const urlsToCache = [
   './ml-trainer.js',
   './ml-optimizer.js',
   './pattern-dashboard.js',
+  './live-ml.js',
   './pattern-integration.js',
   './technical-panel.js',
   './reports.js',
@@ -25,6 +26,8 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
+  /* If precaching fails (offline / CDN hiccup) still activate —
+     network-first fetch ensures fresh code arrives on the next load anyway. */
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
       .then(() => self.skipWaiting())
@@ -41,6 +44,9 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
+  var url = new URL(event.request.url);
+  var sameOrigin = url.origin === self.location.origin;
+
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).then(r => {
@@ -52,7 +58,21 @@ self.addEventListener('fetch', event => {
         return caches.match(event.request).then(cached => cached || r);
       }).catch(() => caches.match(event.request))
     );
+  } else if (sameOrigin) {
+    /* App scripts/data: network-first so code updates actually arrive.
+       Falls back to the cached copy when offline. */
+    event.respondWith(
+      fetch(event.request).then(r => {
+        if (r && r.status === 200) {
+          var clone = r.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          return r;
+        }
+        return caches.match(event.request).then(cached => cached || r);
+      }).catch(() => caches.match(event.request))
+    );
   } else {
+    /* CDN assets: cache-first. */
     event.respondWith(
       caches.match(event.request).then(response => {
         if (response) return response;

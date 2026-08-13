@@ -1,0 +1,476 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Live ML Expert — StoX
+   Learns which indicator states precede up-days from live/confirmed market
+   data. Maintains a rolling daily corpus (features at previous close, label =
+   realized next-bar return), retrains a walk-forward model daily on confirmed
+   outcomes only, and emits auditable "conditional signs" (bucket win rates).
+
+   Depends on: window.PatternStore, window.MLTrainer, window.TechIndicators,
+   window.OHLCVFetcher, window.OfflineOHLCV (optional), window.NIFTY_200.
+
+   Usage:
+     await LiveML.collect({ maxDays: 90, onProgress });
+     await LiveML.retrain({ numFolds: 5, onProgress });
+     const status = await LiveML.getStatus();
+     const sig = await LiveML.predictToday("RELIANCE");
+     const signals = await LiveML.getTodaySignals({ count: 20 });
+   ══════════════════════════════════════════════════════════════════════════ */
+
+window.LiveML = (function () {
+
+  var WARMUP = 30;
+
+  var META_STATUS = "ml_live_status";
+  var KEY_LAST_DATES = "ml_live_last_dates";
+  var MODEL_KEYS = {
+    champion: "ml_live_champion",
+    championMeta: "ml_live_champion_meta",
+    legacy: "ml_live_model",
+    legacyMeta: "ml_live_model_meta",
+    candidatePrefix: "ml_live_model_"
+  };
+
+  var BUCKETS = {
+    rsi: { label: "RSI (14)", bins: [30, 40, 50, 60, 70, 80], labels: ["<30", "30-40", "40-50", "50-60", "60-70", "70-80", "80+"] },
+    atr_pct: { label: "ATR %", bins: [1, 2, 3, 4, 5, 8], labels: ["<1%", "1-2%", "2-3%", "3-4%", "4-5%", "5-8%", "8%+"] },
+    bb_position: { label: "BB Position", bins: [0.2, 0.4, 0.6, 0.8], labels: ["<0.2", "0.2-0.4", "0.4-0.6", "0.6-0.8", "0.8+"] },
+    volume_ratio: { label: "Volume Ratio", bins: [0.7, 1, 1.3, 1.7, 2.5], labels: ["<0.7", "0.7-1", "1-1.3", "1.3-1.7", "1.7-2.5", "2.5+"] }
+  };
+
+  function round2(v) { return Math.round(v * 100) / 100; }
+  function round3(v) { return Math.round(v * 1000) / 1000; }
+
+  function getUniverse() {
+    if (window.NIFTY_200 && window.NIFTY_200.length) return window.NIFTY_200;
+    return [];
+  }
+
+  /* Build a {ticker -> record} map from the offline store once per operation. */
+  async function loadOfflineMap() {
+    if (!window.OfflineOHLCV || !window.OfflineOHLCV.getAll) return null;
+    try {
+      var records = await window.OfflineOHLCV.getAll();
+      var map = {};
+      records.forEach(function (rec) {
+        if (!rec || !rec.ticker) return;
+        map[rec.ticker] = rec;
+        map[rec.ticker.replace(/\.NS$/, "").replace(/\.BO$/, "")] = rec;
+      });
+      return map;
+    } catch (e) { return null; }
+  }
+
+  /* Resolve a promise or give up after ms (keeps the collector moving). */
+  function withTimeout(promise, ms) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var tid = setTimeout(function () { if (!done) { done = true; resolve(null); } }, ms);
+      promise.then(function (v) { if (!done) { done = true; clearTimeout(tid); resolve(v); } })
+             .catch(function () { if (!done) { done = true; clearTimeout(tid); resolve(null); } });
+    });
+  }
+
+  /* Look up an offline record tolerating .NS/.BO suffix mismatches:
+     Score Tuner stores bare tickers ("RELIANCE"), NIFTY_200 uses "RELIANCE.NS". */
+  function offlineLookup(map, symbol) {
+    if (!map || !symbol) return null;
+    return map[symbol] || map[symbol + ".NS"] || map[symbol.replace(/\.NS$/, "").replace(/\.BO$/, "")] || null;
+  }
+
+  /* Load daily candles: offline first, live fallback (capped at 15s). */
+  async function loadDailyCandles(symbol, offlineMap) {
+    var daily = null;
+    var fromOffline = false;
+    var rec = offlineLookup(offlineMap, symbol);
+    if (rec) { daily = rec.daily || rec.data || null; fromOffline = true; }
+    if ((!daily || daily.length < WARMUP + 5) && window.OHLCVFetcher && window.OHLCVFetcher.fetchOHLCVCached) {
+      try {
+        var r = await withTimeout(window.OHLCVFetcher.fetchOHLCVCached(symbol + ".NS", "daily"), 15000);
+        var c = r && r.data ? r.data : (Array.isArray(r) ? r : null);
+        if (c && c.length >= WARMUP + 5) daily = c;
+      } catch (e) {}
+    }
+    return daily;
+  }
+
+  /* Indicator arrays via TechIndicators. */
+  function computeIndicators(candles) {
+    var TI = window.TechIndicators;
+    var bb = TI.bollingerBands(candles, 20, 2);
+    return {
+      rsi: TI.rsi(candles, 14),
+      atr: TI.atr(candles, 14),
+      bb: bb,
+      volSma: TI.sma(TI.volumes(candles), 20)
+    };
+  }
+
+  /* Feature vector at bar index i — same keys as the ML model. */
+  function featuresAt(i, candles, ind) {
+    var close = candles[i].c;
+    return {
+      rsi: ind.rsi[i] != null ? round2(ind.rsi[i]) : 50,
+      atr_pct: ind.atr[i] != null && close > 0 ? round3((ind.atr[i] / close) * 100) : 0,
+      bb_position: ind.bb.upper && ind.bb.lower ? round3((close - (ind.bb.lower[i] || 0)) / Math.max(0.01, (ind.bb.upper[i] || 0) - (ind.bb.lower[i] || 0))) : 0.5,
+      volume_ratio: ind.volSma && ind.volSma[i] ? round2(close > 0 ? candles[i].v / Math.max(1, ind.volSma[i]) : 1) : 1
+    };
+  }
+
+  /**
+   * Collect features per symbol: features at bar t, label = next-bar
+   * close-to-close return. Only appends bars newer than the last collected
+   * date per symbol, keeping the rolling window to maxDays bars per symbol.
+   */
+  async function collect(opts) {
+    opts = opts || {};
+    var onProgress = opts.onProgress || function () {};
+    if (!window.PatternStore || !window.TechIndicators || !window.OHLCVFetcher) {
+      throw new Error("LiveML requires PatternStore, TechIndicators and OHLCVFetcher");
+    }
+
+    await window.PatternStore.init();
+    var universe = opts.symbols || getUniverse().map(function (s) { return s.t; });
+    var maxDays = opts.maxDays || 90;
+
+    var lastDates = {};
+    try { lastDates = (await window.PatternStore.getMeta(KEY_LAST_DATES)) || {}; } catch (e) {}
+
+    onProgress(0, total, "Reading offline candle store...");
+    var offlineMap = await loadOfflineMap();
+    onProgress(0, total, "Loading candles (offline first, live fallback capped at 15s/symbol)...");
+    var total = universe.length;
+    var processed = 0, skipped = 0, newSamples = 0, liveFetches = 0, offlineHits = 0;
+    var fallbackNoted = false;
+
+    for (var i = 0; i < total; i++) {
+      var symbol = universe[i];
+      try {
+        var candles = await loadDailyCandles(symbol, offlineMap);
+        if (!candles || candles.length < WARMUP + 3) { skipped++; continue; }
+        var fromOffline = !!offlineLookup(offlineMap, symbol);
+        if (fromOffline) offlineHits++;
+        if (!fromOffline) {
+          liveFetches++;
+          if (!fallbackNoted) {
+            fallbackNoted = true;
+            onProgress(processed + 1, total, "Note: some symbols not in offline store — fetching live (may take a while).");
+          }
+        }
+
+        var lastDate = lastDates[symbol] || "";
+        var ind = computeIndicators(candles);
+        var stored = [];
+        for (var t = WARMUP; t < candles.length - 1; t++) {
+          var date = String(candles[t].t).slice(0, 10);
+          if (date <= lastDate) continue;
+          var prevClose = candles[t].c;
+          var nextClose = candles[t + 1].c;
+          if (!prevClose || !nextClose) continue;
+          var ret = (nextClose / prevClose) - 1;
+          stored.push({
+            symbol: symbol,
+            entryDate: date,
+            features: featuresAt(t, candles, ind),
+            label: { is_winner: ret > 0, return_1d: round3(ret * 100), days: 1, source: "live" }
+          });
+        }
+        if (stored.length > 0) {
+          stored = stored.slice(-maxDays);
+          lastDates[symbol] = stored[stored.length - 1].entryDate;
+          await window.PatternStore.putLiveFeatures(symbol, stored);
+          newSamples += stored.length;
+        }
+      } catch (e) { skipped++; }
+      processed++;
+      if (processed % 10 === 0 || processed < 3) {
+        await new Promise(function (r) { setTimeout(r, 0); });
+        onProgress(processed, total, "Collected " + processed + "/" + total + " symbols (" + newSamples + " new samples, " + offlineHits + " from offline, " + liveFetches + " live)");
+      }
+    }
+
+    try { await window.PatternStore.setMeta(KEY_LAST_DATES, lastDates); } catch (e) {}
+
+    var summary = { symbolsScanned: total, symbolsProcessed: processed, skipped: skipped, newSamples: newSamples, liveFetches: liveFetches, offlineHits: offlineHits, collectedAt: Date.now() };
+    try {
+      var status = await getStatusMeta() || {};
+      status.lastCollect = Date.now();
+      status.lastCollectSummary = summary;
+      await window.PatternStore.setMeta(META_STATUS, status);
+    } catch (e) {}
+
+    return summary;
+  }
+
+  async function getStatusMeta() {
+    if (!window.PatternStore) return null;
+    try {
+      await window.PatternStore.init();
+      return await window.PatternStore.getMeta(META_STATUS);
+    } catch (e) { return null; }
+  }
+
+  async function loadCorpus() {
+    await window.PatternStore.init();
+    return await window.PatternStore.getAllLiveFeatures();
+  }
+
+  async function corpusStats(samples) {
+    var wins = 0;
+    samples.forEach(function (s) { if (s.label && s.label.is_winner) wins++; });
+    var baseRate = samples.length > 0 ? wins / samples.length : 0;
+    var dates = samples.map(function (s) { return s.entryDate || ""; }).filter(Boolean).sort();
+    var symbols = {};
+    samples.forEach(function (s) { if (s.symbol) symbols[s.symbol] = 1; });
+    return {
+      count: samples.length,
+      symbols: Object.keys(symbols).length,
+      baseRate: baseRate,
+      firstDate: dates[0] || null,
+      lastDate: dates[dates.length - 1] || null
+    };
+  }
+
+  /* ── Conditional signs ─────────────────────────────────────────────────── */
+
+  function bucketIndex(value, bins) {
+    if (value == null || isNaN(value)) return -1;
+    var idx = 0;
+    while (idx < bins.length && value >= bins[idx]) idx++;
+    return idx;
+  }
+
+  /**
+   * Bucket statistics: for each feature, win rate / avg return per bucket, plus
+   * lift vs the corpus base rate. "Proven signs" = buckets with enough samples
+   * and a meaningful lift; also two-feature combo cells.
+   */
+  function computeConditionalSigns(samples, opts) {
+    opts = opts || {};
+    var minN = opts.minN || 30;
+    var minLift = opts.minLift || 0.03;
+
+    var wins = 0;
+    samples.forEach(function (s) { if (s.label && s.label.is_winner) wins++; });
+    var baseRate = samples.length > 0 ? wins / samples.length : 0;
+
+    var tables = {};
+    var signs = [];
+
+    Object.keys(BUCKETS).forEach(function (key) {
+      var def = BUCKETS[key];
+      var counts = new Array(def.labels.length).fill(0);
+      var w = new Array(def.labels.length).fill(0);
+      var rets = new Array(def.labels.length).fill(0);
+      samples.forEach(function (s) {
+        var idx = bucketIndex(s.features[key], def.bins);
+        if (idx < 0) return;
+        counts[idx]++;
+        if (s.label && s.label.is_winner) w[idx]++;
+        if (s.label && s.label.return_1d != null) rets[idx] += s.label.return_1d;
+      });
+      var rows = [];
+      def.labels.forEach(function (lbl, idx) {
+        var n = counts[idx];
+        if (n === 0) return;
+        var upRate = w[idx] / n;
+        var avgRet = rets[idx] / n;
+        rows.push({
+          feature: key,
+          bucket: lbl,
+          n: n,
+          upRate: Math.round(upRate * 1000) / 10,
+          avgReturn: round2(avgRet),
+          lift: Math.round((upRate - baseRate) * 1000) / 10
+        });
+        if (n >= minN && (upRate - baseRate) >= minLift) {
+          signs.push({
+            feature: key,
+            bucket: lbl,
+            n: n,
+            upRate: Math.round(upRate * 1000) / 10,
+            avgReturn: round2(avgRet),
+            lift: Math.round((upRate - baseRate) * 1000) / 10
+          });
+        }
+      });
+      tables[key] = rows;
+    });
+
+    var combos = [
+      { a: "rsi", b: "volume_ratio", splitA: 60, splitB: 1.3 },
+      { a: "rsi", b: "bb_position", splitA: 60, splitB: 0.6 },
+      { a: "bb_position", b: "atr_pct", splitA: 0.6, splitB: 2 },
+      { a: "volume_ratio", b: "atr_pct", splitA: 1.3, splitB: 2 }
+    ];
+    var comboRows = [];
+    combos.forEach(function (c) {
+      var cells = {};
+      samples.forEach(function (s) {
+        var aHi = s.features[c.a] != null && s.features[c.a] >= c.splitA;
+        var bHi = s.features[c.b] != null && s.features[c.b] >= c.splitB;
+        var key = (aHi ? "H" : "L") + "/" + (bHi ? "H" : "L");
+        if (!cells[key]) cells[key] = { n: 0, w: 0, ret: 0 };
+        cells[key].n++;
+        if (s.label && s.label.is_winner) cells[key].w++;
+        if (s.label && s.label.return_1d != null) cells[key].ret += s.label.return_1d;
+      });
+      Object.keys(cells).forEach(function (k) {
+        var cell = cells[k];
+        comboRows.push({
+          combo: c.a + " " + (k[0] === "H" ? ">=" : "<") + c.splitA + " & " + c.b + " " + (k[2] === "H" ? ">=" : "<") + c.splitB,
+          n: cell.n,
+          upRate: Math.round((cell.n > 0 ? cell.w / cell.n : 0) * 1000) / 10,
+          avgReturn: round2(cell.n > 0 ? cell.ret / cell.n : 0),
+          lift: Math.round(((cell.n > 0 ? cell.w / cell.n : 0) - baseRate) * 1000) / 10
+        });
+      });
+    });
+
+    comboRows.sort(function (x, y) { return y.upRate - x.upRate; });
+    signs.sort(function (x, y) { return y.lift - x.lift; });
+
+    return {
+      baseRate: Math.round(baseRate * 1000) / 10,
+      tables: tables,
+      signs: signs.slice(0, 20),
+      combos: comboRows.slice(0, 12),
+      generatedAt: Date.now()
+    };
+  }
+
+  /* ── Retrain on the confirmed corpus ───────────────────────────────────── */
+
+  async function retrain(opts) {
+    opts = opts || {};
+    var onProgress = opts.onProgress || function () {};
+    if (!window.MLTrainer) throw new Error("MLTrainer module not loaded");
+    await window.PatternStore.init();
+
+    var samples = await loadCorpus();
+    if (samples.length < 200) {
+      throw new Error("Live corpus too small for training: " + samples.length + " samples (need >= 200). Collect live features first.");
+    }
+
+    onProgress(0, 1, "Training live model on " + samples.length + " confirmed samples...");
+
+    var originalGetAll = window.PatternStore.getAllFeatures;
+    window.PatternStore.getAllFeatures = function () { return Promise.resolve(samples); };
+    var result;
+    try {
+      result = await window.MLTrainer.trainWithWalkForward(Object.assign({}, opts, {
+        numFolds: opts.numFolds || (samples.length >= 3000 ? 5 : 3),
+        epochsPerFold: opts.epochsPerFold || 20,
+        minTrainSamples: Math.min(200, Math.floor(samples.length * 0.6)),
+        modelKeys: MODEL_KEYS
+      }));
+    } finally {
+      window.PatternStore.getAllFeatures = originalGetAll;
+    }
+
+    var signs = computeConditionalSigns(samples, { minN: opts.minN || 30, minLift: opts.minLift || 0.03 });
+    var cstats = await corpusStats(samples);
+
+    var status = await getStatusMeta() || {};
+    status.lastRetrain = Date.now();
+    status.corpus = cstats;
+    status.walkForwardAcc = result.walkForwardAcc;
+    status.avgAuc = result.avgAuc;
+    status.featureImportance = result.featureImportance || [];
+    status.signs = signs;
+    status.promotion = result.promotion;
+    status.retrainCount = (status.retrainCount || 0) + 1;
+    await window.PatternStore.setMeta(META_STATUS, status);
+
+    return Object.assign({}, result, { corpus: cstats, signs: signs });
+  }
+
+  /* ── Today's signals (latest bar per symbol) ───────────────────────────── */
+
+  async function predictToday(symbol, offlineMap) {
+    if (!window.MLTrainer) return null;
+    var model = null;
+    try {
+      await window.PatternStore.init();
+      model = await window.PatternStore.getMeta(MODEL_KEYS.champion);
+    } catch (e) {}
+    if (!model || !model.network || model.network.inputSize !== window.MLTrainer.FEATURE_KEYS.length) return null;
+
+    var candles = await loadDailyCandles(symbol, offlineMap);
+    if (!candles || candles.length < WARMUP + 2) return null;
+
+    var ind = computeIndicators(candles);
+    var i = candles.length - 1;
+    var f = featuresAt(i, candles, ind);
+    var pred = window.MLTrainer.predictSync(f, model);
+    if (!pred) return null;
+    var prevClose = candles[i - 1] ? candles[i - 1].c : null;
+    var chgPct = prevClose ? ((candles[i].c / prevClose) - 1) * 100 : null;
+    return {
+      symbol: symbol,
+      date: String(candles[i].t).slice(0, 10),
+      winProbability: pred.winProbability,
+      recommendation: pred.recommendation,
+      features: f,
+      close: candles[i].c,
+      chgPct: chgPct != null ? round2(chgPct) : null
+    };
+  }
+
+  async function getTodaySignals(opts) {
+    opts = opts || {};
+    var universe = opts.symbols || getUniverse().map(function (s) { return s.t; });
+    var count = opts.count || 20;
+    var onProgress = opts.onProgress || function () {};
+    var offlineMap = await loadOfflineMap();
+    var out = [];
+    var started = Date.now();
+    for (var i = 0; i < universe.length; i++) {
+      var symbol = universe[i];
+      /* Score the WHOLE universe so the top-N is a true market-wide ranking.
+         If live fallback is burning time, degrade to offline-only symbols. */
+      if (!offlineLookup(offlineMap, symbol) && Date.now() - started > 120000) continue;
+      try {
+        var sig = await predictToday(symbol, offlineMap);
+        if (sig) out.push(sig);
+      } catch (e) {}
+      if (i % 25 === 0 || i === universe.length - 1) {
+        await new Promise(function (r) { setTimeout(r, 0); });
+        onProgress(i + 1, universe.length, "Scored " + (i + 1) + "/" + universe.length + " symbols (" + out.length + " signals)");
+      }
+    }
+    out.sort(function (a, b) {
+      if (b.winProbability !== a.winProbability) return b.winProbability - a.winProbability;
+      if ((b.chgPct || 0) !== (a.chgPct || 0)) return (b.chgPct || 0) - (a.chgPct || 0);
+      return a.symbol < b.symbol ? -1 : 1;
+    });
+    return out.slice(0, count);
+  }
+
+  async function getStatus() {
+    var status = await getStatusMeta() || {};
+    var championMeta = null;
+    try {
+      await window.PatternStore.init();
+      championMeta = await window.PatternStore.getMeta(MODEL_KEYS.championMeta);
+    } catch (e) {}
+    if (championMeta) {
+      status.champion = {
+        trainedAt: championMeta.trainedAt,
+        walkForwardAcc: championMeta.walkForwardAcc,
+        avgAuc: championMeta.avgAuc,
+        featureImportance: championMeta.featureImportance || []
+      };
+    }
+    return status;
+  }
+
+  return {
+    collect: collect,
+    retrain: retrain,
+    getStatus: getStatus,
+    predictToday: predictToday,
+    getTodaySignals: getTodaySignals,
+    computeConditionalSigns: computeConditionalSigns,
+    BUCKETS: BUCKETS
+  };
+})();

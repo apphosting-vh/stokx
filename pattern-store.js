@@ -18,11 +18,12 @@
 window.PatternStore = (function () {
 
   var DB_NAME = "stox_pattern_db";
-  var DB_VERSION = 1;
+  var DB_VERSION = 2;
 
   var STORE_PATTERNS = "patterns";      // per-stock pattern summary
   var STORE_FEATURES = "features";      // raw trade-level features
   var STORE_META = "meta";              // global metadata
+  var STORE_LIVE_FEATURES = "live_features"; // rolling live-market corpus (per symbol)
 
   var _db = null;
 
@@ -41,6 +42,9 @@ window.PatternStore = (function () {
         }
         if (!db.objectStoreNames.contains(STORE_META)) {
           db.createObjectStore(STORE_META, { keyPath: "key" });
+        }
+        if (!db.objectStoreNames.contains(STORE_LIVE_FEATURES)) {
+          db.createObjectStore(STORE_LIVE_FEATURES, { keyPath: "symbol" });
         }
       };
       req.onsuccess = function (e) {
@@ -238,6 +242,50 @@ window.PatternStore = (function () {
         resolve(all);
       };
       req.onerror = function (e) { reject(e.target.error); };
+    });
+  }
+
+  /* ── Live Features (rolling live-market corpus) ────────────────────────── */
+
+  /**
+   * Store the rolling live corpus for a symbol (array of bar-level samples:
+   * { symbol, entryDate, features: { rsi, atr_pct, bb_position, volume_ratio },
+   *   label: { is_winner, return_1d } }).
+   */
+  function putLiveFeatures(symbol, features) {
+    return new Promise(function (resolve, reject) {
+      if (!_db) { reject(new Error("PatternStore not initialized")); return; }
+      var t = _tx(STORE_LIVE_FEATURES, "readwrite");
+      t.store.put({ symbol: symbol, features: features, updatedAt: Date.now() });
+      t.tx.oncomplete = function () { resolve(); };
+      t.tx.onerror = function (e) { reject(e.target.error); };
+    });
+  }
+
+  function getAllLiveFeatures() {
+    return new Promise(function (resolve, reject) {
+      if (!_db) { reject(new Error("PatternStore not initialized")); return; }
+      var t = _tx(STORE_LIVE_FEATURES, "readonly");
+      var req = t.store.getAll();
+      req.onsuccess = function (e) {
+        var results = e.target.result || [];
+        var all = [];
+        results.forEach(function (r) {
+          if (r.features && r.features.length) all = all.concat(r.features);
+        });
+        resolve(all);
+      };
+      req.onerror = function (e) { reject(e.target.error); };
+    });
+  }
+
+  function clearLiveFeatures() {
+    return new Promise(function (resolve, reject) {
+      if (!_db) { reject(new Error("PatternStore not initialized")); return; }
+      var t = _tx(STORE_LIVE_FEATURES, "readwrite");
+      t.store.clear();
+      t.tx.oncomplete = function () { resolve(); };
+      t.tx.onerror = function (e) { reject(e.target.error); };
     });
   }
 
@@ -562,6 +610,9 @@ window.PatternStore = (function () {
     putFeatures: putFeatures,
     getFeatures: getFeatures,
     getAllFeatures: getAllFeatures,
+    putLiveFeatures: putLiveFeatures,
+    getAllLiveFeatures: getAllLiveFeatures,
+    clearLiveFeatures: clearLiveFeatures,
     getMeta: getMeta,
     setMeta: setMeta,
     getStats: getStats,

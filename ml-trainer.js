@@ -335,13 +335,13 @@ window.MLTrainer = (function () {
    * Save a model version to PatternStore meta.
    * Key format: "ml_model_v{id}" for candidates, "ml_model_champion" for active model.
    */
-  async function saveModelVersion(modelData, meta, role) {
+  async function saveModelVersion(modelData, meta, role, candidatePrefix) {
     role = role || "candidate";
     if (!window.PatternStore) return;
     await PatternStore.init();
 
     var id = meta.versionId || ("v" + Date.now());
-    var key = role === "champion" ? "ml_model_champion" : ("ml_model_" + id);
+    var key = role === "champion" ? "ml_model_champion" : ((candidatePrefix || "ml_model_") + id);
 
     // Store model weights
     await PatternStore.setMeta(key, modelData);
@@ -872,20 +872,49 @@ window.MLTrainer = (function () {
 
       var versionId = await registerModel(versionMeta);
       versionMeta.versionId = versionId;
-      var saveResult = await saveModelVersion(serializedModel, versionMeta, "candidate");
+      var saveResult = await saveModelVersion(serializedModel, versionMeta, "candidate", opts.modelKeys ? opts.modelKeys.candidatePrefix : null);
       resultSummary.modelKey = saveResult.key;
       versionMeta.modelKey = saveResult.key;
 
-      // Attempt promotion
-      var existingChampion = await getChampionModel();
-      var promoResult = await promoteIfBetter(versionMeta, existingChampion ? existingChampion.meta : null);
-      resultSummary.promotion = promoResult;
+      if (opts.modelKeys) {
+        // Isolated stream (e.g. LiveML): promote under its own keys without
+        // touching the backtest champion/legacy keys.
+        var K_CHAMPION = opts.modelKeys.champion || "ml_model_champion";
+        var K_CHAMPION_META = opts.modelKeys.championMeta || "ml_model_champion_meta";
+        var K_LEGACY = opts.modelKeys.legacy || "ml_model";
+        var K_LEGACY_META = opts.modelKeys.legacyMeta || "ml_model_meta";
+        var existingLiveMeta = null;
+        try { existingLiveMeta = await PatternStore.getMeta(K_CHAMPION_META); } catch (e) {}
+        var liveScore = versionMeta.walkForwardAcc || versionMeta.finalValAcc || 0;
+        var existingScore = existingLiveMeta ? (existingLiveMeta.walkForwardAcc || existingLiveMeta.finalValAcc || 0) : 0;
+        if (!existingLiveMeta || liveScore >= existingScore) {
+          await PatternStore.setMeta(K_CHAMPION, serializedModel);
+          await PatternStore.setMeta(K_CHAMPION_META, versionMeta);
+          await PatternStore.setMeta(K_LEGACY, serializedModel);
+          await PatternStore.setMeta(K_LEGACY_META, versionMeta);
+          invalidateModelCache();
+          resultSummary.promotion = {
+            promoted: true,
+            reason: "Stream champion updated (score " + liveScore.toFixed(1) + ")" + (existingLiveMeta ? " vs " + existingScore.toFixed(1) : " — no existing stream champion")
+          };
+        } else {
+          resultSummary.promotion = {
+            promoted: false,
+            reason: "Existing stream champion " + existingScore.toFixed(1) + "% >= challenger " + liveScore.toFixed(1) + "% — kept"
+          };
+        }
+      } else {
+        // Attempt promotion
+        var existingChampion = await getChampionModel();
+        var promoResult = await promoteIfBetter(versionMeta, existingChampion ? existingChampion.meta : null);
+        resultSummary.promotion = promoResult;
 
-      if (promoResult.promoted) {
-        // Also save to legacy key for backward compatibility
-        await PatternStore.setMeta("ml_model", serializedModel);
-        await PatternStore.setMeta("ml_model_meta", versionMeta);
-        invalidateModelCache();
+        if (promoResult.promoted) {
+          // Also save to legacy key for backward compatibility
+          await PatternStore.setMeta("ml_model", serializedModel);
+          await PatternStore.setMeta("ml_model_meta", versionMeta);
+          invalidateModelCache();
+        }
       }
     }
 
