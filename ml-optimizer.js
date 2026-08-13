@@ -388,8 +388,9 @@ window.MLOptimizer = (function () {
             storePatterns: false,
             extractFeatures: false
           });
-          if (singleResult && singleResult.stats && singleResult.stats.trades) {
-            var trades = singleResult.stats.trades;
+          var perSymbol = singleResult && singleResult.results ? singleResult.results[evalSymbols[i]] : null;
+          var trades = perSymbol && Array.isArray(perSymbol.trades) ? perSymbol.trades : null;
+          if (trades) {
             totalTrades += trades.length;
             trades.forEach(function (t) {
               if (t.hitTarget) totalWins++;

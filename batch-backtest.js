@@ -352,7 +352,7 @@ window.BatchBacktest = (function () {
           if (opts.onProgress) opts.onProgress(si + 1, totalSymbols, symbol, "analyzing");
 
           if (opts.silent) {
-            results[symbol] = { symbol: symbol, trades: trades.length };
+            results[symbol] = { symbol: symbol, trades: trades, tradeCount: trades.length };
             summary.successCount++;
             summary.totalTrades += trades.length;
             if (opts.onProgress) opts.onProgress(si + 1, totalSymbols, symbol, "done");
@@ -623,7 +623,7 @@ window.BatchBacktest = (function () {
       return {
         symbol: symbol,
         backtestDate: Date.now(),
-        backtestVersion: window.__STOX_APP_VERSION || "3.0.5",
+        backtestVersion: window.__STOX_APP_VERSION || "3.0.6",
         indicatorWeights: indicatorWeights,
         indicatorPowers: indicatorPowers,
         calibration: calibration,
