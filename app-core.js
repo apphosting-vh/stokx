@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.21.0";
+window.__STOX_APP_VERSION = "2.22.0";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -8826,10 +8826,11 @@ function StockScreener(props) {
           var _intelReady = false;
           var _cacheCount = 0;
           try {
-            if (window.TechIndicators && window.TechIndicators.hasPattern) {
+            if (window.TechIndicators && (window.TechIndicators.hasPatternSync || window.TechIndicators.hasPattern)) {
               _intelReady = true;
               _cacheCount = window.TechIndicators._patCacheCount || 0;
-              results.forEach(function(r){ if(window.TechIndicators.hasPattern(r.s.t.replace(/\.NS$/,""))) _pc++; });
+              var _hasPat = window.TechIndicators.hasPatternSync || window.TechIndicators.hasPattern;
+              results.forEach(function(r){ if(_hasPat(r.s.t.replace(/\.NS$/,""))) _pc++; });
             }
           } catch(e){}
           if (_pc > 0) {

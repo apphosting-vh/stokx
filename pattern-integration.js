@@ -449,11 +449,16 @@
       return baseResult;
     };
 
-    // Quick check for pattern availability
+    // Quick check for pattern availability (async — for non-screener use)
     window.TechIndicators.hasPattern = async function (symbol) {
       if (!window.PatternStore) return false;
       var pattern = await window.PatternStore.get(symbol);
       return pattern != null;
+    };
+
+    // Synchronous check using in-memory cache (for screener badge counting)
+    window.TechIndicators.hasPatternSync = function (symbol) {
+      return getPatternFromCache(symbol) != null;
     };
 
     console.log("[PatternIntel] Scoring patched with pattern intelligence");
