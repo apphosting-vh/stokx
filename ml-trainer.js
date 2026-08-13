@@ -176,7 +176,7 @@ window.MLTrainer = (function () {
     return { output: activations[activations.length - 1][0], activations: activations };
   }
 
-  function backward(nn, inputVector, target, lr, clipValue) {
+  function backward(nn, inputVector, target, lr, clipValue, gradAccum) {
     lr = lr || 0.01;
     clipValue = clipValue || 5.0;
     var result = forward(nn, inputVector, true);
@@ -202,6 +202,24 @@ window.MLTrainer = (function () {
       }
     }
 
+    if (gradAccum) {
+      // Batch mode: accumulate gradients; weights are updated once per batch
+      // by applyGrads (which divides by the batch count for mean-SGD).
+      for (var gl = 0; gl < numLayers; gl++) {
+        var glayer = nn.layers[gl];
+        var gPrevAct = activations[gl];
+        var accD = gradAccum.deltas[gl];
+        var accW = gradAccum.weights[gl];
+        for (var gj = 0; gj < glayer.b.length; gj++) {
+          accD[gj] += deltas[gl][gj];
+          for (var gi = 0; gi < gPrevAct.length; gi++) {
+            accW[gi][gj] += Math.max(-clipValue, Math.min(clipValue, gPrevAct[gi] * deltas[gl][gj]));
+          }
+        }
+      }
+      return predicted;
+    }
+
     // Update weights
     for (var l = 0; l < numLayers; l++) {
       var layer = nn.layers[l];
@@ -214,6 +232,40 @@ window.MLTrainer = (function () {
       }
     }
     return predicted;
+  }
+
+  /* Zeroed gradient accumulator matching the network shape. */
+  function makeGradAccum(nn) {
+    var acc = { deltas: [], weights: [] };
+    for (var l = 0; l < nn.layers.length; l++) {
+      var layer = nn.layers[l];
+      var accD = new Array(layer.b.length);
+      var accW = new Array(layer.W.length);
+      for (var j = 0; j < layer.b.length; j++) accD[j] = 0;
+      for (var i = 0; i < layer.W.length; i++) {
+        accW[i] = new Array(layer.W[i].length);
+        for (var j = 0; j < layer.W[i].length; j++) accW[i][j] = 0;
+      }
+      acc.deltas.push(accD);
+      acc.weights.push(accW);
+    }
+    return acc;
+  }
+
+  /* Apply mean-of-batch gradients: W -= lr * (sum grads / count). */
+  function applyGrads(nn, gradAccum, lr, count) {
+    if (!gradAccum || count <= 0) return;
+    for (var l = 0; l < nn.layers.length; l++) {
+      var layer = nn.layers[l];
+      var accD = gradAccum.deltas[l];
+      var accW = gradAccum.weights[l];
+      for (var j = 0; j < layer.b.length; j++) layer.b[j] -= lr * (accD[j] / count);
+      for (var i = 0; i < layer.W.length; i++) {
+        for (var j = 0; j < layer.b.length; j++) {
+          layer.W[i][j] -= lr * (accW[i][j] / count);
+        }
+      }
+    }
   }
 
   /* ── Feature Keys ──────────────────────────────────────────────────── */
@@ -563,16 +615,20 @@ window.MLTrainer = (function () {
         var numBatches = Math.ceil(trainBatch.length / foldBatchSize);
 
         for (var b = 0; b < numBatches; b++) {
+          var gradAccum = makeGradAccum(foldNN);
+          var gradCount = 0;
           for (var s = b * foldBatchSize; s < Math.min((b + 1) * foldBatchSize, trainBatch.length); s++) {
             var sample = trainBatch[s];
             var normalized = foldNormalizer.transform(sample.features);
             var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
             var target = sample.label.is_winner ? 1 : 0;
-            var predicted = backward(foldNN, inputVector, target, effectiveLR);
+            var predicted = backward(foldNN, inputVector, target, effectiveLR, 5.0, gradAccum);
+            gradCount++;
             var pC = Math.max(1e-7, Math.min(1 - 1e-7, predicted));
             epochLoss += -(target * Math.log(pC) + (1 - target) * Math.log(1 - pC));
             if ((predicted >= 0.5 ? 1 : 0) === target) epochCorrect++;
           }
+          if (gradCount > 0) applyGrads(foldNN, gradAccum, effectiveLR, gradCount);
         }
 
         var avgLoss = epochLoss / trainSamples.length;
@@ -692,11 +748,18 @@ window.MLTrainer = (function () {
 
       for (var epoch = 0; epoch < (opts.epochsPerFold || 20); epoch++) {
         var trainBatch = shuffle(fullTrainSamples);
-        for (var s = 0; s < trainBatch.length; s++) {
-          var norm = fullNormalizer.transform(trainBatch[s].features);
-          var vec = FEATURE_KEYS.map(function (k) { return norm[k]; });
-          var target = trainBatch[s].label.is_winner ? 1 : 0;
-          backward(fullNN, vec, target, fullLR);
+        var fullBatchSize = Math.max(1, opts.batchSize || 32);
+        for (var fb = 0; fb < Math.ceil(trainBatch.length / fullBatchSize); fb++) {
+          var gradAccum = makeGradAccum(fullNN);
+          var gradCount = 0;
+          for (var s = fb * fullBatchSize; s < Math.min((fb + 1) * fullBatchSize, trainBatch.length); s++) {
+            var norm = fullNormalizer.transform(trainBatch[s].features);
+            var vec = FEATURE_KEYS.map(function (k) { return norm[k]; });
+            var target = trainBatch[s].label.is_winner ? 1 : 0;
+            backward(fullNN, vec, target, fullLR, 5.0, gradAccum);
+            gradCount++;
+          }
+          if (gradCount > 0) applyGrads(fullNN, gradAccum, fullLR, gradCount);
         }
       }
 
@@ -906,16 +969,20 @@ window.MLTrainer = (function () {
         var numBatches = Math.ceil(trainBatches.length / batchSize);
 
         for (var b = 0; b < numBatches; b++) {
+          var gradAccum = makeGradAccum(nn);
+          var gradCount = 0;
           for (var s = b * batchSize; s < Math.min((b + 1) * batchSize, trainBatches.length); s++) {
             var sample = trainBatches[s];
             var normalized = normalizer.transform(sample.features);
             var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
             var target = sample.label.is_winner ? 1 : 0;
-            var predicted = backward(nn, inputVector, target, lr);
+            var predicted = backward(nn, inputVector, target, lr, 5.0, gradAccum);
+            gradCount++;
             var pClamped = Math.max(1e-7, Math.min(1 - 1e-7, predicted));
             epochLoss += -(target * Math.log(pClamped) + (1 - target) * Math.log(1 - pClamped));
             if ((predicted >= 0.5 ? 1 : 0) === target) epochCorrect++;
           }
+          if (gradCount > 0) applyGrads(nn, gradAccum, lr, gradCount);
         }
 
         var avgLoss = epochLoss / trainSamples.length;
@@ -1152,6 +1219,9 @@ window.MLTrainer = (function () {
 
   function invalidateModelCache() { _cachedModel = null; }
 
+  /* Synchronous check — true when a model is already loaded in memory (no I/O). */
+  function hasCachedModel() { return _cachedModel != null; }
+
   /* ════════════════════════════════════════════════════════════════════════
      Public API
      ════════════════════════════════════════════════════════════════════════ */
@@ -1162,6 +1232,7 @@ window.MLTrainer = (function () {
     predictSync: predictSync,
     getModelInfo: getModelInfo,
     hasModel: hasModel,
+    hasCachedModel: hasCachedModel,
     getModelStatus: getModelStatus,
     invalidateModelCache: invalidateModelCache,
     FEATURE_KEYS: FEATURE_KEYS,

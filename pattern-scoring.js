@@ -287,7 +287,9 @@ window.PatternScoring = (function () {
     // Check if model exists (fast check, no I/O)
     var hasModel = false;
     try {
-      if (ML._cachedModel) { hasModel = true; }
+      if (ML.hasCachedModel) {
+        hasModel = ML.hasCachedModel();
+      } else if (ML._cachedModel) { hasModel = true; }
       else {
         // Check meta exists without full load
         if (window.PatternStore) {

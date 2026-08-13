@@ -4568,7 +4568,10 @@ window.TechIndicators = (function () {
       /* ── Lognormal: always compute when sigma is available ────────────────── */
       var logProbTouch = null;
       if (sigmaDaily != null) {
-        muDaily = driftScore * 0.0025;
+        // Volatility-aware drift: scale the regime score by the stock's own
+        // daily vol instead of a fixed constant, so high/low-vol names get a
+        // proportionally larger/smaller expected drift.
+        muDaily = driftScore * sigmaDaily * 0.5;
         muLog = muDaily - 0.5 * sigmaDaily * sigmaDaily;
         var b = Math.log((1 + targetPct / 100) / (1 + profitPct / 100));
         b = Math.max(b, 0.0005);

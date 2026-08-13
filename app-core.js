@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.22.0";
+window.__STOX_APP_VERSION = "3.0.0";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -3326,7 +3326,7 @@ const SnapshotChartPanel = ({ sn, dispatch }) => {
 /* ══════════════════════════════════════════════════════════════════════════
    PAGE: Portfolio Management
    ══════════════════════════════════════════════════════════════════════════ */
-function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, refreshPrices, setSoldShareSnapshots }) {
+function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, refreshPrices, setSoldShareSnapshots, fetchSinglePrice }) {
   const DF = window.OHLCVFetcher;
   const TI = window.TechIndicators;
   const [showAdd, setShowAdd] = useState(false);
@@ -8610,7 +8610,7 @@ function StockScreener(props) {
   var batchAddToCS = async function() {
     var tickers = Object.keys(selected).filter(function(t) { return selected[t]; }).map(function(t) { return t.replace(/\.NS$/, ""); });
     if (!tickers.length) return;
-    var existing = await dbGetSetting(LS_CONF_TRACKER);
+    var existing = await dbGetSetting("stox_conf_tracker");
     var entries = (Array.isArray(existing) ? existing : []);
     var existingSet = new Set(entries.map(function(e) { return e.ticker; }));
     var toAdd = tickers.filter(function(t) { return !existingSet.has(t); });
@@ -8634,7 +8634,7 @@ function StockScreener(props) {
       } catch(e) {}
     }
     if (added > 0) {
-      await dbSetSetting(LS_CONF_TRACKER, entries);
+      await dbSetSetting("stox_conf_tracker", entries);
       window.dispatchEvent(new CustomEvent("stox:data-changed"));
     }
     showToast(added + " of " + toAdd.length + " added to Confidence Tracker", 2500);
@@ -11033,7 +11033,7 @@ function App() {
     });
   };
 
-  const pageProps = { holdings, setHoldings, watchlist, setWatchlist, prices, navigate, soldShareSnapshots, setSoldShareSnapshots, saveSnapshot, editSnapshot, deleteSnapshot, refreshPrices };
+  const pageProps = { holdings, setHoldings, watchlist, setWatchlist, prices, navigate, soldShareSnapshots, setSoldShareSnapshots, saveSnapshot, editSnapshot, deleteSnapshot, refreshPrices, fetchSinglePrice };
 
   const renderPage = () => {
     switch (page) {

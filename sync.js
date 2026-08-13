@@ -742,9 +742,9 @@ var gdriveUpsertSyncFile = async function(stateData, manual) {
       if (!remotePayload && !manual) return false;
       var remoteExportedAt = _syncRemoteTimeFromPayload(remotePayload);
       if (remoteExportedAt && localEditAt && remoteExportedAt >= localEditAt) {
-        _syncSaveLocal(remoteExportedAt);
-        _syncSaveLocalEdit(remoteExportedAt);
-        return true;
+        // Remote is newer than local data — pushing would lose remote changes.
+        // Let the caller know so it can prompt the user to pull first.
+        return "remote-newer";
       }
     }
     var exportedAt = new Date().toISOString();
@@ -1271,7 +1271,8 @@ window.CloudBackupPanel = function(props) {
     setPushing(true); setPushMsg("Pushing to Google Drive...");
     try {
       var ok = await gdriveUpsertSyncFile(stateData, true);
-      if (ok) { setLastSync(_syncGetLocal()); setTokenOk(!_gdriveTokenExpired() && !!_gdriveGetToken()); setHasRefresh(!!_gdriveGetRefreshToken()); setPushMsg("Pushed to Google Drive successfully!"); }
+      if (ok === "remote-newer") { setTokenOk(!_gdriveTokenExpired() && !!_gdriveGetToken()); setHasRefresh(!!_gdriveGetRefreshToken()); setPushMsg("Remote is newer \u2014 pull first"); }
+      else if (ok) { setLastSync(_syncGetLocal()); setTokenOk(!_gdriveTokenExpired() && !!_gdriveGetToken()); setHasRefresh(!!_gdriveGetRefreshToken()); setPushMsg("Pushed to Google Drive successfully!"); }
       else { setTokenOk(!_gdriveTokenExpired() && !!_gdriveGetToken()); setPushMsg("Push failed. Check credentials and try again."); }
     } catch (e) { setPushMsg(e.message || "Unknown error"); }
     setPushing(false);
