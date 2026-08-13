@@ -786,6 +786,7 @@ window.PatternDashboard = (function () {
       var corpus = liveStatus && liveStatus.corpus;
       var signs = liveStatus && liveStatus.signs;
       var importance = liveStatus && liveStatus.champion && liveStatus.champion.featureImportance;
+      var brPct = function (br) { return br != null ? (br > 0 && br < 1 ? br * 100 : br) : null; };
 
       return React.createElement("div", null,
         // Status
@@ -797,7 +798,7 @@ window.PatternDashboard = (function () {
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginTop: 10 } },
             statCard("Corpus Samples", corpus ? corpus.count : 0),
             statCard("Symbols", corpus ? corpus.symbols : 0),
-            statCard("Base Up-Rate", corpus ? corpus.baseRate + "%" : "N/A"),
+            statCard("Base Up-Rate", corpus ? (brPct(corpus.baseRate) != null ? brPct(corpus.baseRate).toFixed(1) + "%" : "N/A") : "N/A"),
             statCard("Range", corpus ? (corpus.firstDate || "—") + " → " + (corpus.lastDate || "—") : "N/A"),
             statCard("Last Collect", liveStatus && liveStatus.lastCollect ? new Date(liveStatus.lastCollect).toLocaleString() : "Never"),
             statCard("Last Retrain", liveStatus && liveStatus.lastRetrain ? new Date(liveStatus.lastRetrain).toLocaleString() : "Never"),
@@ -935,7 +936,7 @@ window.PatternDashboard = (function () {
             var allPicks = 0, allHits = 0;
             resolved.forEach(function (d) { allPicks += d.picks.length; allHits += d.hits; });
             var allRate = allPicks > 0 ? (allHits / allPicks) * 100 : null;
-            var base = liveStatus && liveStatus.corpus && liveStatus.corpus.baseRate != null ? liveStatus.corpus.baseRate : null;
+            var base = liveStatus && liveStatus.corpus && liveStatus.corpus.baseRate != null ? brPct(liveStatus.corpus.baseRate) : null;
             var shown = days.slice(0, 7);
             return React.createElement("div", null,
               React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },

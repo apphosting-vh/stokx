@@ -317,7 +317,7 @@ window.LiveML = (function () {
     return {
       count: samples.length,
       symbols: Object.keys(symbols).length,
-      baseRate: baseRate,
+      baseRate: Math.round(baseRate * 1000) / 10,
       firstDate: dates[0] || null,
       lastDate: dates[dates.length - 1] || null
     };
