@@ -775,6 +775,7 @@ window.PatternDashboard = (function () {
           onProgress: function (current, total, msg) { pushLiveLog("[" + Math.round((total > 0 ? current / total * 100 : 0)) + "%] " + (msg || "Scoring " + current + "/" + total + "...")); }
         });
         setLiveSignals(signals);
+        await loadLiveStatus();
         pushLiveLog("Signals ready: " + signals.length + " symbols scored from " + (window.LiveML.getUniverse ? window.LiveML.getUniverse().length : "?") + " total, top pick: " + (signals.length > 0 ? signals[0].symbol + " (" + (signals[0].winProbability * 100).toFixed(1) + "%)" : "none"));
       } catch (err) {
         pushLiveLog("ERROR: " + err.message);
@@ -932,8 +933,11 @@ window.PatternDashboard = (function () {
         ),
 
         // Prediction accuracy tracker
-        liveTracker && liveTracker.days.length > 0 && React.createElement("div", { style: cardStyle },
+        liveTracker && React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Prediction Accuracy — Did Yesterday's Picks Print?"),
+          liveSignals && liveSignals.length > 0 && React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+            "Today's scored picks: " + liveSignals.length + " (top: " + liveSignals[0].symbol + " at " + (liveSignals[0].winProbability * 100).toFixed(1) + "%) — pending resolution. Run Collect in the evening to settle them."
+          ),
           (function () {
             var days = liveTracker.days.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; });
             var resolved = days.filter(function (d) { return d.resolvedCount > 0; });
