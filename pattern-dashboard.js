@@ -14,6 +14,7 @@ window.PatternDashboard = (function () {
   var useCallback = React.useCallback;
   var useMemo = React.useMemo;
   var useRef = React.useRef;
+
   /* ── Helpers ─────────────────────────────────────────────────────── */
   function shuffleArray(arr) {
     var a = arr.slice();
@@ -69,10 +70,10 @@ window.PatternDashboard = (function () {
   /* ── Main Dashboard Component ─────────────────────────────────────────── */
 
   function Dashboard(props) {
-    var onBack = props.onBack || null;
+    var onBack = props.onBack || function () {};
     var stocksList = props.stocks || getStockUniverse().map(function (s) { return s.t; });
 
-    var _s = useState("overview"); // tab: overview | run | browse | insights
+    var _s = useState("overview"); // tab: overview | run | browse | insights | ml
     var tab = _s[0], setTab = _s[1];
 
     var _p = useState(null); // patterns
@@ -101,6 +102,32 @@ window.PatternDashboard = (function () {
     var btRunnerRef = useRef(null);
     var _btCap = useState("20");
     var btCap = _btCap[0], setBtCap = _btCap[1];
+    // ML tab state (must be at component top-level — Rules of Hooks)
+    var _mlStatus = useState(null);
+    var mlStatus = _mlStatus[0], setMlStatus = _mlStatus[1];
+    var _mlTraining = useState(false);
+    var mlTraining = _mlTraining[0], setMlTraining = _mlTraining[1];
+    var _mlLog = useState([]);
+    var mlLog = _mlLog[0], setMlLog = _mlLog[1];
+    var _mlOptimizing = useState(false);
+    var mlOptimizing = _mlOptimizing[0], setMlOptimizing = _mlOptimizing[1];
+    var _mlTrainMode = useState("walkforward");
+    var mlTrainMode = _mlTrainMode[0], setMlTrainMode = _mlTrainMode[1];
+
+    // Load ML status on mount
+    useEffect(function () {
+      loadMLStatus();
+    }, []);
+
+    async function loadMLStatus() {
+      try {
+        if (window.MLTrainer && window.MLTrainer.getModelStatus) {
+          var status = await window.MLTrainer.getModelStatus();
+          setMlStatus(status);
+        }
+      } catch (e) {}
+    }
+
     var _btSelectedCount = useState(function () {
       return Math.min(parseInt("20", 10) || 20, getStockUniverse().length);
     });
@@ -113,13 +140,13 @@ window.PatternDashboard = (function () {
 
     async function loadExistingData() {
       try {
-        await PatternStore.init();
-        var p = await PatternStore.getAll();
+        await window.PatternStore.init();
+        var p = await window.PatternStore.getAll();
         setPatterns(p);
-        var s = await PatternStore.getStats();
+        var s = await window.PatternStore.getStats();
         setStats(s);
-        if (p.length > 0 && BatchBacktest) {
-          var r = await BatchBacktest.create({}).generateReport();
+        if (p.length > 0 && window.BatchBacktest) {
+          var r = await window.BatchBacktest.create({}).generateReport();
           setReport(r);
         }
       } catch (e) {
@@ -146,33 +173,20 @@ window.PatternDashboard = (function () {
       var symbols = pickSymbols(btCap);
       var count = symbols.length;
 
-      // Warn if any selected symbols already have patterns (will be overwritten)
-      if (patterns && patterns.length > 0) {
-        var existing = new Set(patterns.map(function(p) { return p.symbol; }));
-        var overlap = symbols.filter(function(s) { return existing.has(s); });
-        if (overlap.length > 0) {
-          setBtLog([{ time: new Date().toLocaleTimeString(), msg: "NOTE: " + overlap.length + " of " + count + " stocks already have patterns and will be OVERWRITTEN. Use Export first to backup." }]);
-        }
-      }
-
       setBtRunning(true);
       setError(null);
       setProgress({ current: 0, total: count, symbol: "", phase: "starting" });
-      setBtLog(function(prev) {
-        var newLog = prev.slice(-50);
-        newLog.push({ time: new Date().toLocaleTimeString(), msg: "Starting batch backtest for " + count + " stocks (cap=" + btCap + ")..." });
-        return newLog;
-      });
+      setBtLog([{ time: new Date().toLocaleTimeString(), msg: "Starting batch backtest for " + count + " stocks (cap=" + btCap + ")..." }]);
 
       try {
-        var runner = BatchBacktest.create(btConfig);
+        var runner = window.BatchBacktest.create(btConfig);
         btRunnerRef.current = runner;
         var result = await runner.runBatch(symbols, {
           onProgress: function (current, total, symbol, phase) {
             setProgress({ current: current, total: total, symbol: symbol, phase: phase });
             // Log key phases: data load summary, no data, errors, completion
             var shouldLog = phase === "data_loaded" || phase === "no_data" || phase === "no_offline_fallback_live"
-              || phase === "done" || phase === "error" || phase === "insufficient_trades" || phase === "no_scores"
+              || phase === "done" || phase === "error" || phase === "insufficient_trades"
               || (typeof current === "number" && current % 10 === 0);
             if (shouldLog) {
               setBtLog(function (prev) {
@@ -239,7 +253,7 @@ window.PatternDashboard = (function () {
     return React.createElement("div", { style: containerStyle },
       // Header
       React.createElement("div", { style: headerStyle },
-        onBack ? React.createElement("button", { onClick: onBack, style: { background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 18 } }, "\u2190") : null,
+        React.createElement("button", { onClick: onBack, style: { background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 18 } }, "\u2190"),
         React.createElement("span", { style: titleStyle }, "Pattern Intelligence Lab")
       ),
 
@@ -248,7 +262,8 @@ window.PatternDashboard = (function () {
         React.createElement("button", { style: tabStyle(tab === "overview"), onClick: function () { setTab("overview"); } }, "Overview"),
         React.createElement("button", { style: tabStyle(tab === "run"), onClick: function () { setTab("run"); } }, "Run Batch"),
         React.createElement("button", { style: tabStyle(tab === "browse"), onClick: function () { setTab("browse"); } }, "Browse Patterns"),
-        React.createElement("button", { style: tabStyle(tab === "insights"), onClick: function () { setTab("insights"); } }, "Insights")
+        React.createElement("button", { style: tabStyle(tab === "insights"), onClick: function () { setTab("insights"); } }, "Insights"),
+        React.createElement("button", { style: tabStyle(tab === "ml"), onClick: function () { setTab("ml"); } }, "ML Engine")
       ),
 
       // Error
@@ -258,7 +273,8 @@ window.PatternDashboard = (function () {
       tab === "overview" && renderOverview(),
       tab === "run" && renderRunBatch(),
       tab === "browse" && renderBrowse(),
-      tab === "insights" && renderInsights()
+      tab === "insights" && renderInsights(),
+      tab === "ml" && renderMLEngine()
     );
 
     function renderOverview() {
@@ -536,9 +552,318 @@ window.PatternDashboard = (function () {
       );
     }
 
+    /* ── ML Engine Tab ─────────────────────────────────────────────────── */
+
+    async function handleTrainML() {
+      if (!window.MLTrainer) {
+        setError("MLTrainer module not loaded");
+        return;
+      }
+      if (!window.PatternStore) {
+        setError("PatternStore not available");
+        return;
+      }
+
+      setMlTraining(true);
+      setMlLog([{ time: new Date().toLocaleTimeString(), msg: "Starting " + mlTrainMode + " training..." }]);
+
+      try {
+        await window.PatternStore.init();
+        var featCount = 0;
+        try {
+          var allFeats = await window.PatternStore.getAllFeatures();
+          featCount = allFeats.length;
+        } catch (e) {}
+
+        setMlLog(function (prev) {
+          var n = prev.slice(-50);
+          n.push({ time: new Date().toLocaleTimeString(), msg: "Available features: " + featCount + " samples" });
+          return n;
+        });
+
+        var result;
+        if (mlTrainMode === "walkforward") {
+          result = await window.MLTrainer.trainWithWalkForward({
+            numFolds: 5,
+            epochsPerFold: 25,
+            hiddenUnits: [32, 16],
+            learningRate: 0.005,
+            batchSize: 32,
+            dropoutRate: 0.2,
+            onFold: function (fold, total, foldResult) {
+              if (foldResult.skipped) {
+                setMlLog(function (prev) {
+                  var n = prev.slice(-50);
+                  n.push({ time: new Date().toLocaleTimeString(), msg: "Fold " + fold + "/" + total + ": skipped (" + foldResult.reason + ")" });
+                  return n;
+                });
+              } else {
+                setMlLog(function (prev) {
+                  var n = prev.slice(-50);
+                  n.push({ time: new Date().toLocaleTimeString(), msg: "Fold " + fold + "/" + total + ": valAcc=" + foldResult.finalValAcc + "%, F1=" + foldResult.f1 + ", Precision=" + foldResult.precision });
+                  return n;
+                });
+              }
+            },
+            onProgress: function (current, total, msg) {
+              setMlLog(function (prev) {
+                var n = prev.slice(-50);
+                if (typeof current === "number" && Math.floor(current) !== Math.floor(prev[prev.length - 1] ? prev[prev.length - 1].current || 0 : -1)) {
+                  n.push({ time: new Date().toLocaleTimeString(), msg: "[" + Math.round(current / total * 100) + "%] " + msg });
+                }
+                return n;
+              });
+            }
+          });
+
+          setMlLog(function (prev) {
+            var n = prev.slice(-50);
+            n.push({ time: new Date().toLocaleTimeString(), msg: "Walk-Forward Result: " + result.walkForwardAcc + "% avg accuracy, Best Fold: " + result.bestFoldAcc + "%" });
+            if (result.promotion) {
+              n.push({ time: new Date().toLocaleTimeString(), msg: "Promotion: " + result.promotion.reason });
+            }
+            if (result.featureImportance && result.featureImportance.length > 0) {
+              var top3 = result.featureImportance.slice(0, 3).map(function (f) { return f.feature + "(" + f.importance.toFixed(3) + ")"; }).join(", ");
+              n.push({ time: new Date().toLocaleTimeString(), msg: "Top Features: " + top3 });
+            }
+            return n;
+          });
+        } else {
+          // Legacy single-split training
+          var trainer = window.MLTrainer.create({
+            hiddenUnits: [32, 16],
+            learningRate: 0.01,
+            epochs: 50,
+            batchSize: 32,
+            dropoutRate: 0.2
+          });
+
+          result = await trainer.train({
+            onEpoch: function (epoch, loss, trainAcc, valAcc) {
+              if (epoch % 10 === 0 || epoch % 10 === 0) {
+                setMlLog(function (prev) {
+                  var n = prev.slice(-50);
+                  n.push({ time: new Date().toLocaleTimeString(), msg: "Epoch " + epoch + ": loss=" + loss.toFixed(4) + " train=" + trainAcc + "% val=" + valAcc + "%" });
+                  return n;
+                });
+              }
+            }
+          });
+
+          setMlLog(function (prev) {
+            var n = prev.slice(-50);
+            n.push({ time: new Date().toLocaleTimeString(), msg: "Training Complete: valAcc=" + result.finalValAcc + "%, loss=" + result.finalLoss });
+            if (result.featureImportance) {
+              var top3 = result.featureImportance.slice(0, 3).map(function (f) { return f.feature + "(" + f.importance.toFixed(3) + ")"; }).join(", ");
+              n.push({ time: new Date().toLocaleTimeString(), msg: "Top Features: " + top3 });
+            }
+            return n;
+          });
+        }
+
+        // Refresh status
+        await loadMLStatus();
+        setError(null);
+      } catch (err) {
+        setMlLog(function (prev) {
+          var n = prev.slice(-50);
+          n.push({ time: new Date().toLocaleTimeString(), msg: "ERROR: " + err.message });
+          return n;
+        });
+        setError("ML training failed: " + err.message);
+      } finally {
+        setMlTraining(false);
+      }
+    }
+
+    async function handleRetrainML() {
+      if (!window.MLTrainer || !window.continuousMLRetrain) {
+        setError("Continuous retrain not available");
+        return;
+      }
+      setMlTraining(true);
+      setMlLog(function (prev) {
+        var n = prev.slice(-50);
+        n.push({ time: new Date().toLocaleTimeString(), msg: "Starting continuous retrain (drift check + walk-forward)..." });
+        return n;
+      });
+
+      try {
+        var result = await window.continuousMLRetrain({
+          numFolds: 5,
+          epochsPerFold: 20,
+          forceRetrain: true,
+          onProgress: function (current, total, msg) {
+            setMlLog(function (prev) {
+              var n = prev.slice(-50);
+              n.push({ time: new Date().toLocaleTimeString(), msg: msg });
+              return n;
+            });
+          }
+        });
+
+        setMlLog(function (prev) {
+          var n = prev.slice(-50);
+          n.push({ time: new Date().toLocaleTimeString(), msg: "Retrain " + (result.retrained ? "completed" : "skipped") + ": " + (result.actions || []).join("; ") });
+          return n;
+        });
+
+        await loadMLStatus();
+      } catch (err) {
+        setError("Continuous retrain failed: " + err.message);
+      } finally {
+        setMlTraining(false);
+      }
+    }
+
+    async function handleOptimizeConfig() {
+      if (!window.MLOptimizer || !window.optimizeBacktestConfig) {
+        setError("MLOptimizer not available");
+        return;
+      }
+      setMlOptimizing(true);
+      setMlLog(function (prev) {
+        var n = prev.slice(-50);
+        n.push({ time: new Date().toLocaleTimeString(), msg: "Starting Bayesian optimization of backtest config..." });
+        return n;
+      });
+
+      try {
+        var symbols = getStockUniverse().slice(0, 10).map(function (s) { return s.t; });
+        var result = await window.optimizeBacktestConfig({
+          symbols: symbols,
+          iterations: 10,
+          onIteration: function (iter, total, config, iterResult) {
+            setMlLog(function (prev) {
+              var n = prev.slice(-50);
+              n.push({ time: new Date().toLocaleTimeString(), msg: "Iter " + iter + "/" + total + ": TP=" + config.targetProfitPct + "% HP=" + config.holdingPeriodDays + "d → Sharpe=" + iterResult.sharpe + " WR=" + iterResult.winRate + "%" });
+              return n;
+            });
+          }
+        });
+
+        setMlLog(function (prev) {
+          var n = prev.slice(-50);
+          n.push({ time: new Date().toLocaleTimeString(), msg: "Best Config: TP=" + result.bestConfig.targetProfitPct + "%, HP=" + result.bestConfig.holdingPeriodDays + "d, Thr=" + result.bestConfig.threshold + " → Sharpe=" + result.bestSharpe });
+          return n;
+        });
+
+        // Apply best config to backtest config
+        setBtConfig(Object.assign({}, btConfig, {
+          targetProfitPct: result.bestConfig.targetProfitPct,
+          holdingPeriodDays: result.bestConfig.holdingPeriodDays,
+          threshold: result.bestConfig.threshold,
+          sampleEvery: result.bestConfig.sampleEvery
+        }));
+
+        setError("Optimal config applied to Backtest Configuration");
+        setTimeout(function () { setError(null); }, 5000);
+      } catch (err) {
+        setError("Optimization failed: " + err.message);
+      } finally {
+        setMlOptimizing(false);
+      }
+    }
+
+    function renderMLEngine() {
+      var hasML = !!(window.MLTrainer);
+      var hasOptimizer = !!(window.MLOptimizer);
+      var championInfo = mlStatus && mlStatus.champion;
+
+      return React.createElement("div", null,
+        // Model Status
+        React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Model Status"),
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginTop: 8 } },
+            statCard("Has Model", mlStatus && mlStatus.hasModel ? "Yes" : "No"),
+            statCard("Features", (mlStatus && mlStatus.totalFeaturesAvailable) || 0),
+            statCard("Method", championInfo && championInfo.method ? String(championInfo.method) : "N/A"),
+            statCard("WF Accuracy", championInfo && championInfo.walkForwardAcc ? championInfo.walkForwardAcc + "%" : "N/A"),
+            statCard("Val Accuracy", championInfo && championInfo.finalValAcc ? championInfo.finalValAcc + "%" : "N/A"),
+            statCard("Versions", (mlStatus && mlStatus.versions && mlStatus.versions.length) || 0)
+          )
+        ),
+        // Feature Importance
+        championInfo && championInfo.featureImportance && React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Feature Importance"),
+          React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" } },
+            championInfo.featureImportance.slice(0, 10).map(function (fi) {
+              var intensity = Math.min(1, fi.importance * 5);
+              var bg = "rgba(22,163,74," + (0.1 + intensity * 0.4) + ")";
+              return React.createElement("div", { key: fi.feature, style: { padding: "4px 10px", borderRadius: 12, background: bg, fontSize: 12, fontWeight: 500, border: "1px solid var(--border)" } },
+                fi.feature + " (" + fi.importance.toFixed(3) + ")"
+              );
+            })
+          )
+        ),
+        // Training Controls
+        React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Training Controls"),
+          React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" } },
+            React.createElement("label", { style: { fontSize: 12, display: "flex", alignItems: "center", gap: 4 } },
+              React.createElement("input", {
+                type: "radio", name: "mlmode", value: "walkforward",
+                checked: mlTrainMode === "walkforward",
+                onChange: function () { setMlTrainMode("walkforward"); }
+              }),
+              "Walk-Forward (Recommended)"
+            ),
+            React.createElement("label", { style: { fontSize: 12, display: "flex", alignItems: "center", gap: 4, marginLeft: 12 } },
+              React.createElement("input", {
+                type: "radio", name: "mlmode", value: "legacy",
+                checked: mlTrainMode === "legacy",
+                onChange: function () { setMlTrainMode("legacy"); }
+              }),
+              "Single Split (Legacy)"
+            )
+          ),
+          React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 12 } },
+            React.createElement("button", {
+              onClick: handleTrainML,
+              disabled: mlTraining || !hasML,
+              style: { padding: "8px 16px", borderRadius: 6, background: mlTraining ? "#9ca3af" : "var(--accent, #16a34a)", color: "#fff", border: "none", cursor: mlTraining ? "not-allowed" : "pointer", fontWeight: 600, opacity: hasML ? 1 : 0.5 }
+            }, mlTraining ? "Training..." : "Train Model"),
+            React.createElement("button", {
+              onClick: handleRetrainML,
+              disabled: mlTraining || !hasML,
+              style: { padding: "8px 16px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: mlTraining ? "not-allowed" : "pointer", opacity: hasML ? 1 : 0.5 }
+            }, "Continuous Retrain")
+          ),
+          hasOptimizer && React.createElement("button", {
+            onClick: handleOptimizeConfig,
+            disabled: mlTraining || mlOptimizing,
+            style: { padding: "8px 16px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: (mlTraining || mlOptimizing) ? "not-allowed" : "pointer", marginTop: 8 }
+          }, mlOptimizing ? "Optimizing..." : "Optimize Backtest Config (Bayesian)")
+        ),
+        // Retrain History
+        mlStatus && mlStatus.retrainHistory && mlStatus.retrainHistory.length > 0 && React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Retrain History"),
+          React.createElement("div", { style: { maxHeight: 150, overflowY: "auto", marginTop: 8 } },
+            mlStatus.retrainHistory.slice().reverse().slice(0, 10).map(function (h, i) {
+              return React.createElement("div", { key: i, style: { display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--border)", fontSize: 12 } },
+                React.createElement("span", null, new Date(h.timestamp).toLocaleString()),
+                React.createElement("span", { style: { fontWeight: 600, color: h.promoted ? "var(--accent, #16a34a)" : "var(--text2)" } },
+                  h.walkForwardAcc + "% WR" + (h.promoted ? " (Promoted)" : "")
+                )
+              );
+            })
+          )
+        ),
+        // ML Log
+        mlLog.length > 0 && React.createElement("div", { style: Object.assign({}, cardStyle, { maxHeight: 200, overflowY: "auto", fontFamily: "monospace", fontSize: 11 }) },
+          mlLog.map(function (entry, i) {
+            return React.createElement("div", { key: i, style: { marginBottom: 2 } },
+              React.createElement("span", { style: { color: "var(--text3)" } }, String(entry.time) + " "),
+              String(entry.msg)
+            );
+          })
+        )
+      );
+    }
+
     async function handleExport() {
       try {
-        var json = await PatternStore.exportJSON();
+        var json = await window.PatternStore.exportJSON();
         var blob = new Blob([json], { type: "application/json" });
         var url = URL.createObjectURL(blob);
         var a = document.createElement("a");
@@ -575,14 +900,14 @@ window.PatternDashboard = (function () {
           setError("Invalid file: expected { patterns: [...] } format");
           return;
         }
-        var count = await PatternStore.importJSON(text);
+        var count = await window.PatternStore.importJSON(text);
         if (window.reloadPatternCache) await window.reloadPatternCache();
-        var all = await PatternStore.getAll();
+        var all = await window.PatternStore.getAll();
         setPatterns(all);
-        var st = await PatternStore.getStats();
+        var st = await window.PatternStore.getStats();
         setStats(st);
         try {
-          var rpt = await BatchBacktest.create({}).generateReport();
+          var rpt = await window.BatchBacktest.create({}).generateReport();
           setReport(rpt);
         } catch (_) {}
         setError("Imported " + count + " patterns from " + file.name);
@@ -604,8 +929,8 @@ window.PatternDashboard = (function () {
       setRemoveConfirm(false);
       try {
         setError(null);
-        var count = (await PatternStore.getAll()).length;
-        await PatternStore.clearAll();
+        var count = (await window.PatternStore.getAll()).length;
+        await window.PatternStore.clearAll();
         if (window.reloadPatternCache) await window.reloadPatternCache();
         setPatterns([]);
         setStats(null);

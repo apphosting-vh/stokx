@@ -76,12 +76,6 @@
 
   /**
    * Apply pattern weights to the compat result format.
-   *
-   * compatResult has: finalScore, baseScore, aggTrendHealth, aggPullbackQuality,
-   *   aggProb4, aggSwingPotential, decision, ...
-   *
-   * pattern has: indicatorWeights { trendHealth: 0.32, ... },
-   *   indicatorPowers { trendHealth: { infoValue: 0.04, ... }, ... }
    */
   function applyPatternToCompatResult(compatResult, pattern) {
     if (!compatResult || !pattern || !pattern.indicatorWeights) return compatResult;
@@ -89,7 +83,6 @@
     var weights = pattern.indicatorWeights;
     var powers = pattern.indicatorPowers;
 
-    // Map compat pillar names to weight keys
     var pillars = {
       trendHealth: compatResult.aggTrendHealth != null ? compatResult.aggTrendHealth : 0,
       pullbackQuality: compatResult.aggPullbackQuality != null ? compatResult.aggPullbackQuality : 0,
@@ -97,14 +90,12 @@
       swingPotential: compatResult.aggSwingPotential != null ? compatResult.aggSwingPotential : 0
     };
 
-    // Get pillar max values from score config
     var pillarMax = { trendHealth: 35, pullbackQuality: 30, prob4: 35, swingPotential: 20 };
     if (window.TechIndicators && window.TechIndicators.getScoreConfig) {
       var sc = window.TechIndicators.getScoreConfig();
       if (sc && sc.pillarMax) pillarMax = sc.pillarMax;
     }
 
-    // Compute weighted score
     var totalWeighted = 0;
     var totalWeight = 0;
     var powerBonusTotal = 0;
@@ -117,7 +108,6 @@
       totalWeighted += weighted;
       totalWeight += w;
 
-      // Power bonus: boost when indicator is in historically predictive range
       if (powers && powers[p] && powers[p].infoValue > 0.01) {
         var iv = powers[p].infoValue;
         if (iv > 0.05 && normalizedPillar > 0.5) {
@@ -130,27 +120,20 @@
     var adjustedScore = clamp(round2(baseWeightedScore + powerBonusTotal), 0, 100);
     var delta = round2(adjustedScore - compatResult.finalScore);
 
-    // Re-classify
     var classification = compatResult.decision;
     if (window.BacktestEngine && window.BacktestEngine.classifyScore) {
       classification = window.BacktestEngine.classifyScore(adjustedScore);
     }
 
-    // Build decision object matching SCREENER_DECISION_MAP format
-    var SCREENER_DECISION_MAP = (typeof SCREENER_DECISION_MAP !== "undefined") ? SCREENER_DECISION_MAP : {};
-    // Fallback decision map
-    if (!SCREENER_DECISION_MAP.STRONG_BUY) {
-      SCREENER_DECISION_MAP = {
-        STRONG_BUY: { label: "STRONG BUY", color: "#16a34a" },
-        BUY:        { label: "BUY",        color: "#22c55e" },
-        WATCHLIST:  { label: "WATCHLIST",  color: "#f59e0b" },
-        NEUTRAL:    { label: "NEUTRAL",    color: "#6b7280" },
-        AVOID:      { label: "AVOID",      color: "#ef4444" },
-        STRONG_AVOID: { label: "STRONG AVOID", color: "#dc2626" }
-      };
-    }
+    var SCREENER_DECISION_MAP = {
+      STRONG_BUY: { label: "STRONG BUY", color: "#16a34a" },
+      BUY:        { label: "BUY",        color: "#22c55e" },
+      WATCHLIST:  { label: "WATCHLIST",  color: "#f59e0b" },
+      NEUTRAL:    { label: "NEUTRAL",    color: "#6b7280" },
+      AVOID:      { label: "AVOID",      color: "#ef4444" },
+      STRONG_AVOID: { label: "STRONG AVOID", color: "#dc2626" }
+    };
 
-    // Apply adjusted values to compat result
     compatResult._patternApplied = true;
     compatResult._patternOriginalScore = compatResult.finalScore;
     compatResult._patternDelta = delta;
@@ -182,14 +165,12 @@
 
     var cal = pattern.calibration;
 
-    // Method 1: Global logistic calibration
     if (cal.global && cal.global.calP0 != null && cal.global.calK != null) {
       var calP0 = cal.global.calP0;
       var calK = cal.global.calK;
       var z = calK * (rawProbTouch - calP0);
       var calibrated = 1 / (1 + Math.exp(-z));
 
-      // Method 2: Stratified overlay
       if (cal.stratified && driftScore != null) {
         var tercile = driftScore < 0.33 ? 0 : driftScore < 0.66 ? 1 : 2;
         if (cal.stratified[tercile]) {
@@ -207,20 +188,17 @@
       return round3(calibrated);
     }
 
-    // Method 3: Stratified only
     if (cal.stratified && driftScore != null) {
-      var tercile = driftScore < 0.33 ? 0 : driftScore < 0.66 ? 1 : 2;
-      if (cal.stratified[tercile]) {
-        var stratum = cal.stratified[tercile];
-        var adjustment = stratum.hitRate / 100;
-        return round3(clamp(rawProbTouch * (adjustment / 0.5), 0.01, 0.99));
+      var tercile2 = driftScore < 0.33 ? 0 : driftScore < 0.66 ? 1 : 2;
+      if (cal.stratified[tercile2]) {
+        var stratum2 = cal.stratified[tercile2];
+        var adjustment2 = stratum2.hitRate / 100;
+        return round3(clamp(rawProbTouch * (adjustment2 / 0.5), 0.01, 0.99));
       }
     }
 
     return rawProbTouch;
   }
-
-  /* ── Init ────────────────────────────────────────────────────────────── */
 
   /**
    * Initialize the Pattern Intelligence system.
@@ -243,15 +221,16 @@
       // 3. Patch navigation to include Pattern Lab tab
       patchNavigation();
 
-      // 4. Patch scoring pipeline to use pattern intelligence
+      // 4. Enhance scoring to use patterns when available
       patchScoring();
 
+      // 5. Expose direct-call helpers for screener paths
+      exposePatternHelpers();
+
       var cacheCount = Object.keys(_patternMemoryCache).length;
-      var cacheSymbols = Object.keys(_patternMemoryCache).slice(0, 10);
-      console.log("[PatternIntel] System ready — screener will use calibrated pattern data");
-      console.log("[PatternIntel] DIAGNOSTIC: cacheLoaded=" + _cacheLoaded + ", patternsInCache=" + cacheCount + ", sampleKeys=" + JSON.stringify(cacheSymbols) + ", applyPatternIntel=" + !!window.applyPatternIntel + ", applyPatternConfCal=" + !!window.applyPatternConfCal);
+      console.log("[PatternIntel] System ready — screener will use calibrated pattern data (" + cacheCount + " patterns cached)");
       if (cacheCount === 0) {
-        console.warn("[PatternIntel] ⚠ NO PATTERNS in cache. Run batch backtest or import patterns from JSON.");
+        console.warn("[PatternIntel] NO PATTERNS in cache. Run batch backtest or import patterns from JSON.");
       }
     } catch (e) {
       console.error("[PatternIntel] Init failed:", e);
@@ -259,45 +238,13 @@
   };
 
   /**
-   * Add "Pattern Lab" to the app's navigation.
+   * Expose direct-call helpers for screener scoring paths.
+   * These are defined OUTSIDE patchScoring() so always available.
    */
-  function patchNavigation() {
-    // Pattern Lab is now a sub-tab inside Pulse page (not a top-level nav item).
-    // No navigation patching needed.
-    console.log("[PatternIntel] Pattern Lab is nested under Pulse > Pattern Lab tab");
-  }
-
-  /**
-   * Navigate to Pattern Lab tab within Pulse page.
-   * Can be called from browser console or other modules.
-   */
-  window.openPatternLab = function () {
-    // Dispatch event to switch to Pulse page with patternlab tab
-    window.dispatchEvent(new CustomEvent("stox:navigate", { detail: { page: "watchlist", tab: "patternlab" } }));
-  };
-
-  /**
-   * THE KEY PATCH: Wire pattern intelligence into the screener's scoring.
-   *
-   * Patches the global computeCompatEntryScore function (used by refreshStock,
-   * addManualStock, and the full screener scan) to apply:
-   *   1. Pattern-weighted entry score (re-weights pillars per stock)
-   *   2. Pattern-calibrated confidence (adjusts probTouch per stock)
-   *
-   * The pattern data is read from an in-memory cache (loaded from IndexedDB
-   * at init), so this patch is fully synchronous — no async overhead per stock.
-   */
+  function exposePatternHelpers() {
     /**
-     * Direct-call helper: apply pattern intelligence to a compat result.
-     * Called explicitly from app-core.js screener paths — does NOT rely on
-     * monkey-patching computeCompatEntryScore (which can fail in Babel scope).
-     *
-     * IMPORTANT: This is defined OUTSIDE patchScoring() so it's always available
-     * even if patchScoring() fails or returns early.
-     *
-     * Usage:
-     *   var result = computeCompatEntryScore(w, d, h, idxD, idxW);
-     *   if (window.applyPatternIntel) result = window.applyPatternIntel(result, "RELIANCE");
+     * Apply pattern intelligence to a compat result.
+     * Called from app-core.js screener paths.
      */
     window.applyPatternIntel = function (compatResult, symbol) {
       if (!compatResult || !symbol || compatResult._patternApplied) return compatResult;
@@ -307,7 +254,7 @@
         console.log("[PatIntel] applyPatternIntel called: symbol=" + symbol + ", cacheLoaded=" + _cacheLoaded + ", patternFound=" + !!pattern + ", cacheKeys(count)=" + Object.keys(_patternMemoryCache).length);
         if (!pattern && _patternMemoryCache && Object.keys(_patternMemoryCache).length > 0) {
           console.log("[PatIntel] Available cache keys (sample):", Object.keys(_patternMemoryCache).slice(0, 5));
-          console.log("[PatIntel] Tried lookup: '" + symbol + "' → '" + symbol + ".NS' (fallback)");
+          console.log("[PatIntel] Tried lookup: '" + symbol + "' -> '" + symbol + ".NS' (fallback)");
         }
       }
       if (pattern) {
@@ -317,12 +264,7 @@
     };
 
     /**
-     * Direct-call helper: apply pattern calibration to a 10-day confidence result.
-     * IMPORTANT: Defined OUTSIDE patchScoring() so always available.
-     *
-     * Usage:
-     *   var conf = TI.computeTenDayForwardConfidence(h, d, idx, ctx);
-     *   if (window.applyPatternConfCal) conf = window.applyPatternConfCal(conf, "RELIANCE");
+     * Apply pattern calibration to a 10-day confidence result.
      */
     window.applyPatternConfCal = function (confResult, symbol) {
       if (!confResult || !symbol || confResult._patternCalibrated) return confResult;
@@ -348,121 +290,122 @@
     };
 
     console.log("[PatternIntel] Direct-call helpers exposed (window.applyPatternIntel, window.applyPatternConfCal)");
+  }
 
+  /**
+   * Add "Pattern Lab" to the app's navigation.
+   */
+  function patchNavigation() {
+    // Wait for the React app to render, then inject the new tab
+    var observer = new MutationObserver(function (mutations) {
+      mutations.forEach(function (mutation) {
+        mutation.addedNodes.forEach(function (node) {
+          if (node.nodeType === 1 && node.querySelector && node.querySelector('[data-stox-nav]')) {
+            injectPatternLabTab(node);
+            observer.disconnect();
+          }
+        });
+      });
+    });
+
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+
+    // Also try immediately in case the DOM is already ready
+    setTimeout(function () {
+      var nav = document.querySelector('[data-stox-nav]') || document.querySelector('nav');
+      if (nav) {
+        injectPatternLabTab(nav.closest('[class*="root"]') || document.body);
+        observer.disconnect();
+      }
+    }, 2000);
+  }
+
+  function injectPatternLabTab(container) {
+    // We add the tab via React state if we can find the state setter
+    // This is a non-invasive approach: we just expose the dashboard component
+    // and let the user navigate to it via the settings page or a URL hash
+    console.log("[PatternIntel] PatternDashboard available at window.openPatternLab()");
+  }
+
+  /**
+   * Make Pattern Lab accessible from anywhere in the app.
+   */
+  window.openPatternLab = function () {
+    if (!window.PatternDashboard) {
+      alert("Pattern Dashboard module not loaded.");
+      return;
+    }
+
+    // Create a full-screen overlay
+    var overlay = document.createElement("div");
+    overlay.id = "pattern-lab-overlay";
+    overlay.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;z-index:99999;background:var(--bg1,#fff);overflow-y:auto;";
+
+    var root = document.createElement("div");
+    root.id = "pattern-lab-root";
+    overlay.appendChild(root);
+    document.body.appendChild(overlay);
+
+    // Render the Pattern Dashboard
+    var DashboardComponent = window.PatternDashboard.Dashboard;
+    var rootElement = ReactDOM.createRoot(root);
+    rootElement.render(React.createElement(DashboardComponent, {
+      onBack: function () {
+        rootElement.unmount();
+        overlay.remove();
+      },
+      stocks: window.STOX_ALL_SYMBOLS || undefined
+    }));
+  };
+
+  /**
+   * Enhance the existing scoring functions to use pattern intelligence.
+   * When a pattern exists for a stock, the entry score and confidence
+   * are adjusted using stock-specific weights and calibration.
+   */
   function patchScoring() {
-    if (!window.TechIndicators) return;
+    if (!window.PatternScoring || !window.TechIndicators) return;
 
-    // ── Step 0: Tag candle arrays with _symbol via fetchOHLCVCached patch ──
-    // This ensures computeCompatEntryScore and computeTenDayForwardConfidence
-    // can identify which stock they're scoring, without patching individual callers.
-    if (window.OHLCVFetcher && window.OHLCVFetcher.fetchOHLCVCached) {
-      var _origFetch = window.OHLCVFetcher.fetchOHLCVCached;
-      window.OHLCVFetcher.fetchOHLCVCached = async function (ticker, timeframe, range) {
-        var result = await _origFetch.call(this, ticker, timeframe, range);
-        // Tag the data array with the clean symbol (no .NS suffix)
-        if (result && result.data && Array.isArray(result.data)) {
-          var sym = (ticker || "").replace(/\.NS$/, "").replace(/\.BO$/, "").replace(/^\^/, "");
-          // Only tag stock symbols (not index like ^NSEI)
-          if (sym && sym.length > 0 && !ticker.startsWith("^")) {
-            result.data._symbol = sym;
-          }
+    // Save original computeEntryScore
+    var originalComputeEntryScore = window.TechIndicators.computeEntryScore;
+
+    // Wrap to add pattern-aware scoring
+    window.TechIndicators.computeEntryScorePatched = async function (symbol, candles, opts) {
+      opts = opts || {};
+
+      // First compute the base score
+      var baseResult = originalComputeEntryScore(candles, opts.indexCandles);
+
+      if (!baseResult || baseResult.entry_score == null) return baseResult;
+
+      // Try pattern-enhanced scoring
+      try {
+        var enhanced = await window.PatternScoring.compute(symbol, candles, opts);
+        if (enhanced && enhanced.entryScore != null) {
+          // Merge pattern data into the result
+          baseResult.pattern_adjusted_score = enhanced.entryScore;
+          baseResult.pattern_score_delta = enhanced.scoreDelta;
+          baseResult.pattern_confidence = enhanced.confidence;
+          baseResult.pattern_probTouch = enhanced.probTouch;
+          baseResult.pattern_used = enhanced.patternUsed;
+          baseResult.classification = enhanced.classification;
         }
-        return result;
-      };
-      console.log("[PatternIntel] fetchOHLCVCached patched — candle arrays tagged with _symbol");
-    }
+      } catch (e) {
+        // Pattern scoring failed — use base result
+        console.warn("[PatternIntel] Scoring fallback:", e.message);
+      }
 
-    // ── Patch computeCompatEntryScore ──
-    if (typeof computeCompatEntryScore === "function") {
-      var _origComputeCompat = computeCompatEntryScore;
-
-      // Replace the global function with pattern-enhanced version
-      window.computeCompatEntryScore = function computeCompatEntryScorePatched(weeklyCandles, dailyCandles, hourlyCandles, indexCandles, indexWeeklyCandles, symbolHint) {
-        // Call original to get base multi-TF score
-        var result = _origComputeCompat(weeklyCandles, dailyCandles, hourlyCandles, indexCandles, indexWeeklyCandles);
-        if (!result || result.finalScore == null) return result;
-
-        // Extract symbol from tagged candle arrays
-        var symbol = symbolHint || null;
-        var pattern = null;
-
-        if (!symbol) {
-          var dc = dailyCandles || hourlyCandles || weeklyCandles;
-          if (dc && dc._symbol) symbol = dc._symbol;
-        }
-
-        if (symbol) {
-          pattern = getPatternFromCache(symbol);
-        }
-
-        // Apply pattern weights if available
-        if (pattern) {
-          applyPatternToCompatResult(result, pattern);
-        }
-
-        return result;
-      };
-
-      console.log("[PatternIntel] computeCompatEntryScore patched with pattern weights (synchronous)");
-    }
-
-    // ── Patch computeTenDayForwardConfidence wrapper in refreshStock ──
-    // The screener calls TI.computeTenDayForwardConfidence at line 8353 of app-core.js.
-    // We wrap it to apply pattern calibration to the probTouch output.
-    if (window.TechIndicators.computeTenDayForwardConfidence) {
-      var _origConf10d = window.TechIndicators.computeTenDayForwardConfidence;
-
-      window.TechIndicators.computeTenDayForwardConfidence = function computeTenDayForwardConfidencePatched(hourlyCandles, dailyCandles, indexCandles, entryScoreCtx, symbolHint) {
-        // Call original
-        var result = _origConf10d(hourlyCandles, dailyCandles, indexCandles, entryScoreCtx);
-
-        if (!result) return result;
-
-        // Apply pattern calibration if we have a pattern for this symbol
-        var symbol = symbolHint || (hourlyCandles && hourlyCandles._symbol) || (dailyCandles && dailyCandles._symbol) || null;
-        if (symbol) {
-          var pattern = getPatternFromCache(symbol);
-          if (pattern) {
-            var rawProb = result.confidenceLognormal != null ? result.confidenceLognormal / 100 : null;
-            var driftScore = result.components && result.components.driftScore != null ? result.components.driftScore : null;
-
-            if (rawProb != null) {
-              var calibrated = applyPatternCalibration(rawProb, driftScore, pattern);
-              if (calibrated != null && calibrated !== rawProb) {
-                result._patternCalibrated = true;
-                result._patternOriginalConf = result.confidence;
-                result.confidence = Math.round(calibrated * 100);
-                if (result.components && result.components.probTouch != null) {
-                  result._patternOriginalProbTouch = result.components.probTouch;
-                  result.components.probTouch = Math.round(calibrated * 100);
-                }
-                result.confidenceLognormal = Math.round(calibrated * 100);
-              }
-            }
-          }
-        }
-
-        return result;
-      };
-
-      console.log("[PatternIntel] computeTenDayForwardConfidence patched with pattern calibration");
-    }
-
-    // ── Quick check helpers ──
-    window.TechIndicators.hasPattern = function (symbol) {
-      return !!getPatternFromCache(symbol);
+      return baseResult;
     };
 
-    window.TechIndicators.getPatternCached = function (symbol) {
-      return getPatternFromCache(symbol);
+    // Quick check for pattern availability
+    window.TechIndicators.hasPattern = async function (symbol) {
+      if (!window.PatternStore) return false;
+      var pattern = await window.PatternStore.get(symbol);
+      return pattern != null;
     };
 
-    // Expose cache status for diagnostics
-    window.TechIndicators._patCacheLoaded = _cacheLoaded;
-    window.TechIndicators._patCacheCount = Object.keys(_patternMemoryCache).length;
-    window.TechIndicators._patCacheSymbols = Object.keys(_patternMemoryCache);
-
-    console.log("[PatternIntel] Scoring pipeline fully patched — cache helpers exposed");
+    console.log("[PatternIntel] Scoring patched with pattern intelligence");
   }
 
   /**
@@ -494,11 +437,6 @@
     });
 
     console.log("[PatternIntel] Batch complete:", result.summary);
-
-    // Auto-reload pattern cache so screener picks up new patterns immediately
-    await loadPatternCache();
-    console.log("[PatternIntel] Pattern cache reloaded — screener will use updated data on next refresh");
-
     return result;
   };
 
@@ -519,15 +457,11 @@
 
     var result = await runner.refreshStale(symbols, 7 * 24 * 60 * 60 * 1000);
     console.log("[PatternIntel] Refresh complete:", result);
-
-    // Reload cache
-    await loadPatternCache();
-
     return result;
   };
 
   /**
-   * Utility: Train ML model on stored features.
+   * Utility: Train ML model on stored features (legacy — single split).
    */
   window.trainMLModel = async function (config) {
     if (!window.MLTrainer) {
@@ -553,6 +487,93 @@
 
     console.log("[PatternIntel] ML training complete:", result);
     return result;
+  };
+
+  /**
+   * Utility: Train ML model with walk-forward validation (recommended).
+   * Trains, validates across time-based folds, and auto-promotes if better.
+   */
+  window.trainMLModelWalkForward = async function (config) {
+    if (!window.MLTrainer) {
+      throw new Error("MLTrainer module not loaded");
+    }
+
+    console.log("[PatternIntel] Starting walk-forward ML training...");
+
+    var result = await window.MLTrainer.trainWithWalkForward(Object.assign({}, config || {}, {
+      numFolds: (config && config.numFolds) || 5,
+      epochsPerFold: (config && config.epochsPerFold) || 30,
+      hiddenUnits: (config && config.hiddenUnits) || [32, 16],
+      learningRate: (config && config.learningRate) || 0.005,
+      onFold: function (fold, total, foldResult) {
+        if (foldResult.skipped) {
+          console.log("[ML-WF] Fold " + fold + "/" + total + " skipped: " + foldResult.reason);
+        } else {
+          console.log("[ML-WF] Fold " + fold + "/" + total + ": valAcc=" + foldResult.finalValAcc + "%, F1=" + foldResult.f1);
+        }
+      }
+    }));
+
+    console.log("[PatternIntel] Walk-forward training complete:", result.walkForwardAcc + "% avg accuracy");
+    if (result.promotion) {
+      console.log("[PatternIntel] Promotion: " + result.promotion.reason);
+    }
+    return result;
+  };
+
+  /**
+   * Utility: Continuous retrain with drift detection.
+   * Call after batch backtest runs to keep model fresh.
+   */
+  window.continuousMLRetrain = async function (config) {
+    if (!window.MLTrainer) {
+      throw new Error("MLTrainer module not loaded");
+    }
+
+    console.log("[PatternIntel] Starting continuous ML retrain...");
+    var result = await window.MLTrainer.continuousRetrain(Object.assign({}, config || {}, {
+      onProgress: function (current, total, msg) {
+        console.log("[ML-RETRAIN] " + Math.round(current / total * 100) + "% — " + msg);
+      }
+    }));
+
+    console.log("[PatternIntel] Continuous retrain result:", result.retrained ? "retrained" : "skipped");
+    if (result.drift) {
+      console.log("[PatternIntel] Drift status:", result.drift.reason);
+    }
+    return result;
+  };
+
+  /**
+   * Utility: Optimize backtest config params using Bayesian optimization.
+   */
+  window.optimizeBacktestConfig = async function (config) {
+    if (!window.MLOptimizer) {
+      throw new Error("MLOptimizer module not loaded");
+    }
+
+    console.log("[PatternIntel] Starting Bayesian config optimization...");
+    var result = await window.MLOptimizer.optimizeConfig(config);
+    console.log("[PatternIntel] Optimization complete. Best config:", JSON.stringify(result.bestConfig));
+    return result;
+  };
+
+  /**
+   * Utility: Detect current market regime.
+   */
+  window.detectMarketRegime = async function (candles, indexCandles) {
+    if (!window.MLOptimizer) return null;
+    return window.MLOptimizer.detectRegimeFromCandles(candles, indexCandles);
+  };
+
+  /**
+   * Utility: Get ML model status (versions, champion, drift, retrain history).
+   */
+  window.getMLStatus = async function () {
+    if (window.MLTrainer) {
+      return await window.MLTrainer.getModelStatus();
+    }
+    return null;
   };
 
   /**

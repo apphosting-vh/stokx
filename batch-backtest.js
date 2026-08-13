@@ -340,17 +340,7 @@ window.BatchBacktest = (function () {
             }
           });
 
-          // trades are inside btResult.stats (engine's runSingle returns stats.trades, not top-level trades)
-          var trades = (btResult.stats && btResult.stats.trades) || [];
-          var scoredBars = btResult.totalScoredBars || 0;
-
-          // Diagnostic: if scoreFn returned 0 scored bars, the score function is failing
-          if (scoredBars === 0 && trades.length === 0) {
-            summary.skippedCount++;
-            if (opts.onProgress) opts.onProgress(si + 1, totalSymbols, symbol, "no_scores");
-            continue;
-          }
-
+          var trades = btResult.trades || [];
           if (trades.length < 5) {
             summary.skippedCount++;
             if (opts.onProgress) opts.onProgress(si + 1, totalSymbols, symbol, "insufficient_trades");
@@ -469,7 +459,7 @@ window.BatchBacktest = (function () {
     /* ── Pattern Extraction ─────────────────────────────────────────────── */
 
     function extractPattern(symbol, btResult, powerResult, candles, dailyCandles, btCfg) {
-      var trades = (btResult.stats && btResult.stats.trades) || [];
+      var trades = btResult.trades || [];
       var stats = btResult.stats || {};
 
       // ── 1. Indicator Weights from component power ──
@@ -521,7 +511,6 @@ window.BatchBacktest = (function () {
           });
         }
         var calP0 = 0.38;
-        var calK = 8; // default slope (adaptive if enough data)
         for (var j = 1; j < buckets.length; j++) {
           if (buckets[j - 1].hitRate < 50 && buckets[j].hitRate >= 50) {
             var prev = buckets[j - 1], curr = buckets[j];
@@ -529,16 +518,7 @@ window.BatchBacktest = (function () {
             break;
           }
         }
-        // Adaptive calK: steeper when hit rate transition is sharp across buckets
-        if (buckets.length >= 3) {
-          var hitRates = buckets.map(function(b) { return b.hitRate; });
-          var hrRange = Math.max.apply(null, hitRates) - Math.min.apply(null, hitRates);
-          var ptRange = Math.max.apply(null, buckets.map(function(b) { return b.avgProbTouch; })) - Math.min.apply(null, buckets.map(function(b) { return b.avgProbTouch; }));
-          if (hrRange > 30 && ptRange > 0.05) {
-            calK = Math.min(50, Math.max(5, round2(hrRange / Math.max(0.01, ptRange))));
-          }
-        }
-        calibration.global = { calP0: calP0, calK: calK, buckets: buckets };
+        calibration.global = { calP0: calP0, calK: 38, buckets: buckets };
       }
 
       // Stratified by drift tercile

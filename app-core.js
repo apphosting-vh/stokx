@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "2.19.0";
+window.__STOX_APP_VERSION = "2.20.0";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -8829,7 +8829,7 @@ function StockScreener(props) {
             if (window.TechIndicators && window.TechIndicators.hasPattern) {
               _intelReady = true;
               _cacheCount = window.TechIndicators._patCacheCount || 0;
-              results.forEach(function(r){ if(window.TechIndicators.hasPattern(r.s.t.replace(/\\.NS$/,""))) _pc++; });
+              results.forEach(function(r){ if(window.TechIndicators.hasPattern(r.s.t.replace(/\.NS$/,""))) _pc++; });
             }
           } catch(e){}
           if (_pc > 0) {
@@ -8839,7 +8839,7 @@ function StockScreener(props) {
             }, "Pattern Intel (" + _pc + ")");
           } else if (_intelReady && _cacheCount > 0 && results.length > 0) {
             return React.createElement("span", {
-              title: "Pattern cache has " + _cacheCount + " patterns but none matched current screener results. Check symbol format in console: [PatIntel]",
+              title: "Pattern cache has " + _cacheCount + " patterns but none matched current screener results.",
               style: { fontSize: 9, fontWeight: 700, padding: "3px 8px", borderRadius: 4, background: "#f59e0b18", color: "#f59e0b", border: "1px solid #f59e0b33", whiteSpace: "nowrap", cursor: "pointer" }
             }, "Pattern Intel (0/" + _cacheCount + ")");
           } else if (_intelReady && _cacheCount === 0) {
@@ -10439,17 +10439,6 @@ function PulsePage({ holdings }) {
 
   const openStock = (tk) => { setPendingTicker(tk); setActiveTab("singlestock"); };
 
-  // Listen for stox:navigate events (e.g., from openPatternLab())
-  React.useEffect(function() {
-    var handler = function(e) {
-      if (e.detail && e.detail.tab === "patternlab") {
-        setActiveTab("patternlab");
-      }
-    };
-    window.addEventListener("stox:navigate", handler);
-    return function() { window.removeEventListener("stox:navigate", handler); };
-  }, []);
-
   const TABS = [
     { key: "screener", label: "Stock Screener", icon: Icons.chart },
     { key: "entryscore", label: "Entry Score", icon: Icons.trendingUp },
@@ -10457,7 +10446,6 @@ function PulsePage({ holdings }) {
     { key: "singlestock", label: "Single Stock Analysis", icon: Icons.search },
     { key: "backtest", label: "Backtesting", icon: Icons.clock },
     { key: "scoretuner", label: "Score Tuner", icon: Icons.settings },
-    { key: "patternlab", label: "Pattern Lab", icon: Icons.flask },
   ];
 
   return React.createElement("div", null,
@@ -10487,12 +10475,7 @@ function PulsePage({ holdings }) {
       activeTab === "confidencescore" && React.createElement(ConfidenceTracker, null),
       activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker }),
       React.createElement("div", { style: { display: activeTab === "backtest" ? "" : "none" } }, React.createElement(BacktestSuitePanel, null)),
-      React.createElement("div", { style: { display: activeTab === "scoretuner" ? "" : "none" } }, React.createElement(ScoreTunerPanel, null)),
-      React.createElement("div", { style: { display: activeTab === "patternlab" ? "" : "none" } },
-        window.PatternDashboard
-          ? React.createElement(window.PatternDashboard.Dashboard, { stocks: window.NIFTY_200 || undefined })
-          : React.createElement("div", { style: { padding: 40, textAlign: "center", color: "var(--text5)" } }, "Pattern Lab module loading...")
-      )
+      React.createElement("div", { style: { display: activeTab === "scoretuner" ? "" : "none" } }, React.createElement(ScoreTunerPanel, null))
     )
   );
 }
@@ -11045,6 +11028,7 @@ function App() {
       case "settings": return React.createElement(SettingsPage, { ...pageProps, themeId, setTheme, fontId, setFont });
       case "info": return React.createElement(InfoPage, null);
       case "notepad": return React.createElement(window.NotepadPage, null);
+      case "patterns": return React.createElement(window.PatternDashboard ? window.PatternDashboard.Dashboard : function(){return React.createElement("div",null,"Pattern Dashboard loading...");}, { onBack: () => setPage("dashboard"), stocks: window.STOX_ALL_SYMBOLS || undefined });
       default: return React.createElement(Dashboard, pageProps);
     }
   };
@@ -11055,6 +11039,7 @@ function App() {
     { key: "tradehistory", label: "Trades", icon: Icons.clock },
     { key: "reports", label: "Reports", icon: Icons.chart },
     { key: "watchlist", label: "Pulse", icon: Icons.eye },
+    { key: "patterns", label: "Pattern Lab", icon: Icons.flask },
     { key: "settings", label: "Settings", icon: Icons.settings },
     { key: "notepad", label: "Notes", icon: Icons.pen },
     { key: "info", label: "Info", icon: Icons.info },
@@ -11067,6 +11052,7 @@ function App() {
     tradehistory: "#f472b6",
     reports: "#a78bfa",
     watchlist: "#2dd4bf",
+    patterns: "#f97316",
     settings: "#93c5fd",
     notepad: "#f59e0b",
     info: "#bef264",

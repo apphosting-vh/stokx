@@ -108,10 +108,33 @@ window.PatternScoring = (function () {
       ? applyPatternWeights(baseResult, pattern, candles)
       : { entryScore: baseResult.entry_score, classification: baseResult.classification, breakdown: null, adjustments: null };
 
-    // 4. Compute confidence
+    // 4. ML Enhancement — augment score with trained model prediction
+    var mlResult = await applyMLEnhancement(symbol, candles, opts, baseResult, scoreResult);
+    if (mlResult && mlResult.adjustedScore != null) {
+      scoreResult.entryScore = mlResult.adjustedScore;
+      scoreResult.classification = mlResult.adjustedClassification;
+      scoreResult.mlEnhancement = mlResult;
+    }
+
+    // 5. Compute confidence
     var confidenceResult = await computeConfidence(symbol, candles, opts, pattern, baseResult);
 
-    // 5. Merge results
+    // 6. Use ML confidence if available and better than calibration
+    if (mlResult && mlResult.winProbability != null) {
+      var mlConf = mlResult.winProbability;
+      // Blend: 70% ML confidence + 30% calibrated confidence when both available
+      if (confidenceResult.confidence != null && confidenceResult.source === "pattern_calibrated") {
+        confidenceResult.confidence = round3(mlConf * 0.7 + confidenceResult.confidence * 0.3);
+        confidenceResult.source = "ml_blended";
+      } else if (mlConf != null) {
+        confidenceResult.confidence = round3(mlConf);
+        confidenceResult.source = "ml_model";
+      }
+      confidenceResult.probTouch = confidenceResult.confidence;
+      confidenceResult.calibratedProbTouch = confidenceResult.confidence;
+    }
+
+    // 7. Merge results
     return {
       entryScore: scoreResult.entryScore,
       classification: scoreResult.classification,
@@ -123,6 +146,7 @@ window.PatternScoring = (function () {
       patternUsed: pattern ? extractPatternInfo(pattern) : null,
       breakdown: scoreResult.breakdown,
       adjustments: scoreResult.adjustments,
+      mlEnhancement: scoreResult.mlEnhancement || null,
       baseScore: baseResult.entry_score,
       scoreDelta: scoreResult.entryScore != null ? round2(scoreResult.entryScore - baseResult.entry_score) : null,
       calibratedProbTouch: confidenceResult.calibratedProbTouch,
@@ -233,6 +257,143 @@ window.PatternScoring = (function () {
       breakdown: breakdown,
       adjustments: adjustments
     };
+  }
+
+  /* ── ML Enhancement ────────────────────────────────────────────────── */
+
+  /**
+   * Apply ML model prediction to augment the entry score.
+   * Computes features at the current bar, runs ML prediction, and
+   * blends with pattern-weighted score.
+   *
+   * Strategy:
+   *   - ML win probability → convert to 0-100 score
+   *   - Blend: 60% pattern-weighted + 40% ML prediction
+   *   - If ML is very confident (>=0.7 or <=0.3), weight ML more (50/50)
+   *   - If no ML model, return null (no enhancement)
+   */
+  async function applyMLEnhancement(symbol, candles, opts, baseResult, scoreResult) {
+    var ML = window.MLTrainer;
+    if (!ML) return null;
+
+    // Check if model exists (fast check, no I/O)
+    var hasModel = false;
+    try {
+      if (ML._cachedModel) { hasModel = true; }
+      else {
+        // Check meta exists without full load
+        if (window.PatternStore) {
+          var meta = await PatternStore.getMeta("ml_model_champion");
+          if (!meta) meta = await PatternStore.getMeta("ml_model");
+          hasModel = !!meta;
+        }
+      }
+    } catch (e) { return null; }
+
+    if (!hasModel) return null;
+
+    // Compute ML features at the current bar
+    var TI = window.TechIndicators;
+    if (!TI || !candles || candles.length < 50) return null;
+
+    try {
+      var n = candles.length - 1;
+      var close = candles[n].c;
+
+      var rsiArr = TI.rsi(candles, 14);
+      var macdObj = TI.macd(candles, 12, 26, 9);
+      var bbObj = TI.bollingerBands(candles, 20, 2);
+      var atrArr = TI.atr(candles, 14);
+      var emaFastArr = TI.ema(candles, 12);
+      var obvArr = TI.obv(candles);
+      var stObj = TI.supertrend(candles, 10, 3);
+      var adxObj = TI.adx(candles, 14);
+      var volSma = TI.sma(TI.volumes(candles), 20);
+
+      var features = {
+        rsi: rsiArr[n] != null ? Math.round(rsiArr[n] * 100) / 100 : 50,
+        macd_hist: macdObj && macdObj.histogram ? Math.round(macdObj.histogram[n] * 1000) / 1000 : 0,
+        bb_position: (bbObj.upper && bbObj.lower)
+          ? Math.round(((close - (bbObj.lower[n] || 0)) / Math.max(0.01, (bbObj.upper[n] || 0) - (bbObj.lower[n] || 0))) * 1000) / 1000
+          : 0.5,
+        atr_pct: atrArr[n] && close > 0 ? Math.round((atrArr[n] / close) * 100 * 1000) / 1000 : 0,
+        obv_trend: n > 0 && obvArr[n - 1] ? Math.round((obvArr[n] || 0) / obvArr[n - 1] * 1000) / 1000 : 1,
+        supertrend_dir: stObj && stObj.trend ? stObj.trend[n] : 0,
+        adx: adxObj && adxObj.adx ? Math.round((adxObj.adx[n] || 0) * 100) / 100 : 0,
+        ema_slope: emaFastArr[n] != null && emaFastArr[Math.max(0, n - 3)] != null
+          ? Math.round(((emaFastArr[n] - emaFastArr[Math.max(0, n - 3)]) / Math.max(0.01, emaFastArr[Math.max(0, n - 3)])) * 100 * 1000) / 1000
+          : 0,
+        volume_ratio: volSma && volSma[n] ? Math.round(candles[n].v / Math.max(1, volSma[n]) * 100) / 100 : 1,
+        entry_score: baseResult.entry_score || 0
+      };
+
+      // Detect regime for regime-specific prediction
+      var regime = null;
+      if (window.MLOptimizer) {
+        regime = window.MLOptimizer.detectRegimeFromCandles(candles, opts.indexCandles);
+      }
+
+      // Get ML prediction
+      var prediction;
+      if (regime && window.MLOptimizer) {
+        prediction = await window.MLOptimizer.predictWithRegime(features, regime);
+      } else {
+        prediction = await ML.predict(features);
+      }
+
+      if (!prediction || prediction.winProbability == null) return null;
+
+      // Convert ML probability (0-1) to score (0-100)
+      var mlScore = prediction.winProbability * 100;
+
+      // Blend pattern-weighted score with ML score
+      var patternScore = scoreResult.entryScore;
+      var mlWeight = 0.4; // default 40% ML
+      var patternWeight = 0.6;
+
+      // If ML is very confident, weight it more
+      if (prediction.winProbability >= 0.7 || prediction.winProbability <= 0.3) {
+        mlWeight = 0.5;
+        patternWeight = 0.5;
+      }
+
+      // If no pattern data, rely more on ML
+      if (!scoreResult.breakdown) {
+        mlWeight = 0.7;
+        patternWeight = 0.3;
+      }
+
+      var adjustedScore = clamp(round2(patternScore * patternWeight + mlScore * mlWeight), 0, 100);
+
+      // Re-classify
+      var adjustedClassification = scoreResult.classification;
+      if (window.BacktestEngine && window.BacktestEngine.classifyScore) {
+        adjustedClassification = window.BacktestEngine.classifyScore(adjustedScore);
+      }
+      // Also consider ML recommendation
+      if (prediction.recommendation === "STRONG_BUY" && adjustedScore >= 60) {
+        adjustedClassification = "STRONG_BUY";
+      } else if (prediction.recommendation === "AVOID" && adjustedScore < 40) {
+        adjustedClassification = "AVOID";
+      }
+
+      return {
+        winProbability: prediction.winProbability,
+        recommendation: prediction.recommendation,
+        mlScore: Math.round(mlScore * 10) / 10,
+        patternScore: Math.round(patternScore * 10) / 10,
+        mlWeight: mlWeight,
+        adjustedScore: adjustedScore,
+        adjustedClassification: adjustedClassification,
+        regime: regime ? regime.regime : null,
+        regimeConfidence: regime ? regime.confidence : null,
+        modelType: prediction.modelType || "champion",
+        features: features
+      };
+    } catch (e) {
+      // ML enhancement failed — silently fall back to pattern-weighted score
+      return null;
+    }
   }
 
   /* ── Pattern-Calibrated Confidence ───────────────────────────────────── */
