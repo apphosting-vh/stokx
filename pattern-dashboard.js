@@ -221,6 +221,9 @@ window.PatternDashboard = (function () {
         } else {
           await window.PatternStore.clearAll();
         }
+        if (window.PatternStore.clearLiveFeatures) {
+          await window.PatternStore.clearLiveFeatures();
+        }
         console.log("[PatternDashboard] IDB cleared, reloading cache...");
         if (window.reloadPatternCache) await window.reloadPatternCache();
         setPatterns([]);
