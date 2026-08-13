@@ -172,7 +172,8 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       scoreConfig: !!scoreConfig,
       patterns: patternData ? patternData.patterns.length : 0,
       patternFeatures: patternData && patternData.features ? patternData.features.length : 0,
-      patternMeta: patternData && patternData.meta ? patternData.meta.length : 0
+      patternMeta: patternData && patternData.meta ? patternData.meta.length : 0,
+      patternLive: patternData && patternData.liveFeatures ? patternData.liveFeatures.length : 0
     },
     data: {
       holdings: holdings,

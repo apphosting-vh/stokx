@@ -228,7 +228,8 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
       scoreConfig: !!scoreConfig,
       patterns: patterns ? patterns.patterns.length : 0,
       patternFeatures: patterns && patterns.features ? patterns.features.length : 0,
-      patternMeta: patterns && patterns.meta ? patterns.meta.length : 0
+      patternMeta: patterns && patterns.meta ? patterns.meta.length : 0,
+      patternLive: patterns && patterns.liveFeatures ? patterns.liveFeatures.length : 0
     },
     data: {
       holdings: stateData.holdings || [],

@@ -542,7 +542,14 @@ window.PatternStore = (function () {
       req.onsuccess = function (e) { resolve(e.target.result || []); };
       req.onerror = function (e) { reject(e.target.error); };
     });
-    return { patterns: patterns, features: featureRecords, meta: metaRecords };
+    var liveFeatures = await new Promise(function (resolve, reject) {
+      if (!_db) { reject(new Error("PatternStore not initialized")); return; }
+      var t = _tx(STORE_LIVE_FEATURES, "readonly");
+      var req = t.store.getAll();
+      req.onsuccess = function (e) { resolve(e.target.result || []); };
+      req.onerror = function (e) { reject(e.target.error); };
+    });
+    return { patterns: patterns, features: featureRecords, meta: metaRecords, liveFeatures: liveFeatures };
   }
 
   /**
@@ -556,6 +563,7 @@ window.PatternStore = (function () {
       await clearAll();
       await clearAllFeatures();
       await clearAllMeta();
+      await clearLiveFeatures();
     }
     if (data.patterns.length > 0) await putMany(data.patterns);
     if (data.features && data.features.length) {
@@ -566,6 +574,19 @@ window.PatternStore = (function () {
           if (!_db) { reject(new Error("PatternStore not initialized")); return; }
           var t = _tx(STORE_FEATURES, "readwrite");
           t.store.put(f);
+          t.tx.oncomplete = function () { resolve(); };
+          t.tx.onerror = function (e) { reject(e.target.error); };
+        });
+      }
+    }
+    if (data.liveFeatures && data.liveFeatures.length) {
+      for (var k = 0; k < data.liveFeatures.length; k++) {
+        var lf = data.liveFeatures[k];
+        if (!lf || lf.symbol == null) continue;
+        await new Promise(function (resolve, reject) {
+          if (!_db) { reject(new Error("PatternStore not initialized")); return; }
+          var t = _tx(STORE_LIVE_FEATURES, "readwrite");
+          t.store.put(lf);
           t.tx.oncomplete = function () { resolve(); };
           t.tx.onerror = function (e) { reject(e.target.error); };
         });
