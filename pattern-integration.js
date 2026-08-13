@@ -200,7 +200,11 @@
     compatResult._patternDelta = delta;
     compatResult.finalScore = adjustedScore;
     var decisionObj = SCREENER_DECISION_MAP[classification];
-    compatResult.decision = decisionObj ? decisionObj.label : (classification || compatResult.decision);
+    if (decisionObj) {
+      compatResult.decision = { label: decisionObj.label, color: decisionObj.color };
+    } else if (typeof compatResult.decision !== "object" || compatResult.decision === null) {
+      compatResult.decision = { label: classification || "NEUTRAL", color: "var(--text6)" };
+    }
     compatResult.decisionColor = decisionObj ? decisionObj.color : null;
     compatResult._patternClassification = classification;
     compatResult._patternWinRate = pattern.tradeStats ? pattern.tradeStats.winRate : null;
