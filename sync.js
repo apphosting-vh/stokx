@@ -87,7 +87,8 @@ var fsaVerifyPermission = async function(handle) {
 /* ── FSA Write: builds StoX envelope and writes to file ── */
 var fsaWriteFile = async function(handle, stateData) {
   try {
-    var payload = await window.__stoxBuildSyncPayload(stateData, true);
+    /* Patterns (incl. live corpus) stay in IndexedDB only — keep the FSA file lean */
+    var payload = await window.__stoxBuildSyncPayload(stateData, true, { excludePatterns: true });
     var writable = await handle.createWritable();
     await writable.write(JSON.stringify(payload, null, 2));
     await writable.close();
@@ -159,7 +160,35 @@ window.__fsaInit = async function() {
     window.__fsa.filename = h.name;
     window.__fsa.ready = perm === "granted";
     window.__fsa.writeNow = _fsaMakeWriteNow();
-    if (perm === "granted") return true;
+    if (perm === "granted") {
+      /* One-time purge: strip any old pattern/live-corpus data from the FSA
+         file so it stays lean (patterns now live in IndexedDB only). */
+      try {
+        var file = await h.getFile();
+        var text = await file.text();
+        var parsed = JSON.parse(text);
+        var pd = parsed && parsed.data ? parsed.data : null;
+        var hasPatterns = pd && pd.patterns != null &&
+          ((pd.patterns.patterns && pd.patterns.patterns.length > 0) ||
+           (pd.patterns.features && pd.patterns.features.length > 0) ||
+           (pd.patterns.meta && pd.patterns.meta.length > 0) ||
+           (pd.patterns.liveFeatures && pd.patterns.liveFeatures.length > 0));
+        if (hasPatterns) {
+          delete pd.patterns;
+          if (parsed.summary) {
+            parsed.summary.patterns = 0;
+            parsed.summary.patternFeatures = 0;
+            parsed.summary.patternMeta = 0;
+            parsed.summary.patternLive = 0;
+          }
+          var w = await h.createWritable();
+          await w.write(JSON.stringify(parsed, null, 2));
+          await w.close();
+          window.dispatchEvent(new CustomEvent("fsa:saved"));
+        }
+      } catch (e) {}
+      return true;
+    }
     window.dispatchEvent(new CustomEvent("fsa:permission-needed"));
     return false;
   } catch (e) { return false; }
@@ -170,7 +199,9 @@ window.__fsaInit = async function() {
    PART 2 — SHARED SYNC PAYLOAD BUILDER
    ────────────────────────────────────────────────────────────────────────── */
 
-window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
+window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
+  opts = opts || {};
+  var includePatterns = !opts.excludePatterns;
   var entryScores = [];
   var entrySnapshots = [];
   var screenerData = null;
@@ -199,12 +230,14 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave) {
     if (saved) scoreConfig = JSON.parse(saved);
   } catch (e) {}
   var patterns = null;
-  try {
-    if (window.PatternStore && window.PatternStore.exportAll) {
-      await window.PatternStore.init();
-      patterns = await window.PatternStore.exportAll();
-    }
-  } catch (e) {}
+  if (includePatterns) {
+    try {
+      if (window.PatternStore && window.PatternStore.exportAll) {
+        await window.PatternStore.init();
+        patterns = await window.PatternStore.exportAll();
+      }
+    } catch (e) {}
+  }
 
   return {
     app: "StoX",
