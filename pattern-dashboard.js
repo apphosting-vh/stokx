@@ -146,10 +146,23 @@ window.PatternDashboard = (function () {
       var symbols = pickSymbols(btCap);
       var count = symbols.length;
 
+      // Warn if any selected symbols already have patterns (will be overwritten)
+      if (patterns && patterns.length > 0) {
+        var existing = new Set(patterns.map(function(p) { return p.symbol; }));
+        var overlap = symbols.filter(function(s) { return existing.has(s); });
+        if (overlap.length > 0) {
+          setBtLog([{ time: new Date().toLocaleTimeString(), msg: "NOTE: " + overlap.length + " of " + count + " stocks already have patterns and will be OVERWRITTEN. Use Export first to backup." }]);
+        }
+      }
+
       setBtRunning(true);
       setError(null);
       setProgress({ current: 0, total: count, symbol: "", phase: "starting" });
-      setBtLog([{ time: new Date().toLocaleTimeString(), msg: "Starting batch backtest for " + count + " stocks (cap=" + btCap + ")..." }]);
+      setBtLog(function(prev) {
+        var newLog = prev.slice(-50);
+        newLog.push({ time: new Date().toLocaleTimeString(), msg: "Starting batch backtest for " + count + " stocks (cap=" + btCap + ")..." });
+        return newLog;
+      });
 
       try {
         var runner = BatchBacktest.create(btConfig);

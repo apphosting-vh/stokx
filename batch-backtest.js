@@ -521,6 +521,7 @@ window.BatchBacktest = (function () {
           });
         }
         var calP0 = 0.38;
+        var calK = 8; // default slope (adaptive if enough data)
         for (var j = 1; j < buckets.length; j++) {
           if (buckets[j - 1].hitRate < 50 && buckets[j].hitRate >= 50) {
             var prev = buckets[j - 1], curr = buckets[j];
@@ -528,7 +529,16 @@ window.BatchBacktest = (function () {
             break;
           }
         }
-        calibration.global = { calP0: calP0, calK: 38, buckets: buckets };
+        // Adaptive calK: steeper when hit rate transition is sharp across buckets
+        if (buckets.length >= 3) {
+          var hitRates = buckets.map(function(b) { return b.hitRate; });
+          var hrRange = Math.max.apply(null, hitRates) - Math.min.apply(null, hitRates);
+          var ptRange = Math.max.apply(null, buckets.map(function(b) { return b.avgProbTouch; })) - Math.min.apply(null, buckets.map(function(b) { return b.avgProbTouch; }));
+          if (hrRange > 30 && ptRange > 0.05) {
+            calK = Math.min(50, Math.max(5, round2(hrRange / Math.max(0.01, ptRange))));
+          }
+        }
+        calibration.global = { calP0: calP0, calK: calK, buckets: buckets };
       }
 
       // Stratified by drift tercile
