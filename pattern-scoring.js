@@ -368,19 +368,19 @@ window.PatternScoring = (function () {
 
       // Blend pattern-weighted score with ML score
       var patternScore = scoreResult.entryScore;
-      var mlWeight = 0.4; // default 40% ML
-      var patternWeight = 0.6;
+      var mlWeight = 0.25; // default 25% ML (kept modest while model is weak)
+      var patternWeight = 0.75;
 
       // If ML is very confident, weight it more
       if (prediction.winProbability >= 0.7 || prediction.winProbability <= 0.3) {
-        mlWeight = 0.5;
-        patternWeight = 0.5;
+        mlWeight = 0.35;
+        patternWeight = 0.65;
       }
 
       // If no pattern data, rely more on ML
       if (!scoreResult.breakdown) {
-        mlWeight = 0.7;
-        patternWeight = 0.3;
+        mlWeight = 0.5;
+        patternWeight = 0.5;
       }
 
       var adjustedScore = clamp(round2(patternScore * patternWeight + mlScore * mlWeight), 0, 100);

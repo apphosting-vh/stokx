@@ -173,10 +173,10 @@
         }
         if (mlPrediction && mlPrediction.winProbability != null) {
           var mlScore = mlPrediction.winProbability * 100;
-          // Blend: 60% pattern-weighted + 40% ML (more ML weight if confident)
-          var mlWeight = 0.4;
+          // Blend: 75% pattern-weighted + 25% ML (kept modest while model is weak)
+          var mlWeight = 0.25;
           if (mlPrediction.winProbability >= 0.7 || mlPrediction.winProbability <= 0.3) {
-            mlWeight = 0.5;
+            mlWeight = 0.35;
           }
           adjustedScore = clamp(round2(adjustedScore * (1 - mlWeight) + mlScore * mlWeight), 0, 100);
         }

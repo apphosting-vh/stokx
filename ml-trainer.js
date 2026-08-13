@@ -324,9 +324,7 @@ window.MLTrainer = (function () {
 
   /* ── Feature Keys ──────────────────────────────────────────────────── */
   var FEATURE_KEYS = [
-    "rsi", "macd_hist", "bb_position", "atr_pct",
-    "obv_trend", "supertrend_dir", "adx", "ema_slope",
-    "volume_ratio", "entry_score"
+    "rsi", "atr_pct", "bb_position", "volume_ratio"
   ];
 
   /* ════════════════════════════════════════════════════════════════════════
@@ -1193,6 +1191,9 @@ window.MLTrainer = (function () {
   function predict(features) {
     return _loadModel().then(function (model) {
       if (!model) return null;
+      // Reject models whose input size no longer matches FEATURE_KEYS
+      // (e.g. champions trained before a feature-set change).
+      if (!model.network || model.network.inputSize !== FEATURE_KEYS.length) return null;
       var nn = deserialize(model.network);
       var normParams = model.normalizer;
       var norm = createNormalizer();
@@ -1226,6 +1227,8 @@ window.MLTrainer = (function () {
    */
   function predictSync(features, loadedModel) {
     if (!loadedModel) return null;
+    // Reject models whose input size no longer matches FEATURE_KEYS
+    if (!loadedModel.network || loadedModel.network.inputSize !== FEATURE_KEYS.length) return null;
     var nn = deserialize(loadedModel.network);
     var normParams = loadedModel.normalizer;
     var normalized = {};
@@ -1324,10 +1327,13 @@ window.MLTrainer = (function () {
       // Try champion first
       return PatternStore.getMeta("ml_model_champion");
     }).then(function (model) {
+      // Reject models whose input size no longer matches FEATURE_KEYS
+      if (model && (!model.network || model.network.inputSize !== FEATURE_KEYS.length)) return null;
       if (model) { _cachedModel = model; return model; }
       // Fallback to legacy
       return PatternStore.getMeta("ml_model");
     }).then(function (model) {
+      if (model && (!model.network || model.network.inputSize !== FEATURE_KEYS.length)) return null;
       if (model) _cachedModel = model;
       return model;
     }).catch(function () { return null; });
