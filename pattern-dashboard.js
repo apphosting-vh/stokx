@@ -140,6 +140,8 @@ window.PatternDashboard = (function () {
     var liveLog = _liveLog[0], setLiveLog = _liveLog[1];
     var _liveSignals = useState(null);
     var liveSignals = _liveSignals[0], setLiveSignals = _liveSignals[1];
+    var _liveTracker = useState(null);
+    var liveTracker = _liveTracker[0], setLiveTracker = _liveTracker[1];
 
     // Load ML status on mount
     useEffect(function () {
@@ -165,6 +167,12 @@ window.PatternDashboard = (function () {
         if (window.LiveML && window.LiveML.getStatus) {
           var status = await window.LiveML.getStatus();
           setLiveStatus(status);
+        }
+      } catch (e) {}
+      try {
+        if (window.LiveML && window.LiveML.getTracker) {
+          var tr = await window.LiveML.getTracker();
+          setLiveTracker(tr);
         }
       } catch (e) {}
     }
@@ -916,6 +924,52 @@ window.PatternDashboard = (function () {
               })
             )
           )
+        ),
+
+        // Prediction accuracy tracker
+        liveTracker && liveTracker.days.length > 0 && React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Prediction Accuracy — Did Yesterday's Picks Print?"),
+          (function () {
+            var days = liveTracker.days.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+            var resolved = days.filter(function (d) { return d.resolvedCount > 0; });
+            var allPicks = 0, allHits = 0;
+            resolved.forEach(function (d) { allPicks += d.picks.length; allHits += d.hits; });
+            var allRate = allPicks > 0 ? (allHits / allPicks) * 100 : null;
+            var base = liveStatus && liveStatus.corpus && liveStatus.corpus.baseRate != null ? liveStatus.corpus.baseRate : null;
+            var shown = days.slice(0, 7);
+            return React.createElement("div", null,
+              React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+                allRate != null
+                  ? "All-time: " + allHits + "/" + allPicks + " (" + allRate.toFixed(1) + "%)" + (base != null ? " vs base up-rate " + base + "% — " + (allRate >= base ? "beating the base rate" : "below the base rate") : "") + ". Pending " + (days.length > 0 ? days.reduce(function (s, d) { return s + (d.picks.length - d.resolvedCount); }, 0) : 0) + " picks — collect in the evening to resolve."
+                  : "Score Today's Signals, then collect in the evening to see how the picks printed."
+              ),
+              React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12, marginTop: 8 } },
+                React.createElement("thead", null,
+                  React.createElement("tr", null,
+                    React.createElement("th", { style: { textAlign: "left", padding: "4px", color: "var(--text3)" } }, "Date"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "4px", color: "var(--text3)" } }, "Picks"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "4px", color: "var(--text3)" } }, "Hits"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "4px", color: "var(--text3)" } }, "Misses"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "4px", color: "var(--text3)" } }, "Hit Rate")
+                  )
+                ),
+                React.createElement("tbody", null,
+                  shown.map(function (d) {
+                    var total = d.picks.length;
+                    var rate = d.resolvedCount > 0 ? (d.hits / d.resolvedCount) * 100 : null;
+                    var rateColor = rate == null ? "var(--text3)" : rate >= (base != null ? base : 50) ? "#16a34a" : "#ef4444";
+                    return React.createElement("tr", { key: d.date },
+                      React.createElement("td", { style: { padding: "4px", fontWeight: 600 } }, d.date),
+                      React.createElement("td", { style: { padding: "4px", textAlign: "right" } }, total),
+                      React.createElement("td", { style: { padding: "4px", textAlign: "right", color: "#16a34a", fontWeight: 700 } }, d.hits),
+                      React.createElement("td", { style: { padding: "4px", textAlign: "right", color: "#ef4444", fontWeight: 700 } }, d.misses),
+                      React.createElement("td", { style: { padding: "4px", textAlign: "right", color: rateColor, fontWeight: 700 } }, rate != null ? rate.toFixed(0) + "%" : "—")
+                    );
+                  })
+                )
+              )
+            );
+          })()
         ),
 
         // Log

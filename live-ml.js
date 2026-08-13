@@ -116,10 +116,90 @@ window.LiveML = (function () {
     };
   }
 
+  /* ── Prediction accuracy tracker ──────────────────────────────────────── */
+
+  var KEY_TRACKER = "ml_live_pred_tracker";
+  var TRACKER_MAX_DAYS = 120;
+
+  async function getTracker() {
+    var t = null;
+    try { t = await window.PatternStore.getMeta(KEY_TRACKER); } catch (e) {}
+    return t || { days: [] };
+  }
+
+  async function saveTracker(t) {
+    t.days = t.days.slice(-TRACKER_MAX_DAYS);
+    try { await window.PatternStore.setMeta(KEY_TRACKER, t); } catch (e) {}
+  }
+
+  /* Record a day-entry per feature date. Replaces a same-date entry only if
+     it hasn't been resolved yet (keeps resolved accuracy data intact). */
+  async function recordTodayPicks(signals) {
+    if (!signals || !signals.length) return null;
+    var t = await getTracker();
+    var byDate = {};
+    signals.forEach(function (s) {
+      var d = s.date || "";
+      if (!d) return;
+      if (!byDate[d]) byDate[d] = [];
+      byDate[d].push({ symbol: s.symbol, winProbability: s.winProbability, recommendation: s.recommendation || "" });
+    });
+    var dates = Object.keys(byDate);
+    for (var i = 0; i < dates.length; i++) {
+      var d = dates[i];
+      var existing = null, existingIdx = -1;
+      for (var j = 0; j < t.days.length; j++) {
+        if (t.days[j].date === d) { existing = t.days[j]; existingIdx = j; break; }
+      }
+      if (existing && existing.resolvedCount > 0) continue;
+      var entry = {
+        date: d,
+        picks: byDate[d],
+        hits: existing ? existing.hits : 0,
+        misses: existing ? existing.misses : 0,
+        resolvedCount: existing ? existing.resolvedCount : 0
+      };
+      if (existingIdx >= 0) t.days.splice(existingIdx, 1);
+      t.days.push(entry);
+    }
+    t.days.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    await saveTracker(t);
+    return t;
+  }
+
+  /* Mark hit/miss for one symbol using its candles: a pick on bar D is a hit
+     when the next bar's close is higher (same convention as the labels). */
+  function resolveSymbolInTracker(tracker, symbol, candles) {
+    if (!tracker || !candles || !candles.length) return;
+    var dateIdx = {};
+    for (var i = 0; i < candles.length; i++) {
+      var d = String(candles[i].t).slice(0, 10);
+      if (!(d in dateIdx)) dateIdx[d] = i;
+    }
+    for (var j = 0; j < tracker.days.length; j++) {
+      var day = tracker.days[j];
+      if (day.resolvedCount >= day.picks.length) continue;
+      for (var k = 0; k < day.picks.length; k++) {
+        var pick = day.picks[k];
+        if (pick.resolved || pick.symbol !== symbol) continue;
+        var idx = dateIdx[day.date];
+        if (idx == null || idx >= candles.length - 1) continue;
+        var c1 = candles[idx].c, c2 = candles[idx + 1].c;
+        if (!c1 || !c2) continue;
+        pick.resolved = true;
+        pick.hit = c2 > c1;
+        pick.return_1d = round3(((c2 / c1) - 1) * 100);
+        if (pick.hit) day.hits++; else day.misses++;
+        day.resolvedCount++;
+      }
+    }
+  }
+
   /**
    * Collect features per symbol: features at bar t, label = next-bar
    * close-to-close return. Only appends bars newer than the last collected
    * date per symbol, keeping the rolling window to maxDays bars per symbol.
+   * Also resolves any pending prediction-tracker picks from loaded candles.
    */
   async function collect(opts) {
     opts = opts || {};
@@ -142,11 +222,23 @@ window.LiveML = (function () {
     var processed = 0, skipped = 0, newSamples = 0, liveFetches = 0, offlineHits = 0;
     var fallbackNoted = false;
 
+    var tracker = await getTracker();
+    var pendingSymbols = {};
+    tracker.days.forEach(function (day) {
+      if (day.resolvedCount >= day.picks.length) return;
+      day.picks.forEach(function (p) { if (!p.resolved) pendingSymbols[p.symbol] = true; });
+    });
+    var trackerNeedsSave = false;
+
     for (var i = 0; i < total; i++) {
       var symbol = universe[i];
       try {
         var candles = await loadDailyCandles(symbol, offlineMap);
         if (!candles || candles.length < WARMUP + 3) { skipped++; continue; }
+        if (pendingSymbols[symbol]) {
+          resolveSymbolInTracker(tracker, symbol, candles);
+          trackerNeedsSave = true;
+        }
         var fromOffline = !!offlineLookup(offlineMap, symbol);
         if (fromOffline) offlineHits++;
         if (!fromOffline) {
@@ -189,6 +281,7 @@ window.LiveML = (function () {
     }
 
     try { await window.PatternStore.setMeta(KEY_LAST_DATES, lastDates); } catch (e) {}
+    if (trackerNeedsSave) await saveTracker(tracker);
 
     var summary = { symbolsScanned: total, symbolsProcessed: processed, skipped: skipped, newSamples: newSamples, liveFetches: liveFetches, offlineHits: offlineHits, collectedAt: Date.now() };
     try {
@@ -443,7 +536,11 @@ window.LiveML = (function () {
       if ((b.chgPct || 0) !== (a.chgPct || 0)) return (b.chgPct || 0) - (a.chgPct || 0);
       return a.symbol < b.symbol ? -1 : 1;
     });
-    return out.slice(0, count);
+    out = out.slice(0, count);
+    if (opts.track !== false) {
+      try { await recordTodayPicks(out); } catch (e) {}
+    }
+    return out;
   }
 
   async function getStatus() {
@@ -471,6 +568,8 @@ window.LiveML = (function () {
     predictToday: predictToday,
     getTodaySignals: getTodaySignals,
     computeConditionalSigns: computeConditionalSigns,
+    getTracker: getTracker,
+    recordTodayPicks: recordTodayPicks,
     BUCKETS: BUCKETS
   };
 })();
