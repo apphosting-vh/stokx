@@ -119,6 +119,10 @@ window.PatternDashboard = (function () {
       loadMLStatus();
     }, []);
 
+    // Remove confirm state (must be at top-level with other hooks)
+    var _removeConfirm = useState(false);
+    var removeConfirm = _removeConfirm[0], setRemoveConfirm = _removeConfirm[1];
+
     async function loadMLStatus() {
       try {
         if (window.MLTrainer && window.MLTrainer.getModelStatus) {
@@ -152,6 +156,100 @@ window.PatternDashboard = (function () {
       } catch (e) {
         console.error("Failed to load patterns:", e);
       }
+    }
+
+    /* ── Remove Patterns Handler (defined before return for Babel hoisting) ── */
+    async function handleRemovePatterns() {
+      if (!removeConfirm) {
+        setRemoveConfirm(true);
+        setTimeout(function () { setRemoveConfirm(false); }, 5000);
+        return;
+      }
+      setRemoveConfirm(false);
+      try {
+        setError(null);
+        await window.PatternStore.init();
+        var count = (await window.PatternStore.getAll()).length;
+        console.log("[PatternDashboard] Removing " + count + " patterns...");
+        if (window.PatternStore.clearEverything) {
+          await window.PatternStore.clearEverything();
+        } else {
+          await window.PatternStore.clearAll();
+        }
+        console.log("[PatternDashboard] IDB cleared, reloading cache...");
+        if (window.reloadPatternCache) await window.reloadPatternCache();
+        setPatterns([]);
+        setStats(null);
+        setReport(null);
+        setError("Cleared " + count + " patterns — ready for fresh backtest");
+        setTimeout(function () { setError(null); }, 4000);
+      } catch (err) {
+        console.error("[PatternDashboard] Remove failed:", err);
+        setError("Clear failed: " + err.message);
+      }
+    }
+
+    /* ── Export/Import Handlers (defined before return for Babel hoisting) ── */
+    async function handleExport() {
+      try {
+        var json = await window.PatternStore.exportJSON();
+        var blob = new Blob([json], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "stox-patterns-" + new Date().toISOString().slice(0, 10) + ".json";
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        setError("Export failed: " + e.message);
+      }
+    }
+
+    function handleImportClick() {
+      var input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json,application/json";
+      input.style.display = "none";
+      input.addEventListener("change", function (e) {
+        handleImportFile(e);
+        input.remove();
+      });
+      document.body.appendChild(input);
+      input.click();
+    }
+
+    async function handleImportFile(e) {
+      var file = e.target && e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        setError(null);
+        var text = await file.text();
+        var parsed = JSON.parse(text);
+        if (!parsed.patterns || !Array.isArray(parsed.patterns)) {
+          setError("Invalid file: expected { patterns: [...] } format");
+          return;
+        }
+        var count = await window.PatternStore.importJSON(text);
+        if (window.reloadPatternCache) await window.reloadPatternCache();
+        var all = await window.PatternStore.getAll();
+        setPatterns(all);
+        var st = await window.PatternStore.getStats();
+        setStats(st);
+        try {
+          var rpt = await window.BatchBacktest.create({}).generateReport();
+          setReport(rpt);
+        } catch (_) {}
+        setError("Imported " + count + " patterns from " + file.name);
+        setTimeout(function () { setError(null); }, 4000);
+      } catch (err) {
+        setError("Import failed: " + err.message);
+      }
+    }
+
+    function getTopKey(obj) {
+      var max = 0, key = "N/A";
+      Object.keys(obj).forEach(function (k) { if (obj[k] > max) { max = obj[k]; key = k; } });
+      return key;
     }
 
     /* ── Run Batch Backtest ────────────────────────────────────────────── */
@@ -859,93 +957,6 @@ window.PatternDashboard = (function () {
           })
         )
       );
-    }
-
-    async function handleExport() {
-      try {
-        var json = await window.PatternStore.exportJSON();
-        var blob = new Blob([json], { type: "application/json" });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement("a");
-        a.href = url;
-        a.download = "stox-patterns-" + new Date().toISOString().slice(0, 10) + ".json";
-        a.click();
-        URL.revokeObjectURL(url);
-      } catch (e) {
-        setError("Export failed: " + e.message);
-      }
-    }
-
-    function handleImportClick() {
-      var input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".json,application/json";
-      input.style.display = "none";
-      input.addEventListener("change", function (e) {
-        handleImportFile(e);
-        input.remove();
-      });
-      document.body.appendChild(input);
-      input.click();
-    }
-
-    async function handleImportFile(e) {
-      var file = e.target && e.target.files && e.target.files[0];
-      if (!file) return;
-      try {
-        setError(null);
-        var text = await file.text();
-        var parsed = JSON.parse(text);
-        if (!parsed.patterns || !Array.isArray(parsed.patterns)) {
-          setError("Invalid file: expected { patterns: [...] } format");
-          return;
-        }
-        var count = await window.PatternStore.importJSON(text);
-        if (window.reloadPatternCache) await window.reloadPatternCache();
-        var all = await window.PatternStore.getAll();
-        setPatterns(all);
-        var st = await window.PatternStore.getStats();
-        setStats(st);
-        try {
-          var rpt = await window.BatchBacktest.create({}).generateReport();
-          setReport(rpt);
-        } catch (_) {}
-        setError("Imported " + count + " patterns from " + file.name);
-        setTimeout(function () { setError(null); }, 4000);
-      } catch (err) {
-        setError("Import failed: " + err.message);
-      }
-    }
-
-    var _removeConfirm = useState(false);
-    var removeConfirm = _removeConfirm[0], setRemoveConfirm = _removeConfirm[1];
-
-    async function handleRemovePatterns() {
-      if (!removeConfirm) {
-        setRemoveConfirm(true);
-        setTimeout(function () { setRemoveConfirm(false); }, 5000);
-        return;
-      }
-      setRemoveConfirm(false);
-      try {
-        setError(null);
-        var count = (await window.PatternStore.getAll()).length;
-        await window.PatternStore.clearAll();
-        if (window.reloadPatternCache) await window.reloadPatternCache();
-        setPatterns([]);
-        setStats(null);
-        setReport(null);
-        setError("Cleared " + count + " patterns — ready for fresh backtest");
-        setTimeout(function () { setError(null); }, 4000);
-      } catch (err) {
-        setError("Clear failed: " + err.message);
-      }
-    }
-
-    function getTopKey(obj) {
-      var max = 0, key = "N/A";
-      Object.keys(obj).forEach(function (k) { if (obj[k] > max) { max = obj[k]; key = k; } });
-      return key;
     }
   }
 

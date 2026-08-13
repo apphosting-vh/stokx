@@ -161,6 +161,35 @@ window.PatternStore = (function () {
     });
   }
 
+  function clearAllFeatures() {
+    return new Promise(function (resolve, reject) {
+      if (!_db) { reject(new Error("PatternStore not initialized")); return; }
+      var t = _tx(STORE_FEATURES, "readwrite");
+      t.store.clear();
+      t.tx.oncomplete = function () { resolve(); };
+      t.tx.onerror = function (e) { reject(e.target.error); };
+    });
+  }
+
+  function clearAllMeta() {
+    return new Promise(function (resolve, reject) {
+      if (!_db) { reject(new Error("PatternStore not initialized")); return; }
+      var t = _tx(STORE_META, "readwrite");
+      t.store.clear();
+      t.tx.oncomplete = function () { resolve(); };
+      t.tx.onerror = function (e) { reject(e.target.error); };
+    });
+  }
+
+  /**
+   * Clear everything: patterns, features, and metadata.
+   */
+  async function clearEverything() {
+    await clearAll();
+    await clearAllFeatures();
+    await clearAllMeta();
+  }
+
   /* ── Raw Features Storage (for ML training) ────────────────────────────── */
 
   /**
@@ -462,6 +491,9 @@ window.PatternStore = (function () {
     getAllSymbols: getAllSymbols,
     delete: deletePattern,
     clearAll: clearAll,
+    clearAllFeatures: clearAllFeatures,
+    clearAllMeta: clearAllMeta,
+    clearEverything: clearEverything,
     putMany: putMany,
     putFeatures: putFeatures,
     getFeatures: getFeatures,
