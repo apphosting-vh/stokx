@@ -70,7 +70,7 @@ window.PatternDashboard = (function () {
   /* ── Main Dashboard Component ─────────────────────────────────────────── */
 
   function Dashboard(props) {
-    var onBack = props.onBack || function () {};
+    var onBack = props.onBack || null;
     var stocksList = props.stocks || getStockUniverse().map(function (s) { return s.t; });
 
     var _s = useState("overview"); // tab: overview | run | browse | insights | ml
@@ -318,6 +318,12 @@ window.PatternDashboard = (function () {
         });
 
         await loadExistingData();
+        // Reload screener's in-memory pattern cache so new patterns take effect immediately
+        if (window.reloadPatternCache) await window.reloadPatternCache();
+        // Reload ML model if one was trained
+        if (window.initPatternIntelligence && window.PatternStore) {
+          try { await window.PatternStore.init(); } catch (_) {}
+        }
         setTab("browse");
       } catch (e) {
         setBtLog(function (prev) {
@@ -351,7 +357,7 @@ window.PatternDashboard = (function () {
     return React.createElement("div", { style: containerStyle },
       // Header
       React.createElement("div", { style: headerStyle },
-        React.createElement("button", { onClick: onBack, style: { background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 18 } }, "\u2190"),
+        onBack ? React.createElement("button", { onClick: onBack, style: { background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 18 } }, "\u2190") : null,
         React.createElement("span", { style: titleStyle }, "Pattern Intelligence Lab")
       ),
 

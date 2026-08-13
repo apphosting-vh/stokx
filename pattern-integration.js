@@ -17,6 +17,7 @@
   /* ── In-memory pattern cache for synchronous screener access ─────────── */
   var _patternMemoryCache = {};   // { "RELIANCE": patternObj, ... }
   var _cacheLoaded = false;
+  var _cachedMLModel = null;     // Pre-loaded ML model for synchronous prediction
 
   /**
    * Load all patterns from IndexedDB into memory so the screener can
@@ -68,6 +69,45 @@
     console.log("[PatternIntel] Cache reloaded: " + Object.keys(_patternMemoryCache).length + " patterns");
   };
 
+  /**
+   * Pre-load ML champion model into memory for synchronous screener prediction.
+   */
+  async function preloadMLModel() {
+    _cachedMLModel = null;
+    if (!window.MLTrainer || !window.PatternStore) return;
+    try {
+      var champ = await window.PatternStore.getMeta("ml_model_champion");
+      if (champ && champ.network && champ.normalizer) {
+        _cachedMLModel = champ;
+        console.log("[PatternIntel] ML champion model pre-loaded for synchronous screener prediction");
+      }
+    } catch (e) {
+      console.warn("[PatternIntel] Failed to pre-load ML model:", e.message);
+    }
+  }
+
+  /**
+   * Compute ML features from a compatResult for synchronous prediction.
+   * Uses the same feature set as pattern-scoring.js applyMLEnhancement.
+   */
+  function computeMLFeaturesFromCompat(compatResult) {
+    if (!compatResult) return null;
+    // Map compatResult fields to ML feature keys
+    var features = {
+      rsi: compatResult.aggRSI != null ? compatResult.aggRSI : 50,
+      macd_hist: 0,     // Not available in compatResult — default neutral
+      bb_position: 0.5,  // Not available — default middle
+      atr_pct: compatResult.aggATRPct != null ? compatResult.aggATRPct : 0,
+      obv_trend: 1,     // Not available — default neutral
+      supertrend_dir: 0, // Not available — default neutral
+      adx: compatResult.aggADX != null ? compatResult.aggADX : 20,
+      ema_slope: 0,      // Not available — default neutral
+      volume_ratio: 1,    // Not available — default neutral
+      entry_score: compatResult.finalScore || 0
+    };
+    return features;
+  }
+
   /* ── Synchronous pattern weight application ─────────────────────────── */
 
   function round2(v) { return v != null ? Math.round(v * 100) / 100 : null; }
@@ -118,6 +158,27 @@
 
     var baseWeightedScore = totalWeight > 0 ? (totalWeighted / totalWeight) * 100 : compatResult.finalScore;
     var adjustedScore = clamp(round2(baseWeightedScore + powerBonusTotal), 0, 100);
+
+    // ── ML Enhancement (synchronous, using pre-loaded model) ──
+    var mlPrediction = null;
+    if (_cachedMLModel && window.MLTrainer && window.MLTrainer.predictSync) {
+      try {
+        var mlFeatures = computeMLFeaturesFromCompat(compatResult);
+        mlPrediction = window.MLTrainer.predictSync(mlFeatures, _cachedMLModel);
+        if (mlPrediction && mlPrediction.winProbability != null) {
+          var mlScore = mlPrediction.winProbability * 100;
+          // Blend: 60% pattern-weighted + 40% ML (more ML weight if confident)
+          var mlWeight = 0.4;
+          if (mlPrediction.winProbability >= 0.7 || mlPrediction.winProbability <= 0.3) {
+            mlWeight = 0.5;
+          }
+          adjustedScore = clamp(round2(adjustedScore * (1 - mlWeight) + mlScore * mlWeight), 0, 100);
+        }
+      } catch (mlErr) {
+        // ML prediction failed silently — use pattern-weighted score
+      }
+    }
+
     var delta = round2(adjustedScore - compatResult.finalScore);
 
     var classification = compatResult.decision;
@@ -144,6 +205,12 @@
     compatResult._patternTrades = pattern.tradeStats ? pattern.tradeStats.totalTrades : null;
     compatResult._patternTopWeight = getTopWeight(pattern.indicatorWeights);
     compatResult._patternHasCalibration = !!(pattern.calibration && pattern.calibration.global);
+    // ML prediction metadata
+    if (mlPrediction) {
+      compatResult._mlEnhanced = true;
+      compatResult._mlWinProb = mlPrediction.winProbability;
+      compatResult._mlRecommendation = mlPrediction.recommendation;
+    }
 
     return compatResult;
   }
@@ -217,6 +284,9 @@
 
       // 2. Pre-load all patterns into memory (for synchronous screener access)
       await loadPatternCache();
+
+      // 2b. Pre-load ML model for synchronous prediction in screener
+      await preloadMLModel();
 
       // 3. Patch navigation to include Pattern Lab tab
       patchNavigation();
@@ -331,37 +401,18 @@
    * Make Pattern Lab accessible from anywhere in the app.
    */
   window.openPatternLab = function () {
-    if (!window.PatternDashboard) {
-      alert("Pattern Dashboard module not loaded.");
-      return;
-    }
-
-    // Create a full-screen overlay
-    var overlay = document.createElement("div");
-    overlay.id = "pattern-lab-overlay";
-    overlay.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;z-index:99999;background:var(--bg1,#fff);overflow-y:auto;";
-
-    var root = document.createElement("div");
-    root.id = "pattern-lab-root";
-    overlay.appendChild(root);
-    document.body.appendChild(overlay);
-
-    // Render the Pattern Dashboard
-    var DashboardComponent = window.PatternDashboard.Dashboard;
-    var rootElement = ReactDOM.createRoot(root);
-    rootElement.render(React.createElement(DashboardComponent, {
-      onBack: function () {
-        rootElement.unmount();
-        overlay.remove();
-      },
-      stocks: window.STOX_ALL_SYMBOLS || undefined
-    }));
+    // Dispatch event to switch to Pulse page with patternlab tab
+    window.dispatchEvent(new CustomEvent("stox:navigate", { detail: { page: "watchlist", tab: "patternlab" } }));
   };
 
   /**
    * Enhance the existing scoring functions to use pattern intelligence.
    * When a pattern exists for a stock, the entry score and confidence
    * are adjusted using stock-specific weights and calibration.
+   *
+   * NOTE: computeEntryScorePatched is DEPRECATED — the live screener uses
+   * window.applyPatternIntel / window.applyPatternConfCal instead (exposed
+   * via exposePatternHelpers). Kept here for backward compatibility only.
    */
   function patchScoring() {
     if (!window.PatternScoring || !window.TechIndicators) return;
@@ -418,7 +469,7 @@
       throw new Error("BatchBacktest module not loaded");
     }
 
-    var stocks = symbols || window.STOX_ALL_SYMBOLS || getDefaultStocks();
+    var stocks = symbols || (window.NIFTY_200 && window.NIFTY_200.map ? window.NIFTY_200.map(function(s) { return s.t; }) : null) || getDefaultStocks();
     var runner = window.BatchBacktest.create({
       targetProfitPct: 4,
       holdingPeriodDays: 14,
@@ -437,6 +488,8 @@
     });
 
     console.log("[PatternIntel] Batch complete:", result.summary);
+    // Reload screener's in-memory pattern cache with new patterns
+    if (window.reloadPatternCache) await window.reloadPatternCache();
     return result;
   };
 
@@ -457,6 +510,8 @@
 
     var result = await runner.refreshStale(symbols, 7 * 24 * 60 * 60 * 1000);
     console.log("[PatternIntel] Refresh complete:", result);
+    // Reload screener's in-memory pattern cache with refreshed patterns
+    if (window.reloadPatternCache) await window.reloadPatternCache();
     return result;
   };
 

@@ -96,8 +96,16 @@ window.PatternScoring = (function () {
       return { entryScore: null, error: "computeEntryScore failed: " + e.message };
     }
 
-    if (!baseResult || baseResult.entry_score == null) {
+    if (!baseResult || (baseResult.entry_score == null && baseResult.entryScore == null)) {
       return { entryScore: null, error: "No entry score computed" };
+    }
+
+    // Normalize field names (TI.computeEntryScore returns camelCase)
+    if (baseResult.entryScore == null && baseResult.entry_score != null) {
+      baseResult.entryScore = baseResult.entry_score;
+    }
+    if (baseResult.classification == null && baseResult.entryScore != null) {
+      // classification may not exist — derive from score
     }
 
     // 2. Load stock pattern
@@ -106,7 +114,7 @@ window.PatternScoring = (function () {
     // 3. Compute pattern-weighted score
     var scoreResult = pattern
       ? applyPatternWeights(baseResult, pattern, candles)
-      : { entryScore: baseResult.entry_score, classification: baseResult.classification, breakdown: null, adjustments: null };
+      : { entryScore: baseResult.entryScore || baseResult.entry_score, classification: baseResult.classification, breakdown: null, adjustments: null };
 
     // 4. ML Enhancement — augment score with trained model prediction
     var mlResult = await applyMLEnhancement(symbol, candles, opts, baseResult, scoreResult);
@@ -147,8 +155,8 @@ window.PatternScoring = (function () {
       breakdown: scoreResult.breakdown,
       adjustments: scoreResult.adjustments,
       mlEnhancement: scoreResult.mlEnhancement || null,
-      baseScore: baseResult.entry_score,
-      scoreDelta: scoreResult.entryScore != null ? round2(scoreResult.entryScore - baseResult.entry_score) : null,
+      baseScore: baseResult.entryScore || baseResult.entry_score,
+      scoreDelta: scoreResult.entryScore != null ? round2(scoreResult.entryScore - (baseResult.entryScore || baseResult.entry_score)) : null,
       calibratedProbTouch: confidenceResult.calibratedProbTouch,
       confidenceSource: confidenceResult.source
     };
@@ -172,15 +180,15 @@ window.PatternScoring = (function () {
     var powers = pattern.indicatorPowers;
 
     if (!weights) {
-      return { entryScore: baseResult.entry_score, classification: baseResult.classification };
+      return { entryScore: baseResult.entryScore || baseResult.entry_score, classification: baseResult.classification };
     }
 
-    // Extract pillar scores from base result
+    // Extract pillar scores from base result (camelCase — matches TI.computeEntryScore output)
     var pillars = {
-      trendHealth: baseResult.trend_health != null ? baseResult.trend_health : 0,
-      pullbackQuality: baseResult.pullback_quality != null ? baseResult.pullback_quality : 0,
+      trendHealth: baseResult.trendHealth != null ? baseResult.trendHealth : (baseResult.trend_health != null ? baseResult.trend_health : 0),
+      pullbackQuality: baseResult.pullbackQuality != null ? baseResult.pullbackQuality : (baseResult.pullback_quality != null ? baseResult.pullback_quality : 0),
       prob4: baseResult.prob4 != null ? baseResult.prob4 : 0,
-      swingPotential: baseResult.swing_potential != null ? baseResult.swing_potential : 0
+      swingPotential: baseResult.swingPotential != null ? baseResult.swingPotential : (baseResult.swing_potential != null ? baseResult.swing_potential : 0)
     };
 
     // Get pillar max values from score config for normalization
@@ -225,7 +233,7 @@ window.PatternScoring = (function () {
     });
 
     // Normalize back to 0-100 scale
-    var baseWeightedScore = totalWeight > 0 ? (totalWeighted / totalWeight) * 100 : baseResult.entry_score;
+    var baseWeightedScore = totalWeight > 0 ? (totalWeighted / totalWeight) * 100 : (baseResult.entryScore || baseResult.entry_score);
 
     // Apply power bonus
     var powerBonusTotal = 0;
@@ -241,7 +249,7 @@ window.PatternScoring = (function () {
     var adjustments = {
       method: "pattern_weighted",
       powerBonusApplied: round2(powerBonusTotal),
-      deltaFromBase: round2(adjustedScore - baseResult.entry_score),
+      deltaFromBase: round2(adjustedScore - (baseResult.entryScore || baseResult.entry_score)),
       weightsUsed: Object.assign({}, weights)
     };
 
@@ -324,7 +332,7 @@ window.PatternScoring = (function () {
           ? Math.round(((emaFastArr[n] - emaFastArr[Math.max(0, n - 3)]) / Math.max(0.01, emaFastArr[Math.max(0, n - 3)])) * 100 * 1000) / 1000
           : 0,
         volume_ratio: volSma && volSma[n] ? Math.round(candles[n].v / Math.max(1, volSma[n]) * 100) / 100 : 1,
-        entry_score: baseResult.entry_score || 0
+        entry_score: baseResult.entryScore || baseResult.entry_score || 0
       };
 
       // Detect regime for regime-specific prediction
@@ -430,11 +438,11 @@ window.PatternScoring = (function () {
       if (!confResult && hourlyCandles && dailyCandles) {
         try {
           var entryScoreCtx = baseResult ? {
-            trendHealth: baseResult.trend_health,
-            pullbackQuality: baseResult.pullback_quality,
-            prob4: baseResult.prob4,
-            swingPotential: baseResult.swing_potential,
-            entryScore: baseResult.entry_score
+            trendHealth: baseResult.trendHealth != null ? baseResult.trendHealth : baseResult.trend_health,
+            pullbackQuality: baseResult.pullbackQuality != null ? baseResult.pullbackQuality : baseResult.pullback_quality,
+            prob4: baseResult.prob4 != null ? baseResult.prob4 : baseResult.prob4,
+            swingPotential: baseResult.swingPotential != null ? baseResult.swingPotential : baseResult.swing_potential,
+            entryScore: baseResult.entry_score != null ? baseResult.entry_score : baseResult.entryScore
           } : null;
 
           confResult = TI.computeHorizonConfidence(hourlyCandles, dailyCandles, {

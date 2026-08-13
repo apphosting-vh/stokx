@@ -468,6 +468,7 @@ window.BatchBacktest = (function () {
 
       if (powerResult && powerResult.components) {
         var totalIV = 0;
+        var erroredComponents = 0;
         var comps = powerResult.components;
         ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (c) {
           if (comps[c] && !comps[c].error) {
@@ -479,12 +480,22 @@ window.BatchBacktest = (function () {
             };
             indicatorWeights[c] = Math.max(0.1, iv);
             totalIV += indicatorWeights[c];
+          } else {
+            erroredComponents++;
           }
         });
 
+        // Renormalize only among components that had valid power data.
+        // Errored components keep a fair share (1/4) instead of being over-weighted.
         if (totalIV > 0) {
+          var validCount = 4 - erroredComponents;
           Object.keys(indicatorWeights).forEach(function (c) {
-            indicatorWeights[c] = round3(indicatorWeights[c] / totalIV);
+            if (comps[c] && !comps[c].error) {
+              indicatorWeights[c] = round3(indicatorWeights[c] / totalIV);
+            } else {
+              // Give errored components their proportional fair share
+              indicatorWeights[c] = round3((1 - totalIV) / erroredComponents);
+            }
           });
         }
       }
