@@ -324,7 +324,8 @@ window.MLTrainer = (function () {
 
   /* ── Feature Keys ──────────────────────────────────────────────────── */
   var FEATURE_KEYS = [
-    "rsi", "atr_pct", "bb_position", "volume_ratio"
+    "rsi", "atr_pct", "bb_position", "volume_ratio",
+    "macd_hist", "ema_slope", "adx"
   ];
 
   /* ════════════════════════════════════════════════════════════════════════

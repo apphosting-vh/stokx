@@ -34,7 +34,10 @@ window.LiveML = (function () {
     rsi: { label: "RSI (14)", bins: [30, 40, 50, 60, 70, 80], labels: ["<30", "30-40", "40-50", "50-60", "60-70", "70-80", "80+"] },
     atr_pct: { label: "ATR %", bins: [1, 2, 3, 4, 5, 8], labels: ["<1%", "1-2%", "2-3%", "3-4%", "4-5%", "5-8%", "8%+"] },
     bb_position: { label: "BB Position", bins: [0.2, 0.4, 0.6, 0.8], labels: ["<0.2", "0.2-0.4", "0.4-0.6", "0.6-0.8", "0.8+"] },
-    volume_ratio: { label: "Volume Ratio", bins: [0.7, 1, 1.3, 1.7, 2.5], labels: ["<0.7", "0.7-1", "1-1.3", "1.3-1.7", "1.7-2.5", "2.5+"] }
+    volume_ratio: { label: "Volume Ratio", bins: [0.7, 1, 1.3, 1.7, 2.5], labels: ["<0.7", "0.7-1", "1-1.3", "1.3-1.7", "1.7-2.5", "2.5+"] },
+    macd_hist: { label: "MACD Hist", bins: [-1.5, -0.5, 0, 0.5, 1.5], labels: ["<-1.5", "-1.5/-0.5", "-0.5/0", "0/0.5", "0.5/1.5", "1.5+"] },
+    ema_slope: { label: "EMA12 Slope %", bins: [-0.5, 0, 0.3, 0.7], labels: ["<-0.5", "-0.5/0", "0/0.3", "0.3/0.7", "0.7+"] },
+    adx: { label: "ADX (14)", bins: [15, 20, 25, 35], labels: ["<15", "15-20", "20-25", "25-35", "35+"] }
   };
 
   function round2(v) { return Math.round(v * 100) / 100; }
@@ -97,11 +100,16 @@ window.LiveML = (function () {
   function computeIndicators(candles) {
     var TI = window.TechIndicators;
     var bb = TI.bollingerBands(candles, 20, 2);
+    var macd = TI.macd(candles, 12, 26, 9);
+    var adx = TI.adx(candles, 14);
     return {
       rsi: TI.rsi(candles, 14),
       atr: TI.atr(candles, 14),
       bb: bb,
-      volSma: TI.sma(TI.volumes(candles), 20)
+      volSma: TI.sma(TI.volumes(candles), 20),
+      macd: macd,
+      emaFast: TI.ema(candles, 12),
+      adx: adx
     };
   }
 
@@ -112,7 +120,10 @@ window.LiveML = (function () {
       rsi: ind.rsi[i] != null ? round2(ind.rsi[i]) : 50,
       atr_pct: ind.atr[i] != null && close > 0 ? round3((ind.atr[i] / close) * 100) : 0,
       bb_position: ind.bb.upper && ind.bb.lower ? round3((close - (ind.bb.lower[i] || 0)) / Math.max(0.01, (ind.bb.upper[i] || 0) - (ind.bb.lower[i] || 0))) : 0.5,
-      volume_ratio: ind.volSma && ind.volSma[i] ? round2(close > 0 ? candles[i].v / Math.max(1, ind.volSma[i]) : 1) : 1
+      volume_ratio: ind.volSma && ind.volSma[i] ? round2(close > 0 ? candles[i].v / Math.max(1, ind.volSma[i]) : 1) : 1,
+      macd_hist: ind.macd && ind.macd.histogram ? round3(ind.macd.histogram[i]) : 0,
+      ema_slope: ind.emaFast[i] != null && ind.emaFast[Math.max(0, i - 3)] != null ? round3((ind.emaFast[i] - ind.emaFast[Math.max(0, i - 3)]) / Math.max(0.01, ind.emaFast[Math.max(0, i - 3)]) * 100) : 0,
+      adx: ind.adx && ind.adx.adx ? round2(ind.adx.adx[i] || 0) : 0
     };
   }
 
@@ -266,10 +277,19 @@ window.LiveML = (function () {
             label: { is_winner: ret > 0, return_1d: round3(ret * 100), days: 1, source: "live" }
           });
         }
-        if (stored.length > 0) {
-          stored = stored.slice(-maxDays);
-          lastDates[symbol] = stored[stored.length - 1].entryDate;
-          await window.PatternStore.putLiveFeatures(symbol, stored);
+        /* Merge with the existing rolling corpus: keep prior bars (so the
+           window persists across daily collects), append the new bars, and
+           cap at maxDays. With an empty lastDate (fresh start) the prior
+           bars are dropped and the full window is rebuilt from candles. */
+        var existing = [];
+        try {
+          var all = await window.PatternStore.getAllLiveFeatures();
+          existing = all.filter(function (s) { return s.symbol === symbol && (!lastDate || s.entryDate <= lastDate); });
+        } catch (e) {}
+        var merged = existing.concat(stored).slice(-maxDays);
+        if (merged.length > 0) {
+          if (merged.length > existing.length) lastDates[symbol] = merged[merged.length - 1].entryDate;
+          await window.PatternStore.putLiveFeatures(symbol, merged);
           newSamples += stored.length;
         }
       } catch (e) { skipped++; }
