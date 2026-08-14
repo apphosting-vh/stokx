@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "3.0.28";
+window.__STOX_APP_VERSION = "3.0.29";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -4713,11 +4713,12 @@ const EntryScorePanel = ({ shares }) => {
       try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
       try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
       const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
+      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch (e) {}
       if (result) result.lastClose = lastDailyClose;
       let conf10d = null, conf10dLog = null, conf10dEmp = null;
       try {
-        const _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result));
-        if (_conf) { conf10dLog = _conf.confidenceLognormal; conf10dEmp = _conf.confidenceEmpirical; if (_conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10; }
+        const _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result), tk);
+        if (_conf) { try { if (window.applyPatternConfCal) _conf = window.applyPatternConfCal(_conf, tk); } catch (e2) {} conf10dLog = _conf.confidenceLognormal; conf10dEmp = _conf.confidenceEmpirical; if (_conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10; }
       } catch (e) {}
       const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d, conf10dLog, conf10dEmp, indicators: { weekly: indW, daily: indD, hourly: indH } };
       saveEntries([entry, ...entries]);
@@ -5439,10 +5440,11 @@ const ConfidenceTracker = () => {
       try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
       try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
       const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
+      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch (e) {}
       let confidence = null, conf10dLog = null, conf10dEmp = null;
       try {
-        const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result));
-        if (conf && conf.confidence != null) { confidence = conf.confidence; conf10dLog = conf.confidenceLognormal; conf10dEmp = conf.confidenceEmpirical; }
+        const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result), tk);
+        if (conf && conf.confidence != null) { try { if (window.applyPatternConfCal) conf = window.applyPatternConfCal(conf, tk); } catch (e2) {} confidence = conf.confidence; conf10dLog = conf.confidenceLognormal; conf10dEmp = conf.confidenceEmpirical; }
       } catch (e) {}
       const row = {
         id: Date.now(),
@@ -8604,9 +8606,10 @@ function StockScreener(props) {
         var indD = TI.computeAll(resD.data);
         var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
         var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
+        try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(e) {}
         if (result) result.lastClose = lc;
         var conf10d = null, conf10dLog = null, conf10dEmp = null;
-        try { var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result)); if (_conf) { conf10dLog = _conf.confidenceLognormal; conf10dEmp = _conf.confidenceEmpirical; conf10d = _conf.confidence != null ? Math.round(_conf.confidence * 10) / 10 : null; } } catch(e) {}
+        try { var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result), tk); if (_conf) { try { if (window.applyPatternConfCal) _conf = window.applyPatternConfCal(_conf, tk); } catch(e2) {} conf10dLog = _conf.confidenceLognormal; conf10dEmp = _conf.confidenceEmpirical; conf10d = _conf.confidence != null ? Math.round(_conf.confidence * 10) / 10 : null; } } catch(e) {}
         entries.unshift({ id: Date.now() + i, ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, indicators: { weekly: indW, daily: indD, hourly: indH } });
         added++;
       } catch(e) {}
@@ -8639,8 +8642,9 @@ function StockScreener(props) {
         if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) continue;
         var lc = resD.data[resD.data.length - 1].c;
         var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, null);
+        try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(e) {}
         var confidence = null, conf10dLog = null, conf10dEmp = null;
-        try { var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result)); if (conf && conf.confidence != null) { confidence = conf.confidence; conf10dLog = conf.confidenceLognormal; conf10dEmp = conf.confidenceEmpirical; } } catch(e) {}
+        try { var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result), tk); if (conf && conf.confidence != null) { try { if (window.applyPatternConfCal) conf = window.applyPatternConfCal(conf, tk); } catch(e2) {} confidence = conf.confidence; conf10dLog = conf.confidenceLognormal; conf10dEmp = conf.confidenceEmpirical; } } catch(e) {}
         entries.unshift({ id: Date.now() + i, ticker: tk, addedAt: new Date().toISOString(), confidence: confidence != null ? Math.round(confidence * 10) / 10 : null, conf10dLog: conf10dLog != null ? Math.round(conf10dLog * 10) / 10 : null, conf10dEmp: conf10dEmp != null ? Math.round(conf10dEmp * 10) / 10 : null, entryScore: result && result.finalScore != null ? result.finalScore : null, entryDecision: result && result.decision ? result.decision.label : null, currentPrice: lc || 0 });
         added++;
       } catch(e) {}
