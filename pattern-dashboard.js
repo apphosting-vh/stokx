@@ -1144,6 +1144,7 @@ window.PatternDashboard = (function () {
           ),
           React.createElement("div", { style: { marginTop: 8, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" } },
             React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "var(--text2)" } }, "Learned-weight blend:"),
+            React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", minWidth: 92, textAlign: "right", lineHeight: 1.3 } }, "Pillar Equal Weights"),
             React.createElement("input", {
               type: "range", min: 0, max: 100, step: 5,
               value: Math.round(patternBlend * 100),
@@ -1151,8 +1152,9 @@ window.PatternDashboard = (function () {
               onMouseUp: persistBlend,
               onTouchEnd: persistBlend,
               onKeyUp: persistBlend,
-              style: { width: 220 }
+              style: { width: 200 }
             }),
+            React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", minWidth: 92, lineHeight: 1.3 } }, "Pillar Learned Weights"),
             React.createElement("span", { style: { fontSize: 12, color: "var(--text2)", fontFamily: "monospace" } },
               Math.round(patternBlend * 100) + "% learned / " + Math.round((1 - patternBlend) * 100) + "% calculated"
             ),
@@ -1161,7 +1163,7 @@ window.PatternDashboard = (function () {
               style: { padding: "4px 10px", borderRadius: 5, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: "pointer", fontSize: 11 }
             }, "50/50"),
             React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } },
-              "0% = calculated 25% each, 100% = pure learned. Blends the learned weights toward the calculated baseline before scoring; overrides are unaffected."
+              "Left = every pillar counted equally (25% each); right = each stock's backtest-learned profile. Overrides are unaffected."
             )
           )
         ),
