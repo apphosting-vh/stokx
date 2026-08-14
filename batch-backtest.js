@@ -478,9 +478,8 @@ window.BatchBacktest = (function () {
       var indicatorPowers = {};
 
       if (powerResult && powerResult.components) {
-        var totalIV = 0;
-        var erroredComponents = 0;
         var comps = powerResult.components;
+        var ivs = [];
         ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (c) {
           if (comps[c] && !comps[c].error) {
             var iv = Math.abs(comps[c].infoValue || 0);
@@ -489,30 +488,26 @@ window.BatchBacktest = (function () {
               infoValue: comps[c].infoValue,
               bucketWinRates: comps[c].bucketWinRates || []
             };
-            indicatorWeights[c] = Math.max(0.1, iv);
-            totalIV += indicatorWeights[c];
-          } else {
-            erroredComponents++;
+            ivs.push({ c: c, iv: iv });
           }
         });
 
-        // Renormalize only among components that had valid power data.
-        // Errored components keep a fair share (1/4) instead of being over-weighted.
-        if (totalIV > 0 && erroredComponents > 0) {
-          var erroredShare = erroredComponents * 0.1;
-          var validShare = 1 - erroredShare;
-          Object.keys(indicatorWeights).forEach(function (c) {
-            if (comps[c] && !comps[c].error) {
-              indicatorWeights[c] = round3(indicatorWeights[c] / totalIV * validShare);
-            } else {
-              indicatorWeights[c] = round3(erroredShare / erroredComponents);
-            }
+        // Relative min-max spread on infoValue (NOT a floor on raw magnitude —
+        // a floor of 0.1 collapsed typical sub-0.1 infoValues to equal 25%).
+        // Valid components get 0.1-0.9 of the budget, errored ones a fair share.
+        if (ivs.length > 0) {
+          var minIV = Math.min.apply(null, ivs.map(function (x) { return x.iv; }));
+          var maxIV = Math.max.apply(null, ivs.map(function (x) { return x.iv; }));
+          var valid = ivs.map(function (x) {
+            return { c: x.c, w: maxIV > minIV ? (0.1 + 0.8 * (x.iv - minIV) / (maxIV - minIV)) : 0.5 };
           });
-        } else if (totalIV > 0) {
-          Object.keys(indicatorWeights).forEach(function (c) {
-            if (comps[c] && !comps[c].error) {
-              indicatorWeights[c] = round3(indicatorWeights[c] / totalIV);
-            }
+          var erroredCount = 4 - ivs.length;
+          var validBudget = 1 - erroredCount * 0.1;
+          var validSum = valid.reduce(function (s, x) { return s + x.w; }, 0);
+          var validScale = validSum > 0 ? validBudget / validSum : 0;
+          valid.forEach(function (x) { indicatorWeights[x.c] = round3(x.w * validScale); });
+          ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (c) {
+            if (indicatorWeights[c] == null) indicatorWeights[c] = round3((erroredCount * 0.1) / Math.max(1, erroredCount));
           });
         }
       }
@@ -623,7 +618,7 @@ window.BatchBacktest = (function () {
       return {
         symbol: symbol,
         backtestDate: Date.now(),
-        backtestVersion: window.__STOX_APP_VERSION || "3.0.21",
+        backtestVersion: window.__STOX_APP_VERSION || "3.0.24",
         indicatorWeights: indicatorWeights,
         indicatorPowers: indicatorPowers,
         calibration: calibration,

@@ -73,7 +73,7 @@ window.PatternDashboard = (function () {
     var onBack = props.onBack || null;
     var stocksList = props.stocks || getStockUniverse().map(function (s) { return s.t; });
 
-    var _s = useState("overview"); // tab: overview | run | browse | insights | ml
+    var _s = useState("overview"); // tab: overview | run | browse | insights | settings | ml | live
     var tab = _s[0], setTab = _s[1];
 
     var _p = useState(null); // patterns
@@ -152,6 +152,60 @@ window.PatternDashboard = (function () {
     // Remove confirm state (must be at top-level with other hooks)
     var _removeConfirm = useState(false);
     var removeConfirm = _removeConfirm[0], setRemoveConfirm = _removeConfirm[1];
+
+    // Pattern Settings tab state (all-stock weight override table)
+    var _pSettings = useState(null);
+    var patternSettings = _pSettings[0], setPatternSettings = _pSettings[1];
+    var _pSearch = useState("");
+    var patternSearch = _pSearch[0], setPatternSearch = _pSearch[1];
+    var _rsAll = useState(false);
+    var resetAllConfirm = _rsAll[0], setResetAllConfirm = _rsAll[1];
+
+    useEffect(function () {
+      if (tab !== "settings") return;
+      if (patternSettings) return;
+      var cancelled = false;
+      (async function () {
+        try {
+          if (!window.PatternStore) { setPatternSettings([]); return; }
+          await window.PatternStore.init();
+          var univ = getStockUniverse().map(function (s) { return s.t; });
+          var pats = await window.PatternStore.getAll();
+          var ov = await window.PatternStore.getWeightOverrides();
+          var patMap = {};
+          pats.forEach(function (p) { if (p && p.symbol) patMap[p.symbol] = p; });
+          var rows = univ.map(function (sym) {
+            var p = patMap[sym];
+            var lw = (p && p.indicatorWeights) ? p.indicatorWeights : null;
+            if (p && window.PatternScoring && window.PatternScoring.resolveLearnedWeights) {
+              var rlw = window.PatternScoring.resolveLearnedWeights(p);
+              if (rlw) lw = rlw;
+            }
+            var o = ov[sym] || null;
+            var base = function (k) { return (lw && lw[k] != null) ? lw[k] : 0.25; };
+            return {
+              symbol: sym,
+              hasPattern: !!p,
+              learned: { trendHealth: base("trendHealth"), pullbackQuality: base("pullbackQuality"), prob4: base("prob4"), swingPotential: base("swingPotential") },
+              trades: p && p.tradeStats ? p.tradeStats.totalTrades : 0,
+              winRate: p && p.tradeStats ? p.tradeStats.winRate : null,
+              backtestDate: p ? (p.backtestDate || null) : null,
+              enabled: !!o,
+              draft: o ? {
+                trendHealth: o.trendHealth != null ? o.trendHealth : base("trendHealth"),
+                pullbackQuality: o.pullbackQuality != null ? o.pullbackQuality : base("pullbackQuality"),
+                prob4: o.prob4 != null ? o.prob4 : base("prob4"),
+                swingPotential: o.swingPotential != null ? o.swingPotential : base("swingPotential")
+              } : { trendHealth: base("trendHealth"), pullbackQuality: base("pullbackQuality"), prob4: base("prob4"), swingPotential: base("swingPotential") }
+            };
+          });
+          if (!cancelled) setPatternSettings(rows);
+        } catch (err) {
+          if (!cancelled) setPatternSettings([]);
+        }
+      })();
+      return function () { cancelled = true; };
+    }, [tab, patternSettings]);
 
     async function loadMLStatus() {
       try {
@@ -415,6 +469,7 @@ window.PatternDashboard = (function () {
         React.createElement("button", { style: tabStyle(tab === "run"), onClick: function () { setTab("run"); } }, "Run Batch"),
         React.createElement("button", { style: tabStyle(tab === "browse"), onClick: function () { setTab("browse"); } }, "Browse Patterns"),
         React.createElement("button", { style: tabStyle(tab === "insights"), onClick: function () { setTab("insights"); } }, "Insights"),
+        React.createElement("button", { style: tabStyle(tab === "settings"), onClick: function () { setTab("settings"); } }, "Pattern Settings"),
         React.createElement("button", { style: tabStyle(tab === "ml"), onClick: function () { setTab("ml"); } }, "ML Engine"),
         React.createElement("button", { style: tabStyle(tab === "live"), onClick: function () { setTab("live"); } }, "Live Expert")
       ),
@@ -427,6 +482,7 @@ window.PatternDashboard = (function () {
       tab === "run" && renderRunBatch(),
       tab === "browse" && renderBrowse(),
       tab === "insights" && renderInsights(),
+      tab === "settings" && renderPatternSettings(),
       tab === "ml" && renderMLEngine(),
       tab === "live" && renderLiveExpert()
     );
@@ -690,9 +746,14 @@ window.PatternDashboard = (function () {
       var wr = p.tradeStats ? p.tradeStats.winRate : 0;
       var wrColor = wr >= 60 ? "var(--accent, #16a34a)" : wr >= 45 ? "#f59e0b" : "#ef4444";
       var topW = null;
-      if (p.indicatorWeights) {
+      var lw = p.indicatorWeights;
+      if (p && window.PatternScoring && window.PatternScoring.resolveLearnedWeights) {
+        var rlw2 = window.PatternScoring.resolveLearnedWeights(p);
+        if (rlw2) lw = rlw2;
+      }
+      if (lw) {
         var max = 0;
-        Object.keys(p.indicatorWeights).forEach(function (k) { if (p.indicatorWeights[k] > max) { max = p.indicatorWeights[k]; topW = k; } });
+        Object.keys(lw).forEach(function (k) { if (lw[k] > max) { max = lw[k]; topW = k; } });
       }
       var age = p.backtestDate ? Math.round((Date.now() - p.backtestDate) / (24 * 60 * 60 * 1000)) : null;
 
@@ -783,6 +844,196 @@ window.PatternDashboard = (function () {
       } finally {
         setLiveBusy(false);
       }
+    }
+
+    /* ── Pattern Settings (per-stock weight overrides) ─────────────────── */
+
+    function updatePatternDraft(symbol, key, sliderVal) {
+      setPatternSettings(function (prev) {
+        return (prev || []).map(function (r) {
+          if (r.symbol !== symbol) return r;
+          var d = Object.assign({}, r.draft);
+          d[key] = Math.round(sliderVal) / 100;
+          return Object.assign({}, r, { draft: d });
+        });
+      });
+    }
+
+    function togglePatternEnabled(symbol, enabled) {
+      setPatternSettings(function (prev) {
+        return (prev || []).map(function (r) {
+          if (r.symbol !== symbol) return r;
+          return Object.assign({}, r, { enabled: enabled });
+        });
+      });
+    }
+
+    async function handleSavePatternSettings(symbol) {
+      var row = (patternSettings || []).filter(function (r) { return r.symbol === symbol; })[0];
+      if (!row) return;
+      try {
+        await window.PatternStore.init();
+        if (row.enabled) {
+          await window.PatternStore.setWeightOverride(symbol, {
+            trendHealth: row.draft.trendHealth,
+            pullbackQuality: row.draft.pullbackQuality,
+            prob4: row.draft.prob4,
+            swingPotential: row.draft.swingPotential
+          });
+          setError("Saved manual weights for " + symbol);
+        } else {
+          await window.PatternStore.clearWeightOverride(symbol);
+          setError("Cleared override for " + symbol + " — learned weights restored");
+        }
+        setTimeout(function () { setError(null); }, 3000);
+      } catch (err) {
+        setError("Save failed: " + err.message);
+      }
+    }
+
+    async function handleRevertPatternSettings(symbol) {
+      try {
+        await window.PatternStore.init();
+        await window.PatternStore.clearWeightOverride(symbol);
+        setPatternSettings(function (prev) {
+          return (prev || []).map(function (r) {
+            if (r.symbol !== symbol) return r;
+            var lw = r.learned;
+            return Object.assign({}, r, {
+              enabled: false,
+              draft: { trendHealth: lw.trendHealth, pullbackQuality: lw.pullbackQuality, prob4: lw.prob4, swingPotential: lw.swingPotential }
+            });
+          });
+        });
+        setError("Reverted " + symbol + " to learned weights");
+        setTimeout(function () { setError(null); }, 3000);
+      } catch (err) {
+        setError("Revert failed: " + err.message);
+      }
+    }
+
+    async function handleResetAllPatternSettings() {
+      if (!resetAllConfirm) {
+        setResetAllConfirm(true);
+        setTimeout(function () { setResetAllConfirm(false); }, 5000);
+        return;
+      }
+      setResetAllConfirm(false);
+      try {
+        await window.PatternStore.init();
+        if (window.PatternStore.clearAllWeightOverrides) {
+          await window.PatternStore.clearAllWeightOverrides();
+        }
+        setPatternSettings(function (prev) {
+          return (prev || []).map(function (r) {
+            var lw = r.learned;
+            return Object.assign({}, r, {
+              enabled: false,
+              draft: { trendHealth: lw.trendHealth, pullbackQuality: lw.pullbackQuality, prob4: lw.prob4, swingPotential: lw.swingPotential }
+            });
+          });
+        });
+        setError("All overrides cleared — every stock back on learned/default weights");
+        setTimeout(function () { setError(null); }, 4000);
+      } catch (err) {
+        setError("Reset failed: " + err.message);
+      }
+    }
+
+    function renderPatternSettings() {
+      if (!patternSettings) {
+        return React.createElement("div", { style: cardStyle },
+          React.createElement("p", { style: { color: "var(--text2)" } }, "Loading patterns..."));
+      }
+      var pillars = [
+        ["trendHealth", "Trend Health"],
+        ["pullbackQuality", "Pullback"],
+        ["prob4", "4% Prob"],
+        ["swingPotential", "Swing"]
+      ];
+      var query = patternSearch.trim().toUpperCase();
+      var rows = patternSettings.filter(function (r) {
+        return !query || r.symbol.indexOf(query) !== -1;
+      });
+      return React.createElement("div", null,
+        React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Pattern Settings"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+            "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Off rows keep learned weights. Overrides apply to all pattern-adjusted scoring and travel with backups."
+          ),
+          React.createElement("div", { style: { marginTop: 10 } },
+            React.createElement("input", {
+              className: "inp", type: "text", placeholder: "Filter by symbol (e.g. RELIANCE)...",
+              value: patternSearch,
+              onChange: function (e) { setPatternSearch(e.target.value); },
+              style: { width: 260, fontSize: 12, padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg1)", color: "var(--text)" }
+            }),
+            React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", marginLeft: 10 } },
+              rows.length + " / " + patternSettings.length + " stocks" + (rows.filter(function (r) { return r.enabled; }).length > 0 ? " · " + rows.filter(function (r) { return r.enabled; }).length + " overridden" : "")
+            ),
+            React.createElement("button", {
+              onClick: handleResetAllPatternSettings,
+              style: { padding: "6px 12px", borderRadius: 6, background: resetAllConfirm ? "#dc2626" : "var(--bg3, #f3f4f6)", border: "1px solid " + (resetAllConfirm ? "#dc2626" : "var(--border)"), color: resetAllConfirm ? "#fff" : "var(--text2)", cursor: "pointer", fontSize: 11, fontWeight: 600, marginLeft: 10 }
+            }, resetAllConfirm ? "Confirm — reset ALL overrides?" : "Reset All Overrides")
+          )
+        ),
+        React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: { maxHeight: 560, overflowY: "auto" } },
+            rows.map(function (r) {
+              var wr = r.winRate != null ? Math.round(r.winRate) + "%" : "—";
+              var age = r.backtestDate ? Math.round((Date.now() - r.backtestDate) / (24 * 60 * 60 * 1000)) + "d" : "—";
+              return React.createElement("div", { key: r.symbol, style: { border: "1px solid " + (r.enabled ? "rgba(22,163,74,.45)" : "var(--border)"), borderRadius: 8, padding: 8, marginBottom: 8, background: r.enabled ? "rgba(22,163,74,.05)" : "transparent" } },
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
+                  React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" } },
+                    React.createElement("span", { style: { fontWeight: 700, fontSize: 13 } }, r.symbol),
+                    React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } },
+                      r.hasPattern ? ("WR " + wr + " · " + r.trades + " trades · " + age) : "no pattern yet — default 25% each"
+                    ),
+                    React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontFamily: "monospace" } },
+                      "learned: " + ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].map(function (k) { return Math.round((r.learned[k] != null ? r.learned[k] : 0.25) * 100); }).join("/") + "%"
+                    )
+                  ),
+                  React.createElement("label", { style: { fontSize: 12, display: "flex", alignItems: "center", gap: 4 } },
+                    React.createElement("input", { type: "checkbox", checked: r.enabled, onChange: function (e) { togglePatternEnabled(r.symbol, e.target.checked); } }),
+                    "Override"
+                  )
+                ),
+                React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 8 } },
+                  pillars.map(function (pillar) {
+                    var key = pillar[0];
+                    var val = r.draft[key] != null ? r.draft[key] : 0.25;
+                    return React.createElement("div", { key: key, style: { fontSize: 11 } },
+                      React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } },
+                        React.createElement("span", { style: { color: "var(--text3)" } }, pillar[1]),
+                        React.createElement("span", { style: { fontWeight: 600 } }, Math.round(val * 100) + "%")
+                      ),
+                      React.createElement("input", {
+                        type: "range", min: 0, max: 100, step: 1,
+                        value: Math.round(val * 100),
+                        disabled: !r.enabled,
+                        onChange: function (e) { updatePatternDraft(r.symbol, key, parseInt(e.target.value, 10)); },
+                        style: { width: "100%" }
+                      })
+                    );
+                  })
+                ),
+                React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 6 } },
+                  React.createElement("button", {
+                    onClick: function () { handleSavePatternSettings(r.symbol); },
+                    disabled: !r.enabled,
+                    style: { padding: "4px 12px", borderRadius: 5, background: r.enabled ? "var(--accent, #16a34a)" : "#9ca3af", color: "#fff", border: "none", cursor: r.enabled ? "pointer" : "not-allowed", fontSize: 11, fontWeight: 600 }
+                  }, "Save"),
+                  React.createElement("button", {
+                    onClick: function () { handleRevertPatternSettings(r.symbol); },
+                    style: { padding: "4px 12px", borderRadius: 5, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: "pointer", fontSize: 11 }
+                  }, "Reset to Default")
+                )
+              );
+            }),
+            rows.length === 0 && React.createElement("p", { style: { color: "var(--text3)", fontSize: 12, padding: 12 } }, "No stocks match \"" + patternSearch + "\".")
+          )
+        )
+      );
     }
 
     function renderLiveExpert() {

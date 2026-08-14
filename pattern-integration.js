@@ -121,6 +121,12 @@
     if (!compatResult || !pattern || !pattern.indicatorWeights) return compatResult;
 
     var weights = pattern.indicatorWeights;
+    try {
+      if (window.PatternScoring && window.PatternScoring.resolveLearnedWeights) {
+        var rlw = window.PatternScoring.resolveLearnedWeights(pattern);
+        if (rlw) weights = rlw;
+      }
+    } catch (e) {}
     var powers = pattern.indicatorPowers;
 
     var pillars = {

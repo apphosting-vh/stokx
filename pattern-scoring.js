@@ -162,6 +162,61 @@ window.PatternScoring = (function () {
     };
   }
 
+  /* ── Resolve Learned Weights ─────────────────────────────────────────── */
+
+  /**
+   * Return the effective per-pillar weights for a pattern.
+   *
+   * Older patterns (and degenerate backtests) stored uniform 0.25 weights
+   * because weight derivation used a 0.1 magnitude floor on infoValue,
+   * which collapsed typical sub-0.1 values to an equal split. When stored
+   * weights are uniform AND the pattern carries differentiated indicator
+   * powers, rebuild the weights via min-max spread so every stock gets a
+   * genuinely personalized allocation.
+   */
+  function resolveLearnedWeights(pattern) {
+    if (!pattern) return null;
+    var pillars = ["trendHealth", "pullbackQuality", "prob4", "swingPotential"];
+    var stored = pattern.indicatorWeights || null;
+
+    var storedDifferentiated = false;
+    if (stored) {
+      var vals = pillars.map(function (k) { return stored[k]; });
+      var anyMissing = vals.some(function (v) { return v == null; });
+      if (!anyMissing) {
+        storedDifferentiated = vals.some(function (v) { return Math.abs(v - vals[0]) > 0.001; });
+      }
+    }
+    if (storedDifferentiated) return stored;
+
+    var powers = pattern.indicatorPowers;
+    if (!powers) return stored;
+
+    var ivs = [];
+    pillars.forEach(function (k) {
+      if (powers[k] && powers[k].infoValue != null) {
+        ivs.push({ c: k, iv: Math.abs(powers[k].infoValue) });
+      }
+    });
+    if (ivs.length === 0) return stored;
+
+    var minIV = Math.min.apply(null, ivs.map(function (x) { return x.iv; }));
+    var maxIV = Math.max.apply(null, ivs.map(function (x) { return x.iv; }));
+    var valid = ivs.map(function (x) {
+      return { c: x.c, w: maxIV > minIV ? (0.1 + 0.8 * (x.iv - minIV) / (maxIV - minIV)) : 0.5 };
+    });
+    var erroredCount = pillars.length - ivs.length;
+    var validBudget = 1 - erroredCount * 0.1;
+    var validSum = valid.reduce(function (s, x) { return s + x.w; }, 0);
+    var validScale = validSum > 0 ? validBudget / validSum : 0;
+    var out = {};
+    valid.forEach(function (x) { out[x.c] = round3(x.w * validScale); });
+    pillars.forEach(function (k) {
+      if (out[k] == null) out[k] = round3((erroredCount * 0.1) / Math.max(1, erroredCount));
+    });
+    return out;
+  }
+
   /* ── Apply Pattern Weights ──────────────────────────────────────────── */
 
   /**
@@ -176,8 +231,15 @@ window.PatternScoring = (function () {
    * where normalization_factor preserves the 0-100 score range.
    */
   function applyPatternWeights(baseResult, pattern, candles) {
-    var weights = pattern.indicatorWeights;
+    var weights = resolveLearnedWeights(pattern);
     var powers = pattern.indicatorPowers;
+
+    /* Manual overrides from Pattern Settings (Pattern Lab) take precedence
+       over the learned weights when set for this symbol. */
+    try {
+      var ov = window.PatternStore && window.PatternStore.getWeightOverridesSync ? window.PatternStore.getWeightOverridesSync() : null;
+      if (ov && ov[pattern.symbol]) weights = ov[pattern.symbol];
+    } catch (e) {}
 
     if (!weights) {
       return { entryScore: baseResult.entryScore || baseResult.entry_score, classification: baseResult.classification };
@@ -582,7 +644,7 @@ window.PatternScoring = (function () {
       hasRegimeBehavior: !!(pattern.regimeBehavior && Object.keys(pattern.regimeBehavior).length > 0),
       totalTrades: pattern.tradeStats ? pattern.tradeStats.totalTrades : 0,
       patternWinRate: pattern.tradeStats ? pattern.tradeStats.winRate : 0,
-      topWeight: getTopWeight(pattern.indicatorWeights)
+      topWeight: getTopWeight(resolveLearnedWeights(pattern))
     };
   }
 
@@ -705,6 +767,7 @@ window.PatternScoring = (function () {
     loadPattern: loadPattern,
     invalidateCache: invalidateCache,
     getPatternSummary: getPatternSummary,
-    applyCalibration: applyCalibration
+    applyCalibration: applyCalibration,
+    resolveLearnedWeights: resolveLearnedWeights
   };
 })();

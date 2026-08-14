@@ -26,6 +26,8 @@ window.PatternStore = (function () {
   var STORE_LIVE_FEATURES = "live_features"; // rolling live-market corpus (per symbol)
 
   var _db = null;
+  var KEY_WEIGHT_OVERRIDES = "stox_pattern_weight_overrides";
+  var _weightOverrides = null;
 
   /* ── DB Init ──────────────────────────────────────────────────────────── */
   function init() {
@@ -49,6 +51,7 @@ window.PatternStore = (function () {
       };
       req.onsuccess = function (e) {
         _db = e.target.result;
+        try { _loadWeightOverrides(); } catch (err) {}
         resolve();
       };
       req.onerror = function (e) {
@@ -180,7 +183,7 @@ window.PatternStore = (function () {
       if (!_db) { reject(new Error("PatternStore not initialized")); return; }
       var t = _tx(STORE_META, "readwrite");
       t.store.clear();
-      t.tx.oncomplete = function () { resolve(); };
+      t.tx.oncomplete = function () { _weightOverrides = {}; resolve(); };
       t.tx.onerror = function (e) { reject(e.target.error); };
     });
   }
@@ -599,6 +602,7 @@ window.PatternStore = (function () {
         await setMeta(m.key, m.value);
       }
     }
+    try { await _loadWeightOverrides(); } catch (e) {}
     return data.patterns.length;
   }
 
@@ -613,6 +617,52 @@ window.PatternStore = (function () {
     } catch (e) {
       return 0;
     }
+  }
+
+  /* ── Manual weight overrides (Pattern Lab → Pattern Settings) ────────────
+     Stored as a single meta record: { symbol: { trendHealth, pullbackQuality,
+     prob4, swingPotential } } with weights as 0-1 fractions. The sync cache is
+     populated at init so sync scoring paths can resolve overrides cheaply. */
+
+  function _loadWeightOverrides() {
+    _weightOverrides = null;
+    return getMeta(KEY_WEIGHT_OVERRIDES).then(function (m) {
+      _weightOverrides = (m && typeof m === "object") ? m : {};
+      return _weightOverrides;
+    }).catch(function () {
+      _weightOverrides = {};
+      return _weightOverrides;
+    });
+  }
+
+  function getWeightOverrides() {
+    if (_weightOverrides) return Promise.resolve(_weightOverrides);
+    return _loadWeightOverrides();
+  }
+
+  function getWeightOverridesSync() {
+    return _weightOverrides || null;
+  }
+
+  function setWeightOverride(symbol, weights) {
+    return getWeightOverrides().then(function (map) {
+      map[symbol] = weights;
+      _weightOverrides = map;
+      return setMeta(KEY_WEIGHT_OVERRIDES, map);
+    });
+  }
+
+  function clearWeightOverride(symbol) {
+    return getWeightOverrides().then(function (map) {
+      if (map[symbol]) delete map[symbol];
+      _weightOverrides = map;
+      return setMeta(KEY_WEIGHT_OVERRIDES, map);
+    });
+  }
+
+  function clearAllWeightOverrides() {
+    _weightOverrides = {};
+    return setMeta(KEY_WEIGHT_OVERRIDES, {});
   }
 
   /* ── Public API ────────────────────────────────────────────────────────── */
@@ -636,6 +686,11 @@ window.PatternStore = (function () {
     clearLiveFeatures: clearLiveFeatures,
     getMeta: getMeta,
     setMeta: setMeta,
+    getWeightOverrides: getWeightOverrides,
+    getWeightOverridesSync: getWeightOverridesSync,
+    setWeightOverride: setWeightOverride,
+    clearWeightOverride: clearWeightOverride,
+    clearAllWeightOverrides: clearAllWeightOverrides,
     getStats: getStats,
     getStalePatterns: getStalePatterns,
     query: query,
