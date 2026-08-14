@@ -174,7 +174,7 @@ window.PatternScoring = (function () {
    * powers, rebuild the weights via min-max spread so every stock gets a
    * genuinely personalized allocation.
    */
-  function resolveLearnedWeights(pattern) {
+  function resolveLearnedWeights(pattern, skipBlend) {
     if (!pattern) return null;
     var pillars = ["trendHealth", "pullbackQuality", "prob4", "swingPotential"];
     var stored = pattern.indicatorWeights || null;
@@ -187,34 +187,55 @@ window.PatternScoring = (function () {
         storedDifferentiated = vals.some(function (v) { return Math.abs(v - vals[0]) > 0.001; });
       }
     }
-    if (storedDifferentiated) return stored;
+    var out = storedDifferentiated ? stored : null;
 
-    var powers = pattern.indicatorPowers;
-    if (!powers) return stored;
-
-    var ivs = [];
-    pillars.forEach(function (k) {
-      if (powers[k] && powers[k].infoValue != null) {
-        ivs.push({ c: k, iv: Math.abs(powers[k].infoValue) });
+    if (!out) {
+      var powers = pattern.indicatorPowers;
+      if (powers) {
+        var ivs = [];
+        pillars.forEach(function (k) {
+          if (powers[k] && powers[k].infoValue != null) {
+            ivs.push({ c: k, iv: Math.abs(powers[k].infoValue) });
+          }
+        });
+        if (ivs.length > 0) {
+          var minIV = Math.min.apply(null, ivs.map(function (x) { return x.iv; }));
+          var maxIV = Math.max.apply(null, ivs.map(function (x) { return x.iv; }));
+          var valid = ivs.map(function (x) {
+            return { c: x.c, w: maxIV > minIV ? (0.1 + 0.8 * (x.iv - minIV) / (maxIV - minIV)) : 0.5 };
+          });
+          var erroredCount = pillars.length - ivs.length;
+          var validBudget = 1 - erroredCount * 0.1;
+          var validSum = valid.reduce(function (s, x) { return s + x.w; }, 0);
+          var validScale = validSum > 0 ? validBudget / validSum : 0;
+          out = {};
+          valid.forEach(function (x) { out[x.c] = round3(x.w * validScale); });
+          pillars.forEach(function (k) {
+            if (out[k] == null) out[k] = round3((erroredCount * 0.1) / Math.max(1, erroredCount));
+          });
+        }
       }
-    });
-    if (ivs.length === 0) return stored;
+    }
+    if (!out) out = stored;
+    if (skipBlend) return out;
 
-    var minIV = Math.min.apply(null, ivs.map(function (x) { return x.iv; }));
-    var maxIV = Math.max.apply(null, ivs.map(function (x) { return x.iv; }));
-    var valid = ivs.map(function (x) {
-      return { c: x.c, w: maxIV > minIV ? (0.1 + 0.8 * (x.iv - minIV) / (maxIV - minIV)) : 0.5 };
-    });
-    var erroredCount = pillars.length - ivs.length;
-    var validBudget = 1 - erroredCount * 0.1;
-    var validSum = valid.reduce(function (s, x) { return s + x.w; }, 0);
-    var validScale = validSum > 0 ? validBudget / validSum : 0;
-    var out = {};
-    valid.forEach(function (x) { out[x.c] = round3(x.w * validScale); });
+    /* Learned/equal blend (Pattern Settings slider): 1 = full learned,
+       0 = equal 25% each. Overrides replace this entirely upstream. */
+    var blend = 0.5;
+    try {
+      if (window.PatternStore && window.PatternStore.getWeightBlendSync) {
+        var b = window.PatternStore.getWeightBlendSync();
+        if (b != null) blend = b;
+      }
+    } catch (e) {}
+    if (blend >= 1) return out;
+    if (blend <= 0) return { trendHealth: 0.25, pullbackQuality: 0.25, prob4: 0.25, swingPotential: 0.25 };
+    var blended = {};
     pillars.forEach(function (k) {
-      if (out[k] == null) out[k] = round3((erroredCount * 0.1) / Math.max(1, erroredCount));
+      var v = out && out[k] != null ? out[k] : 0.25;
+      blended[k] = round3(blend * v + (1 - blend) * 0.25);
     });
-    return out;
+    return blended;
   }
 
   /* ── Apply Pattern Weights ──────────────────────────────────────────── */
@@ -729,7 +750,7 @@ window.PatternScoring = (function () {
       return { hasPattern: false, symbol: symbol };
     }
 
-    var topW = getTopWeight(pattern.indicatorWeights);
+    var topW = getTopWeight(resolveLearnedWeights(pattern));
     var topRegime = null;
     var bestRegimeWR = 0;
     if (pattern.regimeBehavior) {

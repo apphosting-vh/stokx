@@ -115,18 +115,29 @@
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
   /**
+   * Effective weights for a pattern: resolved (repaired from powers if the
+   * stored weights are uniform) and blended toward equal 25% per the global
+   * Learned-weight blend setting. Falls back to stored weights if
+   * PatternScoring is unavailable.
+   */
+  function resolveWeightsForDisplay(pattern) {
+    var w = pattern && pattern.indicatorWeights ? pattern.indicatorWeights : null;
+    try {
+      if (window.PatternScoring && window.PatternScoring.resolveLearnedWeights) {
+        var rlw = window.PatternScoring.resolveLearnedWeights(pattern);
+        if (rlw) w = rlw;
+      }
+    } catch (e) {}
+    return w;
+  }
+
+  /**
    * Apply pattern weights to the compat result format.
    */
   function applyPatternToCompatResult(compatResult, pattern) {
     if (!compatResult || !pattern || !pattern.indicatorWeights) return compatResult;
 
-    var weights = pattern.indicatorWeights;
-    try {
-      if (window.PatternScoring && window.PatternScoring.resolveLearnedWeights) {
-        var rlw = window.PatternScoring.resolveLearnedWeights(pattern);
-        if (rlw) weights = rlw;
-      }
-    } catch (e) {}
+    var weights = resolveWeightsForDisplay(pattern);
     var powers = pattern.indicatorPowers;
 
     var pillars = {
@@ -221,7 +232,7 @@
     compatResult._patternClassification = classification;
     compatResult._patternWinRate = pattern.tradeStats ? pattern.tradeStats.winRate : null;
     compatResult._patternTrades = pattern.tradeStats ? pattern.tradeStats.totalTrades : null;
-    compatResult._patternTopWeight = getTopWeight(pattern.indicatorWeights);
+    compatResult._patternTopWeight = getTopWeight(resolveWeightsForDisplay(pattern));
     compatResult._patternHasCalibration = !!(pattern.calibration && pattern.calibration.global);
     // ML prediction metadata
     if (mlPrediction) {

@@ -166,6 +166,8 @@ window.PatternDashboard = (function () {
     var bulkDeltas = _bulkDeltas[0], setBulkDeltas = _bulkDeltas[1];
     var _bulkConfirm = useState(false);
     var bulkConfirm = _bulkConfirm[0], setBulkConfirm = _bulkConfirm[1];
+    var _pBlend = useState(0.5);
+    var patternBlend = _pBlend[0], setPatternBlend = _pBlend[1];
 
     useEffect(function () {
       if (tab !== "settings") return;
@@ -178,31 +180,39 @@ window.PatternDashboard = (function () {
           var univ = getStockUniverse().map(function (s) { return s.t; });
           var pats = await window.PatternStore.getAll();
           var ov = await window.PatternStore.getWeightOverrides();
+          var bl = 0.5;
+          try {
+            var blv = await window.PatternStore.getWeightBlend();
+            if (blv != null) bl = blv;
+          } catch (e) {}
+          if (!cancelled) setPatternBlend(bl);
           var patMap = {};
           pats.forEach(function (p) { if (p && p.symbol) patMap[p.symbol] = p; });
           var rows = univ.map(function (sym) {
             var p = patMap[sym];
             var lw = (p && p.indicatorWeights) ? p.indicatorWeights : null;
             if (p && window.PatternScoring && window.PatternScoring.resolveLearnedWeights) {
-              var rlw = window.PatternScoring.resolveLearnedWeights(p);
+              var rlw = window.PatternScoring.resolveLearnedWeights(p, true);
               if (rlw) lw = rlw;
             }
             var o = ov[sym] || null;
             var base = function (k) { return (lw && lw[k] != null) ? lw[k] : 0.25; };
+            var learnedRaw = { trendHealth: base("trendHealth"), pullbackQuality: base("pullbackQuality"), prob4: base("prob4"), swingPotential: base("swingPotential") };
+            var learnedEff = blendW(learnedRaw, bl);
             return {
               symbol: sym,
               hasPattern: !!p,
-              learned: { trendHealth: base("trendHealth"), pullbackQuality: base("pullbackQuality"), prob4: base("prob4"), swingPotential: base("swingPotential") },
+              learned: learnedRaw,
               trades: p && p.tradeStats ? p.tradeStats.totalTrades : 0,
               winRate: p && p.tradeStats ? p.tradeStats.winRate : null,
               backtestDate: p ? (p.backtestDate || null) : null,
               enabled: !!o,
               draft: o ? {
-                trendHealth: o.trendHealth != null ? o.trendHealth : base("trendHealth"),
-                pullbackQuality: o.pullbackQuality != null ? o.pullbackQuality : base("pullbackQuality"),
-                prob4: o.prob4 != null ? o.prob4 : base("prob4"),
-                swingPotential: o.swingPotential != null ? o.swingPotential : base("swingPotential")
-              } : { trendHealth: base("trendHealth"), pullbackQuality: base("pullbackQuality"), prob4: base("prob4"), swingPotential: base("swingPotential") }
+                trendHealth: o.trendHealth != null ? o.trendHealth : learnedEff.trendHealth,
+                pullbackQuality: o.pullbackQuality != null ? o.pullbackQuality : learnedEff.pullbackQuality,
+                prob4: o.prob4 != null ? o.prob4 : learnedEff.prob4,
+                swingPotential: o.swingPotential != null ? o.swingPotential : learnedEff.swingPotential
+              } : { trendHealth: learnedEff.trendHealth, pullbackQuality: learnedEff.pullbackQuality, prob4: learnedEff.prob4, swingPotential: learnedEff.swingPotential }
             };
           });
           if (!cancelled) setPatternSettings(rows);
@@ -948,6 +958,30 @@ window.PatternDashboard = (function () {
 
     /* ── Bulk adjust: apply uniform pillar deltas to selected stocks ────── */
 
+    function blendW(lw, b) {
+      var P = ["trendHealth", "pullbackQuality", "prob4", "swingPotential"];
+      var out = {};
+      P.forEach(function (k) { out[k] = Math.round((b * (lw[k] != null ? lw[k] : 0.25) + (1 - b) * 0.25) * 1000) / 1000; });
+      return out;
+    }
+
+    async function persistBlend() {
+      try {
+        await window.PatternStore.init();
+        await window.PatternStore.setWeightBlend(patternBlend);
+        setPatternSettings(function (prev) {
+          return (prev || []).map(function (r) {
+            if (r.enabled) return r;
+            return Object.assign({}, r, { draft: blendW(r.learned, patternBlend) });
+          });
+        });
+        setError("Blend saved: " + Math.round(patternBlend * 100) + "% learned / " + Math.round((1 - patternBlend) * 100) + "% equal");
+        setTimeout(function () { setError(null); }, 2500);
+      } catch (e) {
+        setError("Blend save failed: " + e.message);
+      }
+    }
+
     function toggleBulkSelect(symbol) {
       setBulkSel(function (prev) {
         var n = Object.assign({}, prev);
@@ -1061,7 +1095,7 @@ window.PatternDashboard = (function () {
         React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Pattern Settings"),
           React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
-            "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Off rows keep learned weights. Bulk adjust: tick checkboxes, set per-pillar Δ% (e.g. +10 Trend, -10 Swing), Apply to Selected — deltas are clamped 5-95% and renormalized to 100%. Overrides apply to all pattern-adjusted scoring and travel with backups."
+            "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Off rows keep learned weights. Bulk adjust: tick checkboxes, set per-pillar Δ% (e.g. +10 Trend, -10 Swing), Apply to Selected — deltas are clamped 5-95% and renormalized to 100%. The Learned-weight blend slider mixes learned weights with equal 25% — start low and raise it as you trust the learned profiles. Overrides apply to all pattern-adjusted scoring and travel with backups."
           ),
           React.createElement("div", { style: { marginTop: 10 } },
             React.createElement("input", {
@@ -1107,6 +1141,28 @@ window.PatternDashboard = (function () {
               onClick: handleBulkApply,
               style: { padding: "6px 12px", borderRadius: 6, background: bulkConfirm ? "#dc2626" : "var(--accent, #16a34a)", color: "#fff", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600 }
             }, bulkConfirm ? "Confirm — apply to " + Object.keys(bulkSel).length + "?" : "Apply to Selected")
+          ),
+          React.createElement("div", { style: { marginTop: 8, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" } },
+            React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "var(--text2)" } }, "Learned-weight blend:"),
+            React.createElement("input", {
+              type: "range", min: 0, max: 100, step: 5,
+              value: Math.round(patternBlend * 100),
+              onChange: function (e) { setPatternBlend(parseInt(e.target.value, 10) / 100); },
+              onMouseUp: persistBlend,
+              onTouchEnd: persistBlend,
+              onKeyUp: persistBlend,
+              style: { width: 220 }
+            }),
+            React.createElement("span", { style: { fontSize: 12, color: "var(--text2)", fontFamily: "monospace" } },
+              Math.round(patternBlend * 100) + "% learned / " + Math.round((1 - patternBlend) * 100) + "% equal"
+            ),
+            React.createElement("button", {
+              onClick: function () { setPatternBlend(0.5); persistBlend(); },
+              style: { padding: "4px 10px", borderRadius: 5, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: "pointer", fontSize: 11 }
+            }, "50/50"),
+            React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } },
+              "0% = equal 25% each, 100% = pure learned. Blends the learned weights toward equal before scoring; overrides are unaffected."
+            )
           )
         ),
         React.createElement("div", { style: cardStyle },
@@ -1129,7 +1185,10 @@ window.PatternDashboard = (function () {
                       r.hasPattern ? ("WR " + wr + " · " + r.trades + " trades · " + age) : "no pattern yet — default 25% each"
                     ),
                     React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontFamily: "monospace" } },
-                      "learned: " + ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].map(function (k) { return Math.round((r.learned[k] != null ? r.learned[k] : 0.25) * 100); }).join("/") + "%"
+                      (function () {
+                        var eff = blendW(r.learned, patternBlend);
+                        return "learned: " + ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].map(function (k) { return Math.round(eff[k] * 100); }).join("/") + "%" + (patternBlend < 1 ? " · blend " + Math.round(patternBlend * 100) + "%" : "");
+                      })()
                     )
                   ),
                   React.createElement("label", { style: { fontSize: 12, display: "flex", alignItems: "center", gap: 4 } },

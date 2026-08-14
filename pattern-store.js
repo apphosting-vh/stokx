@@ -26,8 +26,10 @@ window.PatternStore = (function () {
   var STORE_LIVE_FEATURES = "live_features"; // rolling live-market corpus (per symbol)
 
   var _db = null;
-  var KEY_WEIGHT_OVERRIDES = "stox_pattern_weight_overrides";
-  var _weightOverrides = null;
+var KEY_WEIGHT_OVERRIDES = "stox_pattern_weight_overrides";
+var KEY_WEIGHT_BLEND = "stox_pattern_weight_blend";
+var _weightOverrides = null;
+var _weightBlend = null;
 
   /* ── DB Init ──────────────────────────────────────────────────────────── */
   function init() {
@@ -52,6 +54,7 @@ window.PatternStore = (function () {
       req.onsuccess = function (e) {
         _db = e.target.result;
         try { _loadWeightOverrides(); } catch (err) {}
+      try { _loadWeightBlend(); } catch (err) {}
         resolve();
       };
       req.onerror = function (e) {
@@ -183,7 +186,7 @@ window.PatternStore = (function () {
       if (!_db) { reject(new Error("PatternStore not initialized")); return; }
       var t = _tx(STORE_META, "readwrite");
       t.store.clear();
-      t.tx.oncomplete = function () { _weightOverrides = {}; resolve(); };
+      t.tx.oncomplete = function () { _weightOverrides = {}; _weightBlend = null; resolve(); };
       t.tx.onerror = function (e) { reject(e.target.error); };
     });
   }
@@ -603,6 +606,7 @@ window.PatternStore = (function () {
       }
     }
     try { await _loadWeightOverrides(); } catch (e) {}
+    try { await _loadWeightBlend(); } catch (e) {}
     return data.patterns.length;
   }
 
@@ -665,6 +669,36 @@ window.PatternStore = (function () {
     return setMeta(KEY_WEIGHT_OVERRIDES, {});
   }
 
+  /* ── Learned/equal weight blend (Pattern Lab → Pattern Settings) ─────────
+     Global 0-1 fraction: 1 = full learned weights, 0 = equal 25% each.
+     Cached so sync scoring paths can blend cheaply. Default 0.5. */
+
+  function _loadWeightBlend() {
+    _weightBlend = null;
+    return getMeta(KEY_WEIGHT_BLEND).then(function (m) {
+      _weightBlend = (m != null && typeof m === "number" && !isNaN(m)) ? Math.max(0, Math.min(1, m)) : null;
+      return _weightBlend;
+    }).catch(function () {
+      _weightBlend = null;
+      return _weightBlend;
+    });
+  }
+
+  function getWeightBlendSync() {
+    return _weightBlend != null ? _weightBlend : 0.5;
+  }
+
+  function getWeightBlend() {
+    if (_weightBlend != null) return Promise.resolve(_weightBlend);
+    return _loadWeightBlend();
+  }
+
+  function setWeightBlend(v) {
+    var val = Math.max(0, Math.min(1, v == null || isNaN(v) ? 0.5 : Number(v)));
+    _weightBlend = val;
+    return setMeta(KEY_WEIGHT_BLEND, val);
+  }
+
   /* ── Public API ────────────────────────────────────────────────────────── */
   return {
     init: init,
@@ -691,6 +725,9 @@ window.PatternStore = (function () {
     setWeightOverride: setWeightOverride,
     clearWeightOverride: clearWeightOverride,
     clearAllWeightOverrides: clearAllWeightOverrides,
+    getWeightBlendSync: getWeightBlendSync,
+    getWeightBlend: getWeightBlend,
+    setWeightBlend: setWeightBlend,
     getStats: getStats,
     getStalePatterns: getStalePatterns,
     query: query,
