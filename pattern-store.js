@@ -669,8 +669,8 @@ var _weightBlend = null;
     return setMeta(KEY_WEIGHT_OVERRIDES, {});
   }
 
-  /* ── Learned/equal weight blend (Pattern Lab → Pattern Settings) ─────────
-     Global 0-1 fraction: 1 = full learned weights, 0 = equal 25% each.
+  /* ── Learned/calculated weight blend (Pattern Lab → Pattern Settings) ─────
+     Global 0-1 fraction: 1 = full learned weights, 0 = calculated 25% each.
      Cached so sync scoring paths can blend cheaply. Default 0.5. */
 
   function _loadWeightBlend() {

@@ -219,8 +219,8 @@ window.PatternScoring = (function () {
     if (!out) out = stored;
     if (skipBlend) return out;
 
-    /* Learned/equal blend (Pattern Settings slider): 1 = full learned,
-       0 = equal 25% each. Overrides replace this entirely upstream. */
+    /* Learned/calculated blend (Pattern Settings slider): 1 = full learned,
+       0 = calculated 25% each. Overrides replace this entirely upstream. */
     var blend = 0.5;
     try {
       if (window.PatternStore && window.PatternStore.getWeightBlendSync) {

@@ -975,7 +975,7 @@ window.PatternDashboard = (function () {
             return Object.assign({}, r, { draft: blendW(r.learned, patternBlend) });
           });
         });
-        setError("Blend saved: " + Math.round(patternBlend * 100) + "% learned / " + Math.round((1 - patternBlend) * 100) + "% equal");
+        setError("Blend saved: " + Math.round(patternBlend * 100) + "% learned / " + Math.round((1 - patternBlend) * 100) + "% calculated");
         setTimeout(function () { setError(null); }, 2500);
       } catch (e) {
         setError("Blend save failed: " + e.message);
@@ -1095,7 +1095,7 @@ window.PatternDashboard = (function () {
         React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Pattern Settings"),
           React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
-            "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Off rows keep learned weights. Bulk adjust: tick checkboxes, set per-pillar Δ% (e.g. +10 Trend, -10 Swing), Apply to Selected — deltas are clamped 5-95% and renormalized to 100%. The Learned-weight blend slider mixes learned weights with equal 25% — start low and raise it as you trust the learned profiles. Overrides apply to all pattern-adjusted scoring and travel with backups."
+            "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Off rows keep learned weights. Bulk adjust: tick checkboxes, set per-pillar Δ% (e.g. +10 Trend, -10 Swing), Apply to Selected — deltas are clamped 5-95% and renormalized to 100%. The Learned-weight blend slider mixes learned weights with calculated 25% — start low and raise it as you trust the learned profiles. Overrides apply to all pattern-adjusted scoring and travel with backups."
           ),
           React.createElement("div", { style: { marginTop: 10 } },
             React.createElement("input", {
@@ -1154,14 +1154,14 @@ window.PatternDashboard = (function () {
               style: { width: 220 }
             }),
             React.createElement("span", { style: { fontSize: 12, color: "var(--text2)", fontFamily: "monospace" } },
-              Math.round(patternBlend * 100) + "% learned / " + Math.round((1 - patternBlend) * 100) + "% equal"
+              Math.round(patternBlend * 100) + "% learned / " + Math.round((1 - patternBlend) * 100) + "% calculated"
             ),
             React.createElement("button", {
               onClick: function () { setPatternBlend(0.5); persistBlend(); },
               style: { padding: "4px 10px", borderRadius: 5, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: "pointer", fontSize: 11 }
             }, "50/50"),
             React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } },
-              "0% = equal 25% each, 100% = pure learned. Blends the learned weights toward equal before scoring; overrides are unaffected."
+              "0% = calculated 25% each, 100% = pure learned. Blends the learned weights toward the calculated baseline before scoring; overrides are unaffected."
             )
           )
         ),
