@@ -164,27 +164,43 @@
       if (sc && sc.pillarMax) pillarMax = sc.pillarMax;
     }
 
+    // Uniform weights == no re-weighting: the pattern stage is an identity,
+    // i.e. equal pillars keep the base score exactly (P±Δ = 0). Without this,
+    // the normalized-average scale (0-100) diverges from the base raw-sum
+    // scale (35/30/35/20 maxes + modifiers) and fabricates a delta.
+    var firstW = null;
+    var uniformW = true;
+    ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
+      var w = weights[p] != null ? weights[p] : 0.25;
+      if (firstW == null) firstW = w;
+      else if (Math.abs(w - firstW) > 0.001) uniformW = false;
+    });
+
     var totalWeighted = 0;
     var totalWeight = 0;
     var powerBonusTotal = 0;
 
-    ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
-      var w = weights[p] != null ? weights[p] : 0.25;
-      var max = pillarMax[p] || 25;
-      var normalizedPillar = clamp(pillars[p] / max, 0, 1);
-      var weighted = normalizedPillar * w;
-      totalWeighted += weighted;
-      totalWeight += w;
+    if (uniformW) {
+      // Keep the base score; skip the recompute and power bonus entirely.
+    } else {
+      ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
+        var w = weights[p] != null ? weights[p] : 0.25;
+        var max = pillarMax[p] || 25;
+        var normalizedPillar = clamp(pillars[p] / max, 0, 1);
+        var weighted = normalizedPillar * w;
+        totalWeighted += weighted;
+        totalWeight += w;
 
-      if (powers && powers[p] && powers[p].infoValue > 0.01) {
-        var iv = powers[p].infoValue;
-        if (iv > 0.05 && normalizedPillar > 0.5) {
-          powerBonusTotal += iv * normalizedPillar * 2;
+        if (powers && powers[p] && powers[p].infoValue > 0.01) {
+          var iv = powers[p].infoValue;
+          if (iv > 0.05 && normalizedPillar > 0.5) {
+            powerBonusTotal += iv * normalizedPillar * 2;
+          }
         }
-      }
-    });
+      });
+    }
 
-    var baseWeightedScore = totalWeight > 0 ? (totalWeighted / totalWeight) * 100 : compatResult.finalScore;
+    var baseWeightedScore = uniformW ? compatResult.finalScore : (totalWeight > 0 ? (totalWeighted / totalWeight) * 100 : compatResult.finalScore);
     var adjustedScore = clamp(round2(baseWeightedScore + powerBonusTotal), 0, 100);
 
     // ── ML Enhancement (synchronous, using pre-loaded model) ──

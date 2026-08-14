@@ -279,6 +279,25 @@ window.PatternScoring = (function () {
       return { entryScore: baseResult.entryScore || baseResult.entry_score, classification: baseResult.classification };
     }
 
+    // Uniform weights == no re-weighting: the pattern stage is an identity,
+    // i.e. equal pillars keep the base score exactly (P±Δ = 0). Without this,
+    // the normalized-average scale (0-100) diverges from the base raw-sum
+    // scale (35/30/35/20 maxes + modifiers) and fabricates a delta.
+    var firstW = null;
+    var uniformW = true;
+    ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
+      var w = weights[p] != null ? weights[p] : 0.25;
+      if (firstW == null) firstW = w;
+      else if (Math.abs(w - firstW) > 0.001) uniformW = false;
+    });
+    if (uniformW) {
+      return {
+        entryScore: baseResult.entryScore || baseResult.entry_score,
+        classification: baseResult.classification,
+        uniformWeights: true
+      };
+    }
+
     // Extract pillar scores from base result (camelCase — matches TI.computeEntryScore output)
     var pillars = {
       trendHealth: baseResult.trendHealth != null ? baseResult.trendHealth : (baseResult.trend_health != null ? baseResult.trend_health : 0),
