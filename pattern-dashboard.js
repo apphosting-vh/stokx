@@ -160,6 +160,12 @@ window.PatternDashboard = (function () {
     var patternSearch = _pSearch[0], setPatternSearch = _pSearch[1];
     var _rsAll = useState(false);
     var resetAllConfirm = _rsAll[0], setResetAllConfirm = _rsAll[1];
+    var _bulkSel = useState({});
+    var bulkSel = _bulkSel[0], setBulkSel = _bulkSel[1];
+    var _bulkDeltas = useState({ trendHealth: 0, pullbackQuality: 0, prob4: 0, swingPotential: 0 });
+    var bulkDeltas = _bulkDeltas[0], setBulkDeltas = _bulkDeltas[1];
+    var _bulkConfirm = useState(false);
+    var bulkConfirm = _bulkConfirm[0], setBulkConfirm = _bulkConfirm[1];
 
     useEffect(function () {
       if (tab !== "settings") return;
@@ -940,6 +946,102 @@ window.PatternDashboard = (function () {
       }
     }
 
+    /* ── Bulk adjust: apply uniform pillar deltas to selected stocks ────── */
+
+    function toggleBulkSelect(symbol) {
+      setBulkSel(function (prev) {
+        var n = Object.assign({}, prev);
+        if (n[symbol]) delete n[symbol]; else n[symbol] = true;
+        return n;
+      });
+    }
+
+    function bulkSelectRows(rows) {
+      setBulkSel(function (prev) {
+        var n = Object.assign({}, prev);
+        rows.forEach(function (r) { n[r.symbol] = true; });
+        return n;
+      });
+    }
+
+    function bulkClearSel() {
+      setBulkSel({});
+    }
+
+    function bulkDeltaChange(key, val) {
+      var d = Object.assign({}, bulkDeltas);
+      d[key] = val;
+      setBulkDeltas(d);
+    }
+
+    async function handleBulkApply() {
+      var selected = Object.keys(bulkSel).filter(function (k) { return bulkSel[k]; });
+      if (selected.length === 0) {
+        setError("No stocks selected — tick the checkboxes first");
+        setTimeout(function () { setError(null); }, 3000);
+        return;
+      }
+      var P = ["trendHealth", "pullbackQuality", "prob4", "swingPotential"];
+      var hasAny = P.some(function (k) { return (bulkDeltas[k] || 0) !== 0; });
+      if (!hasAny) {
+        setError("Set at least one pillar delta (%) before applying");
+        setTimeout(function () { setError(null); }, 3000);
+        return;
+      }
+      if (!bulkConfirm) {
+        setBulkConfirm(true);
+        setTimeout(function () { setBulkConfirm(false); }, 5000);
+        return;
+      }
+      setBulkConfirm(false);
+      try {
+        await window.PatternStore.init();
+        var ov = await window.PatternStore.getWeightOverrides();
+        var pats = await window.PatternStore.getAll();
+        var patMap = {};
+        pats.forEach(function (p) { if (p && p.symbol) patMap[p.symbol] = p; });
+        var next = {};
+        selected.forEach(function (sym) {
+          var base = {};
+          P.forEach(function (k) {
+            var v = ov[sym] && ov[sym][k] != null ? ov[sym][k] : null;
+            if (v == null && patMap[sym]) {
+              var lw = patMap[sym].indicatorWeights;
+              if (window.PatternScoring && window.PatternScoring.resolveLearnedWeights) {
+                var rlw = window.PatternScoring.resolveLearnedWeights(patMap[sym]);
+                if (rlw) lw = rlw;
+              }
+              v = lw && lw[k] != null ? lw[k] : 0.25;
+            }
+            if (v == null) v = 0.25;
+            base[k] = v;
+          });
+          var nw = {};
+          P.forEach(function (k) {
+            var delta = bulkDeltas[k] || 0;
+            nw[k] = Math.max(0.05, Math.min(0.95, base[k] + delta / 100));
+          });
+          var sum = P.reduce(function (s, k) { return s + nw[k]; }, 0);
+          if (sum > 0) P.forEach(function (k) { nw[k] = Math.round(nw[k] / sum * 1000) / 1000; });
+          next[sym] = nw;
+        });
+        var syms = Object.keys(next);
+        for (var i = 0; i < syms.length; i++) {
+          await window.PatternStore.setWeightOverride(syms[i], next[syms[i]]);
+        }
+        setPatternSettings(function (prev) {
+          return (prev || []).map(function (r) {
+            if (!next[r.symbol]) return r;
+            return Object.assign({}, r, { enabled: true, draft: next[r.symbol] });
+          });
+        });
+        setError("Bulk-applied to " + syms.length + " stock(s)");
+        setTimeout(function () { setError(null); }, 3000);
+      } catch (err) {
+        setError("Bulk apply failed: " + err.message);
+      }
+    }
+
     function renderPatternSettings() {
       if (!patternSettings) {
         return React.createElement("div", { style: cardStyle },
@@ -959,7 +1061,7 @@ window.PatternDashboard = (function () {
         React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Pattern Settings"),
           React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
-            "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Off rows keep learned weights. Overrides apply to all pattern-adjusted scoring and travel with backups."
+            "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Off rows keep learned weights. Bulk adjust: tick checkboxes, set per-pillar Δ% (e.g. +10 Trend, -10 Swing), Apply to Selected — deltas are clamped 5-95% and renormalized to 100%. Overrides apply to all pattern-adjusted scoring and travel with backups."
           ),
           React.createElement("div", { style: { marginTop: 10 } },
             React.createElement("input", {
@@ -975,6 +1077,36 @@ window.PatternDashboard = (function () {
               onClick: handleResetAllPatternSettings,
               style: { padding: "6px 12px", borderRadius: 6, background: resetAllConfirm ? "#dc2626" : "var(--bg3, #f3f4f6)", border: "1px solid " + (resetAllConfirm ? "#dc2626" : "var(--border)"), color: resetAllConfirm ? "#fff" : "var(--text2)", cursor: "pointer", fontSize: 11, fontWeight: 600, marginLeft: 10 }
             }, resetAllConfirm ? "Confirm — reset ALL overrides?" : "Reset All Overrides")
+          ),
+          React.createElement("div", { style: { marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } },
+            React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "var(--text2)" } },
+              "Bulk adjust: " + Object.keys(bulkSel).length + " selected"
+            ),
+            React.createElement("button", {
+              onClick: function () { bulkSelectRows(rows); },
+              style: { padding: "4px 10px", borderRadius: 5, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: "pointer", fontSize: 11 }
+            }, "Select all filtered (" + rows.length + ")"),
+            React.createElement("button", {
+              onClick: bulkClearSel,
+              disabled: Object.keys(bulkSel).length === 0,
+              style: { padding: "4px 10px", borderRadius: 5, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: Object.keys(bulkSel).length === 0 ? "not-allowed" : "pointer", fontSize: 11, opacity: Object.keys(bulkSel).length === 0 ? 0.5 : 1 }
+            }, "Clear"),
+            React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } }, "Δ%:"),
+            [["trendHealth", "Trend"], ["pullbackQuality", "Pullback"], ["prob4", "Prob4"], ["swingPotential", "Swing"]].map(function (bk) {
+              return React.createElement("label", { key: bk[0], style: { fontSize: 11, display: "flex", alignItems: "center", gap: 4, color: "var(--text3)" } },
+                bk[1],
+                React.createElement("input", {
+                  type: "number", min: -100, max: 100, step: 5,
+                  value: bulkDeltas[bk[0]] || 0,
+                  onChange: function (e) { bulkDeltaChange(bk[0], parseInt(e.target.value, 10) || 0); },
+                  style: { width: 62, padding: "4px 6px", borderRadius: 5, border: "1px solid var(--border)", background: "var(--bg1)", color: "var(--text)", fontSize: 12 }
+                })
+              );
+            }),
+            React.createElement("button", {
+              onClick: handleBulkApply,
+              style: { padding: "6px 12px", borderRadius: 6, background: bulkConfirm ? "#dc2626" : "var(--accent, #16a34a)", color: "#fff", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600 }
+            }, bulkConfirm ? "Confirm — apply to " + Object.keys(bulkSel).length + "?" : "Apply to Selected")
           )
         ),
         React.createElement("div", { style: cardStyle },
@@ -985,6 +1117,13 @@ window.PatternDashboard = (function () {
               return React.createElement("div", { key: r.symbol, style: { border: "1px solid " + (r.enabled ? "rgba(22,163,74,.45)" : "var(--border)"), borderRadius: 8, padding: 8, marginBottom: 8, background: r.enabled ? "rgba(22,163,74,.05)" : "transparent" } },
                 React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
                   React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" } },
+                    React.createElement("input", {
+                      type: "checkbox",
+                      checked: !!bulkSel[r.symbol],
+                      onChange: function () { toggleBulkSelect(r.symbol); },
+                      title: "Select for bulk adjust",
+                      style: { accentColor: "var(--accent, #16a34a)" }
+                    }),
                     React.createElement("span", { style: { fontWeight: 700, fontSize: 13 } }, r.symbol),
                     React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } },
                       r.hasPattern ? ("WR " + wr + " · " + r.trades + " trades · " + age) : "no pattern yet — default 25% each"
