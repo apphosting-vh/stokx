@@ -348,10 +348,16 @@ window.BacktestEngine = (function () {
       var bar = candles[idx];
       if (!bar) return null;
       var ts = bar.t;
+      /* Slices via binary search (candles are ascending): conf10dAt runs per
+         scanned bar, so a linear findIndex would be O(N*M) over the run. */
       function sliceBefore(arr) {
         if (!arr) return null;
-        var fi = arr.findIndex(function(b) { return b.t > ts; });
-        return arr.slice(0, fi === -1 ? arr.length : fi);
+        var lo = 0, hi = arr.length;
+        while (lo < hi) {
+          var mid = (lo + hi) >> 1;
+          if (arr[mid].t <= ts) lo = mid + 1; else hi = mid;
+        }
+        return arr.slice(0, lo);
       }
       var hSlice = sliceBefore(tfData.hourly);
       var dSlice = sliceBefore(tfData.daily);

@@ -69,10 +69,16 @@ window.BatchBacktest = (function () {
       /* Try multi-TF scoring if data available */
       var tfData = multiTFMap && symbol ? multiTFMap[symbol] : null;
       if (tfData && (tfData.daily || tfData.hourly || tfData.weekly)) {
+        /* Binary search slice (candles ascending) — scoreAt runs per scanned
+           bar, so a linear findIndex would be O(N*M) over the backtest. */
         function sliceBefore(arr) {
           if (!arr) return null;
-          var fi = arr.findIndex(function(b) { return b.t > ts; });
-          return arr.slice(0, fi === -1 ? arr.length : fi);
+          var lo = 0, hi = arr.length;
+          while (lo < hi) {
+            var mid = (lo + hi) >> 1;
+            if (arr[mid].t <= ts) lo = mid + 1; else hi = mid;
+          }
+          return arr.slice(0, lo);
         }
         var dailySlice = sliceBefore(tfData.daily);
         var hourlySlice = sliceBefore(tfData.hourly);
@@ -135,6 +141,8 @@ window.BatchBacktest = (function () {
     async function runBatch(symbols, opts) {
       opts = opts || {};
       var totalSymbols = symbols.length;
+      _cancelled = false;
+      var errors = [];
 
       // Initialize PatternStore if needed
       if (window.PatternStore) {
@@ -272,6 +280,7 @@ window.BatchBacktest = (function () {
      */
     async function runBatchFromDataMap(dataMap, multiTFMap, indexCandles, opts) {
       opts = opts || {};
+      _cancelled = false;
       var storePatterns = opts.storePatterns !== false;
       var extractFeatures = opts.extractFeatures !== false;
       var symbols = opts.symbols || Object.keys(dataMap);
@@ -352,7 +361,12 @@ window.BatchBacktest = (function () {
           if (opts.onProgress) opts.onProgress(si + 1, totalSymbols, symbol, "analyzing");
 
           if (opts.silent) {
-            results[symbol] = { symbol: symbol, trades: trades, tradeCount: trades.length };
+            results[symbol] = {
+              symbol: symbol,
+              trades: trades,
+              tradeCount: trades.length,
+              winRate: trades.length > 0 ? Math.round(trades.filter(function (t) { return t.hitTarget; }).length / trades.length * 1000) / 10 : 0
+            };
             summary.successCount++;
             summary.totalTrades += trades.length;
             if (opts.onProgress) opts.onProgress(si + 1, totalSymbols, symbol, "done");
@@ -420,7 +434,7 @@ window.BatchBacktest = (function () {
       summary.totalDurationMs = Date.now() - startTime;
       summary.avgWinRate = summary.successCount > 0
         ? round2(Object.values(results).reduce(function (s, p) {
-            return s + (p.tradeStats && p.tradeStats.winRate ? p.tradeStats.winRate : 0);
+            return s + ((p.tradeStats && p.tradeStats.winRate) || p.winRate || 0);
           }, 0) / summary.successCount)
         : 0;
 
@@ -505,9 +519,14 @@ window.BatchBacktest = (function () {
           var validBudget = 1 - erroredCount * 0.1;
           var validSum = valid.reduce(function (s, x) { return s + x.w; }, 0);
           var validScale = validSum > 0 ? validBudget / validSum : 0;
-          valid.forEach(function (x) { indicatorWeights[x.c] = round3(x.w * validScale); });
+          var validKeys = {};
+          valid.forEach(function (x) { validKeys[x.c] = true; indicatorWeights[x.c] = round3(x.w * validScale); });
           ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (c) {
-            if (indicatorWeights[c] == null) indicatorWeights[c] = round3((erroredCount * 0.1) / Math.max(1, erroredCount));
+            // Errored pillars: overwrite the 0.25 default with their 0.1 fair
+            // share so the total always sums to 1.0 (the pre-initialized
+            // default would otherwise leave errored pillars at 0.25, pushing
+            // the sum over 1.0).
+            if (!validKeys[c]) indicatorWeights[c] = round3((erroredCount * 0.1) / Math.max(1, erroredCount));
           });
         }
       }
@@ -618,7 +637,7 @@ window.BatchBacktest = (function () {
       return {
         symbol: symbol,
         backtestDate: Date.now(),
-        backtestVersion: window.__STOX_APP_VERSION || "3.0.37",
+        backtestVersion: window.__STOX_APP_VERSION || "3.0.40",
         indicatorWeights: indicatorWeights,
         indicatorPowers: indicatorPowers,
         calibration: calibration,
@@ -666,6 +685,10 @@ window.BatchBacktest = (function () {
         trades.forEach(function (trade) {
           var entryIdx = featureDateMap[trade.entryDate] != null ? featureDateMap[trade.entryDate] : -1;
           if (entryIdx < 0) return;
+          /* Indicators (BB20, RSI14, ADX14...) have no valid output during
+             warmup — a NaN feature would be dropped at train time. Backtest
+             trades start post-warmup anyway; this is defensive insurance. */
+          if (entryIdx < 20) return;
 
           var close = candles[entryIdx].c;
           features.push({
@@ -674,12 +697,15 @@ window.BatchBacktest = (function () {
             features: {
               rsi: rsi[entryIdx] != null ? round2(rsi[entryIdx]) : 50,
               macd_hist: macd && macd.histogram ? round3(macd.histogram[entryIdx]) : 0,
-              bb_position: (bb.upper && bb.lower) ? round3((close - (bb.lower[entryIdx] || 0)) / Math.max(0.01, (bb.upper[entryIdx] || 0) - (bb.lower[entryIdx] || 0))) : 0.5,
+              bb_position: (bb.upper && bb.lower && bb.upper[entryIdx] != null && bb.lower[entryIdx] != null) ? round3((close - bb.lower[entryIdx]) / Math.max(0.01, bb.upper[entryIdx] - bb.lower[entryIdx])) : 0.5,
               atr_pct: atr[entryIdx] && close > 0 ? round3((atr[entryIdx] / close) * 100) : 0,
-              obv_trend: entryIdx > 0 && obv[entryIdx - 1] ? round3((obv[entryIdx] || 0) / obv[entryIdx - 1]) : 1,
+              /* OBV is cumulative and can go negative/zero — a raw ratio
+                 (obv[i]/obv[i-1]) flips meaning across sign and 0-activity.
+                 Normalize the signed delta by the 20-bar volume SMA instead. */
+              obv_trend: entryIdx > 0 && obv && obv[entryIdx] != null && obv[entryIdx - 1] != null && volSma && volSma[entryIdx] ? round3((obv[entryIdx] - obv[entryIdx - 1]) / Math.max(1, volSma[entryIdx])) : 0,
               supertrend_dir: supertrend && supertrend.trend ? supertrend.trend[entryIdx] : 0,
               adx: adx && adx.adx ? round2(adx.adx[entryIdx] || 0) : 0,
-              ema_slope: emaFast[entryIdx] != null && emaFast[Math.max(0, entryIdx - 3)] != null ? round3((emaFast[entryIdx] - emaFast[Math.max(0, entryIdx - 3)]) / Math.max(0.01, emaFast[Math.max(0, entryIdx - 3)]) * 100) : 0,
+              ema_slope: emaFast[entryIdx] != null && emaFast[Math.max(0, entryIdx - 3)] != null ? round3(Math.max(-100, Math.min(100, (emaFast[entryIdx] - emaFast[Math.max(0, entryIdx - 3)]) / Math.max(0.01, emaFast[Math.max(0, entryIdx - 3)]) * 100))) : 0,
               volume_ratio: volSma && volSma[entryIdx] ? round2(candles[entryIdx].v / Math.max(1, volSma[entryIdx])) : 1,
               entry_score: trade.entryScore || 0
             },

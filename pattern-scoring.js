@@ -442,7 +442,10 @@ window.PatternScoring = (function () {
           ? Math.round(((close - (bbObj.lower[n] || 0)) / Math.max(0.01, (bbObj.upper[n] || 0) - (bbObj.lower[n] || 0))) * 1000) / 1000
           : 0.5,
         atr_pct: atrArr[n] && close > 0 ? Math.round((atrArr[n] / close) * 100 * 1000) / 1000 : 0,
-        obv_trend: n > 0 && obvArr[n - 1] != null && obvArr[n - 1] !== 0 ? Math.round((obvArr[n] || 0) / obvArr[n - 1] * 1000) / 1000 : 1,
+        /* OBV is cumulative and can go negative/zero — a raw ratio flips
+           meaning across sign. Normalize the signed delta by volume SMA20
+           (same convention as extractFeaturesForML). */
+        obv_trend: n > 0 && obvArr[n] != null && obvArr[n - 1] != null && volSma && volSma[n] ? Math.round(((obvArr[n] - obvArr[n - 1]) / Math.max(1, volSma[n])) * 1000) / 1000 : 0,
         supertrend_dir: stObj && stObj.trend ? stObj.trend[n] : 0,
         adx: adxObj && adxObj.adx ? Math.round((adxObj.adx[n] || 0) * 100) / 100 : 0,
         ema_slope: emaFastArr[n] != null && emaFastArr[Math.max(0, n - 3)] != null

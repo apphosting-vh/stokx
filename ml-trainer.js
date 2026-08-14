@@ -648,8 +648,36 @@ window.MLTrainer = (function () {
     for (var fold = 0; fold < numFolds; fold++) {
       var trainEnd = Math.min((fold + 1) * foldSize, validSamples.length);
       var valEnd = Math.min((fold + 2) * foldSize, validSamples.length);
+      /* Last fold: the expanding train window consumes the full foldSize
+         chunk, leaving the validation slice as the tiny remainder
+         (len - numFolds*foldSize, e.g. 17091 - 17090 = 1 sample), which is
+         below the <20 guard and gets skipped — so the newest period is never
+         validated. Instead, hold out the FINAL foldSize chunk for validation
+         and train on everything before it. This keeps the window expanding
+         and scores the most recent data (the period that matters most). */
+      if (fold === numFolds - 1) {
+        trainEnd = Math.max(0, validSamples.length - foldSize);
+        valEnd = validSamples.length;
+      }
+
       var trainSamples = validSamples.slice(0, trainEnd);
       var valSamples = validSamples.slice(trainEnd, valEnd);
+
+      /* Purge window: many symbols share the same entryDate, so same-day
+         samples straddle the fold boundary and a market-wide shock on the
+         boundary date would leak into training. Drop train samples within
+         purgeDays calendar days of the validation window start. */
+      var purgeDays = opts.purgeDays != null ? opts.purgeDays : 7;
+      if (purgeDays > 0 && valSamples.length > 0) {
+        var valStartTs = Date.parse(String(valSamples[0].entryDate || "").slice(0, 10));
+        if (!isNaN(valStartTs)) {
+          var purgeCutoffTs = valStartTs - purgeDays * 86400000;
+          trainSamples = trainSamples.filter(function (s) {
+            var d = Date.parse(String(s.entryDate || "").slice(0, 10));
+            return isNaN(d) || d < purgeCutoffTs;
+          });
+        }
+      }
 
       if (trainSamples.length < minTrainSamples || valSamples.length < 20) {
         onFold(fold + 1, numFolds, { skipped: true, reason: "Insufficient data" });

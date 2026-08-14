@@ -116,7 +116,10 @@ window.LiveML = (function () {
   /* If a symbol's offline snapshot ends before today, fetch the latest daily
      candle(s) live and append bars newer than the snapshot so the newest bar
      is always today's. Returns the original array when nothing is refreshed
-     (identical reference = no refresh, so callers can detect changes). */
+     (identical reference = no refresh, so callers can detect changes). Also
+     writes the appended bars back to the offline IndexedDB record so future
+     collects and the rest of the app (charts, screener) see today's bar
+     instead of re-fetching the same candles repeatedly. */
   async function refreshStaleOffline(symbol, candles, offlineMap) {
     if (!window.OHLCVFetcher || !window.OHLCVFetcher.fetchOHLCVCached) return candles;
     var rec = offlineLookup(offlineMap, symbol);
@@ -131,7 +134,18 @@ window.LiveML = (function () {
       return x && x.t != null && String(x.t).slice(0, 10) > offLast;
     }).slice(-10);
     if (liveNew.length === 0) return candles;
-    return recDaily.concat(liveNew);
+    var merged = recDaily.concat(liveNew);
+    /* Write back to the offline store (v1 records use data, v2 use daily;
+       hourly/weekly untouched). */
+    try {
+      var write = Object.assign({}, rec, { downloadedAt: Date.now() });
+      if (rec.daily != null) write.daily = merged;
+      else write.data = merged;
+      if (window.OfflineOHLCV && window.OfflineOHLCV.put) {
+        await withTimeout(window.OfflineOHLCV.put(write), 5000);
+      }
+    } catch (e) {}
+    return merged;
   }
 
   /* Indicator arrays via TechIndicators. */
