@@ -115,13 +115,24 @@
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
   /**
-   * Effective weights for a pattern: resolved (repaired from powers if the
-   * stored weights are uniform) and blended toward equal 25% per the global
-   * Learned-weight blend setting. Falls back to stored weights if
-   * PatternScoring is unavailable.
+   * Effective weights for a pattern: manual overrides (Pattern Lab →
+   * Pattern Settings) take precedence; otherwise resolved (repaired from
+   * powers if the stored weights are uniform) and blended toward equal 25%
+   * per the global Learned-weight blend setting. Falls back to stored
+   * weights if PatternScoring is unavailable.
    */
   function resolveWeightsForDisplay(pattern) {
     var w = pattern && pattern.indicatorWeights ? pattern.indicatorWeights : null;
+    try {
+      if (window.PatternStore && window.PatternStore.getWeightOverridesSync) {
+        var ov = window.PatternStore.getWeightOverridesSync();
+        if (ov && pattern.symbol) {
+          var sym = pattern.symbol;
+          var ovW = ov[sym] || ov[sym + ".NS"] || ov[sym + ".BO"];
+          if (ovW) return ovW;
+        }
+      }
+    } catch (e) {}
     try {
       if (window.PatternScoring && window.PatternScoring.resolveLearnedWeights) {
         var rlw = window.PatternScoring.resolveLearnedWeights(pattern);
@@ -350,13 +361,18 @@
     window.applyPatternIntel = function (compatResult, symbol) {
       if (!compatResult || !symbol || compatResult._patternApplied) return compatResult;
       var pattern = getPatternFromCache(symbol);
-      if (!window.__patIntelDiagDone) {
-        window.__patIntelDiagDone = true;
-        console.log("[PatIntel] applyPatternIntel called: symbol=" + symbol + ", cacheLoaded=" + _cacheLoaded + ", patternFound=" + !!pattern + ", cacheKeys(count)=" + Object.keys(_patternMemoryCache).length);
-        if (!pattern && _patternMemoryCache && Object.keys(_patternMemoryCache).length > 0) {
-          console.log("[PatIntel] Available cache keys (sample):", Object.keys(_patternMemoryCache).slice(0, 5));
-          console.log("[PatIntel] Tried lookup: '" + symbol + "' -> '" + symbol + ".NS' (fallback)");
-        }
+      if (!pattern) {
+        // Even without a stored pattern, a manual override (Pattern Lab →
+        // Pattern Settings) must still re-weight the score.
+        try {
+          if (window.PatternStore && window.PatternStore.getWeightOverridesSync) {
+            var ov = window.PatternStore.getWeightOverridesSync();
+            if (ov) {
+              var ovW = ov[symbol] || ov[symbol + ".NS"] || ov[symbol + ".BO"];
+              if (ovW) pattern = { symbol: symbol, indicatorWeights: ovW, indicatorPowers: {} };
+            }
+          }
+        } catch (e) {}
       }
       if (pattern) {
         return applyPatternToCompatResult(compatResult, pattern);

@@ -198,7 +198,6 @@ window.PatternDashboard = (function () {
             var o = ov[sym] || null;
             var base = function (k) { return (lw && lw[k] != null) ? lw[k] : 0.25; };
             var learnedRaw = { trendHealth: base("trendHealth"), pullbackQuality: base("pullbackQuality"), prob4: base("prob4"), swingPotential: base("swingPotential") };
-            var learnedEff = blendW(learnedRaw, bl);
             return {
               symbol: sym,
               hasPattern: !!p,
@@ -208,11 +207,11 @@ window.PatternDashboard = (function () {
               backtestDate: p ? (p.backtestDate || null) : null,
               enabled: !!o,
               draft: o ? {
-                trendHealth: o.trendHealth != null ? o.trendHealth : learnedEff.trendHealth,
-                pullbackQuality: o.pullbackQuality != null ? o.pullbackQuality : learnedEff.pullbackQuality,
-                prob4: o.prob4 != null ? o.prob4 : learnedEff.prob4,
-                swingPotential: o.swingPotential != null ? o.swingPotential : learnedEff.swingPotential
-              } : { trendHealth: learnedEff.trendHealth, pullbackQuality: learnedEff.pullbackQuality, prob4: learnedEff.prob4, swingPotential: learnedEff.swingPotential }
+                trendHealth: o.trendHealth != null ? o.trendHealth : learnedRaw.trendHealth,
+                pullbackQuality: o.pullbackQuality != null ? o.pullbackQuality : learnedRaw.pullbackQuality,
+                prob4: o.prob4 != null ? o.prob4 : learnedRaw.prob4,
+                swingPotential: o.swingPotential != null ? o.swingPotential : learnedRaw.swingPotential
+              } : { trendHealth: learnedRaw.trendHealth, pullbackQuality: learnedRaw.pullbackQuality, prob4: learnedRaw.prob4, swingPotential: learnedRaw.swingPotential }
             };
           });
           if (!cancelled) setPatternSettings(rows);
@@ -969,13 +968,7 @@ window.PatternDashboard = (function () {
       try {
         await window.PatternStore.init();
         await window.PatternStore.setWeightBlend(patternBlend);
-        setPatternSettings(function (prev) {
-          return (prev || []).map(function (r) {
-            if (r.enabled) return r;
-            return Object.assign({}, r, { draft: blendW(r.learned, patternBlend) });
-          });
-        });
-        setError("Blend saved: " + Math.round(patternBlend * 100) + "% learned / " + Math.round((1 - patternBlend) * 100) + "% calculated");
+        setError("Blend saved: " + Math.round(patternBlend * 100) + "% learned / " + Math.round((1 - patternBlend) * 100) + "% calculated — overrides unaffected");
         setTimeout(function () { setError(null); }, 2500);
       } catch (e) {
         setError("Blend save failed: " + e.message);
@@ -1042,7 +1035,7 @@ window.PatternDashboard = (function () {
             if (v == null && patMap[sym]) {
               var lw = patMap[sym].indicatorWeights;
               if (window.PatternScoring && window.PatternScoring.resolveLearnedWeights) {
-                var rlw = window.PatternScoring.resolveLearnedWeights(patMap[sym]);
+                var rlw = window.PatternScoring.resolveLearnedWeights(patMap[sym], true);
                 if (rlw) lw = rlw;
               }
               v = lw && lw[k] != null ? lw[k] : 0.25;
@@ -1095,7 +1088,7 @@ window.PatternDashboard = (function () {
         React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Pattern Settings"),
           React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
-            "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Off rows keep learned weights. Bulk adjust: tick checkboxes, set per-pillar Δ% (e.g. +10 Trend, -10 Swing), Apply to Selected — deltas are clamped 5-95% and renormalized to 100%. The Learned-weight blend slider mixes learned weights with calculated 25% — start low and raise it as you trust the learned profiles. Overrides apply to all pattern-adjusted scoring and travel with backups."
+            "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Overrides always win over the blend and start from the raw learned profile (not the blended values). Bulk adjust: tick checkboxes, set per-pillar Δ% (e.g. +10 Trend, -10 Swing), Apply to Selected — deltas are clamped 5-95% and renormalized to 100%. The Learned-weight blend slider mixes learned weights with calculated 25% for non-overridden stocks only. Overrides apply to all pattern-adjusted scoring and travel with backups."
           ),
           React.createElement("div", { style: { marginTop: 10 } },
             React.createElement("input", {

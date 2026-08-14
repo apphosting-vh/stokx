@@ -110,6 +110,19 @@ window.PatternScoring = (function () {
 
     // 2. Load stock pattern
     var pattern = await loadPattern(symbol);
+    if (!pattern) {
+      // Even without a stored pattern, a manual override (Pattern Lab →
+      // Pattern Settings) must still re-weight the score.
+      try {
+        if (window.PatternStore && window.PatternStore.getWeightOverridesSync) {
+          var ovMap = window.PatternStore.getWeightOverridesSync();
+          if (ovMap) {
+            var ovW = ovMap[symbol] || ovMap[symbol + ".NS"] || ovMap[symbol + ".BO"];
+            if (ovW) pattern = { symbol: symbol, indicatorWeights: ovW, indicatorPowers: {} };
+          }
+        }
+      } catch (e) {}
+    }
 
     // 3. Compute pattern-weighted score
     var scoreResult = pattern
