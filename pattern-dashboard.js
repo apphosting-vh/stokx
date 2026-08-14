@@ -939,6 +939,13 @@ window.PatternDashboard = (function () {
         if (window.PatternStore.clearAllWeightOverrides) {
           await window.PatternStore.clearAllWeightOverrides();
         }
+        // Blend is global: reset it to full learned so "Reset All" genuinely
+        // restores the learned profile for every stock. Otherwise a leftover
+        // blend (e.g. 0%) keeps scoring identity and the learned line at 25%.
+        if (window.PatternStore.setWeightBlend) {
+          await window.PatternStore.setWeightBlend(1);
+        }
+        setPatternBlend(1);
         setPatternSettings(function (prev) {
           return (prev || []).map(function (r) {
             var lw = r.learned;
@@ -948,7 +955,7 @@ window.PatternDashboard = (function () {
             });
           });
         });
-        setError("All overrides cleared — every stock back on learned/default weights");
+        setError("All overrides cleared and blend reset to 100% learned — every stock back on its learned weights");
         setTimeout(function () { setError(null); }, 4000);
       } catch (err) {
         setError("Reset failed: " + err.message);
@@ -1181,8 +1188,15 @@ window.PatternDashboard = (function () {
                     ),
                     React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontFamily: "monospace" } },
                       (function () {
+                        var P = ["trendHealth", "pullbackQuality", "prob4", "swingPotential"];
+                        // Always show the RAW learned profile so a low blend can
+                        // never mask it (blend 0% previously rendered 25% for
+                        // every pillar and looked like learned was lost).
+                        var raw = P.map(function (k) { return Math.round((r.learned[k] != null ? r.learned[k] : 0.25) * 100); }).join("/") + "%";
+                        if (patternBlend >= 1) return "learned: " + raw;
                         var eff = blendW(r.learned, patternBlend);
-                        return "learned: " + ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].map(function (k) { return Math.round(eff[k] * 100); }).join("/") + "%" + (patternBlend < 1 ? " · blend " + Math.round(patternBlend * 100) + "%" : "");
+                        var effTxt = P.map(function (k) { return Math.round(eff[k] * 100); }).join("/") + "%";
+                        return "learned: " + raw + " · blend " + Math.round(patternBlend * 100) + "% → eff " + effTxt;
                       })()
                     )
                   ),
