@@ -96,6 +96,44 @@ window.LiveML = (function () {
     return daily;
   }
 
+  /* Today's date as YYYY-MM-DD in IST (same timezone as candle timestamps). */
+  function istToday() {
+    return new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  }
+
+  /* Last bar date (YYYY-MM-DD) of a candle array, or null. */
+  function lastBarDate(candles) {
+    if (!candles || !candles.length) return null;
+    for (var i = candles.length - 1; i >= 0; i--) {
+      if (candles[i] && candles[i].t != null) {
+        var d = String(candles[i].t).slice(0, 10);
+        if (d) return d;
+      }
+    }
+    return null;
+  }
+
+  /* If a symbol's offline snapshot ends before today, fetch the latest daily
+     candle(s) live and append bars newer than the snapshot so the newest bar
+     is always today's. Returns the original array when nothing is refreshed
+     (identical reference = no refresh, so callers can detect changes). */
+  async function refreshStaleOffline(symbol, candles, offlineMap) {
+    if (!window.OHLCVFetcher || !window.OHLCVFetcher.fetchOHLCVCached) return candles;
+    var rec = offlineLookup(offlineMap, symbol);
+    if (!rec) return candles;
+    var recDaily = (rec.daily || rec.data) || null;
+    var offLast = lastBarDate(recDaily);
+    if (!offLast || !(offLast < istToday())) return candles;
+    var liveRes = await withTimeout(window.OHLCVFetcher.fetchOHLCVCached(symbol, "daily"), 15000);
+    var liveC = liveRes && liveRes.data ? liveRes.data : null;
+    if (!liveC || liveC.length === 0) return candles;
+    var liveNew = liveC.filter(function (x) {
+      return x && x.t != null && String(x.t).slice(0, 10) > offLast;
+    }).slice(-10);
+    if (liveNew.length === 0) return candles;
+    return recDaily.concat(liveNew);
+  }
+
   /* Indicator arrays via TechIndicators. */
   function computeIndicators(candles) {
     var TI = window.TechIndicators;
@@ -231,7 +269,7 @@ window.LiveML = (function () {
     onProgress(0, total, "Loading candles (offline first, live fallback capped at 15s/symbol)...");
     var total = universe.length;
     var processed = 0, skipped = 0, newSamples = 0, liveFetches = 0, offlineHits = 0;
-    var fallbackNoted = false;
+    var fallbackNoted = false, staleNoted = false;
 
     var tracker = await getTracker();
     var pendingSymbols = {};
@@ -246,11 +284,29 @@ window.LiveML = (function () {
       try {
         var candles = await loadDailyCandles(symbol, offlineMap);
         if (!candles || candles.length < WARMUP + 3) { skipped++; continue; }
+
+        /* Stale-offline refresh: the offline snapshot (e.g. from yesterday's
+           backtest) only covers up to its last bar. If that bar is older than
+           today, fetch the latest daily candle(s) live and append them so a
+           same-day bar is always collected for every symbol. No live fetch
+           when the snapshot already covers today. */
+        var fromOffline = !!offlineLookup(offlineMap, symbol);
+        if (fromOffline) {
+          var refreshed = await refreshStaleOffline(symbol, candles, offlineMap);
+          if (refreshed !== candles) {
+            candles = refreshed;
+            liveFetches++;
+            if (!staleNoted) {
+              staleNoted = true;
+              onProgress(processed + 1, total, "Offline snapshot older than today — refreshing today's bar live for affected symbols.");
+            }
+          }
+        }
+
         if (pendingSymbols[symbol]) {
           resolveSymbolInTracker(tracker, symbol, candles);
           trackerNeedsSave = true;
         }
-        var fromOffline = !!offlineLookup(offlineMap, symbol);
         if (fromOffline) offlineHits++;
         if (!fromOffline) {
           liveFetches++;
@@ -508,7 +564,7 @@ window.LiveML = (function () {
     } catch (e) {}
     if (!model || !model.network || model.network.inputSize !== window.MLTrainer.FEATURE_KEYS.length) return null;
 
-    var candles = await loadDailyCandles(symbol, offlineMap);
+    var candles = await refreshStaleOffline(symbol, await loadDailyCandles(symbol, offlineMap), offlineMap);
     if (!candles || candles.length < WARMUP + 2) return null;
 
     var ind = computeIndicators(candles);
