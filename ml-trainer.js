@@ -1030,11 +1030,15 @@ window.MLTrainer = (function () {
 
       // Step 3: Record retrain history
       var history = await PatternStore.getMeta("ml_retrain_history") || [];
+      var promoObj = trainResult.promotion || {};
       history.push({
         timestamp: Date.now(),
         walkForwardAcc: trainResult.walkForwardAcc,
-        promoted: trainResult.promotion ? trainResult.promotion.promoted : false,
-        numSamples: trainResult.totalSamples
+        promoted: promoObj.promoted || false,
+        numSamples: trainResult.totalSamples,
+        championScore: promoObj.championScore != null ? promoObj.championScore : null,
+        challengerScore: promoObj.challengerScore != null ? promoObj.challengerScore : null,
+        reason: promoObj.reason || ""
       });
       if (history.length > 20) history = history.slice(-20);
       await PatternStore.setMeta("ml_retrain_history", history);
@@ -1055,6 +1059,8 @@ window.MLTrainer = (function () {
 
   /**
    * Record a prediction for drift tracking.
+   * Also appends a timestamped drift score to ml_drift_history for the
+   * Feature Drift Monitor time-series chart.
    */
   async function recordPrediction(probability) {
     if (!window.PatternStore) return;
@@ -1065,6 +1071,23 @@ window.MLTrainer = (function () {
       // Keep last 500 predictions
       if (recent.predictions.length > 500) recent.predictions = recent.predictions.slice(-500);
       await PatternStore.setMeta("ml_recent_predictions", recent);
+
+      // Append timestamped drift score if we have enough data
+      if (recent.predictions.length >= 20) {
+        var refDist = null;
+        try {
+          var champMeta = await PatternStore.getMeta("ml_model_champion_meta");
+          if (champMeta && champMeta.predictionDistribution) refDist = champMeta.predictionDistribution;
+        } catch (e) {}
+        if (refDist) {
+          var driftResult = detectDrift(recent.predictions, refDist);
+          var driftHistory = await PatternStore.getMeta("ml_drift_history") || [];
+          driftHistory.push({ timestamp: Date.now(), driftScore: driftResult.score, drifted: driftResult.drifted, nPredictions: recent.predictions.length });
+          // Keep last 200 drift score entries
+          if (driftHistory.length > 200) driftHistory = driftHistory.slice(-200);
+          await PatternStore.setMeta("ml_drift_history", driftHistory);
+        }
+      }
     } catch (e) {}
   }
 
@@ -1397,10 +1420,66 @@ window.MLTrainer = (function () {
     }).catch(function () { return null; });
   }
 
-  function invalidateModelCache() { _cachedModel = null; }
+  function invalidateModelCache() {
+    _cachedModel = null;
+    // Eagerly re-load from IndexedDB so subsequent sync calls work
+    _loadModel().catch(function () {});
+  }
 
   /* Synchronous check — true when a model is already loaded in memory (no I/O). */
   function hasCachedModel() { return _cachedModel != null; }
+
+  /* ════════════════════════════════════════════════════════════════════════
+     ML Observability — Drift History & Promotion History
+     ════════════════════════════════════════════════════════════════════════ */
+
+  /**
+   * Get the historical drift scores for the Feature Drift Monitor chart.
+   * Returns { history: [{ timestamp, driftScore, drifted, nPredictions }], currentDrift: {...} }
+   */
+  async function getDriftHistory() {
+    if (!window.PatternStore) return { history: [], currentDrift: null };
+    await PatternStore.init();
+    var history = await PatternStore.getMeta("ml_drift_history") || [];
+
+    // Compute current drift status
+    var currentDrift = null;
+    try {
+      var recentMeta = await PatternStore.getMeta("ml_recent_predictions");
+      var recentPredictions = (recentMeta && recentMeta.predictions) ? recentMeta.predictions : [];
+      var champMeta = await PatternStore.getMeta("ml_model_champion_meta");
+      var refDist = (champMeta && champMeta.predictionDistribution) ? champMeta.predictionDistribution : null;
+      if (recentPredictions.length >= 20 && refDist) {
+        currentDrift = detectDrift(recentPredictions, refDist);
+        currentDrift.nPredictions = recentPredictions.length;
+      } else {
+        currentDrift = { drifted: false, score: 0, reason: recentPredictions.length < 20 ? "Insufficient predictions (" + recentPredictions.length + "/20)" : "No reference distribution", nPredictions: recentPredictions.length };
+      }
+    } catch (e) {}
+
+    return { history: history, currentDrift: currentDrift };
+  }
+
+  /**
+   * Get enriched promotion history with champion vs challenger scores.
+   * Merges ml_retrain_history with ml_model_registry for full context.
+   */
+  async function getPromotionHistory() {
+    if (!window.PatternStore) return { retrainHistory: [], versions: [] };
+    await PatternStore.init();
+    var history = await PatternStore.getMeta("ml_retrain_history") || [];
+    var versions = await getAllModelVersions();
+
+    // Also load the drift history summary for context
+    var driftHistory = await PatternStore.getMeta("ml_drift_history") || [];
+    var lastDrift = driftHistory.length > 0 ? driftHistory[driftHistory.length - 1] : null;
+
+    return {
+      retrainHistory: history,
+      versions: versions,
+      lastDrift: lastDrift
+    };
+  }
 
   /* ════════════════════════════════════════════════════════════════════════
      Public API
@@ -1429,6 +1508,9 @@ window.MLTrainer = (function () {
     detectDrift: detectDrift,
     recordPrediction: recordPrediction,
     // Phase 2: Continuous retrain
-    continuousRetrain: continuousRetrain
+    continuousRetrain: continuousRetrain,
+    // Phase 4: ML Observability
+    getDriftHistory: getDriftHistory,
+    getPromotionHistory: getPromotionHistory
   };
 })();

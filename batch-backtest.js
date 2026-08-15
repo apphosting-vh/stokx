@@ -634,15 +634,34 @@ window.BatchBacktest = (function () {
         scoreDist = { mean: round2(mean), std: round2(Math.sqrt(allScores.reduce(function (s, v) { return s + (v - mean) * (v - mean); }, 0) / (allScores.length - 1))), median: round2(allScores[Math.floor(allScores.length / 2)]) };
       }
 
+      // ── 5. Already-computed engine analytics (calculateStats/equityCurve)
+      //    Persisted verbatim so the Insights tab can render them — no new
+      //    instrumentation, the values already exist on btResult.stats.
+      //    Equity curve points keep only {date, equity} (drop the embedded
+      //    trade objects) to keep the store lean.
+      var scoreBrackets = stats.scoreBrackets || null;
+      var monthlyBreakdown = stats.monthlyBreakdown || null;
+      var equityCurve = stats.equityCurve && stats.equityCurve.curve ? {
+        finalEquity: stats.equityCurve.finalEquity,
+        maxDrawdown: stats.equityCurve.maxDrawdown,
+        sharpeApprox: stats.equityCurve.sharpeApprox,
+        curve: stats.equityCurve.curve.map(function (pt) {
+          return { date: pt.date, equity: pt.equity };
+        })
+      } : null;
+
       return {
         symbol: symbol,
         backtestDate: Date.now(),
-        backtestVersion: window.__STOX_APP_VERSION || "3.0.40",
+        backtestVersion: window.__STOX_APP_VERSION || "3.0.41",
         indicatorWeights: indicatorWeights,
         indicatorPowers: indicatorPowers,
         calibration: calibration,
         regimeBehavior: regimeBehavior,
         scoreDistribution: scoreDist,
+        scoreBrackets: scoreBrackets,
+        monthlyBreakdown: monthlyBreakdown,
+        equityCurve: equityCurve,
         tradeStats: {
           totalTrades: stats.totalSignals != null ? stats.totalSignals : trades.length,
           winRate: stats.winRate || 0,

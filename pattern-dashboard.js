@@ -67,6 +67,492 @@ window.PatternDashboard = (function () {
     return "~20 min";
   }
 
+  /* ── Insights aggregation — every report is derived exclusively from data
+     extractPattern()/calculateStats() already computed and stored per stock.
+     Nothing here re-runs a backtest. ─────────────────────────────────────── */
+
+  var INS_PILLARS = [
+    ["trendHealth", "Trend Health"],
+    ["pullbackQuality", "Pullback Quality"],
+    ["prob4", "4% Prob"],
+    ["swingPotential", "Swing Potential"]
+  ];
+  var INS_BRACKETS = ["STRONG_BUY", "BUY", "WATCHLIST", "NEUTRAL", "AVOID"];
+  var INS_REGIMES = [["low_vol", "Low Volatility"], ["mid_vol", "Mid Volatility"], ["high_vol", "High Volatility"]];
+  var INS_FINITE_PF = "∞";
+
+  function inum(v, d) { return v == null || isNaN(v) ? d : v; }
+
+  /* Re-bucket raw {x, y, n} points into ~8 sorted bins, pooling across
+     stocks whose per-stock calibration used different bucket counts. */
+  function weightedPts(pts) {
+    if (!pts || pts.length < 2) return null;
+    pts.sort(function (a, b) { return a.x - b.x; });
+    var nb = Math.max(2, Math.min(8, Math.floor(pts.length / 3)));
+    var per = Math.max(1, Math.floor(pts.length / nb));
+    var out = [];
+    for (var i = 0; i < pts.length; i += per) {
+      var g = pts.slice(i, i + per);
+      var n = g.reduce(function (s, p) { return s + inum(p.n, 1); }, 0);
+      if (n <= 0) continue;
+      var hits = g.reduce(function (s, p) { return s + (p.y / 100) * inum(p.n, 1); }, 0);
+      var x = g.reduce(function (s, p) { return s + p.x * inum(p.n, 1); }, 0) / n;
+      out.push({ x: Math.round(x * 1000) / 1000, y: Math.round((hits / n) * 1000) / 10, n: Math.round(n) });
+    }
+    return out.length >= 2 ? out : null;
+  }
+
+  /* Same calP0 (50% crossing) / calK (logit slope) derivation used by
+     calibrateConfidence() in backtest-engine.js, applied to pooled buckets. */
+  function deriveCal(buckets) {
+    if (!buckets || buckets.length < 2) return { calP0: null, calK: null };
+    var calP0 = null;
+    for (var j = 1; j < buckets.length; j++) {
+      var a = buckets[j - 1], b = buckets[j];
+      if (a.y < 50 && b.y >= 50) {
+        var denom = b.y - a.y;
+        if (Math.abs(denom) > 0.001) calP0 = Math.round((a.x + ((50 - a.y) / denom) * (b.x - a.x)) * 1000) / 1000;
+        break;
+      }
+    }
+    if (calP0 == null) {
+      calP0 = buckets[buckets.length - 1].y < 50 ? buckets[buckets.length - 1].x : (buckets[0].y >= 50 ? buckets[0].x : 0.38);
+    }
+    var calK = null;
+    var logPts = buckets.filter(function (b) { return b.y > 1 && b.y < 99 && b.x > 0.01 && b.x < 0.99; }).map(function (b) {
+      return { lx: Math.log(b.x / (1 - b.x)), ly: Math.log(b.y / 100 / (1 - b.y / 100)) };
+    });
+    if (logPts.length >= 3) {
+      var sx = 0, sy = 0, sxy = 0, sx2 = 0;
+      logPts.forEach(function (p) { sx += p.lx; sy += p.ly; sxy += p.lx * p.ly; sx2 += p.lx * p.lx; });
+      var den = logPts.length * sx2 - sx * sx;
+      if (Math.abs(den) > 1e-10) calK = Math.max(5, Math.min(100, Math.round(((logPts.length * sxy - sx * sy) / den) * 100) / 100));
+    }
+    if (calK == null) calK = 38;
+    return { calP0: Math.round(calP0 * 1000) / 1000, calK: calK };
+  }
+
+  /* Shape verdict for a reliability curve: flat / inverted / s-shaped / good. */
+  function calShape(buckets) {
+    if (!buckets || buckets.length < 3) return { kind: "insufficient", text: "Not enough buckets to judge the curve shape." };
+    var n = buckets.length, sx = 0, sy = 0, sxy = 0, sx2 = 0;
+    buckets.forEach(function (b) { sx += b.x; sy += b.y; sxy += b.x * b.y; sx2 += b.x * b.x; });
+    var den = n * sx2 - sx * sx;
+    var slope = Math.abs(den) > 1e-10 ? (n * sxy - sx * sy) / den : 0;
+    var first = buckets[0], last = buckets[buckets.length - 1];
+    var span = last.y - first.y;
+    var mae = buckets.reduce(function (s, b) { return s + Math.abs(b.y - b.x * 100); }, 0) / n;
+    if (span <= 8) return { kind: "flat", text: "Hit rate is nearly flat across probTouch (" + span.toFixed(1) + "pt range) — the confidence score does not separate winners from losers. Consider retuning the confidence model." };
+    if (slope < 0.3) return { kind: "weak", text: "Hit rate rises only " + slope.toFixed(2) + "% per probTouch point (slope < 0.3) — weak separation, the score adds little beyond the base rate." };
+    if (last.y < first.y) return { kind: "inverted", text: "Hit rate FALLS as probTouch rises — the confidence score is inverted for this scope. High-probability setups are actually the worst bets." };
+    var well = mae <= 12;
+    return { kind: well ? "good" : "s-shaped", text: well ? "Curve tracks the ideal line closely (avg gap " + mae.toFixed(1) + "pt) — confidence is well calibrated for this scope." : "Curve is monotone but sits " + (mae > 20 ? "far " : "") + "off the ideal line (avg gap " + mae.toFixed(1) + "pt) — S-shaped or systematically optimistic/pessimistic. calP0 below shows the probTouch that actually yields a 50% hit rate." };
+  }
+
+  /* Verdict sentences for the drift / regime / bracket reports. */
+  function stratVerdict(rows) {
+    if (!rows || rows.length < 3) return "Not enough terciles to judge drift separation.";
+    var lo = rows[0].winRate, hi = rows[rows.length - 1].winRate;
+    var gap = hi - lo;
+    if (gap >= 8) return "Drift stratifies well: high-drift setups hit " + hi + "% vs " + lo + "% for low-drift (" + (gap > 0 ? "+" : "") + gap + "pt). High-drift setups are the ones worth trading.";
+    if (gap <= -8) return "Drift is INVERTED: high-drift setups hit " + hi + "% vs " + lo + "% for low-drift. Momentum-chasing setups are actually the weakest — the drift score is misleading here.";
+    return "Drift adds little separation: " + rows.map(function (r) { return r.label.replace("_DRIFT", "") + " " + r.winRate + "%"; }).join(" / ") + " (spread " + (gap > 0 ? "+" : "") + gap + "pt).";
+  }
+
+  function regimeVerdict(rows) {
+    if (!rows || rows.length < 2) return "Not enough regime data to judge.";
+    var lo = rows[0], hi = rows[rows.length - 1];
+    var gap = hi.winRate - lo.winRate;
+    if (gap >= 8) return "StoX performs far better in high-volatility markets: " + hi.winRate + "% win rate in " + hi.label + " vs " + lo.winRate + "% in " + lo.label + ". The profit target is effectively a volatility bet.";
+    if (gap <= -8) return "StoX only works in calm markets: " + lo.winRate + "% win rate in " + lo.label + " vs " + hi.winRate + "% in " + hi.label + ". High-vol entries keep getting caught before the target.";
+    return "Volatility regime barely matters here: " + rows.map(function (r) { return r.label + " " + r.winRate + "%"; }).join(" / ") + " (spread " + (gap > 0 ? "+" : "") + gap + "pt).";
+  }
+
+  function bracketVerdict(rows) {
+    if (!rows || rows.length < 2) return null;
+    var parts = rows.map(function (r) { return r.key + " " + r.winRate + "%"; }).join(" > ");
+    for (var i = 1; i < rows.length; i++) {
+      if (rows[i].winRate < rows[i - 1].winRate - 5) {
+        return "Monotonicity break: " + parts + ". Higher scores did NOT consistently raise the hit rate — the signal boundary between " + rows[i - 1].key + " and " + rows[i].key + " needs attention.";
+      }
+    }
+    return "Monotonic lift: " + parts + ". Higher entry score = higher hit rate, exactly as intended.";
+  }
+
+  function pillarNote(p) {
+    var parts = [];
+    parts.push("r=" + p.correlation + (Math.abs(p.correlation) >= 0.1 ? " (meaningful)" : Math.abs(p.correlation) >= 0.05 ? " (weak)" : " (negligible)"));
+    parts.push("IV=" + p.infoValue + (p.infoValue >= 0.1 ? " (strong)" : p.infoValue >= 0.05 ? " (moderate)" : " (weak)"));
+    if (p.buckets && p.buckets.length >= 2) {
+      var b = p.buckets;
+      var span = b[b.length - 1].winRate - b[0].winRate;
+      if (span <= 6) parts.push("flat bucket curve — pillar does not rank setups");
+      else if (b[b.length - 1].winRate < b[0].winRate) parts.push("INVERTED bucket curve — high pillar scores are worse");
+      else parts.push("bucket curve rises " + (span > 0 ? "+" : "") + span + "pt");
+    }
+    return parts.join(" · ");
+  }
+
+  /* Generic pooling: pull keyed rows out of every pattern and merge them,
+     weighting hit rate / avg return / probTouch by sample count. */
+  function poolGroups(scoped, pick, order, map) {
+    var agg = {}, any = false;
+    scoped.forEach(function (p) {
+      var rows = pick(p);
+      if (!rows) return;
+      rows.forEach(function (r) {
+        if (!r) return;
+        var k = r.key != null ? r.key : (r.label != null ? r.label : r.month);
+        if (k == null) return;
+        var m = map(r);
+        var n = inum(m.n, 0);
+        if (n <= 0) return;
+        any = true;
+        var a = agg[k] = agg[k] || { n: 0, hits: 0, sumRet: 0, sumPT: 0, label: r.label || k };
+        if (!a.label) a.label = r.label || k;
+        a.n += n;
+        a.hits += (inum(m.winRate, 0) / 100) * n;
+        a.sumRet += inum(m.avgReturn, 0) * n;
+        a.sumPT += inum(m.avgProbTouch, 0) * n;
+      });
+    });
+    if (!any) return null;
+    var out = Object.keys(agg).map(function (k) {
+      var a = agg[k];
+      return {
+        key: k,
+        label: a.label || k,
+        n: Math.round(a.n),
+        winRate: Math.round((a.hits / a.n) * 1000) / 10,
+        avgReturn: Math.round((a.sumRet / a.n) * 100) / 100,
+        avgProbTouch: Math.round((a.sumPT / a.n) * 1000) / 1000
+      };
+    });
+    if (order) {
+      out.sort(function (x, y) {
+        var ix = order.indexOf(x.key), iy = order.indexOf(y.key);
+        return (ix < 0 ? 99 : ix) - (iy < 0 ? 99 : iy);
+      });
+    } else {
+      out.sort(function (x, y) { return x.key < y.key ? -1 : x.key > y.key ? 1 : 0; });
+    }
+    return out;
+  }
+
+  /* Indicator power: correlation / info value / bucket win-rate curve,
+     n-weighted across stocks. In single-stock mode the raw quintiles (with
+     min–max ranges) are preserved. */
+  function buildPillars(scoped, single) {
+    if (single) {
+      var o = [];
+      INS_PILLARS.forEach(function (pp) {
+        var key = pp[0], label = pp[1];
+        var pw = single.indicatorPowers && single.indicatorPowers[key];
+        if (!pw) return;
+        var bwr = pw.bucketWinRates || [];
+        o.push({
+          key: key, label: label,
+          n: bwr.reduce(function (s, b) { return s + inum(b.signals, 0); }, 0),
+          correlation: inum(pw.correlation, 0),
+          infoValue: inum(pw.infoValue, 0),
+          buckets: bwr.map(function (b) {
+            return {
+              label: (b.min != null ? b.min : "?") + "–" + (b.max != null ? b.max : "?"),
+              signals: inum(b.signals, 0),
+              winRate: inum(b.winRate, 0),
+              avgReturn: inum(b.avgReturn, 0)
+            };
+          })
+        });
+      });
+      return o;
+    }
+    var out = [];
+    INS_PILLARS.forEach(function (pp) {
+      var key = pp[0], label = pp[1];
+      var aggN = 0, aggCorr = 0, aggIV = 0, buckets = {}, bucketN = {}, maxB = 0;
+      scoped.forEach(function (p) {
+        var pw = p.indicatorPowers && p.indicatorPowers[key];
+        if (!pw) return;
+        var bwr = pw.bucketWinRates || [];
+        var n = bwr.reduce(function (s, b) { return s + inum(b.signals, 0); }, 0);
+        if (n <= 0) return;
+        aggN += n;
+        aggCorr += inum(pw.correlation, 0) * n;
+        aggIV += inum(pw.infoValue, 0) * n;
+        bwr.forEach(function (b, bi) {
+          var bn = inum(b.signals, 0);
+          if (bn <= 0) return;
+          buckets[bi] = (buckets[bi] || 0) + (inum(b.winRate, 0) / 100) * bn;
+          bucketN[bi] = (bucketN[bi] || 0) + bn;
+          if (bi + 1 > maxB) maxB = bi + 1;
+        });
+      });
+      if (!aggN) return;
+      var bList = [];
+      for (var i = 0; i < maxB; i++) {
+        if (!bucketN[i]) continue;
+        bList.push({ label: "Q" + (i + 1), signals: Math.round(bucketN[i]), winRate: Math.round((buckets[i] / bucketN[i]) * 1000) / 10 });
+      }
+      out.push({
+        key: key, label: label, n: aggN,
+        correlation: Math.round((aggCorr / aggN) * 1000) / 1000,
+        infoValue: Math.round((aggIV / aggN) * 1000) / 1000,
+        buckets: bList
+      });
+    });
+    return out;
+  }
+
+  /* Full per-stock trade-stat rows (profitFactor may be the "∞" sentinel). */
+  function buildTradeRows(scoped) {
+    return scoped.map(function (p) {
+      var s = p.tradeStats || {};
+      var eq = p.equityCurve || null;
+      return {
+        symbol: p.symbol,
+        trades: inum(s.totalTrades, 0),
+        winRate: inum(s.winRate, 0),
+        avgReturn: inum(s.avgReturn, 0),
+        avgWin: inum(s.avgWin, 0),
+        avgLoss: inum(s.avgLoss, 0),
+        profitFactor: s.profitFactor,
+        maxConsecWins: inum(s.maxConsecWins, 0),
+        maxConsecLosses: inum(s.maxConsecLosses, 0),
+        avgDaysToTarget: inum(s.avgDaysToTarget, 0),
+        maxDrawdown: inum(s.maxDrawdown, 0),
+        sharpeApprox: inum(s.sharpeApprox, 0),
+        finalEquity: eq ? inum(eq.finalEquity, null) : null
+      };
+    });
+  }
+
+  /* Pooled trade-stats summary across the scope. */
+  function buildAggregate(scoped) {
+    var n = scoped.length, trades = 0, wins = 0, sumRet = 0, sumWR = 0, sumSharpe = 0, pfList = [], ddList = [], maxCW = 0, maxCL = 0, sumDays = 0, daysN = 0;
+    scoped.forEach(function (p) {
+      var s = p.tradeStats || {};
+      var t = inum(s.totalTrades, 0);
+      trades += t;
+      var wr = inum(s.winRate, 0);
+      wins += (wr / 100) * t;
+      sumRet += inum(s.avgReturn, 0) * t;
+      sumWR += wr;
+      sumSharpe += inum(s.sharpeApprox, 0);
+      if (s.profitFactor != null && s.profitFactor !== INS_FINITE_PF && !isNaN(Number(s.profitFactor))) pfList.push(Number(s.profitFactor));
+      var dd = inum(s.maxDrawdown, 0);
+      if (dd > 0) ddList.push(dd);
+      maxCW = Math.max(maxCW, inum(s.maxConsecWins, 0));
+      maxCL = Math.max(maxCL, inum(s.maxConsecLosses, 0));
+      if (inum(s.avgDaysToTarget, 0) > 0) { sumDays += inum(s.avgDaysToTarget, 0); daysN++; }
+    });
+    pfList.sort(function (a, b) { return a - b; });
+    ddList.sort(function (a, b) { return a - b; });
+    return {
+      stocks: n,
+      trades: trades,
+      winRate: trades ? Math.round((wins / trades) * 1000) / 10 : 0,
+      avgReturn: trades ? Math.round((sumRet / trades) * 100) / 100 : 0,
+      avgWinRate: n ? Math.round((sumWR / n) * 10) / 10 : 0,
+      avgSharpe: n ? Math.round((sumSharpe / n) * 100) / 100 : 0,
+      medianPF: pfList.length ? pfList[Math.floor(pfList.length / 2)] : null,
+      medianDD: ddList.length ? ddList[Math.floor(ddList.length / 2)] : null,
+      maxConsecWins: maxCW,
+      maxConsecLosses: maxCL,
+      avgDaysToTarget: daysN ? Math.round((sumDays / daysN) * 10) / 10 : null
+    };
+  }
+
+  /* Single dataset powering the whole Insights tab (pooled or per-stock). */
+  function buildInsightsData(patterns, selectedSymbol) {
+    var scoped = selectedSymbol ? patterns.filter(function (p) { return p && p.symbol === selectedSymbol; }) : patterns;
+    if (!scoped.length) return null;
+    var single = selectedSymbol ? scoped[0] : null;
+
+    // 1 ── Calibration reliability curve
+    var cal = null;
+    if (single) {
+      var g = single.calibration && single.calibration.global;
+      if (g && g.buckets && g.buckets.length) {
+        var bks = g.buckets.map(function (b) { return { x: inum(b.avgProbTouch, 0), y: inum(b.hitRate, 0), n: inum(b.n, 0) }; });
+        cal = { buckets: bks, n: inum(g.n, bks.reduce(function (s, b) { return s + b.n; }, 0)), perStock: null };
+      }
+    } else {
+      var pts = [], per = [];
+      scoped.forEach(function (p) {
+        var g2 = p.calibration && p.calibration.global;
+        if (!g2 || !g2.buckets) return;
+        var sn = 0;
+        g2.buckets.forEach(function (b) {
+          var n = inum(b.n, 0);
+          if (n <= 0) return;
+          sn += n;
+          pts.push({ x: inum(b.avgProbTouch, 0), y: inum(b.hitRate, 0), n: n });
+        });
+        if (sn > 0) per.push({ symbol: p.symbol, calP0: inum(g2.calP0, 0.38), calK: inum(g2.calK, 38), n: sn });
+      });
+      var pooled = weightedPts(pts);
+      if (pooled) cal = { buckets: pooled, n: pts.reduce(function (s, p) { return s + inum(p.n, 0); }, 0), perStock: per.sort(function (a, b) { return a.calP0 - b.calP0; }) };
+    }
+    if (cal) {
+      var d = deriveCal(cal.buckets);
+      cal.calP0 = d.calP0;
+      cal.calK = d.calK;
+      cal.shape = calShape(cal.buckets);
+    }
+
+    // 2 ── Drift-stratified calibration (LOW/MID/HIGH drift terciles)
+    var strat = poolGroups(scoped, function (p) {
+      var s = p.calibration && p.calibration.stratified;
+      return Array.isArray(s) ? s : null;
+    }, ["LOW_DRIFT", "MID_DRIFT", "HIGH_DRIFT"], function (r) {
+      return { n: r.n, winRate: r.hitRate, avgReturn: null, avgProbTouch: r.avgProbTouch };
+    });
+
+    // 3 ── Volatility-regime performance
+    var regimes = poolGroups(scoped, function (p) {
+      var rb = p.regimeBehavior;
+      if (!rb) return null;
+      return INS_REGIMES.filter(function (r) { return rb[r[0]]; }).map(function (r) {
+        var o = rb[r[0]];
+        return Object.assign({ key: r[0], label: r[1] }, o);
+      });
+    }, INS_REGIMES.map(function (r) { return r[0]; }), function (r) {
+      return { n: r.n, winRate: r.winRate, avgReturn: r.avgReturn, avgProbTouch: null };
+    });
+
+    // 4 ── Indicator power
+    var pillars = buildPillars(scoped, single);
+
+    // 5 ── Full trade stats
+    var statRows = buildTradeRows(scoped);
+    var agg = buildAggregate(scoped);
+
+    // 6 ── Signal-bracket lift (entry score monotonicity test)
+    var brackets = poolGroups(scoped, function (p) {
+      if (!p.scoreBrackets) return null;
+      return Object.keys(p.scoreBrackets).map(function (k) {
+        var b = p.scoreBrackets[k];
+        return Object.assign({ key: k }, b);
+      });
+    }, INS_BRACKETS, function (r) {
+      return { n: r.trades, winRate: r.winRate, avgReturn: r.avgReturn, avgProbTouch: null };
+    });
+
+    // 7 ── Monthly breakdown
+    var monthly = poolGroups(scoped, function (p) {
+      return Array.isArray(p.monthlyBreakdown) ? p.monthlyBreakdown : null;
+    }, null, function (r) {
+      return { n: r.trades, winRate: r.winRate, avgReturn: r.avgReturn, avgProbTouch: null };
+    });
+
+    return {
+      mode: single ? "symbol" : "all",
+      symbol: single ? single.symbol : null,
+      single: single,
+      cal: cal,
+      strat: strat,
+      regimes: regimes,
+      pillars: pillars,
+      statRows: statRows,
+      agg: agg,
+      brackets: brackets,
+      monthly: monthly,
+      symbols: patterns.map(function (p) { return p.symbol; })
+    };
+  }
+
+  function numForSort(v) {
+    if (v == null || isNaN(v) || v === "") return -Infinity;
+    if (v === INS_FINITE_PF) return Infinity;
+    return Number(v);
+  }
+
+  function fmtPF(v) {
+    if (v == null || isNaN(Number(v))) return "—";
+    if (v === INS_FINITE_PF || Number(v) === Infinity) return "∞";
+    return Number(v).toFixed(2);
+  }
+
+  function retColor(v) {
+    return v == null || isNaN(v) ? "var(--text3, #9ca3af)" : v > 0 ? "var(--accent, #16a34a)" : v < 0 ? "#ef4444" : "var(--text3, #9ca3af)";
+  }
+
+  function wrColor(v) {
+    return v >= 60 ? "var(--accent, #16a34a)" : v >= 45 ? "#f59e0b" : "#ef4444";
+  }
+
+  /* ── SVG charts (pure, no dependencies) ───────────────────────────────── */
+
+  /* Reliability curve: x = avg probTouch (0–1), y = actual hit rate (0–100),
+     dashed ideal line y = 100x, amber 50% reference. */
+  function calChart(buckets, opts) {
+    opts = opts || {};
+    var W = 640, H = 220, padL = 36, padB = 26, padT = 12, padR = 12;
+    var x0 = padL, x1 = W - padR, y0 = padT, y1 = H - padB;
+    var X = function (x) { return x0 + x * (x1 - x0); };
+    var Y = function (y) { return y1 - (y / 100) * (y1 - y0); };
+    var els = [];
+    [0, 25, 50, 75, 100].forEach(function (g) {
+      els.push(React.createElement("line", { key: "gy" + g, x1: x0, y1: Y(g), x2: x1, y2: Y(g), stroke: g === 50 ? "rgba(245,158,11,.55)" : "var(--border, #e5e7eb)", strokeWidth: 1, strokeDasharray: g === 50 ? "4 3" : null }));
+      els.push(React.createElement("text", { key: "ly" + g, x: x0 - 4, y: Y(g) + 3, fontSize: 9, textAnchor: "end", fill: "var(--text3, #9ca3af)" }, g + "%"));
+    });
+    [0, 0.25, 0.5, 0.75, 1].forEach(function (g) {
+      els.push(React.createElement("text", { key: "lx" + g, x: X(g), y: y1 + 12, fontSize: 9, textAnchor: "middle", fill: "var(--text3, #9ca3af)" }, g));
+    });
+    els.push(React.createElement("line", { key: "ideal", x1: X(0), y1: Y(0), x2: X(1), y2: Y(100), stroke: "var(--text3, #9ca3af)", strokeWidth: 1, strokeDasharray: "5 4" }));
+    if (buckets && buckets.length) {
+      var d = buckets.map(function (b, i) { return (i ? "L" : "M") + X(b.x).toFixed(1) + " " + Y(b.y).toFixed(1); }).join(" ");
+      els.push(React.createElement("path", { key: "line", d: d, fill: "none", stroke: opts.stroke || "#16a34a", strokeWidth: 2 }));
+      buckets.forEach(function (b, i) {
+        els.push(React.createElement("circle", { key: "p" + i, cx: X(b.x), cy: Y(b.y), r: 3.5, fill: opts.stroke || "#16a34a" }));
+        els.push(React.createElement("text", { key: "pt" + i, x: X(b.x) + 5, y: Y(b.y) - 5, fontSize: 9, fill: "var(--text3, #9ca3af)" }, "n=" + b.n));
+      });
+    }
+    els.push(React.createElement("text", { key: "xl", x: x1, y: H - 6, fontSize: 9, textAnchor: "end", fill: "var(--text3, #9ca3af)" }, "avg probTouch →"));
+    els.push(React.createElement("text", { key: "yl", x: 10, y: y0 + 9, fontSize: 9, fill: "var(--text3, #9ca3af)" }, "hit rate %"));
+    return React.createElement("svg", { width: "100%", viewBox: "0 0 " + W + " " + H, style: { display: "block", maxWidth: 660 } }, els);
+  }
+
+  /* Equity curve: equity per trade (chronological), shaded to baseline. */
+  function eqChart(points, opts) {
+    opts = opts || {};
+    if (!points || points.length < 2) return null;
+    var W = 640, H = 200, padL = 44, padB = 22, padT = 10, padR = 12;
+    var x0 = padL, x1 = W - padR, y0 = padT, y1 = H - padB;
+    var eqs = points.map(function (p) { return p.equity; });
+    var min = Math.min.apply(null, eqs), max = Math.max.apply(null, eqs);
+    var lo = Math.min(0, min), hi = Math.max(100, max);
+    var span = (hi - lo) || 1;
+    var X = function (i) { return x0 + (i / (points.length - 1)) * (x1 - x0); };
+    var Y = function (e) { return y1 - (e - lo) / span * (y1 - y0); };
+    var els = [];
+    var steps = 5;
+    for (var g = 0; g <= steps; g++) {
+      var v = lo + (hi - lo) * g / steps;
+      els.push(React.createElement("line", { key: "g" + g, x1: x0, y1: Y(v), x2: x1, y2: Y(v), stroke: "var(--border, #e5e7eb)", strokeWidth: 1 }));
+      els.push(React.createElement("text", { key: "t" + g, x: x0 - 4, y: Y(v) + 3, fontSize: 9, textAnchor: "end", fill: "var(--text3, #9ca3af)" }, Math.round(v)));
+    }
+    var d = points.map(function (p, i) { return (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(p.equity).toFixed(1); }).join(" ");
+    els.push(React.createElement("path", { key: "fill", d: d + " L" + X(points.length - 1).toFixed(1) + " " + Y(lo) + " L" + X(0) + " " + Y(lo) + " Z", fill: "rgba(22,163,74,.08)", stroke: "none" }));
+    els.push(React.createElement("path", { key: "eq", d: d, fill: "none", stroke: opts.stroke || "#16a34a", strokeWidth: 2 }));
+    els.push(React.createElement("text", { key: "x0", x: X(0), y: y1 + 12, fontSize: 9, textAnchor: "start", fill: "var(--text3, #9ca3af)" }, points[0].date || "start"));
+    els.push(React.createElement("text", { key: "x1", x: X(points.length - 1), y: y1 + 12, fontSize: 9, textAnchor: "end", fill: "var(--text3, #9ca3af)" }, points[points.length - 1].date || "end"));
+    return React.createElement("svg", { width: "100%", viewBox: "0 0 " + W + " " + H, style: { display: "block", maxWidth: 660 } }, els);
+  }
+
+  /* Tiny in-cell win-rate bar sparkline for bucket curves. */
+  function sparkBars(vals) {
+    var max = Math.max.apply(null, vals.map(function (v) { return inum(v, 0); }));
+    return React.createElement("div", { style: { display: "flex", alignItems: "flex-end", gap: 3, height: 26 } },
+      vals.map(function (v, i) {
+        var h = max > 0 ? Math.max(2, (inum(v, 0) / max) * 24) : 2;
+        var col = i === 0 ? "#ef4444" : i === vals.length - 1 ? "var(--accent, #16a34a)" : "var(--text3, #9ca3af)";
+        return React.createElement("div", { key: i, title: (vals[i] != null ? vals[i] + "%" : "n/a"), style: { width: 14, height: h, background: col, borderRadius: 2 } });
+      })
+    );
+  }
+
   /* ── Main Dashboard Component ─────────────────────────────────────────── */
 
   function Dashboard(props) {
@@ -130,6 +616,10 @@ window.PatternDashboard = (function () {
     var mlOptimizing = _mlOptimizing[0], setMlOptimizing = _mlOptimizing[1];
     var _mlTrainMode = useState("walkforward");
     var mlTrainMode = _mlTrainMode[0], setMlTrainMode = _mlTrainMode[1];
+    var _mlDriftHistory = useState(null);
+    var mlDriftHistory = _mlDriftHistory[0], setMlDriftHistory = _mlDriftHistory[1];
+    var _mlPromoHistory = useState(null);
+    var mlPromoHistory = _mlPromoHistory[0], setMlPromoHistory = _mlPromoHistory[1];
 
     // Live Expert tab state (must be at component top-level — Rules of Hooks)
     var _liveStatus = useState(null);
@@ -146,6 +636,8 @@ window.PatternDashboard = (function () {
     // Load ML status on mount
     useEffect(function () {
       loadMLStatus();
+      loadMLDriftHistory();
+      loadMLPromoHistory();
       loadLiveStatus();
     }, []);
 
@@ -168,6 +660,12 @@ window.PatternDashboard = (function () {
     var bulkConfirm = _bulkConfirm[0], setBulkConfirm = _bulkConfirm[1];
     var _pBlend = useState(0.5);
     var patternBlend = _pBlend[0], setPatternBlend = _pBlend[1];
+
+    // Insights tab state (must be at component top-level — Rules of Hooks)
+    var _insSym = useState("");
+    var insightsSym = _insSym[0], setInsightsSym = _insSym[1];
+    var _insSort = useState({ key: "sharpeApprox", asc: false });
+    var insightsSort = _insSort[0], setInsightsSort = _insSort[1];
 
     useEffect(function () {
       if (tab !== "settings") return;
@@ -227,6 +725,24 @@ window.PatternDashboard = (function () {
         if (window.MLTrainer && window.MLTrainer.getModelStatus) {
           var status = await window.MLTrainer.getModelStatus();
           setMlStatus(status);
+        }
+      } catch (e) {}
+    }
+
+    async function loadMLDriftHistory() {
+      try {
+        if (window.MLTrainer && window.MLTrainer.getDriftHistory) {
+          var dh = await window.MLTrainer.getDriftHistory();
+          setMlDriftHistory(dh);
+        }
+      } catch (e) {}
+    }
+
+    async function loadMLPromoHistory() {
+      try {
+        if (window.MLTrainer && window.MLTrainer.getPromotionHistory) {
+          var ph = await window.MLTrainer.getPromotionHistory();
+          setMlPromoHistory(ph);
         }
       } catch (e) {}
     }
@@ -690,14 +1206,42 @@ window.PatternDashboard = (function () {
     }
 
     function renderInsights() {
-      if (!report || !patterns || patterns.length === 0) {
+      if (!patterns || patterns.length === 0) {
+        return React.createElement("div", { style: cardStyle },
+          React.createElement("p", { style: { color: "var(--text2)", textAlign: "center" } }, "No insights available yet. Run a batch backtest first.")
+        );
+      }
+      var data = buildInsightsData(patterns, insightsSym);
+      if (!data) {
         return React.createElement("div", { style: cardStyle },
           React.createElement("p", { style: { color: "var(--text2)", textAlign: "center" } }, "No insights available yet.")
         );
       }
+      var symbolOpts = patterns.slice().sort(function (a, b) { return a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0; });
 
       return React.createElement("div", null,
+        // Scope selector — pooled universe or single-stock drill-down
         React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Report Scope"),
+          React.createElement("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10 } },
+            React.createElement("select", {
+              value: insightsSym,
+              onChange: function (e) { setInsightsSym(e.target.value); },
+              style: { padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg1)", color: "var(--text)", fontSize: 12 }
+            },
+              React.createElement("option", { key: "", value: "" }, "All Stocks — pooled (" + patterns.length + ")"),
+              symbolOpts.map(function (p) {
+                return React.createElement("option", { key: p.symbol, value: p.symbol }, p.symbol);
+              })
+            ),
+            React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", lineHeight: 1.4, maxWidth: 560 } },
+              data.single
+                ? "Drill-down: every curve below is " + data.single.symbol + "'s own stored backtest result."
+                : "Every report below is pooled from per-stock data the batch backtest already computed and stored — zero re-instrumentation."
+            )
+          )
+        ),
+        !data.single && report && React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Win Rate Distribution"),
           React.createElement("div", { style: { display: "flex", gap: 4, marginTop: 8, height: 32, alignItems: "flex-end" } },
             Object.keys(report.winRateDistribution || {}).map(function (bucket) {
@@ -712,7 +1256,7 @@ window.PatternDashboard = (function () {
             })
           )
         ),
-        React.createElement("div", { style: cardStyle },
+        !data.single && report && React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Top Predictive Indicators"),
           React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" } },
             Object.keys(report.topIndicators || {}).sort(function (a, b) { return report.topIndicators[b] - report.topIndicators[a]; }).map(function (ind) {
@@ -722,18 +1266,426 @@ window.PatternDashboard = (function () {
             })
           )
         ),
-        React.createElement("div", { style: cardStyle },
-          React.createElement("div", { style: labelStyle }, "Stock Rankings"),
-          React.createElement("div", { style: { maxHeight: 300, overflowY: "auto", marginTop: 8 } },
-            (patterns || []).slice().sort(function (a, b) { return (b.tradeStats ? b.tradeStats.winRate || 0 : 0) - (a.tradeStats ? a.tradeStats.winRate || 0 : 0); }).slice(0, 20).map(function (p, i) {
-              return React.createElement("div", { key: p.symbol, style: { display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--border)" } },
-                React.createElement("span", null, (i + 1) + ". " + p.symbol),
-                React.createElement("span", { style: { fontWeight: 600, color: (p.tradeStats && p.tradeStats.winRate >= 60) ? "var(--accent, #16a34a)" : "var(--text2)" } },
-                  (p.tradeStats ? p.tradeStats.winRate : 0) + "% WR, " + (p.tradeStats ? p.tradeStats.totalTrades : 0) + " trades"
-                )
+        renderInsCalibration(data),
+        renderInsStratified(data),
+        renderInsRegimes(data),
+        renderInsPillars(data),
+        renderInsTradeStats(data),
+        renderInsEquity(data),
+        renderInsBrackets(data),
+        renderInsMonthly(data)
+      );
+    }
+
+    /* ── 1 · Calibration Reliability Curve ─────────────────────────────── */
+
+    function renderInsCalibration(data) {
+      if (!data.cal) {
+        return React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "1 · Calibration Reliability Curve"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4 } }, "No calibration data in scope — a stock needs ≥30 trades with probTouch for its curve to exist.")
+        );
+      }
+      var cal = data.cal;
+      var target = (btConfig && btConfig.targetProfitPct) || 4;
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "1 · Calibration Reliability Curve — is your confidence honest?"),
+        React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+          "Predicted probTouch (x) vs realized +" + target + "% hit rate (y) across " + cal.n + " trades" + (data.single ? "" : " pooled from all stocks") + ". On the dashed ideal line = perfectly calibrated; above the line = under-confident, below = over-confident. calP0 " + cal.calP0 + " is the probTouch that actually produces a 50% hit rate" + (data.single ? "" : " (pooled)") + "; calK " + cal.calK + " is the logit slope."
+        ),
+        calChart(cal.buckets, {}),
+        React.createElement("div", { style: { fontSize: 12, marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", color: "var(--text2)", lineHeight: 1.5 } },
+          cal.shape.text
+        ),
+        cal.perStock && cal.perStock.length > 1 && React.createElement("div", { style: { marginTop: 10 } },
+          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text3)", marginBottom: 4 } }, "calP0 by stock — where each stock's 50% crossing actually sits"),
+          React.createElement("div", { style: { maxHeight: 130, overflowY: "auto" } },
+            cal.perStock.map(function (r) {
+              return React.createElement("div", { key: r.symbol, style: { display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11, borderBottom: "1px solid var(--border)" } },
+                React.createElement("span", { style: { color: "var(--text3)" } }, r.symbol + " (n=" + r.n + ")"),
+                React.createElement("span", { style: { fontWeight: 600 } }, "calP0 " + r.calP0 + " · calK " + r.calK)
               );
             })
           )
+        )
+      );
+    }
+
+    /* ── 2 · Drift-Stratified Calibration ──────────────────────────────── */
+
+    function renderInsStratified(data) {
+      if (!data.strat || !data.strat.length) {
+        return React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "2 · Drift-Stratified Calibration"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4 } }, "No drift stratification in scope — a stock needs ≥30 trades with driftScore.")
+        );
+      }
+      var rows = data.strat;
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "2 · Drift-Stratified Calibration — does drift separate good setups?"),
+        React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+          "Trades split into LOW / MID / HIGH drift terciles. If the confidence model is honest, predicted probTouch and realized hit rate should both rise from low to high drift."
+        ),
+        React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" } },
+          rows.map(function (r) {
+            return React.createElement("div", { key: r.key, style: { flex: 1, minWidth: 170, padding: "10px 12px", borderRadius: 8, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)" } },
+              React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.4 } }, r.label.replace("_DRIFT", "") + " drift"),
+              React.createElement("div", { style: { fontSize: 22, fontWeight: 700, color: wrColor(r.winRate), marginTop: 2 } }, r.winRate + "%"),
+              React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", marginTop: 2 } },
+                "hit rate · n=" + r.n + " · avg probTouch " + r.avgProbTouch
+              )
+            );
+          })
+        ),
+        React.createElement("div", { style: { fontSize: 12, marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", color: "var(--text2)", lineHeight: 1.5 } },
+          stratVerdict(rows)
+        )
+      );
+    }
+
+    /* ── 3 · Volatility-Regime Performance ─────────────────────────────── */
+
+    function renderInsRegimes(data) {
+      if (!data.regimes || !data.regimes.length) {
+        return React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "3 · Volatility-Regime Performance"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4 } }, "No regime data in scope — needs ≥5 trades per ATR tercile per stock.")
+        );
+      }
+      var rows = data.regimes;
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "3 · Volatility-Regime Performance — does StoX only work in calm markets?"),
+        React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+          "Entry-date ATR(14) terciles (computed per stock) split into low / mid / high volatility buckets, with win rate and average return per regime."
+        ),
+        React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" } },
+          rows.map(function (r) {
+            return React.createElement("div", { key: r.key, style: { flex: 1, minWidth: 170, padding: "10px 12px", borderRadius: 8, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)" } },
+              React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text3)" } }, r.label),
+              React.createElement("div", { style: { fontSize: 22, fontWeight: 700, color: wrColor(r.winRate), marginTop: 2 } }, r.winRate + "%"),
+              React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", marginTop: 2 } },
+                "avg return " + (r.avgReturn >= 0 ? "+" : "") + r.avgReturn + "% · n=" + r.n
+              )
+            );
+          })
+        ),
+        React.createElement("div", { style: { fontSize: 12, marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", color: "var(--text2)", lineHeight: 1.5 } },
+          regimeVerdict(rows)
+        )
+      );
+    }
+
+    /* ── 4 · Indicator Power / Info Value ──────────────────────────────── */
+
+    function renderInsPillars(data) {
+      if (!data.pillars || !data.pillars.length) {
+        return React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "4 · Indicator Power / Info Value"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4 } }, "No component-power data in scope — run a batch backtest to populate.")
+        );
+      }
+      var rows = data.pillars;
+      var th = { textAlign: "left", padding: "5px 8px", fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.4, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+      var tdl = { padding: "6px 8px", fontSize: 12, fontWeight: 600, borderBottom: "1px solid var(--border)" };
+      var tdc = { padding: "6px 8px", fontSize: 11, borderBottom: "1px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" };
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "4 · Indicator Power — why did each pillar earn its weight?"),
+        React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+          "Point-biserial correlation with forward hit rate, information value, and the win-rate curve across score buckets. The weights shown in Browse / Pattern Settings are derived from exactly these numbers."
+        ),
+        React.createElement("div", { style: { overflowX: "auto", marginTop: 6 } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null,
+              React.createElement("tr", null,
+                React.createElement("th", { style: th }, "Pillar"),
+                React.createElement("th", { style: th }, "Corr (r)"),
+                React.createElement("th", { style: th }, "Info Value"),
+                React.createElement("th", { style: th }, "N"),
+                React.createElement("th", { style: th }, "Bucket win-rate curve")
+              )
+            ),
+            React.createElement("tbody", null,
+              rows.map(function (p) {
+                var spanTxt = "—";
+                if (p.buckets && p.buckets.length >= 2) {
+                  spanTxt = p.buckets[0].winRate + "% → " + p.buckets[p.buckets.length - 1].winRate + "%";
+                }
+                return React.createElement("tr", { key: p.key },
+                  React.createElement("td", { style: tdl },
+                    React.createElement("div", null, p.label),
+                    React.createElement("div", { style: { fontSize: 10, color: "var(--text3)", fontWeight: 400, lineHeight: 1.4, maxWidth: 240 } }, pillarNote(p))
+                  ),
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 700, color: Math.abs(p.correlation) >= 0.1 ? "var(--accent, #16a34a)" : Math.abs(p.correlation) >= 0.05 ? "#f59e0b" : "var(--text3, #9ca3af)" }) }, p.correlation.toFixed(3)),
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 700, color: p.infoValue >= 0.1 ? "var(--accent, #16a34a)" : p.infoValue >= 0.05 ? "#f59e0b" : "var(--text3, #9ca3af)" }) }, p.infoValue.toFixed(3)),
+                  React.createElement("td", { style: tdc }, p.n),
+                  React.createElement("td", { style: tdc },
+                    React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 } },
+                      sparkBars(p.buckets.map(function (b) { return b.winRate; })),
+                      React.createElement("span", { style: { fontSize: 10, color: "var(--text3)", minWidth: 86, textAlign: "right" } }, spanTxt)
+                    )
+                  )
+                );
+              })
+            )
+          )
+        ),
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8 } },
+          "r ≥ 0.1 = meaningful predictive signal; IV ≥ 0.1 = strong. A rising bucket curve means high pillar scores actually precede wins. Comparing these explains the weight split — e.g. Trend Health at 0.31 vs Swing Potential at 0.19."
+        )
+      );
+    }
+
+    /* ── 5 · Full Trade Stats ──────────────────────────────────────────── */
+
+    function renderInsTradeStats(data) {
+      var rows = data.statRows;
+      var agg = data.agg;
+      var sortKey = insightsSort.key, asc = insightsSort.asc;
+      var sorted = rows.slice().sort(function (a, b) {
+        if (sortKey === "symbol") {
+          var c = String(a.symbol).localeCompare(String(b.symbol));
+          return asc ? c : -c;
+        }
+        var va = numForSort(a[sortKey]), vb = numForSort(b[sortKey]);
+        return asc ? va - vb : vb - va;
+      });
+      var cols = [
+        ["symbol", "Symbol"],
+        ["trades", "Trades"],
+        ["winRate", "Win %"],
+        ["avgReturn", "Avg Ret"],
+        ["profitFactor", "PF"],
+        ["maxDrawdown", "Max DD"],
+        ["maxConsecWins", "W/L streak"],
+        ["avgDaysToTarget", "Days"],
+        ["sharpeApprox", "Sharpe"],
+        ["finalEquity", "Final Eq"]
+      ];
+      var th = { textAlign: "left", padding: "5px 8px", fontSize: 10, color: "var(--text3)", cursor: "pointer", whiteSpace: "nowrap", userSelect: "none", borderBottom: "1px solid var(--border)" };
+      var tdl = { padding: "5px 8px", fontSize: 11, fontWeight: 600, borderBottom: "1px solid var(--border)" };
+      var tdc = { padding: "5px 8px", fontSize: 11, borderBottom: "1px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" };
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "5 · Full Trade Stats"),
+        React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+          "Everything calculateStats() already computed per stock, now rendered: profit factor, consecutive win/loss streaks, days to target, drawdown and Sharpe."
+        ),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10, marginTop: 10 } },
+          statCard("Win Rate", agg.winRate + "%"),
+          statCard("Avg Return", agg.avgReturn + "%"),
+          statCard("Median PF", fmtPF(agg.medianPF)),
+          statCard("Median Max DD", (agg.medianDD != null ? agg.medianDD : "—") + (agg.medianDD != null ? "%" : "")),
+          statCard("Max Streak", agg.maxConsecWins + "W / " + agg.maxConsecLosses + "L"),
+          statCard("Avg Days to Target", agg.avgDaysToTarget != null ? agg.avgDaysToTarget : "—"),
+          statCard("Avg Sharpe", agg.avgSharpe),
+          statCard("Trades", agg.trades + " (" + agg.stocks + " stk)")
+        ),
+        React.createElement("div", { style: { maxHeight: 420, overflowY: "auto", marginTop: 10 } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null,
+              React.createElement("tr", null,
+                cols.map(function (c) {
+                  return React.createElement("th", {
+                    key: c[0],
+                    style: Object.assign({}, th, { color: sortKey === c[0] ? "var(--accent, #16a34a)" : "var(--text3)" }),
+                    onClick: function () { setInsightsSort({ key: c[0], asc: sortKey === c[0] ? !asc : false }); },
+                    title: "Click to sort"
+                  }, c[1] + (sortKey === c[0] ? (asc ? " ↑" : " ↓") : ""));
+                })
+              )
+            ),
+            React.createElement("tbody", null,
+              sorted.slice(0, 60).map(function (r) {
+                return React.createElement("tr", { key: r.symbol },
+                  React.createElement("td", { style: tdl }, r.symbol),
+                  React.createElement("td", { style: tdc }, r.trades),
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 700, color: wrColor(r.winRate) }) }, r.winRate + "%"),
+                  React.createElement("td", { style: Object.assign({}, tdc, { color: retColor(r.avgReturn), fontWeight: 600 }) }, (r.avgReturn >= 0 ? "+" : "") + r.avgReturn + "%"),
+                  React.createElement("td", { style: tdc }, fmtPF(r.profitFactor)),
+                  React.createElement("td", { style: Object.assign({}, tdc, { color: r.maxDrawdown >= 15 ? "#ef4444" : "var(--text2)" }) }, r.maxDrawdown + "%"),
+                  React.createElement("td", { style: tdc }, r.maxConsecWins + "W / " + r.maxConsecLosses + "L"),
+                  React.createElement("td", { style: tdc }, r.avgDaysToTarget != null ? r.avgDaysToTarget : "—"),
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 700, color: r.sharpeApprox >= 0.3 ? "var(--accent, #16a34a)" : r.sharpeApprox < 0 ? "#ef4444" : "var(--text2)" }) }, r.sharpeApprox.toFixed(2)),
+                  React.createElement("td", { style: Object.assign({}, tdc, { color: r.finalEquity != null ? (r.finalEquity >= 100 ? "var(--accent, #16a34a)" : "#ef4444") : "var(--text3)", fontWeight: 600 }) }, r.finalEquity != null ? Math.round(r.finalEquity) : "—")
+                );
+              })
+            )
+          )
+        ),
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8 } },
+          "Click any column header to sort. Showing top " + Math.min(60, sorted.length) + " of " + sorted.length + " stocks." + (data.single ? "" : " Median PF/Max DD are medians across stocks; Win Rate/Avg Return are trade-weighted.")
+        )
+      );
+    }
+
+    /* ── 6 · Equity Curve & Drawdown ───────────────────────────────────── */
+
+    function renderInsEquity(data) {
+      var eq = data.single && data.single.equityCurve;
+      var rowsEq = data.statRows.filter(function (r) { return r.finalEquity != null; });
+      var hasCurve = eq && eq.curve && eq.curve.length > 1;
+      var inner = null;
+      if (hasCurve) {
+        var pts = eq.curve;
+        inner = React.createElement("div", null,
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+            data.single.symbol + " — " + pts.length + " trades, " + pts[0].date + " → " + pts[pts.length - 1].date + ". Final equity " + eq.finalEquity + " (" + (eq.finalEquity >= 100 ? "+" : "") + (eq.finalEquity - 100).toFixed(1) + "%), max drawdown " + eq.maxDrawdown + "%, per-trade Sharpe " + eq.sharpeApprox + "."
+          ),
+          eqChart(pts, {}),
+          React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 6 } },
+            "Shaded region = equity below its running peak; its depth is the drawdown series."
+          )
+        );
+      } else if (rowsEq.length > 0) {
+        var sorted = rowsEq.slice().sort(function (a, b) { return b.finalEquity - a.finalEquity; });
+        var best = sorted[0], worst = sorted[sorted.length - 1];
+        var avgEq = sorted.reduce(function (s, r) { return s + r.finalEquity; }, 0) / sorted.length;
+        var th = { textAlign: "left", padding: "5px 8px", fontSize: 10, color: "var(--text3)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+        var tdl = { padding: "5px 8px", fontSize: 11, fontWeight: 600, borderBottom: "1px solid var(--border)" };
+        var tdc = { padding: "5px 8px", fontSize: 11, borderBottom: "1px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" };
+        inner = React.createElement("div", null,
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+            rowsEq.length + " of " + data.statRows.length + " patterns carry an equity curve (older patterns predate it — rerun the batch to populate). Best: " + best.symbol + " ends at " + best.finalEquity + "; worst: " + worst.symbol + " at " + worst.finalEquity + ". Mean final equity " + Math.round(avgEq * 10) / 10 + " (100 = breakeven)."
+          ),
+          React.createElement("div", { style: { maxHeight: 260, overflowY: "auto", marginTop: 6 } },
+            React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+              React.createElement("thead", null,
+                React.createElement("tr", null,
+                  React.createElement("th", { style: th }, "Symbol"),
+                  React.createElement("th", { style: th }, "Final Equity"),
+                  React.createElement("th", { style: th }, "Max DD"),
+                  React.createElement("th", { style: th }, "Sharpe"),
+                  React.createElement("th", { style: th }, "Win %"),
+                  React.createElement("th", { style: th }, "Trades")
+                )
+              ),
+              React.createElement("tbody", null,
+                sorted.slice(0, 15).map(function (r) {
+                  return React.createElement("tr", { key: r.symbol },
+                    React.createElement("td", { style: tdl }, r.symbol),
+                    React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 700, color: r.finalEquity >= 100 ? "var(--accent, #16a34a)" : "#ef4444" }) }, Math.round(r.finalEquity)),
+                    React.createElement("td", { style: tdc }, r.maxDrawdown + "%"),
+                    React.createElement("td", { style: tdc }, r.sharpeApprox.toFixed(2)),
+                    React.createElement("td", { style: tdc }, r.winRate + "%"),
+                    React.createElement("td", { style: tdc }, r.trades)
+                  );
+                })
+              )
+            )
+          ),
+          React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8 } },
+            "Select a stock above to chart its full equity curve."
+          )
+        );
+      } else {
+        inner = React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4 } },
+          "No equity-curve data stored in scope yet — run a fresh batch backtest to populate it."
+        );
+      }
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "6 · Equity Curve & Drawdown"),
+        inner
+      );
+    }
+
+    /* ── 7 · Signal-Bracket Lift (entry-score monotonicity) ────────────── */
+
+    function renderInsBrackets(data) {
+      if (!data.brackets || !data.brackets.length) {
+        return React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "7 · Signal-Bracket Lift"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4 } }, "No bracket data in scope — older patterns predate it; rerun the batch to populate.")
+        );
+      }
+      var rows = data.brackets;
+      var verdict = bracketVerdict(rows);
+      var th = { textAlign: "left", padding: "5px 8px", fontSize: 10, color: "var(--text3)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+      var tdl = { padding: "6px 8px", fontSize: 12, fontWeight: 700, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+      var tdc = { padding: "6px 8px", fontSize: 11, borderBottom: "1px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" };
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "7 · Signal-Bracket Lift — is your entry score monotonic?"),
+        React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+          "Trades grouped by STRONG_BUY / BUY / WATCHLIST / NEUTRAL. A higher score bracket should come with a higher win rate — this is the direct test of the entry score's monotonicity."
+        ),
+        React.createElement("div", { style: { overflowX: "auto", marginTop: 6 } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null,
+              React.createElement("tr", null,
+                React.createElement("th", { style: th }, "Bracket"),
+                React.createElement("th", { style: th }, "Trades"),
+                React.createElement("th", { style: th }, "Win Rate"),
+                React.createElement("th", { style: th }, "Avg Return")
+              )
+            ),
+            React.createElement("tbody", null,
+              rows.map(function (r) {
+                return React.createElement("tr", { key: r.key },
+                  React.createElement("td", { style: tdl }, r.key),
+                  React.createElement("td", { style: tdc }, r.n),
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 700, color: wrColor(r.winRate) }) }, r.winRate + "%"),
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 600, color: retColor(r.avgReturn) }) }, (r.avgReturn >= 0 ? "+" : "") + r.avgReturn + "%")
+                );
+              })
+            )
+          )
+        ),
+        React.createElement("div", { style: { fontSize: 12, marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", color: "var(--text2)", lineHeight: 1.5 } },
+          verdict
+        )
+      );
+    }
+
+    /* ── 8 · Monthly Breakdown ─────────────────────────────────────────── */
+
+    function renderInsMonthly(data) {
+      if (!data.monthly || !data.monthly.length) {
+        return React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "8 · Monthly Breakdown"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4 } }, "No monthly data in scope — older patterns predate it; rerun the batch to populate.")
+        );
+      }
+      var rows = data.monthly;
+      var maxT = Math.max.apply(null, rows.map(function (r) { return r.trades; }));
+      var th = { textAlign: "left", padding: "5px 8px", fontSize: 10, color: "var(--text3)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+      var tdl = { padding: "6px 8px", fontSize: 12, fontWeight: 600, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+      var tdc = { padding: "6px 8px", fontSize: 11, borderBottom: "1px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" };
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "8 · Monthly Breakdown — seasonality & consistency"),
+        React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+          "Trades pooled by entry month. Reveals seasonal patterns and consistency — a system that only wins in a few months is fragile."
+        ),
+        React.createElement("div", { style: { display: "flex", gap: 4, marginTop: 8, height: 46, alignItems: "flex-end" } },
+          rows.map(function (r) {
+            var h = maxT > 0 ? Math.max(2, (r.trades / maxT) * 40) : 2;
+            return React.createElement("div", { key: r.key, style: { flex: 1, textAlign: "center" } },
+              React.createElement("div", { title: r.key + ": " + r.trades + " trades, " + r.winRate + "% WR, " + (r.avgReturn >= 0 ? "+" : "") + r.avgReturn + "% avg return", style: { height: h, background: wrColor(r.winRate), borderRadius: 2, marginBottom: 2 } }),
+              React.createElement("div", { style: { fontSize: 8, color: "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, r.key)
+            );
+          })
+        ),
+        React.createElement("div", { style: { overflowX: "auto", marginTop: 10 } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null,
+              React.createElement("tr", null,
+                React.createElement("th", { style: th }, "Month"),
+                React.createElement("th", { style: th }, "Trades"),
+                React.createElement("th", { style: th }, "Win Rate"),
+                React.createElement("th", { style: th }, "Avg Return")
+              )
+            ),
+            React.createElement("tbody", null,
+              rows.map(function (r) {
+                return React.createElement("tr", { key: r.key },
+                  React.createElement("td", { style: tdl }, r.key),
+                  React.createElement("td", { style: tdc }, r.trades),
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 700, color: wrColor(r.winRate) }) }, r.winRate + "%"),
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 600, color: retColor(r.avgReturn) }) }, (r.avgReturn >= 0 ? "+" : "") + r.avgReturn + "%")
+                );
+              })
+            )
+          )
+        ),
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8 } },
+          "Bar height = trade count; bar color = that month's win rate."
         )
       );
     }
@@ -1562,6 +2514,8 @@ window.PatternDashboard = (function () {
 
         // Refresh status
         await loadMLStatus();
+        await loadMLDriftHistory();
+        await loadMLPromoHistory();
         setError(null);
       } catch (err) {
         setMlLog(function (prev) {
@@ -1608,6 +2562,8 @@ window.PatternDashboard = (function () {
         });
 
         await loadMLStatus();
+        await loadMLDriftHistory();
+        await loadMLPromoHistory();
       } catch (err) {
         setError("Continuous retrain failed: " + err.message);
       } finally {
@@ -1679,12 +2635,539 @@ window.PatternDashboard = (function () {
       }
     }
 
+    /* ── ML Observability Helpers ──────────────────────────────────────── */
+
+    function buildConfusionMatrix(foldResults) {
+      var tp = 0, fp = 0, fn = 0, tn = 0;
+      if (!foldResults || !foldResults.length) return { tp: 0, fp: 0, fn: 0, tn: 0 };
+      foldResults.forEach(function (fr) {
+        if (!fr.predictions) return;
+        fr.predictions.forEach(function (p) {
+          var predClass = p.predicted >= 0.5 ? 1 : 0;
+          var actual = p.actual;
+          if (predClass === 1 && actual === 1) tp++;
+          else if (predClass === 1 && actual === 0) fp++;
+          else if (predClass === 0 && actual === 1) fn++;
+          else tn++;
+        });
+      });
+      return { tp: tp, fp: fp, fn: fn, tn: tn };
+    }
+
+    function buildReliabilityData(foldResults, nBins) {
+      nBins = nBins || 10;
+      var bins = [];
+      for (var i = 0; i < nBins; i++) bins.push({ sumPred: 0, sumActual: 0, count: 0 });
+      if (!foldResults) return bins;
+      foldResults.forEach(function (fr) {
+        if (!fr.predictions) return;
+        fr.predictions.forEach(function (p) {
+          var binIdx = Math.min(Math.floor(p.predicted * nBins), nBins - 1);
+          bins[binIdx].sumPred += p.predicted;
+          bins[binIdx].sumActual += p.actual;
+          bins[binIdx].count++;
+        });
+      });
+      return bins.map(function (b, i) {
+        return {
+          binStart: i / nBins,
+          binEnd: (i + 1) / nBins,
+          meanPred: b.count > 0 ? b.sumPred / b.count : 0,
+          observedRate: b.count > 0 ? (b.sumActual / b.count) * 100 : 0,
+          count: b.count
+        };
+      }).filter(function (b) { return b.count > 0; });
+    }
+
+    function foldTrendVerdict(foldResults) {
+      if (!foldResults || foldResults.length < 2) return { text: "Need 2+ folds", color: "var(--text3)", cv: 0 };
+      var accs = foldResults.map(function (f) { return f.finalValAcc || 0; });
+      var mean = accs.reduce(function (s, v) { return s + v; }, 0) / accs.length;
+      var variance = accs.reduce(function (s, v) { return s + (v - mean) * (v - mean); }, 0) / accs.length;
+      var std = Math.sqrt(variance);
+      var cv = mean > 0 ? (std / mean) * 100 : 0;
+      if (cv < 5) return { text: "Stable — consistent across time periods", color: "#16a34a", cv: cv };
+      if (cv < 15) return { text: "Moderate variance — some periods harder", color: "#f59e0b", cv: cv };
+      return { text: "High variance — model struggles in certain regimes", color: "#ef4444", cv: cv };
+    }
+
+    function fmtNum(v, d) { return v != null ? Number(v).toFixed(d || 0) : "\u2014"; }
+
+    /* ── ML Observability Renderers ────────────────────────────────────── */
+
+    function renderMLStatusBadge() {
+      var hasIntegration = typeof window.applyPatternIntel === "function";
+      var hasStoredModel = !!(mlStatus && mlStatus.hasModel);
+      var hasLiveML = !!(window.LiveML);
+      var badgeBg = hasIntegration && hasStoredModel ? "#16a34a" : hasIntegration ? "#f59e0b" : "#ef4444";
+      var badgeText = hasIntegration && hasStoredModel ? "ML Active in Scoring" : hasIntegration ? "Integration Loaded (No Model Trained)" : "ML Not in Scoring Path";
+
+      var items = [
+        React.createElement("div", { key: "badge", style: { display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 14px", borderRadius: 20, background: badgeBg + "22", border: "1px solid " + badgeBg, marginBottom: 8 } },
+          React.createElement("div", { style: { width: 8, height: 8, borderRadius: "50%", background: badgeBg } }),
+          React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: badgeBg } }, badgeText)
+        ),
+        React.createElement("div", { key: "detail", style: { fontSize: 12, color: "var(--text3)", lineHeight: 1.6 } },
+          React.createElement("div", null, "applyPatternIntel: " + (hasIntegration ? "loaded" : "missing") + " \u00B7 MLTrainer: " + (window.MLTrainer ? "loaded" : "missing") + " \u00B7 LiveML: " + (hasLiveML ? "loaded (not in scoring path)" : "missing")),
+          React.createElement("div", null, "Champion model stored: " + (hasStoredModel ? "yes" : "no") + " \u00B7 Blend: 75% pattern / 25% ML (or 65/35 if winProb \u2265 0.7)")
+        )
+      ];
+
+      // Side-by-side Rule Score vs ML Score table
+      if (patterns && patterns.length > 0) {
+        var sortedPatterns = patterns.slice().sort(function (a, b) { return a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0; });
+        var rows = sortedPatterns.map(function (p) {
+          if (!p || !p.tradeStats) return null;
+          var ruleScore = p.backtestDate ? Math.round(((p.tradeStats.winRate || 50) / 100) * 100) / 100 : null;
+          var finalScore = p.tradeStats && p.tradeStats.winRate != null ? Math.round(p.tradeStats.winRate) / 100 : null;
+          // Compute ML win probability on the fly from pattern's indicator powers
+          var mlProb = null;
+          if (window.MLTrainer && window.MLTrainer.predictSync && hasStoredModel) {
+            try {
+              var ip = p.indicatorPowers || {};
+              var features = {
+                rsi: ip.trendHealth && ip.trendHealth.correlation != null ? 50 + ip.trendHealth.correlation * 50 : 50,
+                macd_hist: 0,
+                bb_position: 0.5,
+                atr_pct: 3,
+                volume_ratio: 1,
+                ema_slope: 0,
+                adx: ip.trendHealth && ip.trendHealth.correlation != null ? 20 + ip.trendHealth.correlation * 30 : 25
+              };
+              var pred = window.MLTrainer.predictSync(features);
+              if (pred && pred.winProbability != null) mlProb = pred.winProbability;
+            } catch (e) {}
+          }
+          return React.createElement("tr", { key: p.symbol, style: { borderBottom: "1px solid var(--border)" } },
+            React.createElement("td", { style: { padding: "4px 8px", fontWeight: 600, fontSize: 12 } }, p.symbol),
+            React.createElement("td", { style: { padding: "4px 8px", textAlign: "right", fontSize: 12, color: "var(--text3)" } }, ruleScore != null ? (ruleScore * 100).toFixed(1) + "%" : "\u2014"),
+            React.createElement("td", { style: { padding: "4px 8px", textAlign: "right", fontSize: 12, color: mlProb != null ? (mlProb >= 0.55 ? "#16a34a" : mlProb >= 0.45 ? "#f59e0b" : "var(--text3)") : "var(--text3)" } }, mlProb != null ? (mlProb * 100).toFixed(1) + "%" : "\u2014"),
+            React.createElement("td", { style: { padding: "4px 8px", textAlign: "right", fontSize: 12 } }, finalScore != null ? (finalScore * 100).toFixed(1) + "%" : "\u2014")
+          );
+        }).filter(Boolean);
+
+        if (rows.length > 0) {
+          items.push(React.createElement("div", { key: "scores", style: { maxHeight: 300, overflowY: "auto", marginTop: 10 } },
+            React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+              React.createElement("thead", null,
+                React.createElement("tr", null,
+                  ["Symbol", "Rule Score", "ML Win Prob", "Final Score"].map(function (h) {
+                    return React.createElement("th", { key: h, style: { textAlign: h === "Symbol" ? "left" : "right", padding: "4px 8px", fontSize: 11, color: "var(--text3)", fontWeight: 600, position: "sticky", top: 0, background: "var(--bg1)" } }, h);
+                  })
+                )
+              ),
+              React.createElement("tbody", null, rows)
+            )
+          ));
+        }
+      }
+
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "ML Scoring Status"),
+        items
+      );
+    }
+
+    function renderConfusionMatrixAndReliability(championInfo) {
+      var foldResults = championInfo && championInfo.foldResults;
+      if (!foldResults || foldResults.length === 0) {
+        return React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Model Diagnostics"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4 } },
+            "Walk-forward fold data not available — retrain with Walk-Forward to enable confusion matrix and reliability diagnostics."
+          )
+        );
+      }
+
+      var cm = buildConfusionMatrix(foldResults);
+      var total = cm.tp + cm.fp + cm.fn + cm.tn;
+      var precision = (cm.tp + cm.fp) > 0 ? cm.tp / (cm.tp + cm.fp) : 0;
+      var recall = (cm.tp + cm.fn) > 0 ? cm.tp / (cm.tp + cm.fn) : 0;
+      var f1 = (precision + recall) > 0 ? 2 * precision * recall / (precision + recall) : 0;
+      var specificity = (cm.tn + cm.fp) > 0 ? cm.tn / (cm.tn + cm.fp) : 0;
+      var accuracy = total > 0 ? (cm.tp + cm.tn) / total : 0;
+
+      // Aggregate AUC across folds
+      var totalAuc = 0, aucCount = 0;
+      foldResults.forEach(function (fr) { if (fr.auc != null) { totalAuc += fr.auc; aucCount++; } });
+      var avgAuc = aucCount > 0 ? totalAuc / aucCount : 0.5;
+
+      // Reliability data
+      var relData = buildReliabilityData(foldResults, 10);
+
+      // ECE (Expected Calibration Error)
+      var ece = 0, totalPreds = 0;
+      relData.forEach(function (b) {
+        var diff = Math.abs(b.meanPred * 100 - b.observedRate);
+        ece += diff * b.count;
+        totalPreds += b.count;
+      });
+      ece = totalPreds > 0 ? ece / totalPreds : 0;
+
+      // CM table styles
+      var cmTd = { padding: "6px 12px", textAlign: "center", fontSize: 12, fontWeight: 600, minWidth: 50 };
+      var cmTh = Object.assign({}, cmTd, { color: "var(--text3)", fontWeight: 700, fontSize: 11 });
+
+      // Reliability chart dimensions
+      var chartW = 280, chartH = 160, pad = { t: 20, r: 10, b: 30, l: 40 };
+
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "Model Diagnostics (Walk-Forward)"),
+
+        // Confusion Matrix
+        React.createElement("div", { style: { display: "flex", gap: 24, flexWrap: "wrap", marginTop: 8 } },
+          React.createElement("div", null,
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 4 } }, "Confusion Matrix (all folds)"),
+            React.createElement("table", { style: { borderCollapse: "collapse" } },
+              React.createElement("thead", null,
+                React.createElement("tr", null,
+                  React.createElement("th", { style: cmTh }),
+                  React.createElement("th", { style: cmTh }, "Pred Positive"),
+                  React.createElement("th", { style: cmTh }, "Pred Negative")
+                )
+              ),
+              React.createElement("tbody", null,
+                React.createElement("tr", null,
+                  React.createElement("td", { style: Object.assign({}, cmTh, { textAlign: "right" }) }, "Actual +"),
+                  React.createElement("td", { style: Object.assign({}, cmTd, { background: "rgba(22,163,74,0.12)", color: "#16a34a" }) }, cm.tp),
+                  React.createElement("td", { style: Object.assign({}, cmTd, { background: "rgba(239,68,68,0.08)", color: "#ef4444" }) }, cm.fn)
+                ),
+                React.createElement("tr", null,
+                  React.createElement("td", { style: Object.assign({}, cmTh, { textAlign: "right" }) }, "Actual -"),
+                  React.createElement("td", { style: Object.assign({}, cmTd, { background: "rgba(239,68,68,0.08)", color: "#ef4444" }) }, cm.fp),
+                  React.createElement("td", { style: Object.assign({}, cmTd, { background: "rgba(22,163,74,0.12)", color: "#16a34a" }) }, cm.tn)
+                )
+              )
+            )
+          ),
+          React.createElement("div", { style: { fontSize: 12 } },
+            React.createElement("div", { style: { fontWeight: 700, marginBottom: 4 } }, "Derived Metrics"),
+            React.createElement("div", null, "Accuracy: " + (accuracy * 100).toFixed(1) + "%"),
+            React.createElement("div", null, "Precision: " + (precision * 100).toFixed(1) + "%"),
+            React.createElement("div", null, "Recall: " + (recall * 100).toFixed(1) + "%"),
+            React.createElement("div", null, "F1: " + (f1 * 100).toFixed(1) + "%"),
+            React.createElement("div", null, "Specificity: " + (specificity * 100).toFixed(1) + "%"),
+            React.createElement("div", { style: { marginTop: 4, fontWeight: 700 } }, "AUC: " + (avgAuc * 100).toFixed(1) + "%")
+          )
+        ),
+
+        // Reliability Diagram
+        relData.length > 0 && React.createElement("div", { style: { marginTop: 12 } },
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 4 } }, "Reliability Diagram (ECE: " + ece.toFixed(1) + "%)"),
+          React.createElement("svg", { width: chartW, height: chartH, style: { display: "block" } },
+            // Grid
+            React.createElement("line", { x1: pad.l, y1: pad.t, x2: pad.l, y2: chartH - pad.b, stroke: "var(--border)", strokeWidth: 1 }),
+            React.createElement("line", { x1: pad.l, y1: chartH - pad.b, x2: chartW - pad.r, y2: chartH - pad.b, stroke: "var(--border)", strokeWidth: 1 }),
+            // Ideal diagonal
+            React.createElement("line", { x1: pad.l, y1: chartH - pad.b, x2: chartW - pad.r, y2: pad.t, stroke: "var(--text3)", strokeWidth: 1, strokeDasharray: "4,3" }),
+            // Points + line
+            relData.length > 1 && React.createElement("polyline", {
+              points: relData.map(function (b) {
+                var x = pad.l + (b.meanPred) * (chartW - pad.l - pad.r);
+                var y = (chartH - pad.b) - (b.observedRate / 100) * (chartH - pad.t - pad.b);
+                return x + "," + y;
+              }).join(" "),
+              fill: "none", stroke: "#16a34a", strokeWidth: 2
+            }),
+            relData.map(function (b, i) {
+              var x = pad.l + (b.meanPred) * (chartW - pad.l - pad.r);
+              var y = (chartH - pad.b) - (b.observedRate / 100) * (chartH - pad.t - pad.b);
+              return React.createElement("circle", { key: i, cx: x, cy: y, r: 3, fill: "#16a34a" });
+            }),
+            // Axis labels
+            React.createElement("text", { x: pad.l + (chartW - pad.l - pad.r) / 2, y: chartH - 4, textAnchor: "middle", fontSize: 10, fill: "var(--text3)" }, "Mean Predicted"),
+            React.createElement("text", { x: 10, y: pad.t + (chartH - pad.t - pad.b) / 2, textAnchor: "middle", fontSize: 10, fill: "var(--text3)", transform: "rotate(-90,10," + (pad.t + (chartH - pad.t - pad.b) / 2) + ")" }, "Observed Rate")
+          )
+        )
+      );
+    }
+
+    function renderFoldTrend(championInfo) {
+      var foldResults = championInfo && championInfo.foldResults;
+      if (!foldResults || foldResults.length < 2) {
+        return React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Fold-by-Fold Accuracy Trend"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4 } },
+            foldResults && foldResults.length === 1 ? "Only 1 fold completed — need at least 2 for trend analysis." : "Walk-forward fold data not available."
+          )
+        );
+      }
+
+      var verdict = foldTrendVerdict(foldResults);
+      var accs = foldResults.map(function (f) { return f.finalValAcc || 0; });
+      var avgAcc = championInfo.walkForwardAcc || accs.reduce(function (s, v) { return s + v; }, 0) / accs.length;
+      var minAcc = Math.min.apply(null, accs);
+      var maxAcc = Math.max.apply(null, accs);
+      var bestFold = championInfo.bestFold || 1;
+
+      // Chart dimensions
+      var chartW = 320, chartH = 120, pad = { t: 15, r: 10, b: 25, l: 40 };
+      var plotW = chartW - pad.l - pad.r;
+      var plotH = chartH - pad.t - pad.b;
+      var yMin = Math.floor(minAcc / 5) * 5 - 5;
+      var yMax = Math.ceil(maxAcc / 5) * 5 + 5;
+      if (yMax <= yMin + 10) yMax = yMin + 10;
+
+      var points = foldResults.map(function (f, i) {
+        var x = pad.l + (i / (foldResults.length - 1)) * plotW;
+        var y = pad.t + (1 - (f.finalValAcc - yMin) / (yMax - yMin)) * plotH;
+        return { x: x, y: y, acc: f.finalValAcc, fold: f.fold };
+      });
+      var avgY = pad.t + (1 - (avgAcc - yMin) / (yMax - yMin)) * plotH;
+
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "Fold-by-Fold Accuracy Trend"),
+        React.createElement("div", { style: { display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start", marginTop: 8 } },
+          React.createElement("svg", { width: chartW, height: chartH, style: { display: "block" } },
+            // Grid
+            React.createElement("line", { x1: pad.l, y1: pad.t, x2: pad.l, y2: chartH - pad.b, stroke: "var(--border)", strokeWidth: 1 }),
+            React.createElement("line", { x1: pad.l, y1: chartH - pad.b, x2: chartW - pad.r, y2: chartH - pad.b, stroke: "var(--border)", strokeWidth: 1 }),
+            // Average line
+            React.createElement("line", { x1: pad.l, y1: avgY, x2: chartW - pad.r, y2: avgY, stroke: "var(--text3)", strokeWidth: 1, strokeDasharray: "4,3" }),
+            React.createElement("text", { x: chartW - pad.r + 2, y: avgY + 3, fontSize: 9, fill: "var(--text3)" }, avgAcc.toFixed(1) + "%"),
+            // Polyline
+            React.createElement("polyline", {
+              points: points.map(function (p) { return p.x + "," + p.y; }).join(" "),
+              fill: "none", stroke: "#16a34a", strokeWidth: 2
+            }),
+            // Dots
+            points.map(function (p, i) {
+              var color = p.acc >= avgAcc ? "#16a34a" : p.acc >= avgAcc - 5 ? "#f59e0b" : "#ef4444";
+              return React.createElement("circle", { key: i, cx: p.x, cy: p.y, r: 4, fill: color });
+            }),
+            // Fold labels
+            points.map(function (p, i) {
+              return React.createElement("text", { key: "l" + i, x: p.x, y: chartH - pad.b + 12, textAnchor: "middle", fontSize: 9, fill: "var(--text3)" }, "F" + (i + 1));
+            }),
+            React.createElement("text", { x: pad.l + plotW / 2, y: chartH - 2, textAnchor: "middle", fontSize: 9, fill: "var(--text3)" }, "Fold")
+          ),
+          React.createElement("div", { style: { fontSize: 12, minWidth: 120 } },
+            React.createElement("div", { style: { color: verdict.color, fontWeight: 700, marginBottom: 4 } }, verdict.text),
+            React.createElement("div", null, "CV: " + verdict.cv.toFixed(1) + "%"),
+            React.createElement("div", null, "Range: " + minAcc.toFixed(1) + "% \u2013 " + maxAcc.toFixed(1) + "%"),
+            React.createElement("div", null, "Best Fold: #" + bestFold),
+            React.createElement("div", null, "Completed: " + foldResults.length + " folds")
+          )
+        ),
+
+        // Fold detail table
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", marginTop: 10, fontSize: 12 } },
+          React.createElement("thead", null,
+            React.createElement("tr", null,
+              ["Fold", "Train N", "Val N", "Accuracy", "AUC", "F1", "Precision", "Recall"].map(function (h) {
+                return React.createElement("th", { key: h, style: { textAlign: h === "Fold" ? "left" : "right", padding: "3px 6px", fontSize: 11, color: "var(--text3)", fontWeight: 600, borderBottom: "1px solid var(--border)" } }, h);
+              })
+            )
+          ),
+          React.createElement("tbody", null,
+            foldResults.map(function (fr, i) {
+              var isBest = fr.fold === bestFold;
+              var bg = isBest ? "rgba(22,163,74,0.08)" : undefined;
+              return React.createElement("tr", { key: i, style: { background: bg } },
+                React.createElement("td", { style: { padding: "3px 6px", fontWeight: 600 } }, "F" + fr.fold),
+                React.createElement("td", { style: { padding: "3px 6px", textAlign: "right" } }, fmtNum(fr.trainSize)),
+                React.createElement("td", { style: { padding: "3px 6px", textAlign: "right" } }, fmtNum(fr.valSize)),
+                React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", fontWeight: 700, color: fr.finalValAcc >= avgAcc ? "#16a34a" : "#ef4444" } }, fmtNum(fr.finalValAcc, 1) + "%"),
+                React.createElement("td", { style: { padding: "3px 6px", textAlign: "right" } }, fmtNum(fr.auc, 3)),
+                React.createElement("td", { style: { padding: "3px 6px", textAlign: "right" } }, fmtNum(fr.f1, 3)),
+                React.createElement("td", { style: { padding: "3px 6px", textAlign: "right" } }, fmtNum(fr.precision, 3)),
+                React.createElement("td", { style: { padding: "3px 6px", textAlign: "right" } }, fmtNum(fr.recall, 3))
+              );
+            })
+          )
+        )
+      );
+    }
+
+    function renderDriftMonitor() {
+      var hasTrainer = !!(window.MLTrainer);
+      var dh = mlDriftHistory;
+      var currentDrift = dh && dh.currentDrift;
+      var history = dh && dh.history ? dh.history : [];
+
+      var badgeBg = currentDrift && currentDrift.drifted ? "#ef4444" : currentDrift ? "#16a34a" : "var(--text3)";
+      var badgeText = currentDrift ? (currentDrift.drifted ? "Drift Detected" : "No Drift") : "Unknown";
+
+      var items = [
+        React.createElement("div", { key: "badge", style: { display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 14px", borderRadius: 20, background: badgeBg + "22", border: "1px solid " + badgeBg, marginBottom: 8 } },
+          React.createElement("div", { style: { width: 8, height: 8, borderRadius: "50%", background: badgeBg } }),
+          React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: badgeBg } }, badgeText)
+        )
+      ];
+
+      if (currentDrift) {
+        items.push(React.createElement("div", { key: "stats", style: { fontSize: 12, color: "var(--text3)", lineHeight: 1.6, marginBottom: 8 } },
+          React.createElement("span", null, "KL Divergence: " + (currentDrift.score != null ? currentDrift.score.toFixed(3) : "\u2014") + " (threshold: 0.100)"),
+          React.createElement("span", null, " \u00B7 Predictions: " + (currentDrift.nPredictions || 0))
+        ));
+      }
+
+      // Distribution comparison chart
+      if (currentDrift && currentDrift.nPredictions >= 20) {
+        var chartW = 300, chartH = 120, pad = { t: 10, r: 10, b: 25, l: 35 };
+        var recentMeta = null;
+        // We don't have raw recent predictions here, but we can show the drift score as a bar
+        var scoreBar = Math.min(1, (currentDrift.score || 0) / 0.3);
+        items.push(React.createElement("div", { key: "bar", style: { marginTop: 4 } },
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", marginBottom: 2 } }, "Drift Score vs Threshold"),
+          React.createElement("div", { style: { height: 12, background: "var(--bg3)", borderRadius: 6, overflow: "hidden", position: "relative" } },
+            React.createElement("div", { style: { height: "100%", width: (scoreBar * 100) + "%", background: currentDrift.drifted ? "#ef4444" : "#16a34a", borderRadius: 6, transition: "width 0.3s" } }),
+            React.createElement("div", { style: { position: "absolute", left: (0.1 / 0.3 * 100) + "%", top: 0, height: "100%", width: 1, background: "var(--text3)" } })
+          )
+        ));
+      }
+
+      // Time-series chart of historical drift scores
+      if (history.length > 1) {
+        var chartW = 320, chartH = 100, pad = { t: 10, r: 10, b: 20, l: 35 };
+        var plotW = chartW - pad.l - pad.r;
+        var plotH = chartH - pad.t - pad.b;
+        var maxScore = Math.max.apply(null, history.map(function (h) { return h.driftScore || 0; }));
+        maxScore = Math.max(maxScore, 0.15);
+
+        var pts = history.map(function (h, i) {
+          var x = pad.l + (i / (history.length - 1)) * plotW;
+          var y = pad.t + (1 - (h.driftScore || 0) / maxScore) * plotH;
+          return x + "," + y;
+        });
+
+        items.push(React.createElement("div", { key: "ts", style: { marginTop: 8 } },
+          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, marginBottom: 4 } }, "Drift Score Over Time (" + history.length + " samples)"),
+          React.createElement("svg", { width: chartW, height: chartH, style: { display: "block" } },
+            React.createElement("line", { x1: pad.l, y1: pad.t, x2: pad.l, y2: chartH - pad.b, stroke: "var(--border)", strokeWidth: 1 }),
+            React.createElement("line", { x1: pad.l, y1: chartH - pad.b, x2: chartW - pad.r, y2: chartH - pad.b, stroke: "var(--border)", strokeWidth: 1 }),
+            // Threshold line
+            React.createElement("line", { x1: pad.l, y1: pad.t + (1 - 0.1 / maxScore) * plotH, x2: chartW - pad.r, y2: pad.t + (1 - 0.1 / maxScore) * plotH, stroke: "#ef4444", strokeWidth: 1, strokeDasharray: "4,3" }),
+            React.createElement("text", { x: chartW - pad.r + 2, y: pad.t + (1 - 0.1 / maxScore) * plotH + 3, fontSize: 8, fill: "#ef4444" }, "0.1"),
+            // Polyline
+            React.createElement("polyline", { points: pts.join(" "), fill: "none", stroke: "#16a34a", strokeWidth: 1.5 }),
+            // Dots colored by drift status
+            history.map(function (h, i) {
+              var x = pad.l + (i / (history.length - 1)) * plotW;
+              var y = pad.t + (1 - (h.driftScore || 0) / maxScore) * plotH;
+              return React.createElement("circle", { key: i, cx: x, cy: y, r: 2, fill: h.drifted ? "#ef4444" : "#16a34a" });
+            }),
+            React.createElement("text", { x: pad.l + plotW / 2, y: chartH - 4, textAnchor: "middle", fontSize: 9, fill: "var(--text3)" }, "Time")
+          )
+        ));
+      } else if (hasTrainer) {
+        items.push(React.createElement("p", { key: "hint", style: { fontSize: 11, color: "var(--text3)", marginTop: 4 } },
+          "Drift history will appear here as the ML model scores predictions. Each prediction appends a drift score to the time-series."
+        ));
+      }
+
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "Feature Drift Monitor"),
+        items
+      );
+    }
+
+    function renderPromotionHistory() {
+      var ph = mlPromoHistory;
+      var history = ph && ph.retrainHistory ? ph.retrainHistory : [];
+      var versions = ph && ph.versions ? ph.versions : [];
+
+      if (history.length === 0 && versions.length === 0) {
+        return React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Champion / Challenger History"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4 } },
+            "No retrain history — run Continuous Retrain to start tracking promotion decisions."
+          )
+        );
+      }
+
+      // Retrain history table with score comparison
+      var retrainRows = history.slice().reverse().slice(0, 10).map(function (h, i) {
+        var hasScores = h.championScore != null && h.challengerScore != null;
+        var improvement = hasScores ? h.challengerScore - h.championScore : null;
+        return React.createElement("tr", { key: i, style: { borderBottom: "1px solid var(--border)" } },
+          React.createElement("td", { style: { padding: "4px 8px", fontSize: 12 } }, new Date(h.timestamp).toLocaleString()),
+          React.createElement("td", { style: { padding: "4px 8px", fontSize: 12, textAlign: "right", fontWeight: 600 } }, fmtNum(h.walkForwardAcc, 1) + "%"),
+          React.createElement("td", { style: { padding: "4px 8px", fontSize: 12, textAlign: "right", color: "var(--text3)" } }, hasScores ? fmtNum(h.championScore, 1) + "%" : "\u2014"),
+          React.createElement("td", { style: { padding: "4px 8px", fontSize: 12, textAlign: "right", color: "var(--text3)" } }, hasScores ? fmtNum(h.challengerScore, 1) + "%" : "\u2014"),
+          React.createElement("td", { style: { padding: "4px 8px", fontSize: 12, textAlign: "right", color: improvement != null ? (improvement >= 1.0 ? "#16a34a" : improvement >= 0 ? "#f59e0b" : "#ef4444") : "var(--text3)" } }, improvement != null ? (improvement >= 0 ? "+" : "") + improvement.toFixed(1) + "%" : "\u2014"),
+          React.createElement("td", { style: { padding: "4px 8px", fontSize: 12 } },
+            React.createElement("span", { style: { fontWeight: 700, color: h.promoted ? "#16a34a" : "var(--text3)" } }, h.promoted ? "Promoted" : "Kept")
+          ),
+          React.createElement("td", { style: { padding: "4px 8px", fontSize: 11, color: "var(--text3)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, h.reason || "")
+        );
+      });
+
+      // Version timeline (compact)
+      var versionItems = versions.slice(0, 8).map(function (v, i) {
+        var isChamp = v.role === "champion";
+        var bg = isChamp ? "rgba(22,163,74,0.1)" : "var(--bg3)";
+        var border = isChamp ? "1px solid #16a34a" : "1px solid var(--border)";
+        return React.createElement("div", { key: i, style: { padding: "4px 8px", borderRadius: 6, background: bg, border: border, fontSize: 11 } },
+          React.createElement("span", { style: { fontWeight: 700 } }, v.versionId || "?"),
+          " \u00B7 " + fmtNum(v.walkForwardAcc || v.finalValAcc, 1) + "%",
+          " \u00B7 " + (v.role || "candidate"),
+          v.savedAt ? " \u00B7 " + new Date(v.savedAt).toLocaleDateString() : ""
+        );
+      });
+
+      // Promotion threshold visualization
+      var thresholdBar = null;
+      var lastEntry = history.length > 0 ? history[history.length - 1] : null;
+      if (lastEntry && lastEntry.championScore != null && lastEntry.challengerScore != null) {
+        var cScore = lastEntry.championScore;
+        var chScore = lastEntry.challengerScore;
+        var improvement = chScore - cScore;
+        var barMax = Math.max(cScore, chScore, 80) + 5;
+        var barMin = Math.max(0, Math.min(cScore, chScore) - 5);
+        var barRange = barMax - barMin;
+        var champX = ((cScore - barMin) / barRange) * 100;
+        var challX = ((chScore - barMin) / barRange) * 100;
+
+        thresholdBar = React.createElement("div", { style: { marginTop: 10 } },
+          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, marginBottom: 4 } }, "Last Promotion Attempt"),
+          React.createElement("div", { style: { position: "relative", height: 24, background: "var(--bg3)", borderRadius: 4 } },
+            React.createElement("div", { style: { position: "absolute", left: champX + "%", top: 0, width: 2, height: "100%", background: "var(--text3)" } }),
+            React.createElement("div", { style: { position: "absolute", left: challX + "%", top: 0, width: 2, height: "100%", background: improvement >= 1.0 ? "#16a34a" : "#ef4444" } }),
+            React.createElement("div", { style: { position: "absolute", left: Math.min(champX, challX) + "%", top: 9, width: Math.abs(challX - champX) + "%", height: 6, background: improvement >= 1.0 ? "#16a34a" : "#f59e0b", borderRadius: 3 } }),
+            React.createElement("div", { style: { position: "absolute", left: champX + "%", bottom: -14, fontSize: 9, color: "var(--text3)", transform: "translateX(-50%)" } }, "Champ " + cScore.toFixed(1)),
+            React.createElement("div", { style: { position: "absolute", left: challX + "%", bottom: -14, fontSize: 9, color: "var(--text3)", transform: "translateX(-50%)" } }, "Chall " + chScore.toFixed(1))
+          ),
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", marginTop: 14 } },
+            "Gap: " + (improvement >= 0 ? "+" : "") + improvement.toFixed(1) + "% (need \u2265 1.0%)"
+          )
+        );
+      }
+
+      return React.createElement("div", { style: cardStyle },
+        React.createElement("div", { style: labelStyle }, "Champion / Challenger History"),
+
+        thresholdBar,
+
+        retrainRows.length > 0 && React.createElement("div", { style: { marginTop: 10 } },
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 4 } }, "Retrain History"),
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null,
+              React.createElement("tr", null,
+                ["Date", "WF Acc", "Champion", "Challenger", "Gap", "Verdict", "Reason"].map(function (h) {
+                  return React.createElement("th", { key: h, style: { textAlign: h === "Date" || h === "Reason" ? "left" : "right", padding: "3px 6px", fontSize: 11, color: "var(--text3)", fontWeight: 600, borderBottom: "1px solid var(--border)" } }, h);
+                })
+              )
+            ),
+            React.createElement("tbody", null, retrainRows)
+          )
+        ),
+
+        versionItems.length > 0 && React.createElement("div", { style: { marginTop: 10 } },
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 4 } }, "Version Timeline"),
+          React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } }, versionItems)
+        )
+      );
+    }
+
     function renderMLEngine() {
       var hasML = !!(window.MLTrainer);
       var hasOptimizer = !!(window.MLOptimizer);
       var championInfo = mlStatus && mlStatus.champion;
 
       return React.createElement("div", null,
+        // ML Scoring Status (Report 1)
+        renderMLStatusBadge(),
         // Model Status
         React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Model Status"),
@@ -1749,20 +3232,14 @@ window.PatternDashboard = (function () {
             style: { padding: "8px 16px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: (mlTraining || mlOptimizing) ? "not-allowed" : "pointer", marginTop: 8 }
           }, mlOptimizing ? "Optimizing..." : "Optimize Backtest Config (Bayesian)")
         ),
-        // Retrain History
-        mlStatus && mlStatus.retrainHistory && mlStatus.retrainHistory.length > 0 && React.createElement("div", { style: cardStyle },
-          React.createElement("div", { style: labelStyle }, "Retrain History"),
-          React.createElement("div", { style: { maxHeight: 150, overflowY: "auto", marginTop: 8 } },
-            mlStatus.retrainHistory.slice().reverse().slice(0, 10).map(function (h, i) {
-              return React.createElement("div", { key: i, style: { display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--border)", fontSize: 12 } },
-                React.createElement("span", null, new Date(h.timestamp).toLocaleString()),
-                React.createElement("span", { style: { fontWeight: 600, color: h.promoted ? "var(--accent, #16a34a)" : "var(--text2)" } },
-                  h.walkForwardAcc + "% WR" + (h.promoted ? " (Promoted)" : "")
-                )
-              );
-            })
-          )
-        ),
+        // Fold-by-Fold Accuracy Trend (Report 3)
+        renderFoldTrend(championInfo),
+        // Model Diagnostics — Confusion Matrix + Reliability (Report 2)
+        renderConfusionMatrixAndReliability(championInfo),
+        // Feature Drift Monitor (Report 4)
+        renderDriftMonitor(),
+        // Champion / Challenger History (Report 5)
+        renderPromotionHistory(),
         // ML Log
         mlLog.length > 0 && React.createElement("div", { style: Object.assign({}, cardStyle, { maxHeight: 200, overflowY: "auto", fontFamily: "monospace", fontSize: 11 }) },
           mlLog.map(function (entry, i) {
