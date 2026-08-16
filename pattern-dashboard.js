@@ -620,6 +620,8 @@ window.PatternDashboard = (function () {
     var mlDriftHistory = _mlDriftHistory[0], setMlDriftHistory = _mlDriftHistory[1];
     var _mlPromoHistory = useState(null);
     var mlPromoHistory = _mlPromoHistory[0], setMlPromoHistory = _mlPromoHistory[1];
+    var _mlCachedModel = useState(null);
+    var mlCachedModel = _mlCachedModel[0], setMlCachedModel = _mlCachedModel[1];
 
     // Live Expert tab state (must be at component top-level — Rules of Hooks)
     var _liveStatus = useState(null);
@@ -640,6 +642,11 @@ window.PatternDashboard = (function () {
       loadMLPromoHistory();
       loadLiveStatus();
     }, []);
+
+    // Load ML model when ML tab is active
+    useEffect(function () {
+      if (tab === "ml") loadMLCachedModel();
+    }, [tab]);
 
     // Remove confirm state (must be at top-level with other hooks)
     var _removeConfirm = useState(false);
@@ -743,6 +750,15 @@ window.PatternDashboard = (function () {
         if (window.MLTrainer && window.MLTrainer.getPromotionHistory) {
           var ph = await window.MLTrainer.getPromotionHistory();
           setMlPromoHistory(ph);
+        }
+      } catch (e) {}
+    }
+
+    async function loadMLCachedModel() {
+      try {
+        if (window.MLTrainer && window.MLTrainer.getActiveModel) {
+          var m = await window.MLTrainer.getActiveModel();
+          setMlCachedModel(m);
         }
       } catch (e) {}
     }
@@ -1307,6 +1323,9 @@ window.PatternDashboard = (function () {
               );
             })
           )
+        ),
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 10, lineHeight: 1.5 } },
+          "Points on the dashed line = perfectly calibrated. Below the line = model is over-confident (says 80% but only hits 60%). Above = under-confident. calP0 is the threshold where predictions cross 50% hit rate — lower calP0 means the model is more discriminating. calK is the steepness: higher = better separation between winners and losers."
         )
       );
     }
@@ -1339,6 +1358,9 @@ window.PatternDashboard = (function () {
         ),
         React.createElement("div", { style: { fontSize: 12, marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", color: "var(--text2)", lineHeight: 1.5 } },
           stratVerdict(rows)
+        ),
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 } },
+          "If HIGH drift wins more than LOW, the model is correctly identifying momentum. If all three are similar, drift score isn't adding value. If HIGH loses more, the model is chasing bad moves — retrain or recalibrate. Green = HIGH > LOW by >5%."
         )
       );
     }
@@ -1371,6 +1393,9 @@ window.PatternDashboard = (function () {
         ),
         React.createElement("div", { style: { fontSize: 12, marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", color: "var(--text2)", lineHeight: 1.5 } },
           regimeVerdict(rows)
+        ),
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 } },
+          "A good system performs across all regimes or improves in low volatility (where edge is easiest). If low-vol WR is much higher than high-vol, the system avoids volatile traps. If high-vol is better, the system needs momentum to work. Red flag if one regime has <10 trades — too thin to trust."
         )
       );
     }
@@ -1431,6 +1456,9 @@ window.PatternDashboard = (function () {
         ),
         React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8 } },
           "r ≥ 0.1 = meaningful predictive signal; IV ≥ 0.1 = strong. A rising bucket curve means high pillar scores actually precede wins. Comparing these explains the weight split — e.g. Trend Health at 0.31 vs Swing Potential at 0.19."
+        ),
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+          "Correlation (r) measures linear relationship with wins. Info Value (IV) measures how well the indicator separates winners from losers — more robust than correlation. The bucket curve is the real proof: if low buckets lose and high buckets win, the indicator is genuinely predictive, not just statistically correlated."
         )
       );
     }
@@ -1513,6 +1541,9 @@ window.PatternDashboard = (function () {
         ),
         React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8 } },
           "Click any column header to sort. Showing top " + Math.min(60, sorted.length) + " of " + sorted.length + " stocks." + (data.single ? "" : " Median PF/Max DD are medians across stocks; Win Rate/Avg Return are trade-weighted.")
+        ),
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+          "PF > 1.5 is healthy, > 2.0 is strong. Max DD < 15% is conservative, > 25% is risky. Sharpe > 0.3 is good, > 0.5 is excellent. Final equity > 100 = profitable, < 100 = losing. Days to target < 10 = fast trades, > 20 = slow — consider capital cost."
         )
       );
     }
@@ -1574,6 +1605,9 @@ window.PatternDashboard = (function () {
           ),
           React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8 } },
             "Select a stock above to chart its full equity curve."
+          ),
+          React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+            "Final equity > 100 = net profit; < 100 = net loss. Max DD = deepest peak-to-trough drop — the real risk measure. Sharpe > 0.3 = good risk-adjusted return, > 0.5 = excellent. Sort by final equity to find best/worst performers."
           )
         );
       } else {
@@ -1630,6 +1664,9 @@ window.PatternDashboard = (function () {
         ),
         React.createElement("div", { style: { fontSize: 12, marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", color: "var(--text2)", lineHeight: 1.5 } },
           verdict
+        ),
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 } },
+          "Monotonic = STRONG_BUY > BUY > WATCHLIST > NEUTRAL in win rate. This is the most direct test of the score's value. If brackets overlap or reverse, the score thresholds are miscalibrated — the system can't distinguish strong from weak entries. Green = monotonic, Red = broken."
         )
       );
     }
@@ -1686,6 +1723,9 @@ window.PatternDashboard = (function () {
         ),
         React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8 } },
           "Bar height = trade count; bar color = that month's win rate."
+        ),
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
+          "Look for consistency: a robust system should be profitable across most months. Months with <10 trades are too thin to trust. If only 2-3 months are profitable, the system may be overfitted to those periods. Green bars = months where WR > 50%."
         )
       );
     }
@@ -2720,9 +2760,9 @@ window.PatternDashboard = (function () {
           if (!p || !p.tradeStats) return null;
           var ruleScore = p.backtestDate ? Math.round(((p.tradeStats.winRate || 50) / 100) * 100) / 100 : null;
           var finalScore = p.tradeStats && p.tradeStats.winRate != null ? Math.round(p.tradeStats.winRate) / 100 : null;
-          // Compute ML win probability on the fly from pattern's indicator powers
+          // Compute ML win probability using the loaded model
           var mlProb = null;
-          if (window.MLTrainer && window.MLTrainer.predictSync && hasStoredModel) {
+          if (mlCachedModel && window.MLTrainer && window.MLTrainer.predictSync) {
             try {
               var ip = p.indicatorPowers || {};
               var features = {
@@ -2734,7 +2774,7 @@ window.PatternDashboard = (function () {
                 ema_slope: 0,
                 adx: ip.trendHealth && ip.trendHealth.correlation != null ? 20 + ip.trendHealth.correlation * 30 : 25
               };
-              var pred = window.MLTrainer.predictSync(features);
+              var pred = window.MLTrainer.predictSync(features, mlCachedModel);
               if (pred && pred.winProbability != null) mlProb = pred.winProbability;
             } catch (e) {}
           }
@@ -2764,7 +2804,10 @@ window.PatternDashboard = (function () {
 
       return React.createElement("div", { style: cardStyle },
         React.createElement("div", { style: labelStyle }, "ML Scoring Status"),
-        items
+        items,
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 } },
+          "Green badge = model is trained and wired into scoring. Table compares Rule Score (pattern-only) vs ML Win Prob (neural net) vs Final Score (75/25 blend). If ML differs significantly from Rule, the model is adding value \u2014 or pulling in the wrong direction."
+        )
       );
     }
 
@@ -2878,6 +2921,13 @@ window.PatternDashboard = (function () {
             React.createElement("text", { x: pad.l + (chartW - pad.l - pad.r) / 2, y: chartH - 4, textAnchor: "middle", fontSize: 10, fill: "var(--text3)" }, "Mean Predicted"),
             React.createElement("text", { x: 10, y: pad.t + (chartH - pad.t - pad.b) / 2, textAnchor: "middle", fontSize: 10, fill: "var(--text3)", transform: "rotate(-90,10," + (pad.t + (chartH - pad.t - pad.b) / 2) + ")" }, "Observed Rate")
           )
+        ),
+
+        // Interpretation guide
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 10, lineHeight: 1.5 } },
+          "Confusion matrix: top-left = correct winners, bottom-right = correct losers, top-right = false alarms, bottom-left = missed calls. ",
+          "Precision = how many buy calls were right. Recall = how many actual winners caught. ",
+          "Reliability diagram: points on diagonal = well-calibrated (60% prediction wins ~60%). Above = under-confident, below = over-confident. ECE under 5% is good."
         )
       );
     }
@@ -2975,6 +3025,13 @@ window.PatternDashboard = (function () {
               );
             })
           )
+        ),
+
+        // Interpretation guide
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 10, lineHeight: 1.5 } },
+          "Each fold tests the model on a different time period. Flat line = model generalizes consistently. ",
+          "Downward trend = degrading on newer data (overfitting). CV under 5% = stable, 5-15% = moderate, over 15% = unreliable. ",
+          "AUC above 0.6 is decent, above 0.7 is good."
         )
       );
     }
@@ -3058,7 +3115,11 @@ window.PatternDashboard = (function () {
 
       return React.createElement("div", { style: cardStyle },
         React.createElement("div", { style: labelStyle }, "Feature Drift Monitor"),
-        items
+        items,
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 } },
+          "Tracks whether prediction distribution shifts from training. Green = predictions match training. Red = distribution shifted (model may be unreliable). ",
+          "KL divergence under 0.1 = fine, over 0.1 = drift detected. Spike in time-series = regime change. When drift detected, consider retraining."
+        )
       );
     }
 
@@ -3156,6 +3217,13 @@ window.PatternDashboard = (function () {
         versionItems.length > 0 && React.createElement("div", { style: { marginTop: 10 } },
           React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 4 } }, "Version Timeline"),
           React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } }, versionItems)
+        ),
+
+        // Interpretation guide
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 10, lineHeight: 1.5 } },
+          "Champion = current model in production. Challenger = new candidate. Promotion requires +1.0% accuracy improvement. ",
+          "'Promoted' = new model won and replaced old. 'Kept' = challenger wasn't good enough. ",
+          "Version timeline shows all saved models (green border = current champion)."
         )
       );
     }
