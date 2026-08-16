@@ -1690,12 +1690,12 @@ window.PatternDashboard = (function () {
         React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
           "Trades pooled by entry month. Reveals seasonal patterns and consistency — a system that only wins in a few months is fragile."
         ),
-        React.createElement("div", { style: { display: "flex", gap: 4, marginTop: 8, height: 46, alignItems: "flex-end" } },
+        React.createElement("div", { style: { display: "flex", gap: 4, marginTop: 8, height: 52, alignItems: "flex-end", overflowX: "auto" } },
           rows.map(function (r) {
             var h = maxT > 0 ? Math.max(2, (r.trades / maxT) * 40) : 2;
-            return React.createElement("div", { key: r.key, style: { flex: 1, textAlign: "center" } },
+            return React.createElement("div", { key: r.key, style: { minWidth: 28, textAlign: "center", flex: "none" } },
               React.createElement("div", { title: r.key + ": " + r.trades + " trades, " + r.winRate + "% WR, " + (r.avgReturn >= 0 ? "+" : "") + r.avgReturn + "% avg return", style: { height: h, background: wrColor(r.winRate), borderRadius: 2, marginBottom: 2 } }),
-              React.createElement("div", { style: { fontSize: 8, color: "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, r.key)
+              React.createElement("div", { style: { fontSize: 8, color: "var(--text3)" } }, r.key)
             );
           })
         ),
