@@ -2759,7 +2759,6 @@ window.PatternDashboard = (function () {
         var rows = sortedPatterns.map(function (p) {
           if (!p || !p.tradeStats) return null;
           var ruleScore = p.backtestDate ? Math.round(((p.tradeStats.winRate || 50) / 100) * 100) / 100 : null;
-          var finalScore = p.tradeStats && p.tradeStats.winRate != null ? Math.round(p.tradeStats.winRate) / 100 : null;
           // Compute ML win probability using the loaded model
           var mlProb = null;
           if (mlCachedModel && window.MLTrainer && window.MLTrainer.predictSync) {
@@ -2778,11 +2777,21 @@ window.PatternDashboard = (function () {
               if (pred && pred.winProbability != null) mlProb = pred.winProbability;
             } catch (e) {}
           }
+          // Final score = 75% rule + 25% ML (or 65/35 if ML confident)
+          var finalScore = null;
+          if (ruleScore != null) {
+            if (mlProb != null) {
+              var blend = mlProb >= 0.7 ? 0.35 : 0.25;
+              finalScore = Math.round(((1 - blend) * ruleScore + blend * mlProb) * 100) / 100;
+            } else {
+              finalScore = ruleScore;
+            }
+          }
           return React.createElement("tr", { key: p.symbol, style: { borderBottom: "1px solid var(--border)" } },
             React.createElement("td", { style: { padding: "4px 8px", fontWeight: 600, fontSize: 12 } }, p.symbol),
             React.createElement("td", { style: { padding: "4px 8px", textAlign: "right", fontSize: 12, color: "var(--text3)" } }, ruleScore != null ? (ruleScore * 100).toFixed(1) + "%" : "\u2014"),
             React.createElement("td", { style: { padding: "4px 8px", textAlign: "right", fontSize: 12, color: mlProb != null ? (mlProb >= 0.55 ? "#16a34a" : mlProb >= 0.45 ? "#f59e0b" : "var(--text3)") : "var(--text3)" } }, mlProb != null ? (mlProb * 100).toFixed(1) + "%" : "\u2014"),
-            React.createElement("td", { style: { padding: "4px 8px", textAlign: "right", fontSize: 12 } }, finalScore != null ? (finalScore * 100).toFixed(1) + "%" : "\u2014")
+            React.createElement("td", { style: { padding: "4px 8px", textAlign: "right", fontSize: 12, fontWeight: finalScore !== ruleScore ? 700 : 400 } }, finalScore != null ? (finalScore * 100).toFixed(1) + "%" : "\u2014")
           );
         }).filter(Boolean);
 
