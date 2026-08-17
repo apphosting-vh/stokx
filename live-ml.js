@@ -37,7 +37,8 @@ window.LiveML = (function () {
     volume_ratio: { label: "Volume Ratio", bins: [0.7, 1, 1.3, 1.7, 2.5], labels: ["<0.7", "0.7-1", "1-1.3", "1.3-1.7", "1.7-2.5", "2.5+"] },
     macd_hist: { label: "MACD Hist", bins: [-1.5, -0.5, 0, 0.5, 1.5], labels: ["<-1.5", "-1.5/-0.5", "-0.5/0", "0/0.5", "0.5/1.5", "1.5+"] },
     ema_slope: { label: "EMA12 Slope %", bins: [-0.5, 0, 0.3, 0.7], labels: ["<-0.5", "-0.5/0", "0/0.3", "0.3/0.7", "0.7+"] },
-    adx: { label: "ADX (14)", bins: [15, 20, 25, 35], labels: ["<15", "15-20", "20-25", "25-35", "35+"] }
+    adx: { label: "ADX (14)", bins: [15, 20, 25, 35], labels: ["<15", "15-20", "20-25", "25-35", "35+"] },
+    entry_score: { label: "Entry Score", bins: [30, 45, 55, 65, 75], labels: ["<30", "30-45", "45-55", "55-65", "65-75", "75+"] }
   };
 
   function round2(v) { return Math.round(v * 100) / 100; }
@@ -484,7 +485,8 @@ window.LiveML = (function () {
       { a: "rsi", b: "volume_ratio", splitA: 60, splitB: 1.3 },
       { a: "rsi", b: "bb_position", splitA: 60, splitB: 0.6 },
       { a: "bb_position", b: "atr_pct", splitA: 0.6, splitB: 2 },
-      { a: "volume_ratio", b: "atr_pct", splitA: 1.3, splitB: 2 }
+      { a: "volume_ratio", b: "atr_pct", splitA: 1.3, splitB: 2 },
+      { a: "entry_score", b: "rsi", splitA: 65, splitB: 55 }
     ];
     var comboRows = [];
     combos.forEach(function (c) {

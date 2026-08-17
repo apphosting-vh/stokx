@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "3.0.46";
+window.__STOX_APP_VERSION = "3.0.47";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -7962,12 +7962,14 @@ const ScoreTunerPanel = () => {
              ["prob4.volPercentile_hi", "Pctl Hi", 50, 90], ["prob4.volSweet_T2", "Vol Sweet T2", 0, 10],
              ["prob4.volPercentile_lo2", "Pctl Lo2", 5, 30], ["prob4.volPercentile_hi2", "Pctl Hi2", 70, 95],
              ["prob4.efficiencyRatio", "Efficiency Ratio", 0, 10], ["prob4.efficiencyRatioThreshold", "ER Threshold", 0.1, 0.8]
-            ].map(([path, label, min, max]) =>
-              React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
-                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 150 } }, label),
-                React.createElement("input", { className: "inp", type: "number", step: 0.5, min: min, max: max, value: scoreConfig.prob4[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 75, fontSize: 11 } })
-              )
-            )
+             ].map(([path, label, min, max]) => {
+               var key = path.split(".")[1];
+               var isTargetPct = key === "targetPct";
+               return React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
+                 React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 150 } }, label + (isTargetPct ? " (0.04 = 4%)" : "")),
+                 React.createElement("input", { className: "inp", type: "number", step: isTargetPct ? 0.005 : 0.5, min: min, max: max, value: scoreConfig.prob4[key], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 75, fontSize: 11 } })
+               );
+             })
           )
         ),
         /* Pillar 4: Swing Potential */

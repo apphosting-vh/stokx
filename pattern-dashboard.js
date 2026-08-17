@@ -2376,7 +2376,7 @@ window.PatternDashboard = (function () {
                   React.createElement("td", { style: { padding: "4px", textAlign: "right", color: chgColor } }, s.chgPct != null ? (s.chgPct >= 0 ? "+" : "") + s.chgPct + "%" : "—"),
                   React.createElement("td", { style: { padding: "4px", fontSize: 11, color: "var(--text3)" } },
                     "RSI " + s.features.rsi + " · BB " + s.features.bb_position + " · ATR " + s.features.atr_pct + "% · Vol " + s.features.volume_ratio +
-                    " · MACD " + s.features.macd_hist + " · EMA " + s.features.ema_slope + "% · ADX " + s.features.adx
+                    " · MACD " + s.features.macd_hist + " · EMA " + s.features.ema_slope + "% · ADX " + s.features.adx + " · Score " + (s.features.entry_score != null ? s.features.entry_score : "—")
                   )
                 );
               })
