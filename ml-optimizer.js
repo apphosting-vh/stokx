@@ -24,7 +24,7 @@ window.MLOptimizer = (function () {
    */
   var _scDef = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
   var PARAM_SPACE = {
-    targetProfitPct: { min: 1, max: 12, step: 0.5, default: (_scDef.prob4 && _scDef.prob4.targetPct != null) ? _scDef.prob4.targetPct * 100 : 4 },
+    targetProfitPct: { min: 1, max: 12, step: 0.5, default: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 4 },
     holdingPeriodDays: { min: 3, max: 30, step: 1, default: _scDef.horizonDays || 14 },
     threshold: { min: 40, max: 85, step: 5, default: 65 },
     sampleEvery: { min: 1, max: 5, step: 1, default: 2 }

@@ -2510,7 +2510,7 @@ const SessionConfidencePanel = ({ ticker, buyPrice, buyDate, entryScore }) => {
         if (entry <= 0) { setErr("no_entry"); return; }
         const buyD = buyDate ? new Date(buyDate + "T12:00:00") : null;
         const holdingDays = buyD ? Math.max(0, Math.floor((Date.now() - buyD.getTime()) / 86400000)) : 0;
-        const _tgtPct = (TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4;
+        const _tgtPct = TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4;
         const c = TI.computeSessionConfidence(i15, d, { entry_price: entry, target_pct: _tgtPct });
         const e = TI.computeExitScore(d, { entry_price: entry, holding_days: holdingDays, entry_score: entryScore != null ? entryScore : 50 });
         setConf(c);
@@ -2603,7 +2603,7 @@ const ForwardConfidencePanel = ({ ticker }) => {
         const c = TI.computeHorizonConfidence(h1, d, {
           horizonDays: 5, windowSessions: 40,
           entry_price: cur.c,
-          targetPct: (TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4,
+          targetPct: TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4,
           holdingDays: null,
           indexCandles: idxD
         });
@@ -2624,7 +2624,7 @@ const ForwardConfidencePanel = ({ ticker }) => {
   }
   if (err || !conf) return null;
 
-  const _tgtPct5 = (TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4;
+  const _tgtPct5 = TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4;
   const sc = conf.confidence;
   const cp = conf.components;
   const remainingPct = cp.remainingPct != null ? Math.round(cp.remainingPct * 100) / 100 : null;
@@ -2919,7 +2919,7 @@ const TenDayConfidencePanel = ({ ticker }) => {
   function confBd(v) { return v != null ? (v >= 70 ? "var(--profitborder)" : v >= 40 ? "var(--warnborder)" : "var(--lossborder)") : "var(--border)"; }
   const tone = { c: confColor(sc), bg: confBg(sc), bd: confBd(sc) };
   const _hd = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().horizonDays || 10) : 10;
-  const _tgtPct = (window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().prob4 && window.TechIndicators.getScoreConfig().prob4.targetPct != null) ? window.TechIndicators.getScoreConfig().prob4.targetPct * 100 : 4;
+  const _tgtPct = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 4;
   const label = sc == null ? "Insufficient hourly data for a " + _hd + "-day read"
     : sc >= 70 ? "Strong odds \u2014 expect +" + _tgtPct + "% within " + _hd + " trading days"
     : sc >= 40 ? "Moderate \u2014 needs the hourly trend to cooperate"
@@ -2984,7 +2984,7 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
   const [res, setRes] = React.useState(null);
   const [err, setErr] = React.useState(null);
   const _hd = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().horizonDays || 10) : 10;
-  const _tgtPct = (TI && TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4;
+  const _tgtPct = (TI && TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 4;
 
   React.useEffect(() => {
     if (!ticker || !DF || !TI) { setLoading(false); return; }
@@ -3381,7 +3381,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
               }
             }
           }
-          const conf = TI.computeSessionConfidence(i15, d, { entry_price: entry, target_pct: (TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4 });
+          const conf = TI.computeSessionConfidence(i15, d, { entry_price: entry, target_pct: TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4 });
           const update = { golden: golden, conf: conf };
           if (golden || (conf && conf.confidence != null)) {
             setExitInfo((prev) => { const next = Object.assign({}, prev); next[h.id] = update; return next; });
@@ -3848,10 +3848,10 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 React.createElement("span", { style: { fontSize: 13 } }, "\u2728"),
                 React.createElement("div", { style: { flex: 1, minWidth: 0 } },
                   React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#d97706" } },
-                    exitInfo[h.id].golden.amount >= 5 ? "Golden Exit Opportunity" : "Spike Toward " + ((TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4) + "% Target"
+                    exitInfo[h.id].golden.amount >= 5 ? "Golden Exit Opportunity" : "Spike Toward " + (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4) + "% Target"
                   ),
                   React.createElement("div", { style: { fontSize: 10.5, color: "var(--text5)", marginTop: 1, lineHeight: 1.4 } },
-                    "Up-spike carrying this holding near the +" + ((TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4) + "% target \u00b7 spikes often precede a sharp reversal \u2014 consider banking the gain"
+                    "Up-spike carrying this holding near the +" + (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4) + "% target \u00b7 spikes often precede a sharp reversal \u2014 consider banking the gain"
                   )
                 ),
                 exitInfo[h.id].golden.exit_score != null && React.createElement("span", { style: { fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 6, background: "rgba(251,191,36,.18)", color: "#d97706", border: "1px solid rgba(251,191,36,.4)", whiteSpace: "nowrap" } }, "EXIT " + exitInfo[h.id].golden.exit_score)
@@ -3862,7 +3862,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 const ci = exitInfo[h.id] && exitInfo[h.id].conf;
                 if (!ci || ci.confidence == null || !ci.flags || !ci.flags.inTargetBand) return null;
                 const sc = ci.confidence;
-                const _tgtPctH = (TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4;
+                const _tgtPctH = TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4;
                 const tone = sc >= 70 ? { c: "#16a34a", bg: "var(--profitbg)", bd: "var(--profitborder)" } : sc >= 40 ? { c: "#d97706", bg: "var(--warnbg)", bd: "var(--warnborder)" } : { c: "#dc2626", bg: "var(--lossbg)", bd: "var(--lossborder)" };
                 const label = sc >= 70 ? "Let it ride \u2014 strong chance of tagging +" + _tgtPctH + "% today" : sc >= 40 ? "Wait & watch \u2014 keep a tight stop" : "Low odds \u2014 bank the gain today";
                 return React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "8px 12px", borderRadius: 8, background: tone.bg, border: "1px solid " + tone.bd } },
@@ -6440,7 +6440,7 @@ const BacktestPanel = () => {
   const setResult = (v) => { _btLastResult = v; try { localStorage.setItem(LS_BT_RESULT, JSON.stringify(v)); } catch (e) {} setResultState(v); };
   const cancelRef = useRef(false);
   const RANGES = [30, 60, 90, 180, 270, 365, 500, 730];
-  const _btTgtPct = (window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().prob4 && window.TechIndicators.getScoreConfig().prob4.targetPct != null) ? window.TechIndicators.getScoreConfig().prob4.targetPct * 100 : 4;
+  const _btTgtPct = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 4;
   const _btHorizon = (window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 10;
 
   const run = async () => {
@@ -6906,7 +6906,7 @@ const BacktestSuitePanel = () => {
     scoreFn: buildScoreFn(idxCandles, multiTFMap),
     multiTFMap: multiTFMap,
     indexCandles: idxCandles,
-    targetProfitPct: Number(target) || ((TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4),
+    targetProfitPct: Number(target) || (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4),
     holdingPeriodDays: Number(holding) || ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 14),
     threshold: Number(threshold) || 65,
     warmup: 60
@@ -7054,7 +7054,7 @@ const BacktestSuitePanel = () => {
       const res = await eng.runBatch(dataMap, { symbols: ready }, {
         onSymbol: (d, t) => setProgress({ phase: "Backtesting " + t + " symbols\u2026", done: d, total: t })
       });
-      res.targetProfitPct = Number(target) || ((TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4);
+      res.targetProfitPct = Number(target) || (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4);
       res.holdingPeriodDays = Number(holding) || ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 14);
       res.threshold = Number(threshold) || 65;
       if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
@@ -7188,7 +7188,7 @@ const BacktestSuitePanel = () => {
       const res = await eng.runBatch(dataMap, { symbols: ready }, {
         onSymbol: (d, t) => setProgress({ phase: "Backtesting " + d + " / " + t + " symbols\u2026", done: d, total: t })
       });
-      res.targetProfitPct = Number(target) || ((TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4);
+      res.targetProfitPct = Number(target) || (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4);
       res.holdingPeriodDays = Number(holding) || ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 14);
       res.threshold = Number(threshold) || 65;
       res.sourceLabel = "Selected from Screener";
@@ -10610,7 +10610,7 @@ function SingleStockAnalysis({ requestedTicker }) {
     var oeConf = oe && oe.entryConfidence != null ? oe.entryConfidence : null;
     var oeTone = oeConf != null ? (oeConf >= 70 ? "#16a34a" : oeConf >= 40 ? "#d97706" : "#dc2626") : "var(--text5)";
     var _hdVal = (TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 10;
-    var _tgtPctVal = (TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4;
+    var _tgtPctVal = (TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 4;
     var confLabel = confScore == null ? "No " + _hdVal + "-day read"
       : confScore >= 70 ? "Strong odds \u2014 +" + _tgtPctVal + "% likely in " + _hdVal + " sessions"
       : confScore >= 40 ? "Moderate odds" : "Low odds";
@@ -11200,7 +11200,7 @@ function InfoPage() {
         React.createElement(MethSection, { label: "Integrated Decision Engine", stateKey: "integrated" }),
         React.createElement(MethContent, { stateKey: "integrated" },
           React.createElement("p", { style: subSub }, "Layer 1 \u2014 Hard Rules"),
-          React.createElement("p", null, "Target hit (+" + ((TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4) + "%) \u2192 EXIT. Stop loss (entry - ATR\u00d71.5) \u2192 EXIT. Time stop (15 days, <2%) \u2192 EXIT."),
+          React.createElement("p", null, "Target hit (+" + (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4) + "%) \u2192 EXIT. Stop loss (entry - ATR\u00d71.5) \u2192 EXIT. Time stop (15 days, <2%) \u2192 EXIT."),
           React.createElement("p", { style: subSub }, "Layer 2 \u2014 Exit Score"),
           React.createElement("p", null, "Delegates to Exit Score classification. TIGHTEN STOP computes specific price: max(stop_loss, close - ATR\u00d71.5)."),
           React.createElement("p", { style: subSub }, "Layer 3 \u2014 Entry Score Collapse"),

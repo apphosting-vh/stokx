@@ -2900,6 +2900,7 @@ window.TechIndicators = (function () {
      Used to auto-discard stale localStorage configs. */
   var SCORE_CONFIG_VERSION = 2;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
+  function getTargetPctDisplay() { return (SCORE_CONFIG.prob4 && SCORE_CONFIG.prob4.targetPct != null) ? Math.round(SCORE_CONFIG.prob4.targetPct * 1000) / 10 : 4; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
   function getDefaultScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG_DEFAULTS)); }
   function setScoreConfig(patch) {
@@ -3735,7 +3736,7 @@ window.TechIndicators = (function () {
 
     /* Layer 1: Hard Rules */
     if (ep != null && cp != null) {
-      if (target != null && cp >= target) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Target hit (+' + (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4) + '%)', action: 'Full exit', exit_score: exitScore });
+      if (target != null && cp >= target) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Target hit (+' + getTargetPctDisplay() + '%)', action: 'Full exit', exit_score: exitScore });
       if (stopLoss != null && cp <= stopLoss) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Stop loss triggered', action: 'Full exit', exit_score: exitScore });
       if (days >= 15 && cp < ep * 1.02) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Time stop (15 days, <2%)', action: 'Full exit', exit_score: exitScore });
     }
@@ -4099,7 +4100,7 @@ window.TechIndicators = (function () {
       if (!intradayCandles || intradayCandles.length < 10) return base;
       position = position || {};
       var entry = position.entry_price || position.entry || 0;
-      var targetPct = position.target_pct != null ? position.target_pct : (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4);
+      var targetPct = position.target_pct != null ? position.target_pct : (SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 4);
       if (entry <= 0) { base.reason = 'no_entry_price'; return base; }
 
       /* isolate today's session bars (same IST date as the last bar) */
@@ -4377,7 +4378,7 @@ window.TechIndicators = (function () {
     cfg = cfg || {};
     var horizonDays = cfg.horizonDays != null ? cfg.horizonDays : (SCORE_CONFIG.horizonDays || 10);
     var windowSessions = cfg.windowSessions != null ? cfg.windowSessions : 40;
-    var targetPct = cfg.target_pct != null ? cfg.target_pct : (cfg.targetPct != null ? cfg.targetPct : (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4));
+    var targetPct = cfg.target_pct != null ? cfg.target_pct : (cfg.targetPct != null ? cfg.targetPct : (SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 4));
     var holdingDays = cfg.holding_days != null ? cfg.holding_days : (cfg.holdingDays != null ? cfg.holdingDays : 0);
     var ctx = cfg.entryScoreContext || {};
     var base = {
@@ -4691,7 +4692,7 @@ window.TechIndicators = (function () {
     return computeHorizonConfidence(hourlyCandles, dailyCandles, {
       horizonDays: 5, windowSessions: 20,
       entry_price: entry,
-      targetPct: position.target_pct != null ? position.target_pct : (position.targetPct != null ? position.targetPct : (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4)),
+      targetPct: position.target_pct != null ? position.target_pct : (position.targetPct != null ? position.targetPct : (SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 4)),
       holdingDays: position.holding_days != null ? position.holding_days : (position.holdingDays != null ? position.holdingDays : null),
       indexCandles: position.indexCandles || null
     });
@@ -4710,7 +4711,7 @@ window.TechIndicators = (function () {
     return computeHorizonConfidence(hourlyCandles, dailyCandles, {
       horizonDays: _hd, windowSessions: 40,
       entry_price: cur.c,
-      targetPct: SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4,
+      targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 4,
       holdingDays: null,
       indexCandles: indexCandles,
       entryScoreContext: entryScoreContext
@@ -4927,7 +4928,7 @@ window.TechIndicators = (function () {
 
       /* ── 4. 10-day horizon context from current price ─────────────────── */
       var ctx = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-        horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: c, targetPct: SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4,
+        horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: c, targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 4,
         holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
       });
       if (ctx.reason !== 'ok' || ctx.confidence == null) { base.reason = ctx.reason || base.reason; return base; }
@@ -5038,7 +5039,7 @@ window.TechIndicators = (function () {
         var P = prices[p2];
         var fp = fillProb(P);
         var res = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-          horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: P, targetPct: SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4,
+          horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: P, targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 4,
           holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
         });
         var isAggressive = P < floorP;
@@ -5264,6 +5265,7 @@ window.TechIndicators = (function () {
     integratedExitDecision: integratedExitDecision,
     detectCandlePatterns: detectCandlePatterns,
     getScoreConfig: getScoreConfig,
+    getTargetPctDisplay: getTargetPctDisplay,
     getScoreConfigVersion: getScoreConfigVersion,
     getDefaultScoreConfig: getDefaultScoreConfig,
     setScoreConfig: setScoreConfig
