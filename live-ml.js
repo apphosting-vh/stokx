@@ -175,7 +175,8 @@ window.LiveML = (function () {
       volume_ratio: ind.volSma && ind.volSma[i] ? round2(close > 0 ? candles[i].v / Math.max(1, ind.volSma[i]) : 1) : 1,
       macd_hist: ind.macd && ind.macd.histogram ? round3(ind.macd.histogram[i]) : 0,
       ema_slope: ind.emaFast[i] != null && ind.emaFast[Math.max(0, i - 3)] != null ? round3((ind.emaFast[i] - ind.emaFast[Math.max(0, i - 3)]) / Math.max(0.01, ind.emaFast[Math.max(0, i - 3)]) * 100) : 0,
-      adx: ind.adx && ind.adx.adx ? round2(ind.adx.adx[i] || 0) : 0
+      adx: ind.adx && ind.adx.adx ? round2(ind.adx.adx[i] || 0) : 0,
+      entry_score: 0.5
     };
   }
 
