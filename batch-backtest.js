@@ -563,7 +563,30 @@ window.BatchBacktest = (function () {
             break;
           }
         }
-        calibration.global = { calP0: calP0, calK: 38, buckets: buckets };
+
+        // Compute calK from logit-logit slope (same formula as backtest-engine.js)
+        var calK = 38;
+        var logitPts = buckets.filter(function (b) {
+          return b.hitRate > 1 && b.hitRate < 99 && b.avgProbTouch > 0.01 && b.avgProbTouch < 0.99;
+        }).map(function (b) {
+          var lx = Math.log(b.avgProbTouch / (1 - b.avgProbTouch));
+          var ly = Math.log(b.hitRate / 100 / (1 - b.hitRate / 100));
+          return { x: lx, y: ly };
+        });
+        if (logitPts.length >= 3) {
+          var lsx = 0, lsy = 0, lsxy = 0, lsx2 = 0;
+          for (var lk = 0; lk < logitPts.length; lk++) {
+            lsx += logitPts[lk].x; lsy += logitPts[lk].y;
+            lsxy += logitPts[lk].x * logitPts[lk].y; lsx2 += logitPts[lk].x * logitPts[lk].x;
+          }
+          var lDenom = logitPts.length * lsx2 - lsx * lsx;
+          if (Math.abs(lDenom) > 1e-10) {
+            var logitSlope = (logitPts.length * lsxy - lsx * lsy) / lDenom;
+            calK = Math.max(5, Math.min(100, Math.round(logitSlope * 100) / 100));
+          }
+        }
+
+        calibration.global = { calP0: calP0, calK: calK, buckets: buckets };
       }
 
       // Stratified by drift tercile
@@ -653,7 +676,7 @@ window.BatchBacktest = (function () {
       return {
         symbol: symbol,
         backtestDate: Date.now(),
-        backtestVersion: window.__STOX_APP_VERSION || "3.0.43",
+        backtestVersion: window.__STOX_APP_VERSION || "3.0.44",
         indicatorWeights: indicatorWeights,
         indicatorPowers: indicatorPowers,
         calibration: calibration,
