@@ -2984,6 +2984,7 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
   const [res, setRes] = React.useState(null);
   const [err, setErr] = React.useState(null);
   const _hd = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().horizonDays || 10) : 10;
+  const _tgtPct = (TI && TI.getScoreConfig && TI.getScoreConfig().prob4 && TI.getScoreConfig().prob4.targetPct != null) ? TI.getScoreConfig().prob4.targetPct * 100 : 4;
 
   React.useEffect(() => {
     if (!ticker || !DF || !TI) { setLoading(false); return; }
