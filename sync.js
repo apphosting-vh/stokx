@@ -125,6 +125,8 @@ var fsaReadFile = async function(handle) {
       singleStockSnapshots: d.singleStockSnapshots || [],
       confTracker: d.confTracker || [],
       confTrackerPrices: d.confTrackerPrices || {},
+      wlTracker: d.wlTracker || [],
+      wlTrackerPrices: d.wlTrackerPrices || {},
       notes: d.notes || [],
       patterns: d.patterns || null
     };
@@ -212,6 +214,8 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
   var singleStockSnapshots = [];
   var confTracker = [];
   var confTrackerPrices = {};
+  var wlTracker = [];
+  var wlTrackerPrices = {};
   var notes = [];
   var scoreConfig = null;
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch (e) {}
@@ -224,6 +228,8 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
   try { singleStockSnapshots = (await dbGetSetting("stox_single_stock_snapshots")) || []; } catch (e) {}
   try { confTracker = (await dbGetSetting("stox_conf_tracker")) || []; } catch (e) {}
   try { confTrackerPrices = (await dbGetSetting("stox_conf_tracker_prices")) || {}; } catch (e) {}
+  try { wlTracker = (await dbGetSetting("stox_watchlist_tracker")) || []; } catch (e) {}
+  try { wlTrackerPrices = (await dbGetSetting("stox_watchlist_tracker_prices")) || {}; } catch (e) {}
   try { notes = (await dbGetSetting("stox_notes")) || []; } catch (e) {}
   try {
     var saved = localStorage.getItem("stox_score_config");
@@ -257,6 +263,8 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
       singleStockSnapshots: singleStockSnapshots.length,
       confTracker: confTracker.length,
       confTrackerPrices: Object.keys(confTrackerPrices).length,
+      wlTracker: wlTracker.length,
+      wlTrackerPrices: Object.keys(wlTrackerPrices).length,
       notes: notes.length,
       scoreConfig: !!scoreConfig,
       patterns: patterns ? patterns.patterns.length : 0,
@@ -278,6 +286,8 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
       singleStockSnapshots: singleStockSnapshots,
       confTracker: confTracker,
       confTrackerPrices: confTrackerPrices,
+      wlTracker: wlTracker,
+      wlTrackerPrices: wlTrackerPrices,
       notes: notes,
       scoreConfig: scoreConfig,
       patterns: patterns
@@ -331,6 +341,8 @@ window.__stoxRestoreFromPayload = async function(data) {
     if (data.singleStockSnapshots) await dbSetSetting("stox_single_stock_snapshots", data.singleStockSnapshots);
     if (data.confTracker) await dbSetSetting("stox_conf_tracker", data.confTracker);
     if (data.confTrackerPrices && typeof data.confTrackerPrices === "object") await dbSetSetting("stox_conf_tracker_prices", data.confTrackerPrices);
+    if (data.wlTracker) await dbSetSetting("stox_watchlist_tracker", data.wlTracker);
+    if (data.wlTrackerPrices && typeof data.wlTrackerPrices === "object") await dbSetSetting("stox_watchlist_tracker_prices", data.wlTrackerPrices);
     if (data.notes) await dbSetSetting("stox_notes", data.notes);
     if (data.patterns && window.PatternStore && window.PatternStore.importAll) {
       try {
@@ -768,6 +780,8 @@ var gdriveReadSyncFile = async function(silent) {
         singleStockSnapshots: data.data.singleStockSnapshots || [],
         confTracker: data.data.confTracker || [],
         confTrackerPrices: data.data.confTrackerPrices || {},
+        wlTracker: data.data.wlTracker || [],
+        wlTrackerPrices: data.data.wlTrackerPrices || {},
         notes: data.data.notes || []
       },
       modifiedTime: remoteExportedAt

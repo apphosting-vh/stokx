@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "3.0.48";
+window.__STOX_APP_VERSION = "4.0.0";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -948,6 +948,9 @@ const Icons = {
   flask: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("path", { d: "M9 3h6" }),
     React.createElement("path", { d: "M10 9V3h4v6l5 8a2 2 0 0 1-1.7 3H6.7A2 2 0 0 1 5 17l5-8z" })
+  ),
+  bookmark: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
+    React.createElement("path", { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" })
   ),
 };
 
@@ -4375,6 +4378,35 @@ const EntryScorePanel = ({ shares }) => {
     })();
   }, []);
 
+  React.useEffect(function() {
+    if (!entriesLoaded || !entries.length || !window.applyPatternIntel) return;
+    var missing = entries.filter(function(e) { return !e.patMeta; });
+    if (!missing.length) return;
+    (async function() {
+      var changed = false;
+      var copy = entries.slice();
+      for (var i = 0; i < missing.length; i++) {
+        var tk = missing[i].ticker;
+        try {
+          var [resW, resD] = await Promise.all([
+            DF.fetchOHLCVCached(tk, "weekly"), DF.fetchOHLCVCached(tk, "daily")
+          ]);
+          if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) continue;
+          var _idxD = null;
+          try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
+          var result = computeCompatEntryScore(resW.data, resD.data, null, _idxD, null);
+          try { result = window.applyPatternIntel(result, tk); } catch(e) {}
+          if (result && result._patternApplied) {
+            var pm = { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight };
+            var idx = copy.findIndex(function(e) { return e.id === missing[i].id; });
+            if (idx >= 0) { copy[idx] = Object.assign({}, copy[idx], { patMeta: pm }); changed = true; }
+          }
+        } catch(e) {}
+      }
+      if (changed) { setEntries(copy); dbSetSetting(LS_ENTRY_SCORES, copy); }
+    })();
+  }, [entriesLoaded, entries.length]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -4724,7 +4756,8 @@ const EntryScorePanel = ({ shares }) => {
         const _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result), tk);
         if (_conf) { try { if (window.applyPatternConfCal) _conf = window.applyPatternConfCal(_conf, tk); } catch (e2) {} conf10dLog = _conf.confidenceLognormal; conf10dEmp = _conf.confidenceEmpirical; if (_conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10; }
       } catch (e) {}
-      const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d, conf10dLog, conf10dEmp, indicators: { weekly: indW, daily: indD, hourly: indH } };
+      const patMeta = result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight } : null;
+      const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), patMeta, conf10d, conf10dLog, conf10dEmp, indicators: { weekly: indW, daily: indD, hourly: indH } };
       saveEntries([entry, ...entries]);
       setAddTicker(""); setAddPrice(""); setShowAdd(false);
     } catch (e) { setAddErr("Error: " + (e.message || "Failed")); }
@@ -5284,7 +5317,22 @@ const EntryScorePanel = ({ shares }) => {
                     })
                   ) : "—"
                 ),
-                React.createElement("td", { style: Object.assign({}, scoreCellStyle, { color: finalColor, fontWeight: 900 }) }, finalScore !== null ? finalScore : "—"),
+                React.createElement("td", { style: { padding: "8px 10px", textAlign: "center" } },
+                  finalScore !== null
+                    ? React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 4 } },
+                        React.createElement("span", { style: { fontSize: 12, fontWeight: 900, color: finalColor, fontFamily: "var(--font-heading)" } }, finalScore),
+                        fr && fr.decision && fr.decision.label
+                          ? React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: finalColor, padding: "1px 5px", borderRadius: 3, background: finalColor + "18" } }, fr.decision.label)
+                          : null,
+                        entry.patMeta && entry.patMeta.applied
+                          ? React.createElement("span", {
+                              title: "Pattern-adjusted (original: " + entry.patMeta.originalScore + ", \u0394: " + (entry.patMeta.delta > 0 ? "+" : "") + entry.patMeta.delta + ", WR: " + (entry.patMeta.winRate != null ? entry.patMeta.winRate.toFixed(0) + "%, " + entry.patMeta.trades + " trades" : "N/A") + (entry.patMeta.topWeight ? ", top: " + entry.patMeta.topWeight.component : "") + ")",
+                              style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: entry.patMeta.delta > 0 ? "#16a34a22" : entry.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: entry.patMeta.delta > 0 ? "#16a34a" : entry.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (entry.patMeta.delta > 0 ? "#16a34a44" : entry.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
+                            }, "P" + (entry.patMeta.delta > 0 ? "+" + entry.patMeta.delta : entry.patMeta.delta < 0 ? entry.patMeta.delta : ""))
+                          : null
+                      )
+                    : "\u2014"
+                ),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: entry.conf10dLog != null ? (entry.conf10dLog >= 70 ? "#16a34a" : entry.conf10dLog >= 40 ? "#d97706" : "#dc2626") : "var(--text6)", fontFamily: "var(--font-mono)" } }, entry.conf10dLog != null ? Number(entry.conf10dLog).toFixed(0) : "—"),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", fontWeight: 700, color: entry.conf10dEmp != null ? (entry.conf10dEmp >= 70 ? "#16a34a" : entry.conf10dEmp >= 40 ? "#d97706" : "#dc2626") : "var(--text6)", fontFamily: "var(--font-mono)" } }, entry.conf10dEmp != null ? Number(entry.conf10dEmp).toFixed(0) : "—"),
                 React.createElement("td", { style: { padding: "8px 10px", textAlign: "right", color: "var(--text2)", fontFamily: "var(--font-mono)" } }, priceOnAdd > 0 ? INR(priceOnAdd) : "—"),
@@ -5673,7 +5721,22 @@ const ConfidenceTracker = () => {
               React.createElement("td", { style: Object.assign({}, tdStyle, { color: "var(--text3)", whiteSpace: "nowrap" }) }, addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })),
               React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", color: tr.conf10dLog != null ? (tr.conf10dLog >= 70 ? "#16a34a" : tr.conf10dLog >= 40 ? "#d97706" : "#dc2626") : "var(--text6)" }) }, tr.conf10dLog != null ? Number(tr.conf10dLog).toFixed(0) : "\u2014"),
               React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", color: tr.conf10dEmp != null ? (tr.conf10dEmp >= 70 ? "#16a34a" : tr.conf10dEmp >= 40 ? "#d97706" : "#dc2626") : "var(--text6)" }) }, tr.conf10dEmp != null ? Number(tr.conf10dEmp).toFixed(0) : "\u2014"),
-              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", color: esColor }) }, tr.entryScore != null ? tr.entryScore : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                tr.entryScore != null
+                  ? React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 4 } },
+                      React.createElement("span", { style: { fontSize: 12, fontWeight: 900, color: esColor, fontFamily: "var(--font-heading)" } }, tr.entryScore),
+                      tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision]
+                        ? React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: esColor, padding: "1px 5px", borderRadius: 3, background: esColor + "18" } }, tr.entryDecision.replace("_", " "))
+                        : null,
+                      tr.patMeta && tr.patMeta.applied
+                        ? React.createElement("span", {
+                            title: "Pattern-adjusted (original: " + tr.patMeta.originalScore + ", \u0394: " + (tr.patMeta.delta > 0 ? "+" : "") + tr.patMeta.delta + ", WR: " + (tr.patMeta.winRate != null ? tr.patMeta.winRate.toFixed(0) + "%, " + tr.patMeta.trades + " trades" : "N/A") + (tr.patMeta.topWeight ? ", top: " + tr.patMeta.topWeight.component : "") + ")",
+                            style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: tr.patMeta.delta > 0 ? "#16a34a22" : tr.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: tr.patMeta.delta > 0 ? "#16a34a" : tr.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (tr.patMeta.delta > 0 ? "#16a34a44" : tr.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
+                          }, "P" + (tr.patMeta.delta > 0 ? "+" + tr.patMeta.delta : tr.patMeta.delta < 0 ? tr.patMeta.delta : ""))
+                        : null
+                    )
+                  : "\u2014"
+              ),
               React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text2)", fontFamily: "var(--font-mono)" }) }, priceOnAdd > 0 ? INR(priceOnAdd) : "\u2014"),
               React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text4)" }) }, daysElapsed),
               React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text2)", fontFamily: "var(--font-mono)" }) }, currentPrice > 0 ? INR(currentPrice) : (refreshing ? "..." : "\u2014")),
@@ -5682,6 +5745,431 @@ const ConfidenceTracker = () => {
                 React.createElement("button", {
                   onClick: () => deleteTracked(tr.id),
                   title: "Remove from tracker",
+                  style: { border: "none", background: "transparent", cursor: "pointer", padding: 2, color: "var(--text6)" }
+                }, Icons.trash(13))
+              )
+            );
+          })
+        )
+      )
+    )
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   COMPONENT: Watchlist Tracker (Pulse sub-tab)
+   Tracks selected stocks with frozen Entry Score, Price on Add, Date Added,
+   10DLN, 10DEM. Days increments on every trading day. Current Price and
+   % Change refresh on button click.
+   ══════════════════════════════════════════════════════════════════════════ */
+const LS_WL_TRACKER = "stox_watchlist_tracker";
+const LS_WL_PRICES = "stox_watchlist_tracker_prices";
+
+const WatchlistTracker = () => {
+  const TI = window.TechIndicators;
+  const DF = window.OHLCVFetcher;
+  const [tracked, setTracked] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [pricesBackfilled, setPricesBackfilled] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addTicker, setAddTicker] = useState("");
+  const [addPrice, setAddPrice] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addErr, setAddErr] = useState("");
+  const [prices, setPrices] = useState({});
+  const [refreshing, setRefreshing] = useState(false);
+  const [selected, setSelected] = useState({});
+  const [sortKey, setSortKey] = useState("addedAt");
+  const [sortDir, setSortDir] = useState("desc");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const val = await dbGetSetting(LS_WL_TRACKER);
+        if (val && Array.isArray(val)) setTracked(val);
+      } catch (e) {}
+      try {
+        const p = await dbGetSetting(LS_WL_PRICES);
+        if (p && typeof p === "object" && Object.keys(p).length) { setPrices(p); setPricesBackfilled(true); }
+      } catch (e) {}
+      setLoaded(true);
+    })();
+  }, []);
+
+  React.useEffect(function() {
+    if (!loaded || !tracked.length || !window.applyPatternIntel) return;
+    var missing = tracked.filter(function(r) { return !r.patMeta; });
+    if (!missing.length) return;
+    (async function() {
+      var changed = false;
+      var copy = tracked.slice();
+      for (var i = 0; i < missing.length; i++) {
+        var tk = missing[i].ticker;
+        try {
+          var [resW, resD] = await Promise.all([
+            DF.fetchOHLCVCached(tk, "weekly"), DF.fetchOHLCVCached(tk, "daily")
+          ]);
+          if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) continue;
+          var _idxD = null;
+          try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
+          var result = computeCompatEntryScore(resW.data, resD.data, null, _idxD, null);
+          try { result = window.applyPatternIntel(result, tk); } catch(e) {}
+          if (result && result._patternApplied) {
+            var pm = { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight };
+            var idx = copy.findIndex(function(r) { return r.id === missing[i].id; });
+            if (idx >= 0) { copy[idx] = Object.assign({}, copy[idx], { patMeta: pm }); changed = true; }
+          }
+        } catch(e) {}
+      }
+      if (changed) { setTracked(copy); dbSetSetting(LS_WL_TRACKER, copy); }
+    })();
+  }, [loaded, tracked.length]);
+
+  const saveTracked = (arr) => {
+    setTracked(arr);
+    setSelected((prev) => {
+      const ids = new Set(arr.map((t) => t.id));
+      const next = {};
+      Object.keys(prev).forEach((id) => { if (ids.has(Number(id))) next[id] = true; });
+      return next;
+    });
+    dbSetSetting(LS_WL_TRACKER, arr);
+    window.dispatchEvent(new CustomEvent("stox:data-changed"));
+  };
+
+  const savePrices = (p) => { setPrices(p); dbSetSetting(LS_WL_PRICES, p); };
+
+  useEffect(() => {
+    if (!loaded || pricesBackfilled || !tracked.length || !DF || refreshing) return;
+    (async () => {
+      setRefreshing(true);
+      const p = {};
+      for (let i = 0; i < tracked.length; i++) {
+        try {
+          const d = await fetchTickerPrice(tracked[i].ticker);
+          if (d && d.price > 0) p[tracked[i].ticker] = d.price;
+        } catch (e) {}
+      }
+      savePrices(p);
+      setPricesBackfilled(true);
+      setRefreshing(false);
+    })();
+  }, [loaded]);
+
+  const refreshPrices = async () => {
+    if (!tracked.length || refreshing) return;
+    setRefreshing(true);
+    const oldPrices = { ...prices };
+    const p = {};
+    for (let i = 0; i < tracked.length; i++) {
+      try {
+        const d = await fetchTickerPrice(tracked[i].ticker);
+        if (d && d.price > 0) p[tracked[i].ticker] = d.price;
+      } catch (e) {}
+    }
+    savePrices(p);
+    try { if (window.__fsa && window.__fsa.writeNow) await window.__fsa.writeNow(); } catch (e) {}
+    setRefreshing(false);
+    const changes = [];
+    const noChanges = [];
+    tracked.forEach((tr) => {
+      const oldPrice = oldPrices[tr.ticker];
+      const newPrice = p[tr.ticker];
+      const base = tr.priceOnAdd || 0;
+      if (!oldPrice || !newPrice || !base) { noChanges.push(tr.ticker); return; }
+      const oldPct = (oldPrice - base) / base * 100;
+      const newPct = (newPrice - base) / base * 100;
+      const diff = Math.round((newPct - oldPct) * 100) / 100;
+      const label = tr.ticker.replace(".NS", "");
+      if (Math.abs(diff) >= 0.01) {
+        changes.push(label + " " + (diff > 0 ? "+" : "") + diff.toFixed(2) + "% (" + oldPct.toFixed(1) + "% \u2192 " + newPct.toFixed(1) + "%)");
+      } else {
+        noChanges.push(label);
+      }
+    });
+    if (changes.length > 0) {
+      let msg = changes.length + " % change" + (changes.length !== 1 ? "s" : "") + " updated: " + changes.join(", ");
+      if (noChanges.length > 0) msg += " \u00b7 " + noChanges.length + " unchanged";
+      showToast(msg, 0);
+    } else {
+      showToast("Prices refreshed \u2014 no % change updates", 0);
+    }
+  };
+
+  const addAndTrack = async () => {
+    if (!addTicker.trim()) { setAddErr("Enter a ticker."); return; }
+    if (!TI || !DF) { setAddErr("Analysis engine not ready."); return; }
+    setAdding(true); setAddErr("");
+    try {
+      const tk = addTicker.trim().toUpperCase().replace(/\.NS$|\.BO$/, "");
+      if (!tk) { setAddErr("Enter a valid ticker."); setAdding(false); return; }
+      const [resW, resD, resH] = await Promise.all([
+        DF.fetchOHLCVCached(tk, "weekly"),
+        DF.fetchOHLCVCached(tk, "daily"),
+        DF.fetchOHLCVCached(tk, "1h"),
+      ]);
+      if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
+        setAddErr("Insufficient data for " + tk); setAdding(false); return;
+      }
+      const lastDailyClose = resD.data[resD.data.length - 1].c;
+      const price = parseFloat(addPrice) || lastDailyClose || 0;
+      let _idxD = null, _idxW = null;
+      try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
+      try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
+      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
+      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch (e) {}
+      let conf10dLog = null, conf10dEmp = null;
+      try {
+        const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result), tk);
+        if (conf && conf.confidence != null) { try { if (window.applyPatternConfCal) conf = window.applyPatternConfCal(conf, tk); } catch (e2) {} conf10dLog = conf.confidenceLognormal; conf10dEmp = conf.confidenceEmpirical; }
+      } catch (e) {}
+      const row = {
+        id: Date.now(),
+        ticker: tk,
+        addedAt: new Date().toISOString(),
+        entryScore: result && result.finalScore != null ? result.finalScore : null,
+        entryDecision: result && result.decision ? result.decision.label : null,
+        patMeta: result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight } : null,
+        conf10dLog: conf10dLog != null ? Math.round(conf10dLog * 10) / 10 : null,
+        conf10dEmp: conf10dEmp != null ? Math.round(conf10dEmp * 10) / 10 : null,
+        priceOnAdd: price
+      };
+      saveTracked([row, ...tracked]);
+      if (price > 0) savePrices(Object.assign({}, prices, { [tk]: price }));
+      setAddTicker(""); setAddPrice(""); setShowAdd(false);
+      showToast("Added " + tk + " to Watchlist Tracker" + (result && result.finalScore != null ? " \u00b7 Score " + result.finalScore : ""), 3000);
+    } catch (e) { setAddErr("Error: " + (e.message || "Failed")); }
+    setAdding(false);
+  };
+
+  const deleteTracked = async (id) => {
+    const row = tracked.find((t) => t.id === id);
+    if (row && !(await showConfirm("Remove " + row.ticker + " from the Watchlist Tracker?"))) return;
+    saveTracked(tracked.filter((t) => t.id !== id));
+  };
+
+  const toggleSelect = (id) => {
+    setSelected((prev) => {
+      const next = Object.assign({}, prev);
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected((prev) => {
+      const next = Object.assign({}, prev);
+      const allChecked = sorted.length > 0 && sorted.every((t) => next[t.id]);
+      sorted.forEach((t) => { if (allChecked) delete next[t.id]; else next[t.id] = true; });
+      return next;
+    });
+  };
+
+  const deleteSelected = async () => {
+    const ids = Object.keys(selected).filter((id) => selected[id]).map(Number);
+    if (!ids.length) return;
+    const names = tracked.filter((t) => ids.indexOf(t.id) >= 0).map((t) => t.ticker);
+    if (!(await showConfirm("Remove " + names.length + " stock" + (names.length !== 1 ? "s" : "") + " from Watchlist Tracker? (" + names.join(", ") + ")"))) return;
+    saveTracked(tracked.filter((t) => ids.indexOf(t.id) < 0));
+  };
+
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    else { setSortKey(key); setSortDir("desc"); }
+  };
+
+  const exportWTCsv = () => {
+    var rows = [["Stock", "Date Added", "Entry Score", "10DLN", "10DEM", "Price on Add", "Days", "Current Price", "% Change"]];
+    var now = new Date();
+    tracked.forEach(function (tr) {
+      var addedDate = new Date(tr.addedAt);
+      var _startMs = Date.UTC(addedDate.getFullYear(), addedDate.getMonth(), addedDate.getDate());
+      var _endMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+      var days = 0;
+      for (var _t = _startMs; _t < _endMs; _t += 86400000) { var _day = new Date(_t).getUTCDay(); if (_day !== 0 && _day !== 6) days++; }
+      var current = prices[tr.ticker] || "";
+      var pct = tr.priceOnAdd > 0 && current > 0 ? ((current - tr.priceOnAdd) / tr.priceOnAdd * 100).toFixed(2) : "";
+      var dateStr = addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      function esc(v) { var s = String(v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
+      rows.push([esc(tr.ticker), esc(dateStr), tr.entryScore != null ? tr.entryScore : "", tr.conf10dLog != null ? tr.conf10dLog : "", tr.conf10dEmp != null ? tr.conf10dEmp : "", tr.priceOnAdd || "", days, current, pct].join(","));
+    });
+    var csv = rows.join("\r\n");
+    var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "stox-watchlist-tracker-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Exported " + tracked.length + " watchlist stocks to CSV", 3000);
+  };
+
+  var now = new Date();
+  var tradingDays = function (addedAt) {
+    var addedDate = new Date(addedAt);
+    var _startMs = Date.UTC(addedDate.getFullYear(), addedDate.getMonth(), addedDate.getDate());
+    var _endMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    var days = 0;
+    for (var _t = _startMs; _t < _endMs; _t += 86400000) { var _day = new Date(_t).getUTCDay(); if (_day !== 0 && _day !== 6) days++; }
+    return days;
+  };
+  var rowPct = function (tr) {
+    var priceOnAdd = tr.priceOnAdd || 0;
+    var currentPrice = prices[tr.ticker] || 0;
+    return priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100) : null;
+  };
+  var sorted = tracked.slice().sort(function (a, b) {
+    var dir = sortDir === "desc" ? -1 : 1;
+    var av, bv;
+    if (sortKey === "ticker") { av = a.ticker; bv = b.ticker; return dir * av.localeCompare(bv); }
+    if (sortKey === "addedAt") { av = new Date(a.addedAt).getTime(); bv = new Date(b.addedAt).getTime(); return dir * (av - bv); }
+    if (sortKey === "entryScore") { av = a.entryScore != null ? a.entryScore : -1; bv = b.entryScore != null ? b.entryScore : -1; }
+    else if (sortKey === "conf10dLog") { av = a.conf10dLog != null ? a.conf10dLog : -1; bv = b.conf10dLog != null ? b.conf10dLog : -1; }
+    else if (sortKey === "priceOnAdd") { av = a.priceOnAdd || 0; bv = b.priceOnAdd || 0; }
+    else if (sortKey === "days") { av = tradingDays(a.addedAt); bv = tradingDays(b.addedAt); }
+    else if (sortKey === "currentPrice") { av = prices[a.ticker] || 0; bv = prices[b.ticker] || 0; }
+    else if (sortKey === "pct") { av = rowPct(a); bv = rowPct(b); av = av == null ? -999 : av; bv = bv == null ? -999 : bv; }
+    else { av = 0; bv = 0; }
+    return dir * (av - bv);
+  });
+  var selectedCount = Object.keys(selected).filter(function(id) { return selected[id]; }).length;
+  var arrow = function (key) {
+    if (sortKey !== key) return "";
+    return sortDir === "asc" ? React.createElement("span", { style: { display: "inline-flex", verticalAlign: "middle" } }, Ico.triangleUp(10, "var(--accent)")) : React.createElement("span", { style: { display: "inline-flex", verticalAlign: "middle" } }, Ico.triangleDown(10, "var(--accent)"));
+  };
+  var thStyle = { padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, background: "var(--bg3)" };
+  var thRight = Object.assign({}, thStyle, { textAlign: "right" });
+  var tdStyle = { padding: "8px 10px", fontSize: 11, borderBottom: "1px solid var(--border)" };
+  var tdRight = Object.assign({}, tdStyle, { textAlign: "right" });
+
+  return React.createElement("div", null,
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Watchlist Tracker"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } },
+          "Entry Score, Price, 10DLN & 10DEM frozen at add \u00b7 Days increments on trading days \u00b7 Current Price & % Change refresh on click"
+        )
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+        tracked.length > 0 && React.createElement("button", {
+          onClick: refreshPrices, disabled: refreshing,
+          className: "stx-btn",
+          style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: refreshing ? "var(--text6)" : "var(--accent)", cursor: refreshing ? "wait" : "pointer" }
+        }, refreshing ? "Refreshing..." : React.createElement(React.Fragment, null, Ico.refresh(12), " Refresh Prices")),
+        tracked.length > 0 && React.createElement("button", {
+          onClick: exportWTCsv,
+          className: "stx-btn",
+          style: { fontSize: 10, padding: "8px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
+        }, React.createElement(React.Fragment, null, Ico.download(10), " CSV")),
+        React.createElement("button", {
+          onClick: () => { setShowAdd(!showAdd); setAddErr(""); },
+          className: "stx-btn stx-btn-primary",
+          style: { fontSize: 12, padding: "8px 16px" }
+        }, showAdd ? "Cancel" : "+ Add Stock")
+      )
+    ),
+    showAdd && React.createElement("div", { className: "stx-card", style: { marginBottom: 16, padding: 16 } },
+      React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 4 } }, "Add Stock to Watchlist"),
+      React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginBottom: 10 } },
+        "Freezes Entry Score, 10DLN, 10DEM, Price on Add and Date Added at this moment."
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" } },
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Ticker"),
+          React.createElement("input", { className: "inp", type: "text", placeholder: "e.g. RELIANCE", value: addTicker, onChange: (e) => setAddTicker(e.target.value.toUpperCase()), style: { width: 140 } })
+        ),
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", marginBottom: 4 } }, "Price on Add (\u20b9) (optional)"),
+          React.createElement("input", { className: "inp", type: "number", placeholder: "Optional \u2014 uses last close", value: addPrice, onChange: (e) => setAddPrice(e.target.value), style: { width: 120 } })
+        ),
+        React.createElement("button", {
+          onClick: addAndTrack, disabled: adding, className: "stx-btn stx-btn-primary",
+          style: { padding: "8px 18px", fontSize: 12, opacity: adding ? 0.6 : 1, cursor: adding ? "wait" : "pointer" }
+        }, adding ? "Adding..." : "Add & Freeze")
+      ),
+      addErr && React.createElement("div", { style: { marginTop: 8, fontSize: 11, color: addErr.indexOf("Error") === 0 ? "#ef4444" : "#eab308" } }, addErr)
+    ),
+    !tracked.length && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
+      "No watchlist stocks yet. Click \"+ Add Stock\" or select stocks from the Stock Screener and click \"+ WT\"."
+    ),
+    selectedCount > 0 && React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(251,191,36,.08)", border: "1px solid rgba(251,191,36,.25)" } },
+      React.createElement("span", { style: { fontSize: 11, color: "var(--text)", fontWeight: 600 } }, selectedCount + " selected"),
+      React.createElement("button", {
+        onClick: deleteSelected,
+        className: "stx-btn",
+        style: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, padding: "5px 12px", border: "1px solid rgba(239,68,68,.3)", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer", fontFamily: "inherit" }
+      }, Icons.trash(12), " Delete " + selectedCount),
+      React.createElement("button", {
+        onClick: () => setSelected({}),
+        className: "stx-btn",
+        style: { fontSize: 10, padding: "5px 12px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" }
+      }, "Clear")
+    ),
+    tracked.length > 0 && React.createElement("div", { style: { overflowX: "auto", marginTop: 4 } },
+      React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } },
+        React.createElement("thead", null,
+          React.createElement("tr", null,
+            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center", width: 36 }) },
+              React.createElement("input", { type: "checkbox", checked: sorted.length > 0 && sorted.every(function(t) { return selected[t.id]; }), onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 13, height: 13 } })
+            ),
+            React.createElement("th", { style: thStyle, title: "Sort by stock", onClick: function() { toggleSort("ticker"); } }, ["Stock", arrow("ticker")]),
+            React.createElement("th", { style: thStyle, title: "Sort by date added", onClick: function() { toggleSort("addedAt"); } }, ["Date Added", arrow("addedAt")]),
+            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }), title: "Sort by entry score", onClick: function() { toggleSort("entryScore"); } }, ["Entry Score", arrow("entryScore")]),
+            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }), title: "Sort by 10-day lognormal confidence", onClick: function() { toggleSort("conf10dLog"); } }, ["10DLN", arrow("conf10dLog")]),
+            React.createElement("th", { style: Object.assign({}, thStyle, { textAlign: "center" }) }, "10DEM"),
+            React.createElement("th", { style: thRight, title: "Sort by price on add", onClick: function() { toggleSort("priceOnAdd"); } }, ["Price on Add", arrow("priceOnAdd")]),
+            React.createElement("th", { style: thRight, title: "Sort by days held", onClick: function() { toggleSort("days"); } }, ["Days", arrow("days")]),
+            React.createElement("th", { style: thRight, title: "Sort by current price", onClick: function() { toggleSort("currentPrice"); } }, ["Current Price", arrow("currentPrice")]),
+            React.createElement("th", { style: thRight, title: "Sort by % change", onClick: function() { toggleSort("pct"); } }, ["% Change", arrow("pct")]),
+            React.createElement("th", { style: Object.assign({}, thStyle, { width: 40 }) })
+          )
+        ),
+        React.createElement("tbody", null,
+          sorted.map(function (tr) {
+            var addedDate = new Date(tr.addedAt);
+            var daysElapsed = tradingDays(tr.addedAt);
+            var priceOnAdd = tr.priceOnAdd || 0;
+            var currentPrice = prices[tr.ticker] || 0;
+            var pctChange = rowPct(tr);
+            var pctColor = pctChange === null ? "var(--text6)" : pctChange >= 0 ? "#22c55e" : "#ef4444";
+            var esColor = "var(--text6)";
+            if (tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision]) esColor = SCREENER_DECISION_MAP[tr.entryDecision].color;
+            var rowBg = "rgba(251, 191, 36, 0.06)";
+            return React.createElement("tr", { key: tr.id, style: { borderBottom: "1px solid var(--border)", background: selected[tr.id] ? "rgba(251,191,36,.12)" : rowBg } },
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", width: 36 }) },
+                React.createElement("input", { type: "checkbox", checked: !!selected[tr.id], onChange: function() { toggleSelect(tr.id); }, style: { accentColor: "var(--accent)", cursor: "pointer", width: 13, height: 13 } })
+              ),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap" }) }, tr.ticker),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { color: "var(--text3)", whiteSpace: "nowrap" }) }, addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                tr.entryScore != null
+                  ? React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 4 } },
+                      React.createElement("span", { style: { fontSize: 12, fontWeight: 900, color: esColor, fontFamily: "var(--font-heading)" } }, tr.entryScore),
+                      tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision]
+                        ? React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: esColor, padding: "1px 5px", borderRadius: 3, background: esColor + "18" } }, tr.entryDecision.replace("_", " "))
+                        : null,
+                      tr.patMeta && tr.patMeta.applied
+                        ? React.createElement("span", {
+                            title: "Pattern-adjusted (original: " + tr.patMeta.originalScore + ", \u0394: " + (tr.patMeta.delta > 0 ? "+" : "") + tr.patMeta.delta + ", WR: " + (tr.patMeta.winRate != null ? tr.patMeta.winRate.toFixed(0) + "%, " + tr.patMeta.trades + " trades" : "N/A") + (tr.patMeta.topWeight ? ", top: " + tr.patMeta.topWeight.component : "") + ")",
+                            style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: tr.patMeta.delta > 0 ? "#16a34a22" : tr.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: tr.patMeta.delta > 0 ? "#16a34a" : tr.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (tr.patMeta.delta > 0 ? "#16a34a44" : tr.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
+                          }, "P" + (tr.patMeta.delta > 0 ? "+" + tr.patMeta.delta : tr.patMeta.delta < 0 ? tr.patMeta.delta : ""))
+                        : null
+                    )
+                  : "\u2014"
+              ),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", color: tr.conf10dLog != null ? (tr.conf10dLog >= 70 ? "#16a34a" : tr.conf10dLog >= 40 ? "#d97706" : "#dc2626") : "var(--text6)" }) }, tr.conf10dLog != null ? Number(tr.conf10dLog).toFixed(0) : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 800, fontFamily: "var(--font-heading)", color: tr.conf10dEmp != null ? (tr.conf10dEmp >= 70 ? "#16a34a" : tr.conf10dEmp >= 40 ? "#d97706" : "#dc2626") : "var(--text6)" }) }, tr.conf10dEmp != null ? Number(tr.conf10dEmp).toFixed(0) : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text2)", fontFamily: "var(--font-mono)" }) }, priceOnAdd > 0 ? INR(priceOnAdd) : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text4)" }) }, daysElapsed),
+              React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text2)", fontFamily: "var(--font-mono)" }) }, currentPrice > 0 ? INR(currentPrice) : (refreshing ? "..." : "\u2014")),
+              React.createElement("td", { style: Object.assign({}, tdRight, { fontWeight: 700, color: pctColor, fontFamily: "var(--font-mono)" }) }, pctChange !== null ? (pctChange >= 0 ? "+" : "") + pctChange.toFixed(2) + "%" : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                React.createElement("button", {
+                  onClick: () => deleteTracked(tr.id),
+                  title: "Remove from watchlist",
                   style: { border: "none", background: "transparent", cursor: "pointer", padding: 2, color: "var(--text6)" }
                 }, Icons.trash(13))
               )
@@ -8600,27 +9088,23 @@ function StockScreener(props) {
     var existingSet = new Set(entries.map(function(e) { return e.ticker; }));
     var toAdd = tickers.filter(function(t) { return !existingSet.has(t); });
     if (!toAdd.length) { showToast("All selected stocks already in Entry Score", 2500); return; }
-    var _idxD = null, _idxW = null;
-    try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
-    try { var _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch(e) {}
     var added = 0;
     for (var i = 0; i < toAdd.length; i++) {
       var tk = toAdd[i];
       try {
-        var [resW, resD, resH] = await Promise.all([
-          DF.fetchOHLCVCached(tk, "weekly"), DF.fetchOHLCVCached(tk, "daily"), DF.fetchOHLCVCached(tk, "1h")
-        ]);
-        if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) continue;
-        var lc = resD.data[resD.data.length - 1].c;
-        var indW = TI.computeAll(resW.data);
-        var indD = TI.computeAll(resD.data);
-        var indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-        var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
-        try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(e) {}
-        if (result) result.lastClose = lc;
-        var conf10d = null, conf10dLog = null, conf10dEmp = null;
-        try { var _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result), tk); if (_conf) { try { if (window.applyPatternConfCal) _conf = window.applyPatternConfCal(_conf, tk); } catch(e2) {} conf10dLog = _conf.confidenceLognormal; conf10dEmp = _conf.confidenceEmpirical; conf10d = _conf.confidence != null ? Math.round(_conf.confidence * 10) / 10 : null; } } catch(e) {}
-        entries.unshift({ id: Date.now() + i, ticker: tk, currentPrice: lc || 0, addedAt: new Date().toISOString(), result: result, frozenResult: JSON.parse(JSON.stringify(result || {})), conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, indicators: { weekly: indW, daily: indD, hourly: indH } });
+        var sr = results.find(function(r) { return r.s && (r.s.t === tk || r.s.t === tk + ".NS"); });
+        if (!sr) continue;
+        var result = sr.result ? Object.assign({}, sr.result) : null;
+        if (result) result.lastClose = sr.lc || 0;
+        entries.unshift({
+          id: Date.now() + i, ticker: tk, currentPrice: sr.lc || 0, addedAt: new Date().toISOString(),
+          result: result, frozenResult: JSON.parse(JSON.stringify(result || {})),
+          patMeta: sr.patMeta || null,
+          conf10d: sr.conf10d != null ? sr.conf10d : null,
+          conf10dLog: sr.conf10dLog != null ? sr.conf10dLog : null,
+          conf10dEmp: sr.conf10dEmp != null ? sr.conf10dEmp : null,
+          indicators: null
+        });
         added++;
       } catch(e) {}
     }
@@ -8640,22 +9124,22 @@ function StockScreener(props) {
     var existingSet = new Set(entries.map(function(e) { return e.ticker; }));
     var toAdd = tickers.filter(function(t) { return !existingSet.has(t); });
     if (!toAdd.length) { showToast("All selected stocks already in Confidence Tracker", 2500); return; }
-    var _idxD = null;
-    try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
     var added = 0;
     for (var i = 0; i < toAdd.length; i++) {
       var tk = toAdd[i];
       try {
-        var [resW, resD, resH] = await Promise.all([
-          DF.fetchOHLCVCached(tk, "weekly"), DF.fetchOHLCVCached(tk, "daily"), DF.fetchOHLCVCached(tk, "1h")
-        ]);
-        if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) continue;
-        var lc = resD.data[resD.data.length - 1].c;
-        var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, null);
-        try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(e) {}
-        var confidence = null, conf10dLog = null, conf10dEmp = null;
-        try { var conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result), tk); if (conf && conf.confidence != null) { try { if (window.applyPatternConfCal) conf = window.applyPatternConfCal(conf, tk); } catch(e2) {} confidence = conf.confidence; conf10dLog = conf.confidenceLognormal; conf10dEmp = conf.confidenceEmpirical; } } catch(e) {}
-        entries.unshift({ id: Date.now() + i, ticker: tk, addedAt: new Date().toISOString(), confidence: confidence != null ? Math.round(confidence * 10) / 10 : null, conf10dLog: conf10dLog != null ? Math.round(conf10dLog * 10) / 10 : null, conf10dEmp: conf10dEmp != null ? Math.round(conf10dEmp * 10) / 10 : null, entryScore: result && result.finalScore != null ? result.finalScore : null, entryDecision: result && result.decision ? result.decision.label : null, currentPrice: lc || 0 });
+        var sr = results.find(function(r) { return r.s && (r.s.t === tk || r.s.t === tk + ".NS"); });
+        if (!sr) continue;
+        entries.unshift({
+          id: Date.now() + i, ticker: tk, addedAt: new Date().toISOString(),
+          confidence: sr.conf10d != null ? sr.conf10d : null,
+          conf10dLog: sr.conf10dLog != null ? sr.conf10dLog : null,
+          conf10dEmp: sr.conf10dEmp != null ? sr.conf10dEmp : null,
+          entryScore: sr.result && sr.result.finalScore != null ? sr.result.finalScore : null,
+          entryDecision: sr.result && sr.result.decision ? sr.result.decision.label : null,
+          patMeta: sr.patMeta || null,
+          currentPrice: sr.lc || 0
+        });
         added++;
       } catch(e) {}
     }
@@ -8664,6 +9148,40 @@ function StockScreener(props) {
       window.dispatchEvent(new CustomEvent("stox:data-changed"));
     }
     showToast(added + " of " + toAdd.length + " added to Confidence Tracker", 2500);
+    setSelected({});
+  };
+
+  var batchAddToWT = async function() {
+    var tickers = Object.keys(selected).filter(function(t) { return selected[t]; }).map(function(t) { return t.replace(/\.NS$/, ""); });
+    if (!tickers.length) return;
+    var existing = await dbGetSetting("stox_watchlist_tracker");
+    var entries = (Array.isArray(existing) ? existing : []);
+    var existingSet = new Set(entries.map(function(e) { return e.ticker; }));
+    var toAdd = tickers.filter(function(t) { return !existingSet.has(t); });
+    if (!toAdd.length) { showToast("All selected stocks already in Watchlist Tracker", 2500); return; }
+    var added = 0;
+    for (var i = 0; i < toAdd.length; i++) {
+      var tk = toAdd[i];
+      try {
+        var sr = results.find(function(r) { return r.s && (r.s.t === tk || r.s.t === tk + ".NS"); });
+        if (!sr) continue;
+        entries.unshift({
+          id: Date.now() + i, ticker: tk, addedAt: new Date().toISOString(),
+          entryScore: sr.result && sr.result.finalScore != null ? sr.result.finalScore : null,
+          entryDecision: sr.result && sr.result.decision ? sr.result.decision.label : null,
+          patMeta: sr.patMeta || null,
+          conf10dLog: sr.conf10dLog != null ? sr.conf10dLog : null,
+          conf10dEmp: sr.conf10dEmp != null ? sr.conf10dEmp : null,
+          priceOnAdd: sr.lc || 0
+        });
+        added++;
+      } catch(e) {}
+    }
+    if (added > 0) {
+      await dbSetSetting("stox_watchlist_tracker", entries);
+      window.dispatchEvent(new CustomEvent("stox:data-changed"));
+    }
+    showToast(added + " of " + toAdd.length + " added to Watchlist Tracker", 2500);
     setSelected({});
   };
 
@@ -8817,6 +9335,11 @@ function StockScreener(props) {
           className: "stx-btn",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 700, border: "1px solid #06b6d4", background: "rgba(6,182,212,.08)", color: "#06b6d4", cursor: "pointer" }
         }, "+ CS (" + selectedCount + ")") : null,
+        results.length > 0 && !scanning && selectedCount > 0 ? React.createElement("button", {
+          onClick: batchAddToWT,
+          className: "stx-btn",
+          style: { padding: "8px 14px", fontSize: 11, fontWeight: 700, border: "1px solid #f59e0b", background: "rgba(245,158,11,.08)", color: "#f59e0b", cursor: "pointer" }
+        }, "+ WT (" + selectedCount + ")") : null,
         results.length > 0 && !scanning ? React.createElement("button", {
           onClick: saveSnapshot,
           className: "stx-btn",
@@ -10482,6 +11005,7 @@ function PulsePage({ holdings }) {
     { key: "screener", label: "Stock Screener", icon: Icons.chart },
     { key: "entryscore", label: "Entry Score", icon: Icons.trendingUp },
     { key: "confidencescore", label: "Confidence Score", icon: Icons.eye },
+    { key: "watchlisttracker", label: "Watchlist Tracker", icon: Icons.bookmark },
     { key: "singlestock", label: "Single Stock Analysis", icon: Icons.search },
     { key: "backtest", label: "Backtesting", icon: Icons.clock },
     { key: "scoretuner", label: "Score Tuner", icon: Icons.settings },
@@ -10513,6 +11037,7 @@ function PulsePage({ holdings }) {
       activeTab === "screener" && React.createElement(StockScreener, { onOpenStock: openStock }),
       activeTab === "entryscore" && React.createElement(EntryScorePanel, { shares: holdings || [] }),
       activeTab === "confidencescore" && React.createElement(ConfidenceTracker, null),
+      activeTab === "watchlisttracker" && React.createElement(WatchlistTracker, null),
       activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker }),
       React.createElement("div", { style: { display: activeTab === "backtest" ? "" : "none" } }, React.createElement(BacktestSuitePanel, null)),
       React.createElement("div", { style: { display: activeTab === "scoretuner" ? "" : "none" } }, React.createElement(ScoreTunerPanel, null)),
