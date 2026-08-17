@@ -166,8 +166,8 @@ window.BacktestEngine = (function () {
   function create(cfg) {
     cfg = cfg || {};
     var scoreFn = cfg.scoreFn || null;
-    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : 4.0;
-    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : 14;
+    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().prob4 && window.TechIndicators.getScoreConfig().prob4.targetPct != null) ? window.TechIndicators.getScoreConfig().prob4.targetPct * 100 : 4.0);
+    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 14);
     var threshold = cfg.threshold != null ? cfg.threshold : 65;
     var warmup = cfg.warmup != null ? cfg.warmup : 60;
     var multiTFMap = cfg.multiTFMap || null;

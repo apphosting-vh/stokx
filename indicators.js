@@ -1750,7 +1750,7 @@ window.TechIndicators = (function () {
     if (sn.chopIndex !== null && sn.prevChopIndex !== null && sn.chopIndex > sn.prevChopIndex && sn.chopIndex > 61.8) s += 0.5;
     if (sn.atr14 !== null && entryPrice > 0) {
       var stopLoss = entryPrice - sn.atr14 * 1.5;
-      var target = entryPrice * 1.04;
+      var target = entryPrice * (1 + (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct : 0.04));
       var risk = currentPrice - stopLoss;
       var reward = target - currentPrice;
       if (risk > 0 && reward > 0) { var rr = reward / risk; if (rr < 1.0) s += 1.5; else if (rr < 1.5) s += 0.5; }
@@ -2969,7 +2969,8 @@ window.TechIndicators = (function () {
     var atrPct = volRegime ? volRegime.atrPct : (sn.atr14 != null && sn.c != null && sn.c > 0 ? sn.atr14 / sn.c * 100 : null);
     var atrPercentile = volRegime ? volRegime.atrPercentile : 50;
 
-    /* Horizon scaling: longer horizon → more time → target more reachable at same ATR */
+    /* Horizon scaling: longer horizon → more time → target more reachable at same ATR.
+       Normalized against the original 10-day baseline. */
     var horizonDays = SCORE_CONFIG.horizonDays || 10;
     var hScale = Math.sqrt(horizonDays / 10);
 
@@ -3730,11 +3731,11 @@ window.TechIndicators = (function () {
     var exitResult = computeExitScore(currentData, { entry_price: ep, holding_days: days, entry_score: es }, indexCandles);
     var exitScore = exitResult && exitResult.exit_score != null ? exitResult.exit_score : 0;
     var stopLoss = (ep != null && atr != null) ? ep - (atr * 1.5) : null;
-    var target = ep != null ? ep * 1.04 : null;
+    var target = ep != null ? ep * (1 + (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct : 0.04)) : null;
 
     /* Layer 1: Hard Rules */
     if (ep != null && cp != null) {
-      if (target != null && cp >= target) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Target hit (+4%)', action: 'Full exit', exit_score: exitScore });
+      if (target != null && cp >= target) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Target hit (+' + (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4) + '%)', action: 'Full exit', exit_score: exitScore });
       if (stopLoss != null && cp <= stopLoss) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Stop loss triggered', action: 'Full exit', exit_score: exitScore });
       if (days >= 15 && cp < ep * 1.02) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Time stop (15 days, <2%)', action: 'Full exit', exit_score: exitScore });
     }
@@ -4098,7 +4099,7 @@ window.TechIndicators = (function () {
       if (!intradayCandles || intradayCandles.length < 10) return base;
       position = position || {};
       var entry = position.entry_price || position.entry || 0;
-      var targetPct = position.target_pct != null ? position.target_pct : 4;
+      var targetPct = position.target_pct != null ? position.target_pct : (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4);
       if (entry <= 0) { base.reason = 'no_entry_price'; return base; }
 
       /* isolate today's session bars (same IST date as the last bar) */
@@ -4374,9 +4375,9 @@ window.TechIndicators = (function () {
      Returns { confidence, reason, components, flags }. */
   function computeHorizonConfidence(hourlyCandles, dailyCandles, cfg) {
     cfg = cfg || {};
-    var horizonDays = cfg.horizonDays != null ? cfg.horizonDays : 10;
+    var horizonDays = cfg.horizonDays != null ? cfg.horizonDays : (SCORE_CONFIG.horizonDays || 10);
     var windowSessions = cfg.windowSessions != null ? cfg.windowSessions : 40;
-    var targetPct = cfg.target_pct != null ? cfg.target_pct : (cfg.targetPct != null ? cfg.targetPct : 4);
+    var targetPct = cfg.target_pct != null ? cfg.target_pct : (cfg.targetPct != null ? cfg.targetPct : (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4));
     var holdingDays = cfg.holding_days != null ? cfg.holding_days : (cfg.holdingDays != null ? cfg.holdingDays : 0);
     var ctx = cfg.entryScoreContext || {};
     var base = {
@@ -4502,6 +4503,7 @@ window.TechIndicators = (function () {
       if (ema9 != null && ema21 != null) hourDrift += 0.15 * (ema9 > ema21 ? 1 : -1);
       if (rsi14 != null) hourDrift += 0.10 * (rsi14 < 30 ? 0.5 : rsi14 > 70 ? -0.5 : 0);
       hourDrift = clamp(hourDrift, -1, 1);
+      /* Decay hourly drift for longer horizons (10-day baseline) */
       var hourDecay = clamp(Math.pow(Math.min(1, 10 / horizonDays), 1.2), 0.3, 1.0);
       hourDrift *= hourDecay;
       hourDrift *= hourlyDataQuality;
@@ -4689,7 +4691,7 @@ window.TechIndicators = (function () {
     return computeHorizonConfidence(hourlyCandles, dailyCandles, {
       horizonDays: 5, windowSessions: 20,
       entry_price: entry,
-      targetPct: position.target_pct != null ? position.target_pct : (position.targetPct != null ? position.targetPct : 4),
+      targetPct: position.target_pct != null ? position.target_pct : (position.targetPct != null ? position.targetPct : (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4)),
       holdingDays: position.holding_days != null ? position.holding_days : (position.holdingDays != null ? position.holdingDays : null),
       indexCandles: position.indexCandles || null
     });
@@ -4708,7 +4710,7 @@ window.TechIndicators = (function () {
     return computeHorizonConfidence(hourlyCandles, dailyCandles, {
       horizonDays: _hd, windowSessions: 40,
       entry_price: cur.c,
-      targetPct: 4,
+      targetPct: SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4,
       holdingDays: null,
       indexCandles: indexCandles,
       entryScoreContext: entryScoreContext
@@ -4925,7 +4927,7 @@ window.TechIndicators = (function () {
 
       /* ── 4. 10-day horizon context from current price ─────────────────── */
       var ctx = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-        horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: c, targetPct: 4,
+        horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: c, targetPct: SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4,
         holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
       });
       if (ctx.reason !== 'ok' || ctx.confidence == null) { base.reason = ctx.reason || base.reason; return base; }
@@ -5036,7 +5038,7 @@ window.TechIndicators = (function () {
         var P = prices[p2];
         var fp = fillProb(P);
         var res = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-          horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: P, targetPct: 4,
+          horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: P, targetPct: SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct * 100 : 4,
           holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
         });
         var isAggressive = P < floorP;

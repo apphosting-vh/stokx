@@ -417,7 +417,8 @@ window.TechnicalIndicatorsPanel = (function () {
         var now = new Date();
         holdingDays = Math.floor((now - bd) / 864e5);
       }
-      var target = ep * 1.04;
+      var _tp = (window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().prob4 && window.TechIndicators.getScoreConfig().prob4.targetPct != null) ? window.TechIndicators.getScoreConfig().prob4.targetPct : 0.04;
+      var target = ep * (1 + _tp);
       var stopLoss = ep - (atr * 1.5);
       var highWatermark = cp;
       if (candles && candles.length > 0) {
@@ -430,7 +431,7 @@ window.TechnicalIndicatorsPanel = (function () {
       var aboveEntry2Pct = cp >= ep * 1.02;
 
       var rules = [];
-      rules.push({ label: "Take Profit (+4%)", price: target, trigger: cp >= target, active: cp >= target, type: "exit", color: "#16a34a" });
+      rules.push({ label: "Take Profit (+" + Math.round(_tp * 100) + "%)", price: target, trigger: cp >= target, active: cp >= target, type: "exit", color: "#16a34a" });
       rules.push({ label: "Stop Loss (1.5\u00d7ATR)", price: stopLoss, trigger: cp <= stopLoss, active: cp <= stopLoss, type: "exit", color: "#ef4444" });
       if (aboveEntry2Pct) {
         rules.push({ label: "Trailing Stop (2\u00d7ATR from high)", price: trailingStop, trigger: cp <= trailingStop, active: cp <= trailingStop, type: "exit", color: "#ef4444" });

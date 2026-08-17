@@ -111,8 +111,8 @@ window.BatchBacktest = (function () {
   function create(cfg) {
     cfg = cfg || {};
 
-    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : 4.0;
-    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : 14;
+    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().prob4 && window.TechIndicators.getScoreConfig().prob4.targetPct != null) ? window.TechIndicators.getScoreConfig().prob4.targetPct * 100 : 4.0);
+    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 14);
     var threshold = cfg.threshold != null ? cfg.threshold : 65;
     var slippagePct = cfg.slippagePct != null ? cfg.slippagePct : 0.1;
     var brokeragePct = cfg.brokeragePct != null ? cfg.brokeragePct : 0.05;
@@ -676,7 +676,7 @@ window.BatchBacktest = (function () {
       return {
         symbol: symbol,
         backtestDate: Date.now(),
-        backtestVersion: window.__STOX_APP_VERSION || "3.0.45",
+        backtestVersion: window.__STOX_APP_VERSION || "3.0.46",
         indicatorWeights: indicatorWeights,
         indicatorPowers: indicatorPowers,
         calibration: calibration,
