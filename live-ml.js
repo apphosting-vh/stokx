@@ -618,9 +618,8 @@ window.LiveML = (function () {
     } catch (e) {}
     if (!model || !model.network || model.network.inputSize !== window.MLTrainer.FEATURE_KEYS.length) return null;
 
-    var candles = await loadDailyCandles(symbol, offlineMap, true);
-    /* Also try stale refresh for the edge case where offline was downloaded
-       before market close. */
+    var candles = await loadDailyCandles(symbol, offlineMap, false);
+    /* Refresh only if offline snapshot is stale (downloaded before market close). */
     var fromOffline = !!offlineLookup(offlineMap, symbol);
     if (fromOffline) {
       var refreshed = await refreshStaleOffline(symbol, candles, offlineMap);
