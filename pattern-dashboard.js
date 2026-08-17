@@ -2771,7 +2771,8 @@ window.PatternDashboard = (function () {
                 atr_pct: 3,
                 volume_ratio: 1,
                 ema_slope: 0,
-                adx: ip.trendHealth && ip.trendHealth.correlation != null ? 20 + ip.trendHealth.correlation * 30 : 25
+                adx: ip.trendHealth && ip.trendHealth.correlation != null ? 20 + ip.trendHealth.correlation * 30 : 25,
+                entry_score: ruleScore != null ? ruleScore : 0.5
               };
               var pred = window.MLTrainer.predictSync(features, mlCachedModel);
               if (pred && pred.winProbability != null) mlProb = pred.winProbability;
