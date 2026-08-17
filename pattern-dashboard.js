@@ -1804,6 +1804,15 @@ window.PatternDashboard = (function () {
           onProgress: function (current, total, msg) { pushLiveLog("[" + Math.round((total > 0 ? current / total * 100 : 0)) + "%] " + msg); }
         });
         pushLiveLog("COLLECT: scanned " + summary.symbolsScanned + ", processed " + summary.symbolsProcessed + ", new samples: " + summary.newSamples + ", skipped: " + summary.skipped + ", offline: " + summary.offlineHits + ", live: " + summary.liveFetches);
+        /* After resolving yesterday's picks, score today's universe and record
+           picks so tomorrow's collect can resolve them. */
+        pushLiveLog("Scoring today's setup for tracker...");
+        var signals = await window.LiveML.getTodaySignals({
+          count: 20,
+          onProgress: function (current, total, msg) { pushLiveLog("[" + Math.round((total > 0 ? current / total * 100 : 0)) + "%] " + (msg || "Scoring " + current + "/" + total + "...")); }
+        });
+        setLiveSignals(signals);
+        pushLiveLog("Signals ready: " + signals.length + " symbols scored, top pick: " + (signals.length > 0 ? signals[0].symbol + " (" + (signals[0].winProbability * 100).toFixed(1) + "%)" : "none"));
         await loadLiveStatus();
       } catch (err) {
         pushLiveLog("ERROR: " + err.message);
@@ -2261,22 +2270,31 @@ window.PatternDashboard = (function () {
             statCard("WF Accuracy", liveStatus && liveStatus.walkForwardAcc != null ? liveStatus.walkForwardAcc + "%" : "N/A"),
             statCard("Avg AUC", liveStatus && liveStatus.avgAuc != null ? (liveStatus.avgAuc * 100).toFixed(1) + "%" : "N/A")
           ),
-          React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" } },
-            React.createElement("button", {
-              onClick: handleCollectLive,
-              disabled: liveBusy,
-              style: { padding: "8px 16px", borderRadius: 6, background: liveBusy ? "#9ca3af" : "var(--accent, #16a34a)", color: "#fff", border: "none", cursor: liveBusy ? "not-allowed" : "pointer", fontWeight: 600, opacity: hasLive ? 1 : 0.5 }
-            }, liveBusy ? "Working..." : "Collect Live Features"),
-            React.createElement("button", {
-              onClick: handleLiveRetrain,
-              disabled: liveBusy,
-              style: { padding: "8px 16px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: liveBusy ? "not-allowed" : "pointer", opacity: hasLive ? 1 : 0.5 }
-            }, "Retrain on Confirmed Data"),
-            React.createElement("button", {
-              onClick: handleTodaySignals,
-              disabled: liveBusy,
-              style: { padding: "8px 16px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: liveBusy ? "not-allowed" : "pointer", opacity: hasLive ? 1 : 0.5 }
-            }, "Score Today's Signals")
+          React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8, marginTop: 12 } },
+            React.createElement("div", { style: { fontSize: 11, color: "var(--text4)", lineHeight: 1.4 } },
+              "After market close, click Step 1 then Step 2. Step 1 scores the universe and records picks. Step 2 resolves yesterday's picks and collects training data."
+            ),
+            React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
+              React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "var(--accent, #16a34a)", background: "rgba(22,163,74,.1)", padding: "2px 6px", borderRadius: 4 } }, "STEP 1"),
+              React.createElement("button", {
+                onClick: handleTodaySignals,
+                disabled: liveBusy,
+                style: { padding: "8px 16px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: liveBusy ? "not-allowed" : "pointer", opacity: hasLive ? 1 : 0.5, fontWeight: 600 }
+              }, "Score Today's Signals")
+            ),
+            React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
+              React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#d97706", background: "rgba(217,119,6,.1)", padding: "2px 6px", borderRadius: 4 } }, "STEP 2"),
+              React.createElement("button", {
+                onClick: handleCollectLive,
+                disabled: liveBusy,
+                style: { padding: "8px 16px", borderRadius: 6, background: liveBusy ? "#9ca3af" : "var(--accent, #16a34a)", color: "#fff", border: "none", cursor: liveBusy ? "not-allowed" : "pointer", fontWeight: 600, opacity: hasLive ? 1 : 0.5 }
+              }, liveBusy ? "Working..." : "Collect & Resolve"),
+              React.createElement("button", {
+                onClick: handleLiveRetrain,
+                disabled: liveBusy,
+                style: { padding: "8px 16px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: liveBusy ? "not-allowed" : "pointer", opacity: hasLive ? 1 : 0.5 }
+              }, "Retrain Model")
+            )
           )
         ),
 
@@ -2388,7 +2406,7 @@ window.PatternDashboard = (function () {
         liveTracker && React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Prediction Accuracy — Did Yesterday's Picks Print?"),
           liveSignals && liveSignals.length > 0 && React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
-            "Today's scored picks: " + liveSignals.length + " (top: " + liveSignals[0].symbol + " at " + (liveSignals[0].winProbability * 100).toFixed(1) + "%) — pending resolution. Run Collect in the evening to settle them."
+            "Today's scored picks: " + liveSignals.length + " (top: " + liveSignals[0].symbol + " at " + (liveSignals[0].winProbability * 100).toFixed(1) + "%) — pending resolution. Run Step 2 (Collect & Resolve) after market close to settle them."
           ),
           (function () {
             var days = liveTracker.days.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; });
@@ -2401,8 +2419,8 @@ window.PatternDashboard = (function () {
             return React.createElement("div", null,
               React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
                 allRate != null
-                  ? "All-time: " + allHits + "/" + allPicks + " (" + allRate.toFixed(1) + "%)" + (base != null ? " vs base up-rate " + base + "% — " + (allRate >= base ? "beating the base rate" : "below the base rate") : "") + ". Pending " + (days.length > 0 ? days.reduce(function (s, d) { return s + (d.picks.length - d.resolvedCount); }, 0) : 0) + " picks — collect in the evening to resolve."
-                  : "Score Today's Signals, then collect in the evening to see how the picks printed."
+                  ? "All-time: " + allHits + "/" + allPicks + " (" + allRate.toFixed(1) + "%)" + (base != null ? " vs base up-rate " + base + "% — " + (allRate >= base ? "beating the base rate" : "below the base rate") : "") + ". Pending " + (days.length > 0 ? days.reduce(function (s, d) { return s + (d.picks.length - d.resolvedCount); }, 0) : 0) + " picks — run Step 2 (Collect & Resolve) after close."
+                  : "Run Step 1 (Score Today's Signals) then Step 2 (Collect & Resolve) after market close to track picks."
               ),
               React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12, marginTop: 8 } },
                 React.createElement("thead", null,

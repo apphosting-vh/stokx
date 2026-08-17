@@ -81,25 +81,48 @@ window.LiveML = (function () {
     return map[symbol] || map[symbol + ".NS"] || map[symbol.replace(/\.NS$/, "").replace(/\.BO$/, "")] || null;
   }
 
-  /* Load daily candles: offline first, live fallback (capped at 15s). */
-  async function loadDailyCandles(symbol, offlineMap) {
-    var daily = null;
-    var fromOffline = false;
+  /* Load daily candles.
+     - firstRun (no prior collects): offline first, live fallback.
+     - subsequent runs: live first (Yahoo), offline fallback. Ensures latest
+       closing prices for tracker resolution. */
+  async function loadDailyCandles(symbol, offlineMap, liveFirst) {
     var rec = offlineLookup(offlineMap, symbol);
-    if (rec) { daily = rec.daily || rec.data || null; fromOffline = true; }
-    if ((!daily || daily.length < WARMUP + 5) && window.OHLCVFetcher && window.OHLCVFetcher.fetchOHLCVCached) {
+    var offlineDaily = rec ? (rec.daily || rec.data || null) : null;
+
+    if (liveFirst && window.OHLCVFetcher && window.OHLCVFetcher.fetchOHLCVCached) {
+      /* Live first — try Yahoo, fall back to offline if it fails or is too short. */
       try {
         var r = await withTimeout(window.OHLCVFetcher.fetchOHLCVCached(symbol + ".NS", "daily"), 15000);
         var c = r && r.data ? r.data : (Array.isArray(r) ? r : null);
-        if (c && c.length >= WARMUP + 5) daily = c;
+        if (c && c.length >= WARMUP + 5) return c;
+      } catch (e) {}
+      /* Live failed — fall back to offline */
+      if (offlineDaily && offlineDaily.length >= WARMUP + 5) return offlineDaily;
+      return offlineDaily;
+    }
+
+    /* Offline first — original path for first-time collect. */
+    if (offlineDaily && offlineDaily.length >= WARMUP + 5) return offlineDaily;
+    if (window.OHLCVFetcher && window.OHLCVFetcher.fetchOHLCVCached) {
+      try {
+        var r2 = await withTimeout(window.OHLCVFetcher.fetchOHLCVCached(symbol + ".NS", "daily"), 15000);
+        var c2 = r2 && r2.data ? r2.data : (Array.isArray(r2) ? r2 : null);
+        if (c2 && c2.length >= WARMUP + 5) return c2;
       } catch (e) {}
     }
-    return daily;
+    return offlineDaily;
   }
 
   /* Today's date as YYYY-MM-DD in IST (same timezone as candle timestamps). */
   function istToday() {
     return new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  }
+
+  /* Market close as epoch ms IST today (3:30 PM IST = 15:30). */
+  function marketCloseIST() {
+    var now = new Date(Date.now() + 5.5 * 3600 * 1000);
+    var close = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 15, 30, 0, 0);
+    return close.getTime() - 5.5 * 3600 * 1000; // back to UTC epoch
   }
 
   /* Last bar date (YYYY-MM-DD) of a candle array, or null. */
@@ -127,7 +150,17 @@ window.LiveML = (function () {
     if (!rec) return candles;
     var recDaily = (rec.daily || rec.data) || null;
     var offLast = lastBarDate(recDaily);
-    if (!offLast || !(offLast < istToday())) return candles;
+    var today = istToday();
+    /* Refresh when: (a) snapshot doesn't have today's bar at all, or
+       (b) snapshot has today's bar but was downloaded before market close
+       (3:30 PM IST) — the close price may be stale. */
+    var needsRefresh = false;
+    if (!offLast || offLast < today) {
+      needsRefresh = true;
+    } else if (offLast === today && rec.downloadedAt != null) {
+      needsRefresh = rec.downloadedAt < marketCloseIST();
+    }
+    if (!needsRefresh) return candles;
     var liveRes = await withTimeout(window.OHLCVFetcher.fetchOHLCVCached(symbol, "daily"), 15000);
     var liveC = liveRes && liveRes.data ? liveRes.data : null;
     if (!liveC || liveC.length === 0) return candles;
@@ -279,10 +312,14 @@ window.LiveML = (function () {
 
     var lastDates = {};
     try { lastDates = (await window.PatternStore.getMeta(KEY_LAST_DATES)) || {}; } catch (e) {}
+    var isFirstRun = Object.keys(lastDates).length === 0;
 
     onProgress(0, total, "Reading offline candle store...");
     var offlineMap = await loadOfflineMap();
-    onProgress(0, total, "Loading candles (offline first, live fallback capped at 15s/symbol)...");
+    var loadMsg = isFirstRun
+      ? "First run — loading candles from offline store (live fallback capped at 15s/symbol)..."
+      : "Subsequent run — fetching live close prices from Yahoo (offline fallback capped at 15s/symbol)...";
+    onProgress(0, total, loadMsg);
     var total = universe.length;
     var processed = 0, skipped = 0, newSamples = 0, liveFetches = 0, offlineHits = 0;
     var fallbackNoted = false, staleNoted = false;
@@ -298,23 +335,23 @@ window.LiveML = (function () {
     for (var i = 0; i < total; i++) {
       var symbol = universe[i];
       try {
-        var candles = await loadDailyCandles(symbol, offlineMap);
+        var liveFirst = !isFirstRun;
+        var candles = await loadDailyCandles(symbol, offlineMap, liveFirst);
         if (!candles || candles.length < WARMUP + 3) { skipped++; continue; }
 
-        /* Stale-offline refresh: the offline snapshot (e.g. from yesterday's
-           backtest) only covers up to its last bar. If that bar is older than
-           today, fetch the latest daily candle(s) live and append them so a
-           same-day bar is always collected for every symbol. No live fetch
-           when the snapshot already covers today. */
+        /* First run only: stale-offline refresh — the offline snapshot may
+           not have today's bar or may have been downloaded before market
+           close. In subsequent runs loadDailyCandles already fetches live
+           first, so the data is fresh. */
         var fromOffline = !!offlineLookup(offlineMap, symbol);
-        if (fromOffline) {
+        if (isFirstRun && fromOffline) {
           var refreshed = await refreshStaleOffline(symbol, candles, offlineMap);
           if (refreshed !== candles) {
             candles = refreshed;
             liveFetches++;
             if (!staleNoted) {
               staleNoted = true;
-              onProgress(processed + 1, total, "Offline snapshot older than today — refreshing today's bar live for affected symbols.");
+              onProgress(processed + 1, total, "Offline snapshot stale — fetching live close prices from Yahoo for affected symbols.");
             }
           }
         }
@@ -323,10 +360,10 @@ window.LiveML = (function () {
           resolveSymbolInTracker(tracker, symbol, candles);
           trackerNeedsSave = true;
         }
-        if (fromOffline) offlineHits++;
-        if (!fromOffline) {
+        if (!liveFirst && fromOffline) offlineHits++;
+        if (liveFirst || !fromOffline) {
           liveFetches++;
-          if (!fallbackNoted) {
+          if (!fallbackNoted && !liveFirst) {
             fallbackNoted = true;
             onProgress(processed + 1, total, "Note: some symbols not in offline store — fetching live (may take a while).");
           }
@@ -581,7 +618,14 @@ window.LiveML = (function () {
     } catch (e) {}
     if (!model || !model.network || model.network.inputSize !== window.MLTrainer.FEATURE_KEYS.length) return null;
 
-    var candles = await refreshStaleOffline(symbol, await loadDailyCandles(symbol, offlineMap), offlineMap);
+    var candles = await loadDailyCandles(symbol, offlineMap, true);
+    /* Also try stale refresh for the edge case where offline was downloaded
+       before market close. */
+    var fromOffline = !!offlineLookup(offlineMap, symbol);
+    if (fromOffline) {
+      var refreshed = await refreshStaleOffline(symbol, candles, offlineMap);
+      if (refreshed !== candles) candles = refreshed;
+    }
     if (!candles || candles.length < WARMUP + 2) return null;
 
     var ind = computeIndicators(candles);
