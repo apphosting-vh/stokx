@@ -737,7 +737,7 @@ window.BacktestEngine = (function () {
     }
 
     function buildWalkForwardVerdict(agg) {
-      if (!agg.totalOosSignals) return "No out-of-sample signals generated — try a lower threshold or longer history.";
+      if (!agg.totalOosSignals) return "No test signals generated \u2014 try a lower threshold or longer history.";
       var parts = [];
       parts.push("Out-of-sample win rate " + (agg.overallWinRate != null ? agg.overallWinRate + "%" : "—") + " across " + agg.totalOosSignals + " signals in " + agg.folds + " folds (" + agg.foldsWithSignals + " with signals).");
       if (agg.consistency != null) {
@@ -747,8 +747,8 @@ window.BacktestEngine = (function () {
       }
       if (agg.avgTrainTestGap != null) {
         parts.push(agg.avgTrainTestGap > -10
-          ? "Out-of-sample win rate tracks in-sample (" + (agg.avgTrainTestGap >= 0 ? "+" : "") + agg.avgTrainTestGap + "pts avg gap) — little sign of overfit."
-          : "Out-of-sample lags in-sample by " + agg.avgTrainTestGap + "pts — some degradation out-of-sample.");
+          ? "Test win rate tracks training (" + (agg.avgTrainTestGap >= 0 ? "+" : "") + agg.avgTrainTestGap + "pts avg gap) \u2014 little sign of overfit."
+          : "Test win rate lags training by " + agg.avgTrainTestGap + "pts \u2014 some degradation on unseen data.");
       }
       return parts.join(" ");
     }
@@ -865,7 +865,7 @@ window.BacktestEngine = (function () {
     }
 
     function exportWalkForwardCSV(res) {
-      var headers = ["Fold", "Period Start", "Period End", "IS Signals", "IS Win Rate %", "OOS Signals", "OOS Win Rate %", "OOS Avg Return %", "OOS Profit Factor"];
+      var headers = ["Fold", "Period Start", "Period End", "Train Signals", "Train Win Rate %", "Test Signals", "Test Win Rate %", "Test Avg Return %", "Test Profit Factor"];
       var rows = (res.folds || []).map(function (fl) {
         return [fl.fold, fl.period[0], fl.period[1], fl.inSample.totalSignals, fl.inSample.winRate, fl.oos.totalSignals, fl.oos.winRate, fl.oos.avgReturnPct, fl.oos.profitFactor];
       });

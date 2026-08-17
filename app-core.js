@@ -6578,11 +6578,11 @@ const BacktestPanel = () => {
 
     result && result.matured > 0 && React.createElement("div", null,
       React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } },
-        Stat("Matured Sessions", result.matured, result.sampleNote || (result.pending > 0 ? result.pending + " recent sessions pending (no forward window)" : "full 10-session window each")),
+        Stat("Trades Tested", result.matured, result.sampleNote || (result.pending > 0 ? result.pending + " recent sessions pending (no forward window)" : "full " + _btHorizon + "-session window each")),
         Stat("Period", result.rangeStart + " \u2192 " + result.rangeEnd, result.ticker + " \u00b7 " + result.days + " day window"),
         Stat("Avg Entry Score", result.avgEntry != null ? fmtS(result.avgEntry) : "\u2014", "0\u2013100 quality score"),
-        Stat("Avg " + _btHorizon + "-Day Conf", result.avgConf != null ? fmtS(result.avgConf) : "\u2014", "chance of +" + _btTgtPct + "% in " + _btHorizon + " sessions"),
-        Stat("Avg 10d Return", result.avgFwd10 != null ? fmtR(result.avgFwd10) : "\u2014", "buy & hold, close\u2192close", retColor(result.avgFwd10))
+        Stat("Avg Confidence", result.avgConf != null ? fmtS(result.avgConf) : "\u2014", "model's chance of +" + _btTgtPct + "% in " + _btHorizon + " sessions"),
+        Stat("Avg Buy & Hold", result.avgFwd10 != null ? fmtR(result.avgFwd10) : "\u2014", "what a passive investor would earn", retColor(result.avgFwd10))
       ),
 
       (result.verdict && (result.verdict.entryGap != null || result.verdict.confSpread != null)) && React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, marginBottom: 16, background: "rgba(6,182,212,.06)", border: "1px solid rgba(6,182,212,.2)", fontSize: 12, color: "var(--text2)", lineHeight: 1.6 } },
@@ -6760,7 +6760,7 @@ var NIFTY_200_UNIQUE = NIFTY_200.filter(function(s) { if (_nseen.has(s.t)) retur
    BACKTEST SUITE — StoX Backtesting Engine UI
    Option 1  Single-symbol detailed analysis
    Option 2  Batch backtest across the NIFTY 200 universe
-   Option 3  Walk-forward out-of-sample analysis
+   Option 3  Walk-forward strategy validation
    Engine: backtest-engine.js (window.BacktestEngine), scoring via the same
    production computeEntryScore (Trend 35 / Pullback 30 / 4% Prob 35 / Swing 20).
    ══════════════════════════════════════════════════════════════════════════ */
@@ -6772,6 +6772,8 @@ const BacktestSuitePanel = () => {
   const DF = window.OHLCVFetcher;
   const TI = window.TechIndicators;
   const BE = window.BacktestEngine;
+  const _btTgtPct = (TI && TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 4;
+  const _btHorizon = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().horizonDays || 10) : 10;
 
   function shuffleArray(arr) {
     var a = arr.slice();
@@ -7107,7 +7109,7 @@ const BacktestSuitePanel = () => {
       var multiTFMap = multiTFData ? (function() { var m = {}; m[tk] = multiTFData; return m; })() : {};
       const eng = makeEngine(idx, multiTFMap);
       const res = await eng.runWalkForward(candles, { symbol: tk, folds: Number(folds) || 4, minInSample: 120 }, {
-        onFold: (f, t) => setProgress({ phase: "Evaluating out-of-sample fold " + f + " / " + t + "\u2026", done: f, total: t })
+        onFold: (f, t) => setProgress({ phase: "Testing fold " + f + " / " + t + "\u2026", done: f, total: t })
       });
       if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
       setModeResult({ mode: "walkforward", data: res });
@@ -7381,12 +7383,12 @@ const BacktestSuitePanel = () => {
       ),
       React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } },
         Stat("Signals", fmtS(st.totalSignals), d.symbol + " \u00b7 " + (d.rangeStart || "") + " \u2192 " + (d.rangeEnd || "")),
-        Stat("Win Rate", st.totalSignals ? fmtPct(st.winRate) : "\u2014", "+" + fmt2(d.targetProfitPct) + "% target within " + d.holdingPeriodDays + " sessions", st.totalSignals ? retColor(st.winRate - 50) : undefined),
-        Stat("Avg Return", st.totalSignals ? React.createElement("span", { style: { color: retColor(st.avgReturnPct) } }, fmtR(st.avgReturnPct)) : "\u2014", "per trade, close\u2192close"),
-        Stat("Avg Win / Loss", st.totalSignals ? fmtR(st.avgWinPct) + " / " + fmtR(st.avgLossPct) : "\u2014", "hit target vs timed-out trades"),
-        Stat("Avg Days to Target", st.totalSignals && st.avgDaysToTarget != null ? fmt2(st.avgDaysToTarget) : "\u2014", "winning trades only"),
-        Stat("Profit Factor", st.totalSignals ? fmtPF(st.profitFactor) : "\u2014", "gross profit \u00f7 gross loss"),
-        Stat("Max Consecutive", st.totalSignals ? st.maxConsecutiveWins + "W / " + st.maxConsecutiveLosses + "L" : "\u2014", "winning / losing streaks")
+        Stat("Win Rate", st.totalSignals ? fmtPct(st.winRate) : "\u2014", "trades that hit +" + fmt2(d.targetProfitPct) + "% in " + d.holdingPeriodDays + " days", st.totalSignals ? retColor(st.winRate - 50) : undefined),
+        Stat("Avg Return", st.totalSignals ? React.createElement("span", { style: { color: retColor(st.avgReturnPct) } }, fmtR(st.avgReturnPct)) : "\u2014", "per trade, entry to exit"),
+        Stat("Avg Win / Loss", st.totalSignals ? fmtR(st.avgWinPct) + " / " + fmtR(st.avgLossPct) : "\u2014", "winning trades vs losing trades"),
+        Stat("Avg Days to Target", st.totalSignals && st.avgDaysToTarget != null ? fmt2(st.avgDaysToTarget) : "\u2014", "how many days winners take"),
+        Stat("Profit Factor", st.totalSignals ? fmtPF(st.profitFactor) : "\u2014", "total profit \u00f7 total loss"),
+        Stat("Max Streak", st.totalSignals ? st.maxConsecutiveWins + "W / " + st.maxConsecutiveLosses + "L" : "\u2014", "longest win / loss streak")
       ),
       st.totalSignals === 0 && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 24, color: "var(--text6)", fontSize: 12, marginBottom: 16 } },
         (st.message || "No trade signals generated") + " \u2014 try lowering the min score or a longer window."
@@ -7416,11 +7418,11 @@ const BacktestSuitePanel = () => {
           )
         )
       ),
-      d.calibration && d.calibration.buckets && d.calibration.buckets.length > 0 && card("Confidence Calibration", _btHorizon + "-Day Confidence model calibration: probTouch deciles vs actual +" + d.targetProfitPct + "% hit rate. Derived calP0 = " + (d.calibration.calP0 != null ? d.calibration.calP0 : "\u2014") + " (anchor) and calK = " + (d.calibration.calK != null ? d.calibration.calK : "\u2014") + " (slope). Current defaults: calP0=0.38, calK=38.",
+      d.calibration && d.calibration.buckets && d.calibration.buckets.length > 0 && card("Confidence Accuracy Check", "How well the model's confidence predictions match reality across all backtested stocks.",
         React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
             React.createElement("thead", null, React.createElement("tr", null,
-              cell("Decile", td), cell("Avg probTouch", td), cell("Range", td), cell("N", td), cell("Hits", td), cell("Empirical Hit Rate", td), cell("vs 50%", td)
+              cell("Rank", td), cell("Predicted Probability", td), cell("Range", td), cell("Signals", td), cell("Wins", td), cell("Actual Win Rate", td), cell("vs Break-even", td)
             )),
             React.createElement("tbody", null, d.calibration.buckets.map(function(b) {
               var diff = b.hitRate - 50;
@@ -7474,13 +7476,13 @@ const BacktestSuitePanel = () => {
     const errors = (d.allResults || []).filter(r => r.error).length;
     return React.createElement("div", null,
       React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } },
-        Stat("Symbols Tested", fmtS(s.symbolsTested), errors > 0 ? errors + " fetch/score failures skipped" : (d.sourceLabel || "NIFTY 200 universe")),
-        Stat("With Signals", fmtS(s.symbolsWithSignals), fmtS(s.symbolsNoSignals) + " had no qualifying signals"),
-        Stat("Total Signals", fmtS(s.totalSignals), "across all symbols"),
-        Stat("Overall Win Rate", s.overallWinRate != null ? fmtPct(s.overallWinRate) : "\u2014", "all pooled signals", s.overallWinRate != null ? retColor(s.overallWinRate - 50) : undefined),
-        Stat("Avg Symbol Win Rate", s.avgWinRate != null ? fmtPct(s.avgWinRate) : "\u2014", "per-symbol average"),
-        Stat("Avg Return", s.avgReturn != null ? React.createElement("span", { style: { color: retColor(s.avgReturn) } }, fmtR(s.avgReturn)) : "\u2014", "per trade, close\u2192close"),
-        Stat("Avg Profit Factor", s.avgProfitFactor != null ? fmtPF(s.avgProfitFactor) : "\u2014", "across profitable symbols")
+        Stat("Stocks Tested", fmtS(s.symbolsTested), errors > 0 ? errors + " fetch/score failures skipped" : (d.sourceLabel || "NIFTY 200 universe")),
+        Stat("Stocks With Signals", fmtS(s.symbolsWithSignals), fmtS(s.symbolsNoSignals) + " had no qualifying signals"),
+        Stat("Total Signals", fmtS(s.totalSignals), "across all stocks"),
+        Stat("Overall Win Rate", s.overallWinRate != null ? fmtPct(s.overallWinRate) : "\u2014", "all pooled trades", s.overallWinRate != null ? retColor(s.overallWinRate - 50) : undefined),
+        Stat("Avg Stock Win Rate", s.avgWinRate != null ? fmtPct(s.avgWinRate) : "\u2014", "per-stock average"),
+        Stat("Avg Return", s.avgReturn != null ? React.createElement("span", { style: { color: retColor(s.avgReturn) } }, fmtR(s.avgReturn)) : "\u2014", "per trade, entry to exit"),
+        Stat("Avg Profit Factor", s.avgProfitFactor != null ? fmtPF(s.avgProfitFactor) : "\u2014", "across profitable stocks")
       ),
       s.bestByWinRate && React.createElement("div", { style: { padding: "10px 14px", borderRadius: 10, marginBottom: 16, background: "rgba(6,182,212,.06)", border: "1px solid rgba(6,182,212,.2)", fontSize: 12, color: "var(--text2)", lineHeight: 1.6 } },
         React.createElement("span", { style: { color: "#22c55e", fontWeight: 700 } }, "Best by win rate: " + symName(s.bestByWinRate) + " (" + fmtPct(s.bestWinRate) + ")"),
@@ -7602,20 +7604,20 @@ const BacktestSuitePanel = () => {
     return React.createElement("div", null,
       a.verdict && React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, marginBottom: 16, background: "rgba(6,182,212,.06)", border: "1px solid rgba(6,182,212,.2)", fontSize: 12, color: "var(--text2)", lineHeight: 1.6 } }, a.verdict),
       React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } },
-        Stat("Folds", fmtS(a.folds), fmtS(a.foldsWithSignals) + " with out-of-sample signals"),
-        Stat("OOS Signals", fmtS(a.totalOosSignals), "+" + fmt2(d.targetProfitPct) + "% / " + d.holdingPeriodDays + "d target"),
-        Stat("OOS Win Rate", a.overallWinRate != null ? fmtPct(a.overallWinRate) : "\u2014", "pooled across folds", a.overallWinRate != null ? retColor(a.overallWinRate - 50) : undefined),
-        Stat("Avg Fold Win Rate", a.avgFoldWinRate != null ? fmtPct(a.avgFoldWinRate) : "\u2014", "unweighted mean of folds"),
-        Stat("Avg OOS Return", a.avgOosReturn != null ? React.createElement("span", { style: { color: retColor(a.avgOosReturn) } }, fmtR(a.avgOosReturn)) : "\u2014", "per trade, close\u2192close"),
+        Stat("Folds", fmtS(a.folds), fmtS(a.foldsWithSignals) + " produced trades"),
+        Stat("Test Signals", fmtS(a.totalOosSignals), "+" + fmt2(d.targetProfitPct) + "% / " + d.holdingPeriodDays + "d target"),
+        Stat("Test Win Rate", a.overallWinRate != null ? fmtPct(a.overallWinRate) : "\u2014", "unseen data only", a.overallWinRate != null ? retColor(a.overallWinRate - 50) : undefined),
+        Stat("Avg Fold Win Rate", a.avgFoldWinRate != null ? fmtPct(a.avgFoldWinRate) : "\u2014", "average across folds"),
+        Stat("Avg Test Return", a.avgOosReturn != null ? React.createElement("span", { style: { color: retColor(a.avgOosReturn) } }, fmtR(a.avgOosReturn)) : "\u2014", "per trade, entry to exit"),
         Stat("Consistency", a.consistency != null ? fmtPct(a.consistency) : "\u2014", "% of folds with win rate \u2265 40%"),
-        Stat("Train\u2013Test Gap", a.avgTrainTestGap != null ? fmt2(a.avgTrainTestGap) + "pts" : "\u2014", "OOS win rate \u2212 in-sample win rate"),
+        Stat("Train\u2013Test Gap", a.avgTrainTestGap != null ? fmt2(a.avgTrainTestGap) + "pts" : "\u2014", "how much test results trail training results"),
         Stat("Positive Folds", a.positiveFolds + " / " + fmtS(a.folds), "folds with positive avg return")
       ),
-      card("Folds", "Each fold: in-sample (everything before the window) vs out-of-sample (the window itself).",
+      card("Fold Details", "Each fold: Train on past data, then test on the next unseen period.",
         React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
             React.createElement("thead", null, React.createElement("tr", null,
-              cell("Fold", tdL), cell("Period", tdL), cell("IS Signals", td), cell("IS Win Rate", td), cell("OOS Signals", td), cell("OOS Win Rate", td), cell("OOS Avg Return", td), cell("OOS PF", td)
+              cell("Fold", tdL), cell("Period", tdL), cell("Train Signals", td), cell("Train Win Rate", td), cell("Test Signals", td), cell("Test Win Rate", td), cell("Test Avg Return", td), cell("Test Profit Factor", td)
             )),
             React.createElement("tbody", null, (d.folds || []).map((f) => React.createElement("tr", { key: f.fold },
               cell("Fold " + f.fold, tdL), cell(f.period[0] + " \u2192 " + f.period[1], tdL),
@@ -7627,11 +7629,11 @@ const BacktestSuitePanel = () => {
           )
         )
       ),
-      d.calibration && d.calibration.buckets && d.calibration.buckets.length > 0 && card("Confidence Calibration (OOS)", "10-Day Confidence model calibration across all out-of-sample folds. Derived calP0 = " + (d.calibration.calP0 != null ? d.calibration.calP0 : "\u2014") + ", calK = " + (d.calibration.calK != null ? d.calibration.calK : "\u2014") + ".",
+      d.calibration && d.calibration.buckets && d.calibration.buckets.length > 0 && card("Confidence Accuracy Check", "How well the model's confidence predictions match reality. Each row groups signals by similar predicted probability, then checks the actual win rate.",
         React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
             React.createElement("thead", null, React.createElement("tr", null,
-              cell("Decile", td), cell("Avg probTouch", td), cell("N", td), cell("Empirical Hit Rate", td), cell("vs 50%", td)
+              cell("Rank", td), cell("Predicted Probability", td), cell("Signals", td), cell("Actual Win Rate", td), cell("vs Break-even", td)
             )),
             React.createElement("tbody", null, d.calibration.buckets.map(function(b) {
               var diff = b.hitRate - 50;
@@ -7781,7 +7783,7 @@ const BacktestSuitePanel = () => {
     ),
 
     !(singleResult || batchResult || wfResult || multiResult) && !running && React.createElement("div", { className: "stx-card", style: { textAlign: "center", padding: 40, color: "var(--text6)", fontSize: 13 } },
-      "Pick a mode and run a backtest. Single Symbol replays every session on one stock; Batch ranks the NIFTY 200 universe; Walk-Forward tests out-of-sample consistency fold by fold; Multi Symbol backtests stocks selected from the Screener; Path Analysis charts the daily price path for any ticker over a date range."
+      "Pick a mode and run a backtest. Single Symbol replays every session on one stock; Batch ranks the NIFTY 200 universe; Walk-Forward tests strategy consistency across multiple time periods; Multi Symbol backtests stocks selected from the Screener; Path Analysis charts the daily price path for any ticker over a date range."
     )
   );
 };
