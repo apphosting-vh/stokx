@@ -191,7 +191,7 @@
         var w = weights[p] != null ? weights[p] : 0.25;
         var max = pillarMax[p] || 25;
         var normalizedPillar = clamp(pillars[p] / max, 0, 1);
-        var weighted = normalizedPillar * w;
+        var weighted = pillars[p] * w;
         totalWeighted += weighted;
         totalWeight += w;
 
@@ -204,7 +204,7 @@
       });
     }
 
-    var baseWeightedScore = uniformW ? compatResult.finalScore : (totalWeight > 0 ? (totalWeighted / totalWeight) * 100 : compatResult.finalScore);
+    var baseWeightedScore = uniformW ? compatResult.finalScore : (totalWeight > 0 ? totalWeighted / totalWeight : compatResult.finalScore);
     var adjustedScore = clamp(round2(baseWeightedScore + powerBonusTotal), 0, 100);
 
     // ── ML Enhancement (synchronous, using pre-loaded model) ──
