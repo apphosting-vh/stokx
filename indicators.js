@@ -3000,10 +3000,6 @@ window.TechIndicators = (function () {
       else if (sn.upDownVolRatio <= c.upDayVol_low) s += c.upDayVolPenalty;
     }
 
-    if (sn.adxL != null && sn.adxL >= 25 && sn.plusDI != null && sn.minusDI != null) {
-      if (sn.plusDI > sn.minusDI) s += c.directionalBias;
-    }
-
     if (sn.bbUpper != null && sn.c != null && sn.c > 0) {
       var headroom = (sn.bbUpper - sn.c) / sn.c;
       if (headroom < c.resistanceThreshold) s += c.resistancePenalty;

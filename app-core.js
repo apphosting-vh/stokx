@@ -4757,7 +4757,7 @@ const EntryScorePanel = ({ shares }) => {
         const _conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result), tk);
         if (_conf) { try { if (window.applyPatternConfCal) _conf = window.applyPatternConfCal(_conf, tk); } catch (e2) {} conf10dLog = _conf.confidenceLognormal; conf10dEmp = _conf.confidenceEmpirical; if (_conf.confidence != null) conf10d = Math.round(_conf.confidence * 10) / 10; }
       } catch (e) {}
-      const patMeta = result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight } : null;
+      const patMeta = buildPatMeta(result);
       const entry = { id: Date.now(), ticker: tk, currentPrice: price, addedAt: new Date().toISOString(), result, frozenResult: JSON.parse(JSON.stringify(result || {})), patMeta, conf10d, conf10dLog, conf10dEmp, indicators: { weekly: indW, daily: indD, hourly: indH } };
       saveEntries([entry, ...entries]);
       setAddTicker(""); setAddPrice(""); setShowAdd(false);
@@ -5327,7 +5327,7 @@ const EntryScorePanel = ({ shares }) => {
                           : null,
                         entry.patMeta && entry.patMeta.applied
                           ? React.createElement("span", {
-                              title: "Pattern-adjusted (original: " + entry.patMeta.originalScore + ", \u0394: " + (entry.patMeta.delta > 0 ? "+" : "") + entry.patMeta.delta + ", WR: " + (entry.patMeta.winRate != null ? entry.patMeta.winRate.toFixed(0) + "%, " + entry.patMeta.trades + " trades" : "N/A") + (entry.patMeta.topWeight ? ", top: " + entry.patMeta.topWeight.component : "") + ")",
+                              title: patMetaTooltip(entry.patMeta),
                               style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: entry.patMeta.delta > 0 ? "#16a34a22" : entry.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: entry.patMeta.delta > 0 ? "#16a34a" : entry.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (entry.patMeta.delta > 0 ? "#16a34a44" : entry.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
                             }, "P" + (entry.patMeta.delta > 0 ? "+" + entry.patMeta.delta : entry.patMeta.delta < 0 ? entry.patMeta.delta : ""))
                           : null
@@ -5731,7 +5731,7 @@ const ConfidenceTracker = () => {
                         : null,
                       tr.patMeta && tr.patMeta.applied
                         ? React.createElement("span", {
-                            title: "Pattern-adjusted (original: " + tr.patMeta.originalScore + ", \u0394: " + (tr.patMeta.delta > 0 ? "+" : "") + tr.patMeta.delta + ", WR: " + (tr.patMeta.winRate != null ? tr.patMeta.winRate.toFixed(0) + "%, " + tr.patMeta.trades + " trades" : "N/A") + (tr.patMeta.topWeight ? ", top: " + tr.patMeta.topWeight.component : "") + ")",
+                            title: patMetaTooltip(tr.patMeta),
                             style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: tr.patMeta.delta > 0 ? "#16a34a22" : tr.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: tr.patMeta.delta > 0 ? "#16a34a" : tr.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (tr.patMeta.delta > 0 ? "#16a34a44" : tr.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
                           }, "P" + (tr.patMeta.delta > 0 ? "+" + tr.patMeta.delta : tr.patMeta.delta < 0 ? tr.patMeta.delta : ""))
                         : null
@@ -5930,7 +5930,7 @@ const WatchlistTracker = () => {
         addedAt: new Date().toISOString(),
         entryScore: result && result.finalScore != null ? result.finalScore : null,
         entryDecision: result && result.decision ? result.decision.label : null,
-        patMeta: result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight } : null,
+        patMeta: buildPatMeta(result),
         conf10dLog: conf10dLog != null ? Math.round(conf10dLog * 10) / 10 : null,
         conf10dEmp: conf10dEmp != null ? Math.round(conf10dEmp * 10) / 10 : null,
         priceOnAdd: price
@@ -6154,7 +6154,7 @@ const WatchlistTracker = () => {
                         : null,
                       tr.patMeta && tr.patMeta.applied
                         ? React.createElement("span", {
-                            title: "Pattern-adjusted (original: " + tr.patMeta.originalScore + ", \u0394: " + (tr.patMeta.delta > 0 ? "+" : "") + tr.patMeta.delta + ", WR: " + (tr.patMeta.winRate != null ? tr.patMeta.winRate.toFixed(0) + "%, " + tr.patMeta.trades + " trades" : "N/A") + (tr.patMeta.topWeight ? ", top: " + tr.patMeta.topWeight.component : "") + ")",
+                            title: patMetaTooltip(tr.patMeta),
                             style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: tr.patMeta.delta > 0 ? "#16a34a22" : tr.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: tr.patMeta.delta > 0 ? "#16a34a" : tr.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (tr.patMeta.delta > 0 ? "#16a34a44" : tr.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
                           }, "P" + (tr.patMeta.delta > 0 ? "+" + tr.patMeta.delta : tr.patMeta.delta < 0 ? tr.patMeta.delta : ""))
                         : null
@@ -8599,6 +8599,38 @@ function buildEntryScoreContext(result) {
   return { entryScore: result.finalScore, trendHealth: result.aggTrendHealth, pullbackQuality: result.aggPullbackQuality, prob4: result.aggProb4, swingPotential: result.aggSwingPotential };
 }
 
+function buildPatMeta(result) {
+  if (!result || !result._patternApplied) return null;
+  return {
+    applied: true,
+    delta: result._patternDelta,
+    originalScore: result._patternOriginalScore,
+    winRate: result._patternWinRate,
+    trades: result._patternTrades,
+    topWeight: result._patternTopWeight,
+    calibrated: !!result._patternHasCalibration,
+    powerBonus: result._powerBonusApplied || 0,
+    powerBonusBreakdown: result._powerBonusBreakdown || null
+  };
+}
+
+function patMetaTooltip(pm) {
+  if (!pm || !pm.applied) return "";
+  var parts = ["Pattern-adjusted (original: " + pm.originalScore + ", \u0394: " + (pm.delta > 0 ? "+" : "") + pm.delta];
+  if (pm.winRate != null) parts.push("WR: " + pm.winRate.toFixed(0) + "%, " + pm.trades + " trades");
+  if (pm.topWeight) parts.push("top: " + pm.topWeight.component);
+  if (pm.powerBonus) {
+    var pbParts = ["+" + pm.powerBonus.toFixed(2)];
+    if (pm.powerBonusBreakdown) {
+      Object.keys(pm.powerBonusBreakdown).forEach(function(k) {
+        if (pm.powerBonusBreakdown[k]) pbParts.push(k.charAt(0) + ":" + pm.powerBonusBreakdown[k].toFixed(2));
+      });
+    }
+    parts.push("bonus: " + pbParts.join(" "));
+  }
+  return parts.join(", ") + ")";
+}
+
 function StockScreener(props) {
   props = props || {};
   var onOpenStock = props.onOpenStock;
@@ -8877,7 +8909,7 @@ function StockScreener(props) {
       var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
-      var _patMeta = result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight, calibrated: result._patternHasCalibration } : null;
+      var _patMeta = buildPatMeta(result);
       setResults(function(p) {
         var idx = p.findIndex(function(r) { return r.s.t === s.t; });
         if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta }; return copy; }
@@ -8930,7 +8962,7 @@ function StockScreener(props) {
       var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
-      var _patMeta = result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight, calibrated: result._patternHasCalibration } : null;
+      var _patMeta = buildPatMeta(result);
       setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta }]); });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[stockObj.t] = Date.now(); return c; });
     } catch(e) { setScanErr("Failed to fetch " + tk); }
@@ -9031,7 +9063,7 @@ function StockScreener(props) {
            var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
            var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
            var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
-           var _patMeta = result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight, calibrated: result._patternHasCalibration } : null;
+           var _patMeta = buildPatMeta(result);
            var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
            if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta };
           bg.timestamps[stk.t] = Date.now();
@@ -9231,7 +9263,7 @@ function StockScreener(props) {
           var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
           var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
           var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
-          var _patMeta = result && result._patternApplied ? { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight, calibrated: result._patternHasCalibration } : null;
+          var _patMeta = buildPatMeta(result);
           return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta };
         } catch(e) { return null; }
       });
@@ -9538,7 +9570,7 @@ function StockScreener(props) {
                     React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: d.color, padding: "2px 6px", borderRadius: 4, background: d.color + "18" } }, d.label),
                     r.patMeta && r.patMeta.applied
                       ? React.createElement("span", {
-                          title: "Pattern-adjusted (original: " + r.patMeta.originalScore + ", \u0394: " + (r.patMeta.delta > 0 ? "+" : "") + r.patMeta.delta + ", WR: " + (r.patMeta.winRate != null ? r.patMeta.winRate.toFixed(0) + "%, " + r.patMeta.trades + " trades" : "N/A") + (r.patMeta.topWeight ? ", top: " + r.patMeta.topWeight.component : "") + ")",
+                          title: patMetaTooltip(r.patMeta),
                           style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: r.patMeta.delta > 0 ? "#16a34a22" : r.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: r.patMeta.delta > 0 ? "#16a34a" : r.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (r.patMeta.delta > 0 ? "#16a34a44" : r.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
                         }, "P" + (r.patMeta.delta > 0 ? "+" + r.patMeta.delta : r.patMeta.delta < 0 ? r.patMeta.delta : ""))
                       : null
@@ -10539,7 +10571,7 @@ function SingleStockAnalysis({ requestedTicker }) {
     if (!mtf && !mtfLoading) return null;
     var entryScore = null, entryDec = null;
     if (mtf && mtf.entry) { entryScore = mtf.entry.finalScore; entryDec = mtf.entry.decision; }
-    var patMeta = mtf && mtf.entry && mtf.entry._patternApplied ? { applied: true, delta: mtf.entry._patternDelta, originalScore: mtf.entry._patternOriginalScore, winRate: mtf.entry._patternWinRate, trades: mtf.entry._patternTrades, topWeight: mtf.entry._patternTopWeight } : null;
+    var patMeta = buildPatMeta(mtf && mtf.entry);
     var _pm = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().pillarMax || {}) : {};
     var pillars = entryScore != null ? [
       { label: "Trend Health", val: mtf.entry.aggTrendHealth, max: _pm.trendHealth != null ? _pm.trendHealth : 35, color: "#22c55e" },
@@ -10560,7 +10592,7 @@ function SingleStockAnalysis({ requestedTicker }) {
                   entryDec && React.createElement("span", { style: { fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: (entryDec.color || "#6b7280") + "22", border: "1px solid " + (entryDec.color || "#6b7280"), color: entryDec.color || "var(--text5)" } }, entryDec.label),
                   patMeta && patMeta.applied
                     ? React.createElement("span", {
-                        title: "Pattern-adjusted (original: " + patMeta.originalScore + ", \u0394: " + (patMeta.delta > 0 ? "+" : "") + patMeta.delta + ", WR: " + (patMeta.winRate != null ? patMeta.winRate.toFixed(0) + "%, " + patMeta.trades + " trades" : "N/A") + (patMeta.topWeight ? ", top: " + patMeta.topWeight.component : "") + ")",
+                        title: patMetaTooltip(patMeta),
                         style: { fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: patMeta.delta > 0 ? "#16a34a18" : patMeta.delta < 0 ? "#dc262618" : "#6b728018", color: patMeta.delta > 0 ? "#16a34a" : patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (patMeta.delta > 0 ? "#16a34a44" : patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
                       }, "P" + (patMeta.delta > 0 ? "+" + patMeta.delta : patMeta.delta < 0 ? patMeta.delta : ""))
                     : null
