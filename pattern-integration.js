@@ -184,6 +184,7 @@
     var totalWeighted = 0;
     var totalWeight = 0;
     var powerBonusTotal = 0;
+    var pillarBonuses = {};
 
     if (uniformW) {
       // Keep the base score; skip the recompute and power bonus entirely.
@@ -196,12 +197,12 @@
         totalWeighted += weighted;
         totalWeight += w;
 
-        if (powers && powers[p] && powers[p].infoValue > 0.01) {
-          var iv = powers[p].infoValue;
-          if (iv > 0.05 && normalizedPillar > 0.5) {
-            powerBonusTotal += iv * normalizedPillar * 2;
-          }
+        var pb = 0;
+        if (powers && powers[p] && powers[p].infoValue > 0.05 && normalizedPillar > 0.5) {
+          pb = round3(powers[p].infoValue * normalizedPillar * 2);
         }
+        pillarBonuses[p] = pb;
+        powerBonusTotal += pb;
       });
     }
 
@@ -268,6 +269,8 @@
     compatResult._patternTrades = pattern.tradeStats ? pattern.tradeStats.totalTrades : null;
     compatResult._patternTopWeight = getTopWeight(resolveWeightsForDisplay(pattern));
     compatResult._patternHasCalibration = !!(pattern.calibration && pattern.calibration.global);
+    compatResult._powerBonusApplied = round2(powerBonusTotal);
+    compatResult._powerBonusBreakdown = pillarBonuses;
     // ML prediction metadata
     if (mlPrediction) {
       compatResult._mlEnhanced = true;

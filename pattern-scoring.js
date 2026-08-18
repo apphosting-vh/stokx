@@ -336,12 +336,8 @@ window.PatternScoring = (function () {
       // Compute power bonus: if the indicator's historical correlation is strong,
       // give a small bonus to signals that align with high-power ranges
       var powerBonus = 0;
-      if (powers && powers[p] && powers[p].infoValue > 0.01) {
-        // Boost if pillar is in its historically predictive range
-        var infoValue = powers[p].infoValue;
-        if (infoValue > 0.05 && normalizedPillar > 0.5) {
-          powerBonus = round3(infoValue * normalizedPillar * 2);  // small boost
-        }
+      if (powers && powers[p] && powers[p].infoValue > 0.05 && normalizedPillar > 0.5) {
+        powerBonus = round3(powers[p].infoValue * normalizedPillar * 2);
       }
 
       breakdown[p] = {
