@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.1.0";
+window.__STOX_APP_VERSION = "4.2.0";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -11120,6 +11120,7 @@ function PulsePage({ holdings }) {
    PAGE: Info (Changelog & Version History)
    ══════════════════════════════════════════════════════════════════════════ */
 function InfoPage() {
+  var TI = window.TechIndicators;
   var _m = React.useState(null), openM = _m[0], setOpenM = _m[1];
   var subH = { fontSize: 13, fontWeight: 700, color: "var(--text)", marginTop: 10, marginBottom: 4 };
   var subSub = { fontSize: 12, fontWeight: 600, color: "var(--text2)", marginTop: 8, marginBottom: 2 };
