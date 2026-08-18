@@ -621,6 +621,8 @@ window.PatternDashboard = (function () {
     var btCap = _btCap[0], setBtCap = _btCap[1];
     var _btResult = useState(null);
     var btResult = _btResult[0], setBtResult = _btResult[1];
+    var _browseSort = useState({ key: "winRate", asc: false });
+    var browseSort = _browseSort[0], setBrowseSort = _browseSort[1];
     // ML tab state (must be at component top-level — Rules of Hooks)
     var _mlStatus = useState(null);
     var mlStatus = _mlStatus[0], setMlStatus = _mlStatus[1];
@@ -1304,9 +1306,46 @@ window.PatternDashboard = (function () {
         );
       }
 
+      var sortKey = browseSort.key, asc = browseSort.asc;
+      function numVal(p, key) {
+        if (key === "symbol") return 0;
+        if (key === "trades") return p.tradeStats ? p.tradeStats.totalTrades || 0 : 0;
+        if (key === "winRate") return p.tradeStats ? p.tradeStats.winRate || 0 : 0;
+        if (key === "adjWR") return p.adjustedMetrics && p.adjustedMetrics.winRate != null ? p.adjustedMetrics.winRate : -1;
+        if (key === "mlWR") return p.mlAdjustedMetrics && p.mlAdjustedMetrics.winRate != null ? p.mlAdjustedMetrics.winRate : -1;
+        if (key === "sharpe") return p.tradeStats ? p.tradeStats.sharpeApprox || 0 : 0;
+        if (key === "profitFactor") { var pf = p.tradeStats ? p.tradeStats.profitFactor : null; return (pf != null && isFinite(pf)) ? pf : -1; }
+        if (key === "avgReturn") return p.tradeStats ? p.tradeStats.avgReturn || 0 : 0;
+        if (key === "maxDD") return p.tradeStats ? p.tradeStats.maxDrawdown || 0 : 0;
+        if (key === "topPillar") {
+          var lw2 = p.indicatorWeights;
+          if (p && window.PatternScoring && window.PatternScoring.resolveLearnedWeights) { var rlw2 = window.PatternScoring.resolveLearnedWeights(p); if (rlw2) lw2 = rlw2; }
+          if (!lw2) return "";
+          var best = "", bestV = -1;
+          Object.keys(lw2).forEach(function (k) { if (lw2[k] > bestV) { bestV = lw2[k]; best = k; } });
+          return best;
+        }
+        if (key === "age") return p.backtestDate ? -(Date.now() - p.backtestDate) : 0;
+        return 0;
+      }
       var sorted = patterns.slice().sort(function (a, b) {
-        return (b.tradeStats ? b.tradeStats.winRate || 0 : 0) - (a.tradeStats ? a.tradeStats.winRate || 0 : 0);
+        if (sortKey === "symbol") { var c = String(a.symbol).localeCompare(String(b.symbol)); return asc ? c : -c; }
+        if (sortKey === "topPillar") { var c2 = String(numVal(a, "topPillar")).localeCompare(String(numVal(b, "topPillar"))); return asc ? c2 : -c2; }
+        var va = numVal(a, sortKey), vb = numVal(b, sortKey);
+        return asc ? va - vb : vb - va;
       });
+
+      var th = { textAlign: "left", padding: "6px 8px", fontSize: 11, fontWeight: 600, color: "var(--text3)", cursor: "pointer", whiteSpace: "nowrap", userSelect: "none", borderBottom: "2px solid var(--border)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 };
+      var tdc = { padding: "5px 8px", fontSize: 12, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+      var tdr = { padding: "5px 8px", fontSize: 12, borderBottom: "1px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" };
+
+      function col(key, label, alignRight) {
+        var isSorted = sortKey === key;
+        return React.createElement("th", {
+          key: key, style: Object.assign({}, alignRight ? th : th, { textAlign: alignRight ? "right" : "left" }),
+          onClick: function () { setBrowseSort({ key: key, asc: isSorted ? !asc : (key === "symbol" ? true : false) }); }
+        }, label + (isSorted ? (asc ? " \u2191" : " \u2193") : ""));
+      }
 
       return React.createElement("div", null,
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 } },
@@ -1316,7 +1355,54 @@ window.PatternDashboard = (function () {
             style: { padding: "4px 10px", borderRadius: 4, background: "var(--bg3)", border: "1px solid var(--border)", cursor: "pointer", fontSize: 12 }
           }, "Export All")
         ),
-        sorted.map(function (p) { return patternRow(p); })
+        React.createElement("div", { style: { maxHeight: "calc(100vh - 220px)", overflowY: "auto", borderRadius: 8, border: "1px solid var(--border)" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null,
+              React.createElement("tr", null,
+                col("symbol", "Symbol", false),
+                col("trades", "Trades", true),
+                col("winRate", "WR%", true),
+                col("adjWR", "Pat WR", true),
+                col("mlWR", "ML WR", true),
+                col("sharpe", "Sharpe", true),
+                col("profitFactor", "PF", true),
+                col("avgReturn", "Avg Ret", true),
+                col("maxDD", "Max DD", true),
+                col("topPillar", "Top Pillar", false),
+                col("age", "Age", true)
+              )
+            ),
+            React.createElement("tbody", null,
+              sorted.map(function (p) {
+                var wr = p.tradeStats ? p.tradeStats.winRate || 0 : 0;
+                var wrColor = wr >= 60 ? "var(--accent, #16a34a)" : wr >= 45 ? "#f59e0b" : "#ef4444";
+                var adjWR = p.adjustedMetrics && p.adjustedMetrics.winRate != null ? p.adjustedMetrics.winRate : null;
+                var mlWR = p.mlAdjustedMetrics && p.mlAdjustedMetrics.winRate != null ? p.mlAdjustedMetrics.winRate : null;
+                var trades = p.tradeStats ? p.tradeStats.totalTrades || 0 : 0;
+                var sharpe = p.tradeStats ? p.tradeStats.sharpeApprox || 0 : 0;
+                var pf = p.tradeStats ? p.tradeStats.profitFactor : null;
+                var avgRet = p.tradeStats ? p.tradeStats.avgReturn || 0 : 0;
+                var maxDD = p.tradeStats ? p.tradeStats.maxDrawdown || 0 : 0;
+                var age = p.backtestDate ? Math.round((Date.now() - p.backtestDate) / (24 * 60 * 60 * 1000)) : null;
+                var topPillar = numVal(p, "topPillar");
+
+                return React.createElement("tr", { key: p.symbol, style: { cursor: "default" } },
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 600 }) }, p.symbol),
+                  React.createElement("td", { style: tdr }, trades),
+                  React.createElement("td", { style: Object.assign({}, tdr, { fontWeight: 700, color: wrColor }) }, wr + "%"),
+                  React.createElement("td", { style: Object.assign({}, tdr, { color: adjWR != null ? "#06b6d4" : "var(--text4)" }) }, adjWR != null ? adjWR + "%" : "\u2014"),
+                  React.createElement("td", { style: Object.assign({}, tdr, { color: mlWR != null ? "#a78bfa" : "var(--text4)" }) }, mlWR != null ? mlWR + "%" : "\u2014"),
+                  React.createElement("td", { style: tdr }, sharpe),
+                  React.createElement("td", { style: Object.assign({}, tdr, { color: (pf != null && pf >= 1.5) ? "var(--accent)" : "var(--text)" }) }, (pf != null && isFinite(pf)) ? pf : "\u2014"),
+                  React.createElement("td", { style: Object.assign({}, tdr, { color: avgRet >= 0 ? "var(--accent)" : "#ef4444" }) }, avgRet + "%"),
+                  React.createElement("td", { style: Object.assign({}, tdr, { color: maxDD > 10 ? "#ef4444" : "var(--text)" }) }, maxDD + "%"),
+                  React.createElement("td", { style: tdc }, topPillar || "\u2014"),
+                  React.createElement("td", { style: Object.assign({}, tdr, { color: "var(--text3)" }) }, age != null ? age + "d" : "\u2014")
+                );
+              })
+            )
+          )
+        )
       );
     }
 
