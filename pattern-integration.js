@@ -92,17 +92,19 @@
    */
   function computeMLFeaturesFromCompat(compatResult) {
     if (!compatResult) return null;
-    // Map compatResult fields to ML feature keys
+    // compatResult has pillar scores (agg*) but not raw indicators.
+    // Use neutral defaults for missing features; entry_score is the only
+    // meaningful feature available from the compat result.
     var features = {
-      rsi: compatResult.aggRSI != null ? compatResult.aggRSI : 50,
-      macd_hist: 0,     // Not available in compatResult — default neutral
-      bb_position: 0.5,  // Not available — default middle
-      atr_pct: compatResult.aggATRPct != null ? compatResult.aggATRPct : 0,
-      obv_trend: 1,     // Not available — default neutral
-      supertrend_dir: 0, // Not available — default neutral
-      adx: compatResult.aggADX != null ? compatResult.aggADX : 20,
-      ema_slope: 0,      // Not available — default neutral
-      volume_ratio: 1,    // Not available — default neutral
+      rsi: 50,               // not in compatResult — neutral default
+      macd_hist: 0,          // not in compatResult — neutral default
+      bb_position: 0.5,      // not in compatResult — neutral default
+      atr_pct: 0,            // not in compatResult — neutral default
+      obv_trend: 1,          // not in compatResult — neutral default
+      supertrend_dir: 0,     // not in compatResult — neutral default
+      adx: 20,               // not in compatResult — neutral default
+      ema_slope: 0,          // not in compatResult — neutral default
+      volume_ratio: 1,       // not in compatResult — neutral default
       entry_score: compatResult.finalScore || 0
     };
     return features;
@@ -144,6 +146,9 @@
 
   /**
    * Apply pattern weights to the compat result format.
+   * NOTE: This is the sync path used by the screener (from cache).
+   * The async path used by PatternScoring.compute() is in pattern-scoring.js.
+   * Both check _patternApplied to prevent double ML application.
    */
   function applyPatternToCompatResult(compatResult, pattern) {
     if (!compatResult || !pattern || !pattern.indicatorWeights) return compatResult;
@@ -204,8 +209,10 @@
     var adjustedScore = clamp(round2(baseWeightedScore + powerBonusTotal), 0, 100);
 
     // ── ML Enhancement (synchronous, using pre-loaded model) ──
+    // Skip ML blend when pattern reweighting is a no-op (uniform weights),
+    // since the pattern stage is intended as an identity in that case.
     var mlPrediction = null;
-    if (_cachedMLModel && window.MLTrainer && window.MLTrainer.predictSync) {
+    if (!uniformW && _cachedMLModel && window.MLTrainer && window.MLTrainer.predictSync) {
       try {
         var mlFeatures = computeMLFeaturesFromCompat(compatResult);
         // Gate: model was trained on entry scores >= entryScoreMin (scores of
@@ -273,16 +280,34 @@
 
   function getTopWeight(weights) {
     if (!weights) return null;
-    var max = 0, top = null;
+    var max = 0, top = null, allEqual = true, firstW = null;
     Object.keys(weights).forEach(function (k) {
-      if (weights[k] > max) { max = weights[k]; top = k; }
+      var w = weights[k] != null ? weights[k] : 0;
+      if (firstW == null) firstW = w;
+      else if (Math.abs(w - firstW) > 0.001) allEqual = false;
+      if (w > max) { max = w; top = k; }
     });
+    if (allEqual) return null;
     return top ? { component: top, weight: max } : null;
   }
 
   /**
    * Apply pattern calibration to raw probTouch value.
    */
+  function findTercile(driftScore, stratified) {
+    if (!stratified || !stratified.length || driftScore == null) return null;
+    for (var i = 0; i < stratified.length; i++) {
+      var s = stratified[i];
+      if (s && s.driftRange) {
+        var lo = s.driftRange[0], hi = s.driftRange[1];
+        if (driftScore >= lo && driftScore <= hi) return i;
+      }
+    }
+    return driftScore < (stratified[0].driftRange ? stratified[0].driftRange[1] : 0.33) ? 0
+         : driftScore >= (stratified[stratified.length - 1].driftRange ? stratified[stratified.length - 1].driftRange[0] : 0.66) ? stratified.length - 1
+         : 1;
+  }
+
   function applyPatternCalibration(rawProbTouch, driftScore, pattern) {
     if (!pattern || !pattern.calibration || rawProbTouch == null) return rawProbTouch;
 
@@ -295,8 +320,8 @@
       var calibrated = 1 / (1 + Math.exp(-z));
 
       if (cal.stratified && driftScore != null) {
-        var tercile = driftScore < 0.33 ? 0 : driftScore < 0.66 ? 1 : 2;
-        if (cal.stratified[tercile]) {
+        var tercile = findTercile(driftScore, cal.stratified);
+        if (tercile != null && cal.stratified[tercile]) {
           var stratum = cal.stratified[tercile];
           var stratumWR = stratum.hitRate / 100;
           var globalWR = 0.5;
@@ -314,8 +339,8 @@
     }
 
     if (cal.stratified && driftScore != null) {
-      var tercile2 = driftScore < 0.33 ? 0 : driftScore < 0.66 ? 1 : 2;
-      if (cal.stratified[tercile2]) {
+      var tercile2 = findTercile(driftScore, cal.stratified);
+      if (tercile2 != null && cal.stratified[tercile2]) {
         var stratum2 = cal.stratified[tercile2];
         var adjustment2 = stratum2.hitRate / 100;
         return round3(clamp(rawProbTouch * (adjustment2 / 0.5), 0.01, 0.99));

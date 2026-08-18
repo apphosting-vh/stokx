@@ -45,8 +45,8 @@ window.BatchBacktest = (function () {
   /** Longer pause — lets GC run and the user see progress updates */
   function yieldLong() { return yieldToUI(80); }
 
-  function round2(v) { return Math.round(v * 100) / 100; }
-  function round3(v) { return Math.round(v * 1000) / 1000; }
+  function round2(v) { return v != null ? Math.round(v * 100) / 100 : null; }
+  function round3(v) { return v != null ? Math.round(v * 1000) / 1000 : null; }
 
   /**
    * Build the multi-TF score function (same approach as the existing

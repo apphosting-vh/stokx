@@ -264,7 +264,14 @@ window.PatternScoring = (function () {
    *
    * where normalization_factor preserves the 0-100 score range.
    */
+  /**
+   * Apply pattern weights to a base score result.
+   * NOTE: This is the async path used by PatternScoring.compute() (loads from IDB).
+   * The sync screener path uses pattern-integration.js:applyPatternToCompatResult()
+   * instead. Both must check _patternApplied to avoid double ML application.
+   */
   function applyPatternWeights(baseResult, pattern, candles) {
+    if (baseResult._patternApplied) return baseResult;
     var weights = resolveLearnedWeights(pattern);
     var powers = pattern.indicatorPowers;
 
@@ -599,9 +606,15 @@ window.PatternScoring = (function () {
 
       result.probTouchRaw = rawProbTouch;
       result.driftScore = driftScore;
-      result.driftLabel = driftScore != null
-        ? (driftScore < 0.33 ? "LOW_DRIFT" : driftScore < 0.66 ? "MID_DRIFT" : "HIGH_DRIFT")
-        : null;
+      result.driftLabel = null;
+      if (driftScore != null && pattern && pattern.calibration && pattern.calibration.stratified) {
+        var lblIdx = findTercile(driftScore, pattern.calibration.stratified);
+        if (lblIdx != null && pattern.calibration.stratified[lblIdx]) {
+          result.driftLabel = pattern.calibration.stratified[lblIdx].label || (lblIdx === 0 ? "LOW_DRIFT" : lblIdx === 2 ? "HIGH_DRIFT" : "MID_DRIFT");
+        }
+      } else if (driftScore != null) {
+        result.driftLabel = driftScore < 0 ? "LOW_DRIFT" : driftScore < 0.33 ? "LOW_DRIFT" : driftScore < 0.66 ? "MID_DRIFT" : "HIGH_DRIFT";
+      }
 
       // ── Apply pattern calibration ──
       if (pattern && pattern.calibration && rawProbTouch != null) {
@@ -631,6 +644,20 @@ window.PatternScoring = (function () {
    *
    * Falls back to stratified drift-tercile lookup.
    */
+  function findTercile(driftScore, stratified) {
+    if (!stratified || !stratified.length || driftScore == null) return null;
+    for (var i = 0; i < stratified.length; i++) {
+      var s = stratified[i];
+      if (s && s.driftRange) {
+        var lo = s.driftRange[0], hi = s.driftRange[1];
+        if (driftScore >= lo && driftScore <= hi) return i;
+      }
+    }
+    return driftScore < (stratified[0].driftRange ? stratified[0].driftRange[1] : 0.33) ? 0
+         : driftScore >= (stratified[stratified.length - 1].driftRange ? stratified[stratified.length - 1].driftRange[0] : 0.66) ? stratified.length - 1
+         : 1;
+  }
+
   function applyCalibration(rawProbTouch, driftScore, pattern) {
     var cal = pattern.calibration;
 
@@ -643,8 +670,8 @@ window.PatternScoring = (function () {
 
       // Method 2: Stratified adjustment overlay
       if (cal.stratified && driftScore != null) {
-        var tercile = driftScore < 0.33 ? 0 : driftScore < 0.66 ? 1 : 2;
-        if (cal.stratified[tercile]) {
+        var tercile = findTercile(driftScore, cal.stratified);
+        if (tercile != null && cal.stratified[tercile]) {
           var stratum = cal.stratified[tercile];
           var stratumWR = (stratum.hitRate != null ? stratum.hitRate : 50) / 100;
           var totalN = cal.global.buckets
@@ -668,8 +695,8 @@ window.PatternScoring = (function () {
 
     // Method 3: Stratified only
     if (cal.stratified && driftScore != null) {
-      var tercile = driftScore < 0.33 ? 0 : driftScore < 0.66 ? 1 : 2;
-      if (cal.stratified[tercile]) {
+      var tercile = findTercile(driftScore, cal.stratified);
+      if (tercile != null && cal.stratified[tercile]) {
         var stratum = cal.stratified[tercile];
         // Use the stratum's empirical hit rate as adjustment factor
         var adjustment = (stratum.hitRate != null ? stratum.hitRate : 50) / 100;
