@@ -280,6 +280,8 @@ window.BatchBacktest = (function () {
     function computeAdjustedMetrics(allScoredBars, pattern, candles, engine, cfg, mlModel) {
       var _clamp = function (v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; };
       var threshold = cfg.threshold || 65;
+      var usePatternWeights = cfg.usePatternWeights !== false;
+      var useMLBlend = cfg.useMLBlend !== false;
       if (!allScoredBars || !allScoredBars.length || !pattern || !candles) return null;
 
       var weights = pattern.indicatorWeights || null;
@@ -291,7 +293,7 @@ window.BatchBacktest = (function () {
       }
 
       var uniformW = true;
-      if (weights) {
+      if (weights && usePatternWeights) {
         var _firstW = null;
         ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
           var w = weights[p] != null ? weights[p] : 0.25;
@@ -301,11 +303,11 @@ window.BatchBacktest = (function () {
       }
 
       // Pre-compute ML indicator cache once for this symbol (O(N))
-      var mlCache = mlModel ? buildMLIndicatorCache(candles) : null;
+      var mlCache = (mlModel && useMLBlend) ? buildMLIndicatorCache(candles) : null;
 
       // Shared scored-bars arrays for both passes
       var patternOnlyScored = [];
-      var mlBlendedScored = mlModel ? [] : null;
+      var mlBlendedScored = (mlModel && mlCache && useMLBlend) ? [] : null;
 
       for (var bi = 0; bi < allScoredBars.length; bi++) {
         var bar = allScoredBars[bi];
@@ -320,19 +322,19 @@ window.BatchBacktest = (function () {
         var patternScore = bar.entryScore;
         var powerBonusTotal = 0;
 
-        if (!uniformW && weights) {
+        if (usePatternWeights && !uniformW && weights) {
           var totalWeighted = 0, totalWeight = 0;
           ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
             var w = weights[p] != null ? weights[p] : 0.25;
             var max = pillarMax[p] || 25;
             var normalizedPillar = _clamp(pillars[p] / max, 0, 1);
-            totalWeighted += pillars[p] * w;
+            totalWeighted += normalizedPillar * w;
             totalWeight += w;
             if (powers && powers[p] && powers[p].infoValue > 0.05 && normalizedPillar > 0.5) {
               powerBonusTotal += round3(powers[p].infoValue * normalizedPillar * 2);
             }
           });
-          patternScore = _clamp(round2(totalWeight > 0 ? totalWeighted / totalWeight : bar.entryScore + powerBonusTotal), 0, 100);
+          patternScore = _clamp(round2(totalWeight > 0 ? (totalWeighted / totalWeight) * 100 : bar.entryScore + powerBonusTotal), 0, 100);
         }
 
         var base = {
@@ -388,6 +390,8 @@ window.BatchBacktest = (function () {
     var timeframe = cfg.timeframe || "1h";
     var range = cfg.range || "2y";
     var sampleEvery = cfg.sampleEvery != null ? cfg.sampleEvery : 2;
+    var usePatternWeights = cfg.usePatternWeights !== false;
+    var useMLBlend = cfg.useMLBlend !== false;
     var _cancelled = false;
 
     /**
@@ -727,7 +731,9 @@ window.BatchBacktest = (function () {
             holdingPeriodDays: holdingPeriodDays,
             targetProfitPct: targetProfitPct,
             slippagePct: slippagePct,
-            brokeragePct: brokeragePct
+            brokeragePct: brokeragePct,
+            usePatternWeights: usePatternWeights,
+            useMLBlend: useMLBlend
           }, mlModel);
           if (adjResult) {
             pat.adjustedMetrics = adjResult.patternOnly || null;
@@ -760,7 +766,7 @@ window.BatchBacktest = (function () {
         try {
           await window.PatternStore.setMeta("lastBatchRun", {
             date: Date.now(),
-            config: { targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: threshold },
+            config: { targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: threshold, usePatternWeights: usePatternWeights, useMLBlend: useMLBlend },
             summary: summary
           });
         } catch (e) { console.warn("setMeta failed:", e.message); }

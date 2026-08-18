@@ -124,13 +124,14 @@ window.PatternScoring = (function () {
       } catch (e) {}
     }
 
-    // 3. Compute pattern-weighted score
-    var scoreResult = pattern
+    // 3. Compute pattern-weighted score (gated by scoring config)
+    var _sc = (window.getScoringConfig && window.getScoringConfig()) || { usePatternWeights: true, useMLBlend: true };
+    var scoreResult = (pattern && _sc.usePatternWeights)
       ? applyPatternWeights(baseResult, pattern, candles)
       : { entryScore: baseResult.entryScore || baseResult.entry_score, classification: baseResult.classification, breakdown: null, adjustments: null };
 
-    // 4. ML Enhancement — augment score with trained model prediction
-    var mlResult = await applyMLEnhancement(symbol, candles, opts, baseResult, scoreResult);
+    // 4. ML Enhancement — augment score with trained model prediction (gated by scoring config)
+    var mlResult = _sc.useMLBlend ? await applyMLEnhancement(symbol, candles, opts, baseResult, scoreResult) : null;
     if (mlResult && mlResult.adjustedScore != null) {
       scoreResult.entryScore = mlResult.adjustedScore;
       scoreResult.classification = mlResult.adjustedClassification;
@@ -329,7 +330,7 @@ window.PatternScoring = (function () {
       var w = weights[p] != null ? weights[p] : 0.25;
       var max = pillarMax[p] || 25;
       var normalizedPillar = clamp(pillars[p] / max, 0, 1);
-      var weighted = pillars[p] * w;
+      var weighted = normalizedPillar * w;
       totalWeighted += weighted;
       totalWeight += w;
 
@@ -348,7 +349,7 @@ window.PatternScoring = (function () {
       };
     });
 
-    var baseWeightedScore = totalWeight > 0 ? totalWeighted / totalWeight : (baseResult.entryScore || baseResult.entry_score);
+    var baseWeightedScore = totalWeight > 0 ? (totalWeighted / totalWeight) * 100 : (baseResult.entryScore || baseResult.entry_score);
 
     // Apply power bonus
     var powerBonusTotal = 0;

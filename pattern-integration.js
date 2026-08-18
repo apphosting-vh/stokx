@@ -18,6 +18,7 @@
   var _patternMemoryCache = {};   // { "RELIANCE": patternObj, ... }
   var _cacheLoaded = false;
   var _cachedMLModel = null;     // Pre-loaded ML model for synchronous prediction
+  var _cachedScoringConfig = { usePatternWeights: true, useMLBlend: true };
 
   /**
    * Load all patterns from IndexedDB into memory so the screener can
@@ -60,6 +61,15 @@
    */
   window.reloadPatternCache = async function () {
     await loadPatternCache();
+    // Load scoring config (pattern weights / ML blend toggles)
+    if (window.PatternStore && window.PatternStore.getMeta) {
+      try {
+        var sc = await window.PatternStore.getMeta("scoring_config");
+        if (sc && typeof sc === "object") {
+          _cachedScoringConfig = { usePatternWeights: sc.usePatternWeights !== false, useMLBlend: sc.useMLBlend !== false };
+        }
+      } catch (e) {}
+    }
     // Update exposed diagnostics
     if (window.TechIndicators) {
       window.TechIndicators._patCacheLoaded = _cacheLoaded;
@@ -67,6 +77,24 @@
       window.TechIndicators._patCacheSymbols = Object.keys(_patternMemoryCache);
     }
     console.log("[PatternIntel] Cache reloaded: " + Object.keys(_patternMemoryCache).length + " patterns");
+  };
+
+  /**
+   * Set scoring config toggles (pattern weights / ML blend).
+   * Persists to PatternStore and updates in-memory cache.
+   */
+  window.setScoringConfig = async function (sc) {
+    _cachedScoringConfig = { usePatternWeights: sc.usePatternWeights !== false, useMLBlend: sc.useMLBlend !== false };
+    if (window.PatternStore && window.PatternStore.setMeta) {
+      try { await window.PatternStore.setMeta("scoring_config", _cachedScoringConfig); } catch (e) {}
+    }
+  };
+
+  /**
+   * Get current scoring config toggles (sync).
+   */
+  window.getScoringConfig = function () {
+    return { usePatternWeights: _cachedScoringConfig.usePatternWeights, useMLBlend: _cachedScoringConfig.useMLBlend };
   };
 
   /**
@@ -193,11 +221,13 @@
     // scale (35/30/35/20 maxes + modifiers) and fabricates a delta.
     var firstW = null;
     var uniformW = true;
-    ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
-      var w = weights[p] != null ? weights[p] : 0.25;
-      if (firstW == null) firstW = w;
-      else if (Math.abs(w - firstW) > 0.001) uniformW = false;
-    });
+    if (_cachedScoringConfig.usePatternWeights) {
+      ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
+        var w = weights[p] != null ? weights[p] : 0.25;
+        if (firstW == null) firstW = w;
+        else if (Math.abs(w - firstW) > 0.001) uniformW = false;
+      });
+    }
 
     var totalWeighted = 0;
     var totalWeight = 0;
@@ -211,7 +241,7 @@
         var w = weights[p] != null ? weights[p] : 0.25;
         var max = pillarMax[p] || 25;
         var normalizedPillar = clamp(pillars[p] / max, 0, 1);
-        var weighted = pillars[p] * w;
+        var weighted = normalizedPillar * w;
         totalWeighted += weighted;
         totalWeight += w;
 
@@ -224,14 +254,14 @@
       });
     }
 
-    var baseWeightedScore = uniformW ? compatResult.finalScore : (totalWeight > 0 ? totalWeighted / totalWeight : compatResult.finalScore);
+    var baseWeightedScore = uniformW ? compatResult.finalScore : (totalWeight > 0 ? (totalWeighted / totalWeight) * 100 : compatResult.finalScore);
     var adjustedScore = clamp(round2(baseWeightedScore + powerBonusTotal), 0, 100);
 
     // ── ML Enhancement (synchronous, using pre-loaded model) ──
     // Skip ML blend when pattern reweighting is a no-op (uniform weights),
-    // since the pattern stage is intended as an identity in that case.
+    // or when ML blend is disabled by the user.
     var mlPrediction = null;
-    if (!uniformW && _cachedMLModel && window.MLTrainer && window.MLTrainer.predictSync) {
+    if (!uniformW && _cachedScoringConfig.useMLBlend && _cachedMLModel && window.MLTrainer && window.MLTrainer.predictSync) {
       try {
         var mlFeatures = computeMLFeaturesFromCompat(compatResult, dailyCandles);
         // Gate: model was trained on entry scores >= entryScoreMin (scores of

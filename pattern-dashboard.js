@@ -592,7 +592,7 @@ window.PatternDashboard = (function () {
     // Run Batch tab state (must be at component top-level — Rules of Hooks)
     var _btConfig = useState(function () {
       var _scDef = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
-      var defaults = { targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 4, holdingPeriodDays: _scDef.horizonDays || 14, threshold: 65, sampleEvery: 2 };
+      var defaults = { targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 4, holdingPeriodDays: _scDef.horizonDays || 14, threshold: 65, sampleEvery: 2, usePatternWeights: true, useMLBlend: true };
       try {
         var saved = localStorage.getItem("stox_best_bt_config");
         if (saved) {
@@ -602,6 +602,8 @@ window.PatternDashboard = (function () {
           if (typeof c.holdingPeriodDays === "number" && isFinite(c.holdingPeriodDays) && c.holdingPeriodDays > 0) v.holdingPeriodDays = c.holdingPeriodDays;
           if (typeof c.threshold === "number" && isFinite(c.threshold) && c.threshold > 0 && c.threshold <= 100) v.threshold = c.threshold;
           if (typeof c.sampleEvery === "number" && isFinite(c.sampleEvery) && c.sampleEvery >= 1) v.sampleEvery = c.sampleEvery;
+          if (typeof c.usePatternWeights === "boolean") v.usePatternWeights = c.usePatternWeights;
+          if (typeof c.useMLBlend === "boolean") v.useMLBlend = c.useMLBlend;
           if (v.targetProfitPct != null && v.holdingPeriodDays != null && v.threshold != null && v.sampleEvery != null) {
             return Object.assign({}, defaults, v);
           }
@@ -681,6 +683,11 @@ window.PatternDashboard = (function () {
     var bulkConfirm = _bulkConfirm[0], setBulkConfirm = _bulkConfirm[1];
     var _pBlend = useState(0.5);
     var patternBlend = _pBlend[0], setPatternBlend = _pBlend[1];
+    var _scoringCfg = useState(function () {
+      if (window.getScoringConfig) return window.getScoringConfig();
+      return { usePatternWeights: true, useMLBlend: true };
+    });
+    var scoringCfg = _scoringCfg[0], setScoringCfg = _scoringCfg[1];
 
     // Insights tab state (must be at component top-level — Rules of Hooks)
     var _insSym = useState("");
@@ -987,7 +994,8 @@ window.PatternDashboard = (function () {
           avgWinRate: result.summary.avgWinRate || null,
           avgAdjustedWinRate: result.summary.avgAdjustedWinRate || null,
           avgMLWinRate: result.summary.avgMLWinRate || null,
-          mlModelLoaded: result.summary.mlModelLoaded || false
+          mlModelLoaded: result.summary.mlModelLoaded || false,
+          runConfig: { usePatternWeights: btConfig.usePatternWeights !== false, useMLBlend: btConfig.useMLBlend !== false }
         });
 
         await loadExistingData();
@@ -1185,6 +1193,18 @@ window.PatternDashboard = (function () {
             configField("Holding Period (days)", btConfig.holdingPeriodDays, function (v) { var _defH = (window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 14; setBtConfig(Object.assign({}, btConfig, { holdingPeriodDays: parseInt(v) || _defH })); }),
             configField("Threshold Score", btConfig.threshold, function (v) { setBtConfig(Object.assign({}, btConfig, { threshold: parseInt(v) || 65 })); }),
             configField("Sample Every N bars", btConfig.sampleEvery, function (v) { setBtConfig(Object.assign({}, btConfig, { sampleEvery: parseInt(v) || 2 })); })
+          ),
+          React.createElement("div", { style: { display: "flex", gap: 16, marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" } },
+            React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12 } },
+              React.createElement("input", { type: "checkbox", checked: btConfig.usePatternWeights !== false, onChange: function (e) { var next = Object.assign({}, btConfig, { usePatternWeights: e.target.checked }); setBtConfig(next); try { localStorage.setItem("stox_best_bt_config", JSON.stringify(next)); } catch(_e) {} }, style: { cursor: "pointer" } }),
+              React.createElement("span", null, "Pattern Re-weighting"),
+              React.createElement("span", { style: { fontSize: 10, color: "var(--text5)" } }, "(stock-specific pillar weights)")
+            ),
+            React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12 } },
+              React.createElement("input", { type: "checkbox", checked: btConfig.useMLBlend !== false, onChange: function (e) { var next = Object.assign({}, btConfig, { useMLBlend: e.target.checked }); setBtConfig(next); try { localStorage.setItem("stox_best_bt_config", JSON.stringify(next)); } catch(_e) {} }, style: { cursor: "pointer" } }),
+              React.createElement("span", null, "ML Blend"),
+              React.createElement("span", { style: { fontSize: 10, color: "var(--text5)" } }, "(champion model overlay)")
+            )
           )
         ),
         // Progress
@@ -1232,30 +1252,37 @@ window.PatternDashboard = (function () {
               React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: "var(--text)" } }, btResult.avgWinRate != null ? btResult.avgWinRate + "%" : "\u2014")
             ),
             React.createElement("div", { style: { textAlign: "center" } },
-              React.createElement("div", { style: { fontSize: 10, color: "#06b6d4", textTransform: "uppercase", letterSpacing: .5 } }, "Pattern Adj WR"),
+              React.createElement("div", { style: { fontSize: 10, color: "#06b6d4", textTransform: "uppercase", letterSpacing: .5 } }, "Pattern Adj WR" + (btResult.runConfig && btResult.runConfig.usePatternWeights === false ? " (off)" : "")),
               React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: "#06b6d4" } }, btResult.avgAdjustedWinRate != null ? btResult.avgAdjustedWinRate + "%" : "\u2014")
             ),
             React.createElement("div", { style: { textAlign: "center" } },
-              React.createElement("div", { style: { fontSize: 10, color: "#a78bfa", textTransform: "uppercase", letterSpacing: .5 } }, "ML Blended WR"),
+              React.createElement("div", { style: { fontSize: 10, color: "#a78bfa", textTransform: "uppercase", letterSpacing: .5 } }, "ML Blended WR" + (btResult.runConfig && btResult.runConfig.useMLBlend === false ? " (off)" : "")),
               React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: btResult.mlModelLoaded ? "#a78bfa" : "var(--text6)" } }, btResult.avgMLWinRate != null ? btResult.avgMLWinRate + "%" : (btResult.mlModelLoaded === false ? "No model" : "\u2014"))
             )
           ),
           (function () {
-            // Delta line
-            if (btResult.avgAdjustedWinRate != null && btResult.avgWinRate != null) {
+            var parts = [];
+            var runCfg = btResult.runConfig || {};
+            // Pattern delta
+            if (runCfg.usePatternWeights === false) {
+              parts.push(React.createElement("span", { key: "a" }, "Pattern re-weighting disabled \u2014 raw scores used as-is"));
+            } else if (btResult.avgAdjustedWinRate != null && btResult.avgWinRate != null) {
               var rawVsAdj = Math.round((btResult.avgAdjustedWinRate - btResult.avgWinRate) * 10) / 10;
               var adjLabel = rawVsAdj >= 0 ? "Pattern re-weighting improved" : "Pattern re-weighting reduced";
-              var parts = [React.createElement("span", { key: "a" }, adjLabel + " raw win rate by " + Math.abs(rawVsAdj) + " points")];
-              if (btResult.avgMLWinRate != null && btResult.avgAdjustedWinRate != null) {
-                var adjVsMl = Math.round((btResult.avgMLWinRate - btResult.avgAdjustedWinRate) * 10) / 10;
-                var mlLabel = adjVsMl >= 0 ? "ML blend improved" : "ML blend reduced";
-                parts.push(React.createElement("span", { key: "b" }, ". " + mlLabel + " pattern-adjusted win rate by " + Math.abs(adjVsMl) + " points"));
-              } else if (!btResult.mlModelLoaded) {
-                parts.push(React.createElement("span", { key: "b" }, ". No champion model loaded \u2014 ML blend not applied"));
-              }
-              return React.createElement("div", { style: { fontSize: 12, color: "var(--text3)", lineHeight: 1.6 } }, parts);
+              parts.push(React.createElement("span", { key: "a" }, adjLabel + " raw win rate by " + Math.abs(rawVsAdj) + " points"));
             }
-            return null;
+            // ML delta
+            if (runCfg.useMLBlend === false) {
+              parts.push(React.createElement("span", { key: "b" }, ". ML blend disabled \u2014 no model overlay applied"));
+            } else if (btResult.avgMLWinRate != null && btResult.avgAdjustedWinRate != null) {
+              var adjVsMl = Math.round((btResult.avgMLWinRate - btResult.avgAdjustedWinRate) * 10) / 10;
+              var mlLabel = adjVsMl >= 0 ? "ML blend improved" : "ML blend reduced";
+              parts.push(React.createElement("span", { key: "b" }, ". " + mlLabel + " pattern-adjusted win rate by " + Math.abs(adjVsMl) + " points"));
+            } else if (!btResult.mlModelLoaded && runCfg.useMLBlend !== false) {
+              parts.push(React.createElement("span", { key: "b" }, ". No champion model loaded \u2014 ML blend not applied"));
+            }
+            if (!parts.length) return null;
+            return React.createElement("div", { style: { fontSize: 12, color: "var(--text3)", lineHeight: 1.6 } }, parts);
           })()
         ),
         // Log
@@ -2185,6 +2212,18 @@ window.PatternDashboard = (function () {
             "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Overrides always win over the blend and start from the raw learned profile (not the blended values). Bulk adjust: tick checkboxes, set per-pillar Δ% (e.g. +10 Trend, -10 Swing), Apply to Selected — deltas are clamped 5-95% and renormalized to 100%. The Learned-weight blend slider mixes learned weights with calculated 25% for non-overridden stocks only. Overrides apply to all pattern-adjusted scoring and travel with backups."
           ),
           React.createElement("div", { style: { marginTop: 10 } },
+            React.createElement("div", { style: { display: "flex", gap: 16, marginBottom: 10, padding: "8px 12px", background: "var(--bg2)", borderRadius: 6, border: "1px solid var(--border)" } },
+              React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12 } },
+                React.createElement("input", { type: "checkbox", checked: scoringCfg.usePatternWeights !== false, onChange: function (e) { var next = Object.assign({}, scoringCfg, { usePatternWeights: e.target.checked }); setScoringCfg(next); if (window.setScoringConfig) window.setScoringConfig(next); }, style: { cursor: "pointer" } }),
+                React.createElement("span", { style: { fontWeight: 600 } }, "Pattern Re-weighting"),
+                React.createElement("span", { style: { fontSize: 10, color: "var(--text5)" } }, "(pillar weight adjustment)")
+              ),
+              React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12 } },
+                React.createElement("input", { type: "checkbox", checked: scoringCfg.useMLBlend !== false, onChange: function (e) { var next = Object.assign({}, scoringCfg, { useMLBlend: e.target.checked }); setScoringCfg(next); if (window.setScoringConfig) window.setScoringConfig(next); }, style: { cursor: "pointer" } }),
+                React.createElement("span", { style: { fontWeight: 600 } }, "ML Blend"),
+                React.createElement("span", { style: { fontSize: 10, color: "var(--text5)" } }, "(champion model overlay)")
+              )
+            ),
             React.createElement("input", {
               className: "inp", type: "text", placeholder: "Filter by symbol (e.g. RELIANCE)...",
               value: patternSearch,
