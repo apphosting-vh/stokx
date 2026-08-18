@@ -9833,6 +9833,7 @@ function SingleStockAnalysis({ requestedTicker }) {
       var entry = null;
       if (resW && resW.data && resD && resD.data) {
         entry = computeCompatEntryScore(resW.data, resD.data, resH && resH.data && resH.data.length >= 100 ? resH.data : null, idxD && idxD.data, idxW && idxW.data);
+        try { if (window.applyPatternIntel) entry = window.applyPatternIntel(entry, tk); } catch(_e) {}
       }
       var rs = null, beta = null;
       if (idxD && idxD.data && resD && resD.data) {
@@ -10538,39 +10539,69 @@ function SingleStockAnalysis({ requestedTicker }) {
     if (!mtf && !mtfLoading) return null;
     var entryScore = null, entryDec = null;
     if (mtf && mtf.entry) { entryScore = mtf.entry.finalScore; entryDec = mtf.entry.decision; }
+    var patMeta = mtf && mtf.entry && mtf.entry._patternApplied ? { applied: true, delta: mtf.entry._patternDelta, originalScore: mtf.entry._patternOriginalScore, winRate: mtf.entry._patternWinRate, trades: mtf.entry._patternTrades, topWeight: mtf.entry._patternTopWeight } : null;
+    var _pm = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().pillarMax || {}) : {};
+    var pillars = entryScore != null ? [
+      { label: "Trend Health", val: mtf.entry.aggTrendHealth, max: _pm.trendHealth != null ? _pm.trendHealth : 35, color: "#22c55e" },
+      { label: "Pullback Quality", val: mtf.entry.aggPullbackQuality, max: _pm.pullbackQuality != null ? _pm.pullbackQuality : 30, color: "#06b6d4" },
+      { label: "4% Probability", val: mtf.entry.aggProb4, max: _pm.prob4 != null ? _pm.prob4 : 35, color: "#f59e0b" },
+      { label: "Swing Potential", val: mtf.entry.aggSwingPotential, max: _pm.swingPotential != null ? _pm.swingPotential : 20, color: "#8b5cf6" }
+    ] : [];
     return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: "12px 14px", borderRadius: 10, marginBottom: 12, background: "var(--bg4)", border: "1px solid var(--border)" } },
       React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text4)" } }, "Multi-Timeframe Context (W/D/H + Nifty50)"),
       !mtf && mtfLoading && React.createElement("div", { style: { fontSize: 10, color: "var(--text6)" } }, "Loading..."),
-      mtf && React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "stretch" } },
-        React.createElement("div", { style: { flex: 1, minWidth: 220 } },
-          React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 4 } }, "Entry Score"),
-          entryScore != null
-            ? React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 } },
-                React.createElement("span", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-mono)", color: entryDec && entryDec.color ? entryDec.color : "var(--text)" } }, entryScore),
-                entryDec && React.createElement("span", { style: { fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: (entryDec.color || "#6b7280") + "22", border: "1px solid " + (entryDec.color || "#6b7280"), color: entryDec.color || "var(--text5)" } }, entryDec.label)
-              )
-            : React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginBottom: 6 } }, "Insufficient data"),
-          entryScore != null && React.createElement("div", { style: { display: "flex", gap: 8 } },
-            [["W", mtf.entry.weekly], ["D", mtf.entry.daily], ["H", mtf.entry.hourly]].map(function (t) {
-              var s = t[1];
-              var total = s && s.total != null ? s.total : null;
-              var _cbCfg = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig().classification : null;
-              var _cbSB = _cbCfg ? _cbCfg.strongBuy : 80, _cbB = _cbCfg ? _cbCfg.buy : 65, _cbW = _cbCfg ? _cbCfg.watchlist : 50, _cbN = _cbCfg ? _cbCfg.neutral : 35;
-              return React.createElement("div", { key: t[0], style: { flex: 1 } },
-                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 8, color: "var(--text6)", fontFamily: "var(--font-mono)" } },
-                  React.createElement("span", null, t[0]),
-                  React.createElement("span", null, total != null ? total : "\u2014")
-                ),
-                React.createElement("div", { style: { height: 4, borderRadius: 2, background: "var(--bg5)", marginTop: 2, overflow: "hidden" } },
-                  total != null && React.createElement("div", { style: { width: Math.min(100, Math.max(0, total)) + "%", height: "100%", background: total >= _cbSB ? "var(--profit)" : total >= _cbB ? "#22c55e" : total >= _cbW ? "#fbbf24" : total >= _cbN ? "#fb923c" : "var(--loss)", borderRadius: 2 } })
+      mtf && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
+        React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "stretch" } },
+          React.createElement("div", { style: { flex: 1, minWidth: 220 } },
+            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 4 } }, "Entry Score"),
+            entryScore != null
+              ? React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 } },
+                  React.createElement("span", { style: { fontSize: 24, fontWeight: 800, fontFamily: "var(--font-mono)", color: entryDec && entryDec.color ? entryDec.color : "var(--text)" } }, entryScore),
+                  entryDec && React.createElement("span", { style: { fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: (entryDec.color || "#6b7280") + "22", border: "1px solid " + (entryDec.color || "#6b7280"), color: entryDec.color || "var(--text5)" } }, entryDec.label),
+                  patMeta && patMeta.applied
+                    ? React.createElement("span", {
+                        title: "Pattern-adjusted (original: " + patMeta.originalScore + ", \u0394: " + (patMeta.delta > 0 ? "+" : "") + patMeta.delta + ", WR: " + (patMeta.winRate != null ? patMeta.winRate.toFixed(0) + "%, " + patMeta.trades + " trades" : "N/A") + (patMeta.topWeight ? ", top: " + patMeta.topWeight.component : "") + ")",
+                        style: { fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: patMeta.delta > 0 ? "#16a34a18" : patMeta.delta < 0 ? "#dc262618" : "#6b728018", color: patMeta.delta > 0 ? "#16a34a" : patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (patMeta.delta > 0 ? "#16a34a44" : patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
+                      }, "P" + (patMeta.delta > 0 ? "+" + patMeta.delta : patMeta.delta < 0 ? patMeta.delta : ""))
+                    : null
                 )
-              );
-            })
+              : React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginBottom: 6 } }, "Insufficient data"),
+            entryScore != null && React.createElement("div", { style: { display: "flex", gap: 8 } },
+              [["W", mtf.entry.weekly], ["D", mtf.entry.daily], ["H", mtf.entry.hourly]].map(function (t) {
+                var s = t[1];
+                var total = s && s.total != null ? s.total : null;
+                var _cbCfg = (TI && TI.getScoreConfig) ? TI.getScoreConfig().classification : null;
+                var _cbSB = _cbCfg ? _cbCfg.strongBuy : 80, _cbB = _cbCfg ? _cbCfg.buy : 65, _cbW = _cbCfg ? _cbCfg.watchlist : 50, _cbN = _cbCfg ? _cbCfg.neutral : 35;
+                return React.createElement("div", { key: t[0], style: { flex: 1 } },
+                  React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 8, color: "var(--text6)", fontFamily: "var(--font-mono)" } },
+                    React.createElement("span", null, t[0]),
+                    React.createElement("span", null, total != null ? total : "\u2014")
+                  ),
+                  React.createElement("div", { style: { height: 4, borderRadius: 2, background: "var(--bg5)", marginTop: 2, overflow: "hidden" } },
+                    total != null && React.createElement("div", { style: { width: Math.min(100, Math.max(0, total)) + "%", height: "100%", background: total >= _cbSB ? "var(--profit)" : total >= _cbB ? "#22c55e" : total >= _cbW ? "#fbbf24" : total >= _cbN ? "#fb923c" : "var(--loss)", borderRadius: 2 } })
+                  )
+                );
+              })
+            )
+          ),
+          React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "stretch" } },
+            rsCell("RS vs Nifty50", mtf.rs ? mtf.rs.rs : null, mtf.rs && mtf.rs.mansfield != null ? "Mansfield: " + (mtf.rs.mansfield > 0 ? "+" : "") + _fmt(mtf.rs.mansfield, 2) + "%" : null),
+            rsCell("Beta (30d)", mtf.beta, null)
           )
         ),
-        React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "stretch" } },
-          rsCell("RS vs Nifty50", mtf.rs ? mtf.rs.rs : null, mtf.rs && mtf.rs.mansfield != null ? "Mansfield: " + (mtf.rs.mansfield > 0 ? "+" : "") + _fmt(mtf.rs.mansfield, 2) + "%" : null),
-          rsCell("Beta (30d)", mtf.beta, null)
+        entryScore != null && pillars.length > 0 && React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+          pillars.map(function (p) {
+            var pct = p.max > 0 ? Math.round(p.val / p.max * 100) : 0;
+            return React.createElement("div", { key: p.label, style: { flex: 1, minWidth: 120, padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border)" } },
+              React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 9, marginBottom: 3 } },
+                React.createElement("span", { style: { color: "var(--text5)", fontWeight: 600 } }, p.label),
+                React.createElement("span", { style: { color: "var(--text4)", fontFamily: "var(--font-mono)", fontWeight: 700 } }, _fmt(p.val, 1) + " / " + p.max)
+              ),
+              React.createElement("div", { style: { height: 3, borderRadius: 2, background: "var(--bg5)", overflow: "hidden" } },
+                React.createElement("div", { style: { width: pct + "%", height: "100%", background: p.color, borderRadius: 2 } })
+              )
+            );
+          })
         )
       )
     );
