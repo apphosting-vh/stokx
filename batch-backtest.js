@@ -112,14 +112,34 @@ window.BatchBacktest = (function () {
      * Returns the model object or null if unavailable.
      */
     async function loadMLModelForBacktest() {
-      if (!window.MLTrainer || !window.PatternStore) return null;
+      var expectedInputSize = window.MLTrainer && window.MLTrainer.FEATURE_KEYS ? window.MLTrainer.FEATURE_KEYS.length : 8;
+      if (!window.MLTrainer || !window.PatternStore) {
+        console.warn("[BatchBT] ML model load skipped: MLTrainer=" + !!window.MLTrainer + " PatternStore=" + !!window.PatternStore);
+        return null;
+      }
       try {
         await window.PatternStore.init();
+        // Try backtest champion key first
         var champ = await window.PatternStore.getMeta("ml_model_champion");
         if (champ && champ.network && champ.normalizer) {
-          console.log("[BatchBT] ML champion model loaded for adjusted scoring");
-          return champ;
+          if (champ.network.inputSize !== expectedInputSize) {
+            console.warn("[BatchBT] ml_model_champion inputSize mismatch: model=" + champ.network.inputSize + " expected=" + expectedInputSize + " — skipping");
+          } else {
+            console.log("[BatchBT] ML champion model loaded (ml_model_champion) for adjusted scoring, inputSize=" + champ.network.inputSize);
+            return champ;
+          }
         }
+        // Fallback: live expert stores under ml_live_champion
+        var liveChamp = await window.PatternStore.getMeta("ml_live_champion");
+        if (liveChamp && liveChamp.network && liveChamp.normalizer) {
+          if (liveChamp.network.inputSize !== expectedInputSize) {
+            console.warn("[BatchBT] ml_live_champion inputSize mismatch: model=" + liveChamp.network.inputSize + " expected=" + expectedInputSize + " — skipping");
+          } else {
+            console.log("[BatchBT] ML champion model loaded (ml_live_champion) for adjusted scoring, inputSize=" + liveChamp.network.inputSize);
+            return liveChamp;
+          }
+        }
+        console.warn("[BatchBT] No ML champion model found (tried ml_model_champion and ml_live_champion)");
       } catch (e) { console.warn("[BatchBT] ML model load failed:", e.message); }
       return null;
     }
@@ -305,6 +325,10 @@ window.BatchBacktest = (function () {
       // Pre-compute ML indicator cache once for this symbol (O(N))
       var mlCache = (mlModel && useMLBlend) ? buildMLIndicatorCache(candles) : null;
 
+      if (useMLBlend) {
+        console.log("[BatchBT] ML pipeline: mlModel=" + !!mlModel + " mlCache=" + !!mlCache + " useMLBlend=" + useMLBlend + " candles=" + (candles ? candles.length : 0));
+      }
+
       // Shared scored-bars arrays for both passes
       var patternOnlyScored = [];
       var mlBlendedScored = (mlModel && mlCache && useMLBlend) ? [] : null;
@@ -369,7 +393,9 @@ window.BatchBacktest = (function () {
       // Simulate and measure both passes
       var patternOnly = simulateAndMeasure(patternOnlyScored, candles, engine, cfg, pattern.symbol);
       var mlBlended = mlBlendedScored ? simulateAndMeasure(mlBlendedScored, candles, engine, cfg, pattern.symbol) : null;
-
+      if (useMLBlend) {
+        console.log("[BatchBT] ML scoring: patternOnlyBars=" + patternOnlyScored.length + " mlBlendedBars=" + (mlBlendedScored ? mlBlendedScored.length : "null") + " patternOnlyWR=" + (patternOnly ? patternOnly.winRate : "?") + " mlBlendedWR=" + (mlBlended ? mlBlended.winRate : "?"));
+      }
       return { patternOnly: patternOnly, mlBlended: mlBlended };
     }
 
