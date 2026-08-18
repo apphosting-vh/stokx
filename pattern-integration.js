@@ -100,8 +100,6 @@
       macd_hist: 0,          // not in compatResult — neutral default
       bb_position: 0.5,      // not in compatResult — neutral default
       atr_pct: 0,            // not in compatResult — neutral default
-      obv_trend: 1,          // not in compatResult — neutral default
-      supertrend_dir: 0,     // not in compatResult — neutral default
       adx: 20,               // not in compatResult — neutral default
       ema_slope: 0,          // not in compatResult — neutral default
       volume_ratio: 1,       // not in compatResult — neutral default
@@ -242,6 +240,14 @@
     var classification = compatResult.decision;
     if (window.BacktestEngine && window.BacktestEngine.classifyScore) {
       classification = window.BacktestEngine.classifyScore(adjustedScore);
+    }
+    // ML recommendation can override classification at extremes
+    if (mlPrediction) {
+      if (mlPrediction.recommendation === "STRONG_BUY" && adjustedScore >= 60) {
+        classification = "STRONG_BUY";
+      } else if (mlPrediction.recommendation === "AVOID" && adjustedScore < 40) {
+        classification = "AVOID";
+      }
     }
 
     var SCREENER_DECISION_MAP = {

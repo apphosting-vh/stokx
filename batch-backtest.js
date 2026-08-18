@@ -676,7 +676,7 @@ window.BatchBacktest = (function () {
       return {
         symbol: symbol,
         backtestDate: Date.now(),
-        backtestVersion: window.__STOX_APP_VERSION || "4.0.0",
+        backtestVersion: window.__STOX_APP_VERSION || "4.1.0",
         indicatorWeights: indicatorWeights,
         indicatorPowers: indicatorPowers,
         calibration: calibration,

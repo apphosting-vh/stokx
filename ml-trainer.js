@@ -5,7 +5,7 @@
    and feature importance ranking.
 
    Architecture:
-     - Ensemble: input(10) → [Dense(32,ReLU)+Dropout, Dense(16,ReLU)] → output(1,Sigmoid)
+     - Ensemble: input(8) → [Dense(32,ReLU)+Dropout, Dense(16,ReLU)] → output(1,Sigmoid)
      - Multiple model instances trained on different data splits
      - Walk-forward validation with configurable window sizes
      - Champion-Challenger promotion logic
@@ -78,8 +78,6 @@ window.MLTrainer = (function () {
 
   /* ── Feature Normalizer (Robust) ──────────────────────────────────── */
   function createNormalizer() {
-    var means = {};
-    var stds = {};
     var medians = {};
     var iqrs = {};
 
@@ -89,11 +87,7 @@ window.MLTrainer = (function () {
         var vals = data.map(function (d) { return d.features[k]; })
           .filter(function (v) { return v != null && !isNaN(v); })
           .sort(function (a, b) { return a - b; });
-        if (vals.length < 5) { means[k] = 0; stds[k] = 1; medians[k] = 0; iqrs[k] = 1; return; }
-        var sum = vals.reduce(function (s, v) { return s + v; }, 0);
-        means[k] = sum / vals.length;
-        var variance = vals.reduce(function (s, v) { return s + (v - means[k]) * (v - means[k]); }, 0) / vals.length;
-        stds[k] = Math.sqrt(variance) > 1e-8 ? Math.sqrt(variance) : 1;
+        if (vals.length < 5) { medians[k] = 0; iqrs[k] = 1; return; }
         var mid = Math.floor(vals.length / 2);
         medians[k] = vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
         var q1idx = Math.floor(vals.length * 0.25);
@@ -106,15 +100,14 @@ window.MLTrainer = (function () {
       var result = {};
       Object.keys(features).forEach(function (k) {
         var val = features[k] != null ? features[k] : 0;
-        // Use robust scaling: (val - median) / IQR — less sensitive to outliers
         result[k] = ((val - (medians[k] != null ? medians[k] : 0)) / (iqrs[k] != null ? iqrs[k] : 1));
       });
       return result;
     }
 
-    function getParams() { return { means: means, stds: stds, medians: medians, iqrs: iqrs }; }
+    function getParams() { return { medians: medians, iqrs: iqrs }; }
 
-    function loadParams(p) { means = p.means || {}; stds = p.stds || {}; medians = p.medians || {}; iqrs = p.iqrs || {}; }
+    function loadParams(p) { medians = p.medians || {}; iqrs = p.iqrs || {}; }
 
     return { fit: fit, transform: transform, getParams: getParams, loadParams: loadParams };
   }
@@ -1282,7 +1275,7 @@ window.MLTrainer = (function () {
 
       var normalized = {};
       FEATURE_KEYS.forEach(function (k) {
-        normalized[k] = ((features[k] != null ? features[k] : 0) - (normParams.medians[k] != null ? normParams.medians[k] : (normParams.means[k] != null ? normParams.means[k] : 0))) / (normParams.iqrs[k] != null ? normParams.iqrs[k] : (normParams.stds[k] != null ? normParams.stds[k] : 1));
+        normalized[k] = ((features[k] != null ? features[k] : 0) - (normParams.medians[k] != null ? normParams.medians[k] : 0)) / (normParams.iqrs[k] != null ? normParams.iqrs[k] : 1);
       });
 
       var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
@@ -1314,7 +1307,7 @@ window.MLTrainer = (function () {
     var normParams = loadedModel.normalizer;
     var normalized = {};
     FEATURE_KEYS.forEach(function (k) {
-      normalized[k] = ((features[k] != null ? features[k] : 0) - (normParams.medians[k] != null ? normParams.medians[k] : (normParams.means[k] != null ? normParams.means[k] : 0))) / (normParams.iqrs[k] != null ? normParams.iqrs[k] : (normParams.stds[k] != null ? normParams.stds[k] : 1));
+      normalized[k] = ((features[k] != null ? features[k] : 0) - (normParams.medians[k] != null ? normParams.medians[k] : 0)) / (normParams.iqrs[k] != null ? normParams.iqrs[k] : 1);
     });
     var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
     var result = forward(nn, inputVector, false);

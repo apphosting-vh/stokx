@@ -35,7 +35,7 @@ window.LiveML = (function () {
     atr_pct: { label: "ATR %", bins: [1, 2, 3, 4, 5, 8], labels: ["<1%", "1-2%", "2-3%", "3-4%", "4-5%", "5-8%", "8%+"] },
     bb_position: { label: "BB Position", bins: [0.2, 0.4, 0.6, 0.8], labels: ["<0.2", "0.2-0.4", "0.4-0.6", "0.6-0.8", "0.8+"] },
     volume_ratio: { label: "Volume Ratio", bins: [0.7, 1, 1.3, 1.7, 2.5], labels: ["<0.7", "0.7-1", "1-1.3", "1.3-1.7", "1.7-2.5", "2.5+"] },
-    macd_hist: { label: "MACD Hist", bins: [-1.5, -0.5, 0, 0.5, 1.5], labels: ["<-1.5", "-1.5/-0.5", "-0.5/0", "0/0.5", "0.5/1.5", "1.5+"] },
+    macd_hist: { label: "MACD Hist %", bins: [-0.5, -0.1, 0, 0.1, 0.5], labels: ["<-0.5%", "-0.5/-0.1%", "-0.1/0%", "0/0.1%", "0.1/0.5%", "0.5%+"] },
     ema_slope: { label: "EMA12 Slope %", bins: [-0.5, 0, 0.3, 0.7], labels: ["<-0.5", "-0.5/0", "0/0.3", "0.3/0.7", "0.7+"] },
     adx: { label: "ADX (14)", bins: [15, 20, 25, 35], labels: ["<15", "15-20", "20-25", "25-35", "35+"] },
     entry_score: { label: "Entry Score", bins: [30, 45, 55, 65, 75], labels: ["<30", "30-45", "45-55", "55-65", "65-75", "75+"] }
@@ -202,15 +202,61 @@ window.LiveML = (function () {
   /* Feature vector at bar index i — same keys as the ML model. */
   function featuresAt(i, candles, ind) {
     var close = candles[i].c;
+    var es = 0.5;
+    try {
+      var TI = window.TechIndicators;
+      if (TI && ind && ind.rsi && ind.adx && ind.macd && ind.bb && ind.atr) {
+        var trendScore = 0;
+        var sma20Arr = TI.sma(candles, 20);
+        var sma50Arr = TI.sma(candles, 50);
+        var sma20 = sma20Arr && sma20Arr[i];
+        var sma50 = sma50Arr && sma50Arr[i];
+        if (sma20 != null && close > sma20) trendScore += 1;
+        if (sma20 != null && sma50 != null && sma20 > sma50) trendScore += 1;
+        var macdH = ind.macd.histogram && ind.macd.histogram[i];
+        if (macdH != null && macdH > 0) trendScore += 1;
+        var adxVal = ind.adx.adx && ind.adx.adx[i];
+        var plusDI = ind.adx.plusDI && ind.adx.plusDI[i];
+        var minusDI = ind.adx.minusDI && ind.adx.minusDI[i];
+        if (adxVal != null && adxVal >= 25 && plusDI != null && minusDI != null && plusDI > minusDI) trendScore += 1;
+        var pullScore = 0;
+        var rsi = ind.rsi[i];
+        if (rsi != null && rsi < 40) pullScore += 1;
+        var bbUpper = ind.bb.upper && ind.bb.upper[i];
+        var bbLower = ind.bb.lower && ind.bb.lower[i];
+        if (bbUpper != null && bbLower != null && bbUpper > bbLower) {
+          var bbW = (bbUpper - bbLower) / close;
+          var bbW5 = 0;
+          for (var bi = Math.max(0, i - 5); bi < i; bi++) {
+            if (ind.bb.upper[bi] != null && ind.bb.lower[bi] != null) {
+              bbW5 += (ind.bb.upper[bi] - ind.bb.lower[bi]) / (candles[bi].c || 1);
+            }
+          }
+          bbW5 = bbW5 / Math.max(1, i - Math.max(0, i - 5));
+          if (bbW5 > 0 && bbW < bbW5 * 0.9) pullScore += 1;
+        }
+        var probScore = 0;
+        if (ind.atr[i] != null && close > 0) {
+          var atrPct = ind.atr[i] / close;
+          if (atrPct > 0 && atrPct < 0.04) probScore += 1;
+          var targetReach = (0.04 * close) / ind.atr[i];
+          if (targetReach > 1.5) probScore += 1;
+        }
+        var swingScore = 0;
+        if (rsi != null && rsi < 40 && i >= 2 && ind.rsi[i - 2] != null && ind.rsi[i - 2] > rsi) swingScore += 1;
+        var raw = (trendScore / 4) * 0.35 + (pullScore / 2) * 0.30 + (probScore / 2) * 0.35 + (swingScore / 1) * 0.0;
+        es = Math.max(0, Math.min(1, raw));
+      }
+    } catch (_e) {}
     return {
       rsi: ind.rsi[i] != null ? round2(ind.rsi[i]) : 50,
       atr_pct: ind.atr[i] != null && close > 0 ? round3((ind.atr[i] / close) * 100) : 0,
       bb_position: ind.bb.upper && ind.bb.lower ? round3((close - (ind.bb.lower[i] || 0)) / Math.max(0.01, (ind.bb.upper[i] || 0) - (ind.bb.lower[i] || 0))) : 0.5,
-      volume_ratio: ind.volSma && ind.volSma[i] ? round2(close > 0 ? candles[i].v / Math.max(1, ind.volSma[i]) : 1) : 1,
-      macd_hist: ind.macd && ind.macd.histogram ? round3(ind.macd.histogram[i]) : 0,
+      volume_ratio: ind.volSma && ind.volSma[i] ? round2(candles[i].v / Math.max(1, ind.volSma[i])) : 1,
+      macd_hist: ind.macd && ind.macd.histogram && close > 0 ? round3(ind.macd.histogram[i] / close * 100) : 0,
       ema_slope: ind.emaFast[i] != null && ind.emaFast[Math.max(0, i - 3)] != null ? round3((ind.emaFast[i] - ind.emaFast[Math.max(0, i - 3)]) / Math.max(0.01, ind.emaFast[Math.max(0, i - 3)]) * 100) : 0,
       adx: ind.adx && ind.adx.adx ? round2(ind.adx.adx[i] || 0) : 0,
-      entry_score: 0.5
+      entry_score: round3(es)
     };
   }
 
