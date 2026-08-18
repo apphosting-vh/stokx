@@ -309,10 +309,14 @@ window.PatternDashboard = (function () {
     return scoped.map(function (p) {
       var s = p.tradeStats || {};
       var eq = p.equityCurve || null;
+      var adj = p.adjustedMetrics || null;
+      var ml = p.mlAdjustedMetrics || null;
       return {
         symbol: p.symbol,
         trades: inum(s.totalTrades, 0),
         winRate: inum(s.winRate, 0),
+        adjWinRate: adj && adj.winRate != null ? adj.winRate : null,
+        mlWinRate: ml && ml.winRate != null ? ml.winRate : null,
         avgReturn: inum(s.avgReturn, 0),
         avgWin: inum(s.avgWin, 0),
         avgLoss: inum(s.avgLoss, 0),
@@ -330,6 +334,7 @@ window.PatternDashboard = (function () {
   /* Pooled trade-stats summary across the scope. */
   function buildAggregate(scoped) {
     var n = scoped.length, trades = 0, wins = 0, sumRet = 0, sumWR = 0, sumSharpe = 0, pfList = [], ddList = [], maxCW = 0, maxCL = 0, sumDays = 0, daysN = 0;
+    var adjWRsum = 0, adjN = 0, mlWRsum = 0, mlN = 0;
     scoped.forEach(function (p) {
       var s = p.tradeStats || {};
       var t = inum(s.totalTrades, 0);
@@ -345,6 +350,10 @@ window.PatternDashboard = (function () {
       maxCW = Math.max(maxCW, inum(s.maxConsecWins, 0));
       maxCL = Math.max(maxCL, inum(s.maxConsecLosses, 0));
       if (inum(s.avgDaysToTarget, 0) > 0) { sumDays += inum(s.avgDaysToTarget, 0); daysN++; }
+      var adj = p.adjustedMetrics || null;
+      if (adj && adj.winRate != null) { adjWRsum += adj.winRate; adjN++; }
+      var ml = p.mlAdjustedMetrics || null;
+      if (ml && ml.winRate != null) { mlWRsum += ml.winRate; mlN++; }
     });
     pfList.sort(function (a, b) { return a - b; });
     ddList.sort(function (a, b) { return a - b; });
@@ -359,7 +368,9 @@ window.PatternDashboard = (function () {
       medianDD: ddList.length ? ddList[Math.floor(ddList.length / 2)] : null,
       maxConsecWins: maxCW,
       maxConsecLosses: maxCL,
-      avgDaysToTarget: daysN ? Math.round((sumDays / daysN) * 10) / 10 : null
+      avgDaysToTarget: daysN ? Math.round((sumDays / daysN) * 10) / 10 : null,
+      adjWinRate: adjN ? Math.round((adjWRsum / adjN) * 10) / 10 : null,
+      mlWinRate: mlN ? Math.round((mlWRsum / mlN) * 10) / 10 : null
     };
   }
 
@@ -606,6 +617,8 @@ window.PatternDashboard = (function () {
     var btRunnerRef = useRef(null);
     var _btCap = useState("20");
     var btCap = _btCap[0], setBtCap = _btCap[1];
+    var _btResult = useState(null);
+    var btResult = _btResult[0], setBtResult = _btResult[1];
     // ML tab state (must be at component top-level — Rules of Hooks)
     var _mlStatus = useState(null);
     var mlStatus = _mlStatus[0], setMlStatus = _mlStatus[1];
@@ -923,6 +936,7 @@ window.PatternDashboard = (function () {
 
       setBtRunning(true);
       setError(null);
+      setBtResult(null);
       setProgress({ current: 0, total: count, symbol: "", phase: "starting" });
       setBtLog([{ time: new Date().toLocaleTimeString(), msg: "Starting batch backtest for " + count + " stocks (cap=" + btCap + ")..." }]);
 
@@ -965,6 +979,15 @@ window.PatternDashboard = (function () {
           var newLog = prev.slice(-50);
           newLog.push({ time: new Date().toLocaleTimeString(), msg: "COMPLETE: " + result.summary.successCount + " success, " + result.summary.failCount + " failed, " + result.summary.skippedCount + " skipped. Duration: " + Math.round(result.summary.totalDurationMs / 1000) + "s" });
           return newLog;
+        });
+
+        // Store result summary for comparison card
+        setBtResult({
+          summary: result.summary,
+          avgWinRate: result.summary.avgWinRate || null,
+          avgAdjustedWinRate: result.summary.avgAdjustedWinRate || null,
+          avgMLWinRate: result.summary.avgMLWinRate || null,
+          mlModelLoaded: result.summary.mlModelLoaded || false
         });
 
         await loadExistingData();
@@ -1039,12 +1062,25 @@ window.PatternDashboard = (function () {
       if (!stats) return React.createElement("div", { style: cardStyle },
         React.createElement("p", { style: { color: "var(--text2)" } }, "No patterns stored yet. Go to 'Run Batch' to backtest all stocks and build pattern intelligence."));
 
+      // Compute aggregated adj/ML win rates from patterns
+      var adjWRsum = 0, adjN = 0, mlWRsum = 0, mlN = 0;
+      (patterns || []).forEach(function (p) {
+        var adj = p.adjustedMetrics || null;
+        if (adj && adj.winRate != null) { adjWRsum += adj.winRate; adjN++; }
+        var ml = p.mlAdjustedMetrics || null;
+        if (ml && ml.winRate != null) { mlWRsum += ml.winRate; mlN++; }
+      });
+      var avgAdjWR = adjN ? Math.round((adjWRsum / adjN) * 10) / 10 : null;
+      var avgMLWR = mlN ? Math.round((mlWRsum / mlN) * 10) / 10 : null;
+
       return React.createElement("div", null,
         // Stats cards
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginBottom: 20 } },
           statCard("Stocks Analyzed", stats.totalPatterns),
           statCard("Total Trades", stats.totalTrades),
           statCard("Avg Win Rate", (stats.avgWinRate || 0) + "%"),
+          avgAdjWR != null ? statCard("Pattern Adj WR", avgAdjWR + "%") : null,
+          avgMLWR != null ? statCard("ML Blended WR", avgMLWR + "%") : null,
           statCard("Avg Sharpe", stats.avgSharpe || 0),
           statCard("With Calibration", stats.withCalibration),
           statCard("Oldest", stats.oldestPattern ? new Date(stats.oldestPattern).toLocaleDateString() : "N/A")
@@ -1187,6 +1223,41 @@ window.PatternDashboard = (function () {
                 fontWeight: 600, fontSize: 14
               }
             }, "Start Batch Backtest (" + effectiveCount + " stocks)"),
+        // Post-run comparison card
+        btResult && !btRunning && React.createElement("div", { style: Object.assign({}, cardStyle, { border: "1px solid rgba(6,182,212,.3)", background: "rgba(6,182,212,.04)" }) },
+          React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 10 } }, "Scoring Parity Comparison"),
+          React.createElement("div", { style: { display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10 } },
+            React.createElement("div", { style: { textAlign: "center" } },
+              React.createElement("div", { style: { fontSize: 10, color: "var(--text4)", textTransform: "uppercase", letterSpacing: .5 } }, "Raw Win Rate"),
+              React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: "var(--text)" } }, btResult.avgWinRate != null ? btResult.avgWinRate + "%" : "\u2014")
+            ),
+            React.createElement("div", { style: { textAlign: "center" } },
+              React.createElement("div", { style: { fontSize: 10, color: "#06b6d4", textTransform: "uppercase", letterSpacing: .5 } }, "Pattern Adj WR"),
+              React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: "#06b6d4" } }, btResult.avgAdjustedWinRate != null ? btResult.avgAdjustedWinRate + "%" : "\u2014")
+            ),
+            React.createElement("div", { style: { textAlign: "center" } },
+              React.createElement("div", { style: { fontSize: 10, color: "#a78bfa", textTransform: "uppercase", letterSpacing: .5 } }, "ML Blended WR"),
+              React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: btResult.mlModelLoaded ? "#a78bfa" : "var(--text6)" } }, btResult.avgMLWinRate != null ? btResult.avgMLWinRate + "%" : (btResult.mlModelLoaded === false ? "No model" : "\u2014"))
+            )
+          ),
+          (function () {
+            // Delta line
+            if (btResult.avgAdjustedWinRate != null && btResult.avgWinRate != null) {
+              var rawVsAdj = Math.round((btResult.avgAdjustedWinRate - btResult.avgWinRate) * 10) / 10;
+              var adjLabel = rawVsAdj >= 0 ? "Pattern re-weighting improved" : "Pattern re-weighting reduced";
+              var parts = [React.createElement("span", { key: "a" }, adjLabel + " raw win rate by " + Math.abs(rawVsAdj) + " points")];
+              if (btResult.avgMLWinRate != null && btResult.avgAdjustedWinRate != null) {
+                var adjVsMl = Math.round((btResult.avgMLWinRate - btResult.avgAdjustedWinRate) * 10) / 10;
+                var mlLabel = adjVsMl >= 0 ? "ML blend improved" : "ML blend reduced";
+                parts.push(React.createElement("span", { key: "b" }, ". " + mlLabel + " pattern-adjusted win rate by " + Math.abs(adjVsMl) + " points"));
+              } else if (!btResult.mlModelLoaded) {
+                parts.push(React.createElement("span", { key: "b" }, ". No champion model loaded \u2014 ML blend not applied"));
+              }
+              return React.createElement("div", { style: { fontSize: 12, color: "var(--text3)", lineHeight: 1.6 } }, parts);
+            }
+            return null;
+          })()
+        ),
         // Log
         btLog.length > 0 && React.createElement("div", { style: Object.assign({}, cardStyle, { maxHeight: 200, overflowY: "auto", fontFamily: "monospace", fontSize: 11 }) },
           btLog.map(function (entry, i) {
@@ -1483,6 +1554,8 @@ window.PatternDashboard = (function () {
         ["symbol", "Symbol"],
         ["trades", "Trades"],
         ["winRate", "Win %"],
+        ["adjWinRate", "Pat WR"],
+        ["mlWinRate", "ML WR"],
         ["avgReturn", "Avg Ret"],
         ["profitFactor", "PF"],
         ["maxDrawdown", "Max DD"],
@@ -1501,6 +1574,8 @@ window.PatternDashboard = (function () {
         ),
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10, marginTop: 10 } },
           statCard("Win Rate", agg.winRate + "%"),
+          agg.adjWinRate != null ? statCard("Pattern Adj WR", agg.adjWinRate + "%") : null,
+          agg.mlWinRate != null ? statCard("ML Blended WR", agg.mlWinRate + "%") : null,
           statCard("Avg Return", agg.avgReturn + "%"),
           statCard("Median PF", fmtPF(agg.medianPF)),
           statCard("Median Max DD", (agg.medianDD != null ? agg.medianDD : "—") + (agg.medianDD != null ? "%" : "")),
@@ -1529,6 +1604,8 @@ window.PatternDashboard = (function () {
                   React.createElement("td", { style: tdl }, r.symbol),
                   React.createElement("td", { style: tdc }, r.trades),
                   React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 700, color: wrColor(r.winRate) }) }, r.winRate + "%"),
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 700, color: r.adjWinRate != null ? "#06b6d4" : "var(--text3)" }) }, r.adjWinRate != null ? r.adjWinRate + "%" : "—"),
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 700, color: r.mlWinRate != null ? "#a78bfa" : "var(--text3)" }) }, r.mlWinRate != null ? r.mlWinRate + "%" : "—"),
                   React.createElement("td", { style: Object.assign({}, tdc, { color: retColor(r.avgReturn), fontWeight: 600 }) }, (r.avgReturn >= 0 ? "+" : "") + r.avgReturn + "%"),
                   React.createElement("td", { style: tdc }, fmtPF(r.profitFactor)),
                   React.createElement("td", { style: Object.assign({}, tdc, { color: r.maxDrawdown >= 15 ? "#ef4444" : "var(--text2)" }) }, r.maxDrawdown + "%"),
@@ -1754,6 +1831,8 @@ window.PatternDashboard = (function () {
     function patternRow(p) {
       var wr = p.tradeStats ? p.tradeStats.winRate : 0;
       var wrColor = wr >= 60 ? "var(--accent, #16a34a)" : wr >= 45 ? "#f59e0b" : "#ef4444";
+      var adjWR = p.adjustedMetrics && p.adjustedMetrics.winRate != null ? p.adjustedMetrics.winRate : null;
+      var mlWR = p.mlAdjustedMetrics && p.mlAdjustedMetrics.winRate != null ? p.mlAdjustedMetrics.winRate : null;
       var topW = null;
       var lw = p.indicatorWeights;
       if (p && window.PatternScoring && window.PatternScoring.resolveLearnedWeights) {
@@ -1778,6 +1857,11 @@ window.PatternDashboard = (function () {
         ),
         React.createElement("div", { style: { textAlign: "right" } },
           React.createElement("div", { style: { fontWeight: 700, fontSize: 16, color: wrColor } }, wr + "%"),
+          React.createElement("div", { style: { fontSize: 10, color: "var(--text3)", marginTop: 2 } },
+            adjWR != null ? React.createElement("span", { style: { color: "#06b6d4" } }, "Pat:" + adjWR + "%") : null,
+            adjWR != null && mlWR != null ? " " : null,
+            mlWR != null ? React.createElement("span", { style: { color: "#a78bfa" } }, "ML:" + mlWR + "%") : null
+          ),
           React.createElement("div", { style: { fontSize: 11, color: "var(--text3)" } }, "Sharpe: " + (p.tradeStats ? p.tradeStats.sharpeApprox || 0 : 0))
         )
       );

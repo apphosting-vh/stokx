@@ -588,7 +588,7 @@ window.BacktestEngine = (function () {
       }
       var step = opts.sampleEvery || 1;
       var scoredBars = 0, totalBars = endIdx - startIdx + 1;
-      var trades = [], scored = [];
+      var trades = [], scored = [], allScoredBars = [];
       var minTH = opts.minTrendHealth != null ? opts.minTrendHealth : -Infinity;
       var minPQ = opts.minPullbackQuality != null ? opts.minPullbackQuality : -Infinity;
       var minP4 = opts.minProb4 != null ? opts.minProb4 : -Infinity;
@@ -598,6 +598,7 @@ window.BacktestEngine = (function () {
         if ((i - startIdx) % step === 0) {
           var r = scoreAt(candles, i, symbol);
           if (r && r.entryScore != null) {
+            allScoredBars.push({ idx: i, entryScore: ROUND2(r.entryScore), trendHealth: ROUND2(r.trendHealth), pullbackQuality: ROUND2(r.pullbackQuality), prob4: ROUND2(r.prob4), swingPotential: ROUND2(r.swingPotential), raw_score: ROUND2(r.raw_score), modifiers: ROUND2(r.modifiers) });
             var rc = Object.assign({}, r);
             var fwd = simulateTrade(candles, i, r, opts);
             if (!fwd) { if (hooks.onBar && (i - startIdx) % 25 === 0) { hooks.onBar(i - startIdx + 1, totalBars); await yieldToUI(); } continue; }
@@ -646,7 +647,8 @@ window.BacktestEngine = (function () {
         rangeStart: candles[startIdx] ? String(candles[startIdx].t).slice(0, 10) : null,
         rangeEnd: candles[endIdx] ? String(candles[endIdx].t).slice(0, 10) : null,
         sampledEvery: step > 1 ? step : null,
-        totalScoredBars: scoredBars
+        totalScoredBars: scoredBars,
+        allScoredBars: allScoredBars
       };
     }
 
@@ -1159,6 +1161,8 @@ window.BacktestEngine = (function () {
       scoreAt: scoreAt,
       simulateTrade: simulateTrade,
       calculateStats: calculateStats,
+      calibrateConfidence: calibrateConfidence,
+      equityCurve: equityCurve,
       classifyScore: classifyScore,
       runSingle: runSingle,
       runWalkForward: runWalkForward,

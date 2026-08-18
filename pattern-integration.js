@@ -87,25 +87,45 @@
   }
 
   /**
-   * Compute ML features from a compatResult for synchronous prediction.
-   * Uses the same feature set as pattern-scoring.js applyMLEnhancement.
+   * Compute ML features for synchronous prediction.
+   * When dailyCandles is provided, computes real indicators.
+   * Otherwise falls back to neutral defaults (entry_score only).
    */
-  function computeMLFeaturesFromCompat(compatResult) {
+  function computeMLFeaturesFromCompat(compatResult, dailyCandles) {
     if (!compatResult) return null;
-    // compatResult has pillar scores (agg*) but not raw indicators.
-    // Use neutral defaults for missing features; entry_score is the only
-    // meaningful feature available from the compat result.
-    var features = {
-      rsi: 50,               // not in compatResult — neutral default
-      macd_hist: 0,          // not in compatResult — neutral default
-      bb_position: 0.5,      // not in compatResult — neutral default
-      atr_pct: 0,            // not in compatResult — neutral default
-      adx: 20,               // not in compatResult — neutral default
-      ema_slope: 0,          // not in compatResult — neutral default
-      volume_ratio: 1,       // not in compatResult — neutral default
+    if (dailyCandles && dailyCandles.length >= 30 && window.TechIndicators) {
+      try {
+        var TI = window.TechIndicators;
+        var n = dailyCandles.length - 1;
+        var close = dailyCandles[n].c;
+        var rsiArr = TI.rsi(dailyCandles, 14);
+        var macdObj = TI.macd(dailyCandles, 12, 26, 9);
+        var bbObj = TI.bollingerBands(dailyCandles, 20, 2);
+        var atrArr = TI.atr(dailyCandles, 14);
+        var emaFastArr = TI.ema(dailyCandles, 12);
+        var adxObj = TI.adx(dailyCandles, 14);
+        var volSma = TI.sma(TI.volumes(dailyCandles), 20);
+        return {
+          rsi: rsiArr[n] != null ? Math.round(rsiArr[n] * 100) / 100 : 50,
+          macd_hist: macdObj && macdObj.histogram && close > 0 ? Math.round(macdObj.histogram[n] / close * 100 * 1000) / 1000 : 0,
+          bb_position: (bbObj.upper && bbObj.lower)
+            ? Math.round(((close - (bbObj.lower[n] || 0)) / Math.max(0.01, (bbObj.upper[n] || 0) - (bbObj.lower[n] || 0))) * 1000) / 1000
+            : 0.5,
+          atr_pct: atrArr[n] && close > 0 ? Math.round((atrArr[n] / close) * 100 * 1000) / 1000 : 0,
+          adx: adxObj && adxObj.adx ? Math.round((adxObj.adx[n] || 0) * 100) / 100 : 20,
+          ema_slope: emaFastArr[n] != null && emaFastArr[Math.max(0, n - 3)] != null
+            ? Math.round(((emaFastArr[n] - emaFastArr[Math.max(0, n - 3)]) / Math.max(0.01, emaFastArr[Math.max(0, n - 3)])) * 100 * 1000) / 1000
+            : 0,
+          volume_ratio: volSma && volSma[n] ? Math.round(dailyCandles[n].v / Math.max(1, volSma[n]) * 100) / 100 : 1,
+          entry_score: compatResult.finalScore || 0
+        };
+      } catch (e) {}
+    }
+    return {
+      rsi: 50, macd_hist: 0, bb_position: 0.5, atr_pct: 0,
+      adx: 20, ema_slope: 0, volume_ratio: 1,
       entry_score: compatResult.finalScore || 0
     };
-    return features;
   }
 
   /* ── Synchronous pattern weight application ─────────────────────────── */
@@ -148,7 +168,7 @@
    * The async path used by PatternScoring.compute() is in pattern-scoring.js.
    * Both check _patternApplied to prevent double ML application.
    */
-  function applyPatternToCompatResult(compatResult, pattern) {
+  function applyPatternToCompatResult(compatResult, pattern, dailyCandles) {
     if (!compatResult || !pattern || !pattern.indicatorWeights) return compatResult;
 
     var weights = resolveWeightsForDisplay(pattern);
@@ -213,7 +233,7 @@
     var mlPrediction = null;
     if (!uniformW && _cachedMLModel && window.MLTrainer && window.MLTrainer.predictSync) {
       try {
-        var mlFeatures = computeMLFeaturesFromCompat(compatResult);
+        var mlFeatures = computeMLFeaturesFromCompat(compatResult, dailyCandles);
         // Gate: model was trained on entry scores >= entryScoreMin (scores of
         // actual opened trades). Below that, fall back to pattern-weighted only.
         if (_cachedMLModel.entryScoreMin != null && (mlFeatures.entry_score == null || mlFeatures.entry_score < _cachedMLModel.entryScoreMin)) {
@@ -408,7 +428,7 @@
      * Apply pattern intelligence to a compat result.
      * Called from app-core.js screener paths.
      */
-    window.applyPatternIntel = function (compatResult, symbol) {
+    window.applyPatternIntel = function (compatResult, symbol, dailyCandles) {
       if (!compatResult || !symbol || compatResult._patternApplied) return compatResult;
       var pattern = getPatternFromCache(symbol);
       if (!pattern) {
@@ -425,7 +445,7 @@
         } catch (e) {}
       }
       if (pattern) {
-        return applyPatternToCompatResult(compatResult, pattern);
+        return applyPatternToCompatResult(compatResult, pattern, dailyCandles);
       }
       return compatResult;
     };

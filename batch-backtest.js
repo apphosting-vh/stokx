@@ -105,8 +105,276 @@ window.BatchBacktest = (function () {
     };
   }
 
-  /**
-   * Create a batch backtest runner with configuration.
+    /* ── ML helpers for Pass 2 (mirrors live path exactly) ─────────────── */
+
+    /**
+     * Load the same ml_model_champion meta key that preloadMLModel() uses live.
+     * Returns the model object or null if unavailable.
+     */
+    async function loadMLModelForBacktest() {
+      if (!window.MLTrainer || !window.PatternStore) return null;
+      try {
+        await window.PatternStore.init();
+        var champ = await window.PatternStore.getMeta("ml_model_champion");
+        if (champ && champ.network && champ.normalizer) {
+          console.log("[BatchBT] ML champion model loaded for adjusted scoring");
+          return champ;
+        }
+      } catch (e) { console.warn("[BatchBT] ML model load failed:", e.message); }
+      return null;
+    }
+
+    /**
+     * Pre-compute all indicator arrays once per symbol (O(N), not O(N×bars)).
+     * Returns an object keyed by indicator name, each an array aligned to candles.
+     */
+    function buildMLIndicatorCache(candles) {
+      var TI = window.TechIndicators;
+      if (!TI || !candles || candles.length < 30) return null;
+      try {
+        return {
+          rsi: TI.rsi(candles, 14),
+          macdObj: TI.macd(candles, 12, 26, 9),
+          bbObj: TI.bollingerBands(candles, 20, 2),
+          atr: TI.atr(candles, 14),
+          emaFast: TI.ema(candles, 12),
+          adxObj: TI.adx(candles, 14),
+          volSma: TI.sma(TI.volumes(candles), 20),
+          volumes: TI.volumes(candles)
+        };
+      } catch (e) { return null; }
+    }
+
+    /**
+     * Compute ML features for a specific bar index — field-for-field identical
+     * to computeMLFeaturesFromCompat's real-feature branch (pattern-integration.js:96-122).
+     * Uses the pre-computed indicator cache (O(1) per bar).
+     */
+    function mlFeaturesAtBar(bar, idx, cache, entryScore) {
+      if (!cache || idx == null) return null;
+      var close = bar.c || 0;
+      if (close <= 0) return null;
+      try {
+        var n = idx;
+        return {
+          rsi: cache.rsi[n] != null ? Math.round(cache.rsi[n] * 100) / 100 : 50,
+          macd_hist: cache.macdObj && cache.macdObj.histogram && close > 0
+            ? Math.round(cache.macdObj.histogram[n] / close * 100 * 1000) / 1000 : 0,
+          bb_position: (cache.bbObj.upper && cache.bbObj.lower)
+            ? Math.round(((close - (cache.bbObj.lower[n] || 0)) / Math.max(0.01, (cache.bbObj.upper[n] || 0) - (cache.bbObj.lower[n] || 0))) * 1000) / 1000
+            : 0.5,
+          atr_pct: cache.atr[n] && close > 0 ? Math.round((cache.atr[n] / close) * 100 * 1000) / 1000 : 0,
+          adx: cache.adxObj && cache.adxObj.adx ? Math.round((cache.adxObj.adx[n] || 0) * 100) / 100 : 20,
+          ema_slope: cache.emaFast[n] != null && cache.emaFast[Math.max(0, n - 3)] != null
+            ? Math.round(((cache.emaFast[n] - cache.emaFast[Math.max(0, n - 3)]) / Math.max(0.01, cache.emaFast[Math.max(0, n - 3)])) * 100 * 1000) / 1000
+            : 0,
+          volume_ratio: cache.volSma && cache.volSma[n] ? Math.round(cache.volumes[n] / Math.max(1, cache.volSma[n]) * 100) / 100 : 1,
+          entry_score: entryScore || 0
+        };
+      } catch (e) { return null; }
+    }
+
+    /**
+     * Apply ML blend to the pattern-only score — same gating (entryScoreMin)
+     * and same weight tiers (0.25 / 0.35) as applyPatternToCompatResult.
+     * Returns the blended score, or patternOnlyScore if ML is skipped.
+     */
+    function applyMLBlendAtBar(patternOnlyScore, features, model) {
+      if (!model || !features || !window.MLTrainer || !window.MLTrainer.predictSync) return patternOnlyScore;
+      try {
+        // Gate: model was trained on entry scores >= entryScoreMin
+        if (model.entryScoreMin != null && (features.entry_score == null || features.entry_score < model.entryScoreMin)) {
+          return patternOnlyScore;
+        }
+        var mlPrediction = window.MLTrainer.predictSync(features, model);
+        if (mlPrediction && mlPrediction.winProbability != null) {
+          var mlScore = mlPrediction.winProbability * 100;
+          var mlWeight = 0.25;
+          if (mlPrediction.winProbability >= 0.7 || mlPrediction.winProbability <= 0.3) {
+            mlWeight = 0.35;
+          }
+          return Math.min(100, Math.max(0, Math.round((patternOnlyScore * (1 - mlWeight) + mlScore * mlWeight) * 100) / 100));
+        }
+      } catch (e) { /* ML prediction failed — use pattern-only score */ }
+      return patternOnlyScore;
+    }
+
+    /* ── Shared trade simulation + measurement ─────────────────────────── */
+
+    /**
+     * From an array of scored bars (each with {idx, adjustedScore}),
+     * simulate trades and compute metrics. Shared by patternOnly and mlBlended.
+     */
+    function simulateAndMeasure(scoredBars, candles, engine, cfg, symbol) {
+      var opts = { realisticEntry: true, realisticExit: true, slippagePct: cfg.slippagePct || 0.1, brokeragePct: cfg.brokeragePct || 0.05 };
+      var trades = [];
+      for (var i = 0; i < scoredBars.length; i++) {
+        var sb = scoredBars[i];
+        var scoreObj = {
+          entryScore: sb.adjustedScore,
+          trendHealth: sb.trendHealth,
+          pullbackQuality: sb.pullbackQuality,
+          prob4: sb.prob4,
+          swingPotential: sb.swingPotential,
+          raw_score: sb.raw_score,
+          modifiers: sb.modifiers,
+          classification: window.BacktestEngine && window.BacktestEngine.classifyScore ? window.BacktestEngine.classifyScore(sb.adjustedScore) : null
+        };
+        var trade = engine.simulateTrade(candles, sb.idx, scoreObj, opts);
+        if (trade) {
+          trade.symbol = symbol || "";
+          trade._adjustedScore = sb.adjustedScore;
+          trade._rawScore = sb.rawScore;
+          trades.push(trade);
+        }
+      }
+      if (trades.length === 0) return { totalSignals: 0, trades: [], winRate: 0, message: "No trades above threshold" };
+
+      var n = trades.length;
+      var wins = trades.filter(function (t) { return t.hitTarget; });
+      var losses = trades.filter(function (t) { return !t.hitTarget; });
+      var winRate = Math.round((wins.length / n) * 1000) / 10;
+      var avgReturn = trades.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / n;
+      var avgWin = wins.length ? wins.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / wins.length : 0;
+      var avgLoss = losses.length ? losses.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / losses.length : 0;
+      var grossProfit = trades.filter(function (t) { return t.finalReturnPct > 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0);
+      var grossLoss = Math.abs(trades.filter(function (t) { return t.finalReturnPct < 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0));
+      var profitFactor = grossLoss > 0 ? round2(grossProfit / grossLoss) : (grossProfit > 0 ? "∞" : 0);
+
+      var calibration = null;
+      try { calibration = engine.calibrateConfidence(trades); } catch (e) {}
+      var eq = null;
+      try { eq = engine.equityCurve(trades); } catch (e) {}
+
+      return {
+        totalSignals: n,
+        winningTrades: wins.length,
+        losingTrades: losses.length,
+        winRate: winRate,
+        avgReturnPct: round2(avgReturn),
+        avgWinPct: round2(avgWin),
+        avgLossPct: round2(avgLoss),
+        profitFactor: profitFactor,
+        finalEquity: eq ? eq.finalEquity : null,
+        maxDrawdown: eq ? eq.maxDrawdown : null,
+        sharpeApprox: eq ? eq.sharpeApprox : null,
+        calibration: calibration,
+        trades: trades.slice().sort(function (a, b) { return String(b.entryDate).localeCompare(String(a.entryDate)); })
+      };
+    }
+
+    /* ── Pass 2: Two-pass adjusted metrics ─────────────────────────────── */
+
+    /**
+     * Pass 2: Re-score bars using pattern re-weighting + optional ML blend,
+     * re-grade trades, compute both patternOnly and mlBlended metrics.
+     *
+     * @param {Array} allScoredBars - from btResult.allScoredBars
+     * @param {Object} pattern - extracted pattern with indicatorWeights / indicatorPowers
+     * @param {Array} candles - OHLCV candles for the symbol
+     * @param {Object} engine - BacktestEngine instance
+     * @param {Object} cfg - { threshold, holdingPeriodDays, targetProfitPct, slippagePct, brokeragePct }
+     * @param {Object} mlModel - pre-loaded ML champion model (or null)
+     * @returns {Object} { patternOnly: {...}, mlBlended: {...} | null }
+     */
+    function computeAdjustedMetrics(allScoredBars, pattern, candles, engine, cfg, mlModel) {
+      var _clamp = function (v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; };
+      var threshold = cfg.threshold || 65;
+      if (!allScoredBars || !allScoredBars.length || !pattern || !candles) return null;
+
+      var weights = pattern.indicatorWeights || null;
+      var powers = pattern.indicatorPowers || null;
+      var pillarMax = { trendHealth: 35, pullbackQuality: 30, prob4: 35, swingPotential: 20 };
+      if (window.TechIndicators && window.TechIndicators.getScoreConfig) {
+        var sc = window.TechIndicators.getScoreConfig();
+        if (sc && sc.pillarMax) pillarMax = sc.pillarMax;
+      }
+
+      var uniformW = true;
+      if (weights) {
+        var _firstW = null;
+        ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
+          var w = weights[p] != null ? weights[p] : 0.25;
+          if (_firstW == null) _firstW = w;
+          else if (Math.abs(w - _firstW) > 0.001) uniformW = false;
+        });
+      }
+
+      // Pre-compute ML indicator cache once for this symbol (O(N))
+      var mlCache = mlModel ? buildMLIndicatorCache(candles) : null;
+
+      // Shared scored-bars arrays for both passes
+      var patternOnlyScored = [];
+      var mlBlendedScored = mlModel ? [] : null;
+
+      for (var bi = 0; bi < allScoredBars.length; bi++) {
+        var bar = allScoredBars[bi];
+        var pillars = {
+          trendHealth: bar.trendHealth || 0,
+          pullbackQuality: bar.pullbackQuality || 0,
+          prob4: bar.prob4 || 0,
+          swingPotential: bar.swingPotential || 0
+        };
+
+        // Pattern re-weighting (same logic as before)
+        var patternScore = bar.entryScore;
+        var powerBonusTotal = 0;
+
+        if (!uniformW && weights) {
+          var totalWeighted = 0, totalWeight = 0;
+          ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
+            var w = weights[p] != null ? weights[p] : 0.25;
+            var max = pillarMax[p] || 25;
+            var normalizedPillar = _clamp(pillars[p] / max, 0, 1);
+            totalWeighted += pillars[p] * w;
+            totalWeight += w;
+            if (powers && powers[p] && powers[p].infoValue > 0.05 && normalizedPillar > 0.5) {
+              powerBonusTotal += round3(powers[p].infoValue * normalizedPillar * 2);
+            }
+          });
+          patternScore = _clamp(round2(totalWeight > 0 ? totalWeighted / totalWeight : bar.entryScore + powerBonusTotal), 0, 100);
+        }
+
+        var base = {
+          idx: bar.idx,
+          rawScore: bar.entryScore,
+          trendHealth: bar.trendHealth,
+          pullbackQuality: bar.pullbackQuality,
+          prob4: bar.prob4,
+          swingPotential: bar.swingPotential,
+          raw_score: bar.raw_score,
+          modifiers: bar.modifiers
+        };
+
+        // Pattern-only pass
+        if (patternScore >= threshold) {
+          patternOnlyScored.push(Object.assign({ adjustedScore: patternScore }, base));
+        }
+
+        // ML-blended pass
+        if (mlBlendedScored && mlCache) {
+          var mlScore = patternScore;
+          if (!uniformW) {
+            var features = mlFeaturesAtBar(candles[bar.idx], bar.idx, mlCache, patternScore);
+            if (features) {
+              mlScore = applyMLBlendAtBar(patternScore, features, mlModel);
+            }
+          }
+          if (mlScore >= threshold) {
+            mlBlendedScored.push(Object.assign({ adjustedScore: mlScore }, base));
+          }
+        }
+      }
+
+      // Simulate and measure both passes
+      var patternOnly = simulateAndMeasure(patternOnlyScored, candles, engine, cfg, pattern.symbol);
+      var mlBlended = mlBlendedScored ? simulateAndMeasure(mlBlendedScored, candles, engine, cfg, pattern.symbol) : null;
+
+      return { patternOnly: patternOnly, mlBlended: mlBlended };
+    }
+
+    /**
+     * Create a batch backtest runner with configuration.
    */
   function create(cfg) {
     cfg = cfg || {};
@@ -413,6 +681,8 @@ window.BatchBacktest = (function () {
           }
 
           results[symbol] = pattern;
+          results[symbol]._allScoredBars = btResult.allScoredBars || null;
+          results[symbol]._candles = candles;
           summary.successCount++;
           summary.totalTrades += trades.length;
 
@@ -437,6 +707,53 @@ window.BatchBacktest = (function () {
             return s + ((p.tradeStats && p.tradeStats.winRate) || p.winRate || 0);
           }, 0) / summary.successCount)
         : 0;
+
+      // ── Pass 2: Adjusted metrics (pattern re-weighting + ML parity) ──
+      // Re-scores bars using pattern weights + optional ML blend, re-grades
+      // trades, produces patternOnly and mlBlended metrics for comparison.
+      var mlModel = await loadMLModelForBacktest();
+      var pass2Symbols = Object.keys(results);
+      var adjWinRateSum = 0, adjCount = 0;
+      var mlWinRateSum = 0, mlCount = 0;
+      for (var ai = 0; ai < pass2Symbols.length; ai++) {
+        var sym = pass2Symbols[ai];
+        var pat = results[sym];
+        var scoredBars = pat._allScoredBars;
+        var candles2 = pat._candles;
+        if (!scoredBars || !scoredBars.length || !candles2) continue;
+        try {
+          var adjResult = computeAdjustedMetrics(scoredBars, pat, candles2, engine, {
+            threshold: threshold,
+            holdingPeriodDays: holdingPeriodDays,
+            targetProfitPct: targetProfitPct,
+            slippagePct: slippagePct,
+            brokeragePct: brokeragePct
+          }, mlModel);
+          if (adjResult) {
+            pat.adjustedMetrics = adjResult.patternOnly || null;
+            pat.mlAdjustedMetrics = adjResult.mlBlended || null;
+            if (adjResult.patternOnly && adjResult.patternOnly.winRate != null) { adjWinRateSum += adjResult.patternOnly.winRate; adjCount++; }
+            if (adjResult.mlBlended && adjResult.mlBlended.winRate != null) { mlWinRateSum += adjResult.mlBlended.winRate; mlCount++; }
+          }
+        } catch (e) { console.warn("Adjusted metrics failed for " + sym + ":", e.message); }
+        // Clean up internal fields
+        delete pat._allScoredBars;
+        delete pat._candles;
+      }
+      summary.avgAdjustedWinRate = adjCount > 0 ? round2(adjWinRateSum / adjCount) : null;
+      summary.avgMLWinRate = mlCount > 0 ? round2(mlWinRateSum / mlCount) : null;
+      summary.mlModelLoaded = mlModel != null;
+
+      // ── Re-save patterns after Pass 2 to persist adjustedMetrics/mlAdjustedMetrics ──
+      if (storePatterns && window.PatternStore) {
+        for (var ri = 0; ri < pass2Symbols.length; ri++) {
+          var rSym = pass2Symbols[ri];
+          var rPat = results[rSym];
+          if (rPat && (rPat.adjustedMetrics || rPat.mlAdjustedMetrics)) {
+            try { await window.PatternStore.put(rSym, rPat); } catch (e) { console.warn("Re-save failed for " + rSym + ":", e.message); }
+          }
+        }
+      }
 
       // Update global metadata
       if (window.PatternStore) {

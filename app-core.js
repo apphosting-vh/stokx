@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.2.0";
+window.__STOX_APP_VERSION = "4.2.4";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -4396,7 +4396,7 @@ const EntryScorePanel = ({ shares }) => {
           var _idxD = null;
           try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
           var result = computeCompatEntryScore(resW.data, resD.data, null, _idxD, null);
-          try { result = window.applyPatternIntel(result, tk); } catch(e) {}
+          try { result = window.applyPatternIntel(result, tk, resD.data); } catch(e) {}
           if (result && result._patternApplied) {
             var pm = { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight };
             var idx = copy.findIndex(function(e) { return e.id === missing[i].id; });
@@ -4750,7 +4750,7 @@ const EntryScorePanel = ({ shares }) => {
       try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
       try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
       const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
-      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch (e) {}
+      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch (e) {}
       if (result) result.lastClose = lastDailyClose;
       let conf10d = null, conf10dLog = null, conf10dEmp = null;
       try {
@@ -5493,7 +5493,7 @@ const ConfidenceTracker = () => {
       try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
       try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
       const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
-      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch (e) {}
+      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch (e) {}
       let confidence = null, conf10dLog = null, conf10dEmp = null;
       try {
         const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result), tk);
@@ -5814,7 +5814,7 @@ const WatchlistTracker = () => {
           var _idxD = null;
           try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
           var result = computeCompatEntryScore(resW.data, resD.data, null, _idxD, null);
-          try { result = window.applyPatternIntel(result, tk); } catch(e) {}
+          try { result = window.applyPatternIntel(result, tk, resD.data); } catch(e) {}
           if (result && result._patternApplied) {
             var pm = { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight };
             var idx = copy.findIndex(function(r) { return r.id === missing[i].id; });
@@ -5918,7 +5918,7 @@ const WatchlistTracker = () => {
       try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
       try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
       const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
-      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch (e) {}
+      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch (e) {}
       let conf10dLog = null, conf10dEmp = null;
       try {
         const conf = TI.computeTenDayForwardConfidence(resH.data, resD.data, _idxD, buildEntryScoreContext(result), tk);
@@ -7481,6 +7481,8 @@ const BacktestSuitePanel = () => {
         Stat("Total Signals", fmtS(s.totalSignals), "across all stocks"),
         Stat("Overall Win Rate", s.overallWinRate != null ? fmtPct(s.overallWinRate) : "\u2014", "all pooled trades", s.overallWinRate != null ? retColor(s.overallWinRate - 50) : undefined),
         Stat("Avg Stock Win Rate", s.avgWinRate != null ? fmtPct(s.avgWinRate) : "\u2014", "per-stock average"),
+        s.avgAdjustedWinRate != null ? Stat("Pattern Adj WR", fmtPct(s.avgAdjustedWinRate), "after pattern re-weighting (live parity)", s.avgAdjustedWinRate != null ? retColor(s.avgAdjustedWinRate - 50) : undefined) : null,
+        s.avgMLWinRate != null ? Stat("ML Blended WR", fmtPct(s.avgMLWinRate), "pattern + ML blend (full live parity)", s.avgMLWinRate != null ? retColor(s.avgMLWinRate - 50) : undefined) : (s.mlModelLoaded === false ? Stat("ML Blended WR", "\u2014", "no champion model loaded") : null),
         Stat("Avg Return", s.avgReturn != null ? React.createElement("span", { style: { color: retColor(s.avgReturn) } }, fmtR(s.avgReturn)) : "\u2014", "per trade, entry to exit"),
         Stat("Avg Profit Factor", s.avgProfitFactor != null ? fmtPF(s.avgProfitFactor) : "\u2014", "across profitable stocks")
       ),
@@ -7492,9 +7494,9 @@ const BacktestSuitePanel = () => {
       (function() {
         var exportRankingCSV = function() {
           if (!d.results || !d.results.length) return;
-          var headers = ["Symbol", "Signals", "Wins", "Losses", "Win Rate %", "Avg Return %", "Profit Factor", "Avg Hold Days", "Avg 10DLN", "Avg 10DEM", "Avg Score", "Avg Trend", "Avg Pullback", "Avg Prob4", "Avg Swing"];
+          var headers = ["Symbol", "Signals", "Wins", "Losses", "Win Rate %", "Pattern Adj WR %", "ML Blended WR %", "Avg Return %", "Profit Factor", "Avg Hold Days", "Avg 10DLN", "Avg 10DEM", "Avg Score", "Avg Trend", "Avg Pullback", "Avg Prob4", "Avg Swing"];
           var rows = d.results.map(function(r) {
-            return [r.symbol, r.totalSignals, r.winningTrades, r.losingTrades, r.winRate != null ? r.winRate : "", r.avgReturnPct != null ? r.avgReturnPct : "", r.profitFactor, r.avgHoldDays != null ? r.avgHoldDays : "", r.avgConfLog != null ? Math.round(r.avgConfLog * 1000) / 10 : "", r.avgConfEmp != null ? Math.round(r.avgConfEmp * 1000) / 10 : "", r.avgEntryScore != null ? r.avgEntryScore : "", r.avgTrend != null ? r.avgTrend : "", r.avgPullback != null ? r.avgPullback : "", r.avgProb4 != null ? r.avgProb4 : "", r.avgSwing != null ? r.avgSwing : ""];
+            return [r.symbol, r.totalSignals, r.winningTrades, r.losingTrades, r.winRate != null ? r.winRate : "", r.adjustedMetrics && r.adjustedMetrics.winRate != null ? r.adjustedMetrics.winRate : "", r.mlAdjustedMetrics && r.mlAdjustedMetrics.winRate != null ? r.mlAdjustedMetrics.winRate : "", r.avgReturnPct != null ? r.avgReturnPct : "", r.profitFactor, r.avgHoldDays != null ? r.avgHoldDays : "", r.avgConfLog != null ? Math.round(r.avgConfLog * 1000) / 10 : "", r.avgConfEmp != null ? Math.round(r.avgConfEmp * 1000) / 10 : "", r.avgEntryScore != null ? r.avgEntryScore : "", r.avgTrend != null ? r.avgTrend : "", r.avgPullback != null ? r.avgPullback : "", r.avgProb4 != null ? r.avgProb4 : "", r.avgSwing != null ? r.avgSwing : ""];
           });
           var csv = [headers.join(",")].concat(rows.map(function(r) { return r.map(function(v) { var s = String(v == null ? "" : v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(","); })).join("\r\n");
           var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
@@ -7530,7 +7532,10 @@ const BacktestSuitePanel = () => {
           React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
             React.createElement("thead", null, React.createElement("tr", null,
-              cell("Symbol", tdL), cell("Signals", td), cell("Wins", td), cell("Losses", td), cell("Win Rate", td), cell("Avg Return", td), cell("Profit Factor", td), cell("Avg Hold", td), cell("Avg 10DLN", td), cell("Avg 10DEM", td), cell("Avg Score", td),
+              cell("Symbol", tdL), cell("Signals", td), cell("Wins", td), cell("Losses", td), cell("Win Rate", td),
+              React.createElement("td", { style: Object.assign({}, td, { color: "#06b6d4" }), title: "Pattern-adjusted win rate (live parity, no ML)" }, "Pat WR"),
+              React.createElement("td", { style: Object.assign({}, td, { color: "#a78bfa" }), title: "ML-blended win rate (full live parity with champion model)" }, "ML WR"),
+              cell("Avg Return", td), cell("Profit Factor", td), cell("Avg Hold", td), cell("Avg 10DLN", td), cell("Avg 10DEM", td), cell("Avg Score", td),
               React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average Trend Health pillar score across all trades for this symbol" }, "Avg Trend"),
               React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average Pullback Quality pillar score across all trades for this symbol" }, "Avg Pullback"),
               React.createElement("td", { style: Object.assign({}, td, { color: "var(--accent)" }), title: "Average 4% Probability pillar score across all trades for this symbol" }, "Avg Prob4"),
@@ -7539,6 +7544,8 @@ const BacktestSuitePanel = () => {
             React.createElement("tbody", null, (d.results || []).map((r) => React.createElement("tr", { key: r.symbol },
               cell(symName(r.symbol), tdL), cell(r.totalSignals), cell(r.winningTrades), cell(r.losingTrades),
               cell(React.createElement("span", { style: { color: retColor(r.winRate - 50), fontWeight: 700 } }, fmtPct(r.winRate))),
+              React.createElement("td", { style: Object.assign({}, td, { color: r.adjustedMetrics && r.adjustedMetrics.winRate != null ? retColor(r.adjustedMetrics.winRate - 50) : "var(--text6)", fontWeight: 700 }) }, r.adjustedMetrics && r.adjustedMetrics.winRate != null ? fmtPct(r.adjustedMetrics.winRate) : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, td, { color: r.mlAdjustedMetrics && r.mlAdjustedMetrics.winRate != null ? "#a78bfa" : "var(--text6)", fontWeight: 700 }) }, r.mlAdjustedMetrics && r.mlAdjustedMetrics.winRate != null ? fmtPct(r.mlAdjustedMetrics.winRate) : "\u2014"),
               cell(React.createElement("span", { style: { color: retColor(r.avgReturnPct) } }, fmtR(r.avgReturnPct))),
               cell(fmtPF(r.profitFactor)),
               cell(r.avgHoldDays != null ? fmt2(r.avgHoldDays) : "\u2014"),
@@ -8896,7 +8903,7 @@ function StockScreener(props) {
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
-      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(_e) {}
+      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch(_e) {}
       var conf10d = null, conf10dLog = null, conf10dEmp = null;
       try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
@@ -8949,7 +8956,7 @@ function StockScreener(props) {
       var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
       var lc = quotePrice != null ? quotePrice : lastDailyClose;
       var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
-      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(_e) {}
+      try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch(_e) {}
       var conf10d = null, conf10dLog = null, conf10dEmp = null;
       try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
       var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
@@ -9050,7 +9057,7 @@ function StockScreener(props) {
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
-           try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(_e) {}
+           try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch(_e) {}
            var conf10d = null, conf10dLog = null, conf10dEmp = null;
            try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
            var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
@@ -9250,7 +9257,7 @@ function StockScreener(props) {
           var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
           var lc = quotePrice != null ? quotePrice : lastDailyClose;
           var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
-          try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk); } catch(_e) {}
+          try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch(_e) {}
           var conf10d = null, conf10dLog = null, conf10dEmp = null;
           try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
@@ -9865,7 +9872,7 @@ function SingleStockAnalysis({ requestedTicker }) {
       var entry = null;
       if (resW && resW.data && resD && resD.data) {
         entry = computeCompatEntryScore(resW.data, resD.data, resH && resH.data && resH.data.length >= 100 ? resH.data : null, idxD && idxD.data, idxW && idxW.data);
-        try { if (window.applyPatternIntel) entry = window.applyPatternIntel(entry, tk); } catch(_e) {}
+        try { if (window.applyPatternIntel) entry = window.applyPatternIntel(entry, tk, resD.data); } catch(_e) {}
       }
       var rs = null, beta = null;
       if (idxD && idxD.data && resD && resD.data) {
