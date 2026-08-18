@@ -258,10 +258,9 @@
     var adjustedScore = clamp(round2(baseWeightedScore + powerBonusTotal), 0, 100);
 
     // ── ML Enhancement (synchronous, using pre-loaded model) ──
-    // Skip ML blend when pattern reweighting is a no-op (uniform weights),
-    // or when ML blend is disabled by the user.
+    // Skip ML blend only when disabled by the user.
     var mlPrediction = null;
-    if (!uniformW && _cachedScoringConfig.useMLBlend && _cachedMLModel && window.MLTrainer && window.MLTrainer.predictSync) {
+    if (_cachedScoringConfig.useMLBlend && _cachedMLModel && window.MLTrainer && window.MLTrainer.predictSync) {
       try {
         var mlFeatures = computeMLFeaturesFromCompat(compatResult, dailyCandles);
         // Gate: model was trained on entry scores >= entryScoreMin (scores of

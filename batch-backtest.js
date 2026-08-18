@@ -356,11 +356,9 @@ window.BatchBacktest = (function () {
         // ML-blended pass
         if (mlBlendedScored && mlCache) {
           var mlScore = patternScore;
-          if (!uniformW) {
-            var features = mlFeaturesAtBar(candles[bar.idx], bar.idx, mlCache, patternScore);
-            if (features) {
-              mlScore = applyMLBlendAtBar(patternScore, features, mlModel);
-            }
+          var features = mlFeaturesAtBar(candles[bar.idx], bar.idx, mlCache, patternScore);
+          if (features) {
+            mlScore = applyMLBlendAtBar(patternScore, features, mlModel);
           }
           if (mlScore >= threshold) {
             mlBlendedScored.push(Object.assign({ adjustedScore: mlScore }, base));

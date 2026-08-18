@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.3.1";
+window.__STOX_APP_VERSION = "4.3.2";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
