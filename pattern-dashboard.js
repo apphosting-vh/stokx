@@ -2057,7 +2057,7 @@ window.PatternDashboard = (function () {
         }
         pushLiveLog("STEP 1 COMPLETE: " + signals.length + " signals scored");
         if (signals.length > 0) {
-          pushLiveLog("Top pick: " + signals[0].symbol + " | Win Prob: " + (signals[0].winProbability * 100).toFixed(1) + "% | Tech Score: " + (signals[0].technicalScore || "N/A") + " | Expected: " + (signals[0].expectedChgPct != null ? (signals[0].expectedChgPct >= 0 ? "+" : "") + signals[0].expectedChgPct + "%" : "N/A") + (signals[0].modelUsed ? " [ML]" : " [Tech]"));
+          pushLiveLog("Top pick: " + signals[0].symbol + " | Live: \u20B9" + (signals[0].close != null ? signals[0].close.toFixed(2) : "?") + " | Pred: \u20B9" + (signals[0].predictedClose != null ? signals[0].predictedClose.toFixed(2) : "?") + " | Exp: " + (signals[0].expectedChgPct != null ? (signals[0].expectedChgPct >= 0 ? "+" : "") + signals[0].expectedChgPct + "%" : "N/A") + (signals[0].modelUsed ? " [ML]" : " [Tech]"));
         }
         pushLiveLog("Run Step 2 (Evening Validate) after market close to check predictions.");
         await window.LiveML.saveMorningScan(signals);
@@ -2644,7 +2644,7 @@ window.PatternDashboard = (function () {
           ),
           validationReport.days.map(function (day) {
             return React.createElement("div", { key: day.date, style: { marginTop: 10 } },
-              React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 4 } }, day.date + " — " + day.hits + "/" + day.resolvedCount + " hits (" + (day.hitRate != null ? day.hitRate.toFixed(0) + "%" : "N/A") + ")" + (day.avgReturn != null ? " | Avg Return: " + (day.avgReturn >= 0 ? "+" : "") + day.avgReturn + "%" : "")),
+              React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 4 } }, day.date + " — " + day.hits + "/" + day.resolvedCount + " hits (" + (day.hitRate != null ? day.hitRate.toFixed(0) + "%" : "N/A") + ")" + (day.avgReturn != null ? " | Avg Return: " + (day.avgReturn >= 0 ? "+" : "") + day.avgReturn + "%" : "") + (day.avgCloseError != null ? " | Avg Close Err: " + (day.avgCloseError >= 0 ? "+" : "") + day.avgCloseError + "%" : "")),
               React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } },
                 React.createElement("thead", null,
                   React.createElement("tr", null,

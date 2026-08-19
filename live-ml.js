@@ -1080,6 +1080,10 @@ window.LiveML = (function () {
       var avgReturn = resolved.length > 0
         ? resolved.reduce(function (s, p) { return s + (p.actualChg || 0); }, 0) / resolved.length
         : null;
+      var withCloseErr = resolved.filter(function (p) { return p.closeError != null; });
+      var avgCloseError = withCloseErr.length > 0
+        ? round2(withCloseErr.reduce(function (s, p) { return s + p.closeError; }, 0) / withCloseErr.length)
+        : null;
 
       validationDays.push({
         date: day.date,
@@ -1089,7 +1093,8 @@ window.LiveML = (function () {
         hits: hits.length,
         misses: resolved.length - hits.length,
         hitRate: resolved.length > 0 ? Math.round((hits.length / resolved.length) * 1000) / 10 : null,
-        avgReturn: avgReturn != null ? round2(avgReturn) : null
+        avgReturn: avgReturn != null ? round2(avgReturn) : null,
+        avgCloseError: avgCloseError
       });
     });
 
