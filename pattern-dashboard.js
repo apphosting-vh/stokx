@@ -652,6 +652,15 @@ window.PatternDashboard = (function () {
     var liveSignals = _liveSignals[0], setLiveSignals = _liveSignals[1];
     var _liveTracker = useState(null);
     var liveTracker = _liveTracker[0], setLiveTracker = _liveTracker[1];
+    // Step 2: Evening validation report
+    var _validationReport = useState(null);
+    var validationReport = _validationReport[0], setValidationReport = _validationReport[1];
+    // Step 3: Night improvement report
+    var _improvementReport = useState(null);
+    var improvementReport = _improvementReport[0], setImprovementReport = _improvementReport[1];
+    // Active step tracking
+    var _activeLiveStep = useState(0);
+    var activeLiveStep = _activeLiveStep[0], setActiveLiveStep = _activeLiveStep[1];
 
     // Load ML status on mount
     useEffect(function () {
@@ -1990,60 +1999,14 @@ window.PatternDashboard = (function () {
       });
     }
 
-    async function handleCollectLive() {
-      if (!window.LiveML) { setError("LiveML module not loaded"); return; }
-      setLiveBusy(true);
-      setLiveLog([]);
-      pushLiveLog("Collecting live features from " + getStockUniverse().length + " symbols...");
-      try {
-        var summary = await window.LiveML.collect({
-          maxDays: 90,
-          onProgress: function (current, total, msg) { pushLiveLog("[" + Math.round((total > 0 ? current / total * 100 : 0)) + "%] " + msg); }
-        });
-        pushLiveLog("COLLECT: scanned " + summary.symbolsScanned + ", processed " + summary.symbolsProcessed + ", new samples: " + summary.newSamples + ", skipped: " + summary.skipped + ", offline: " + summary.offlineHits + ", live: " + summary.liveFetches);
-        /* After resolving yesterday's picks, score today's universe and record
-           picks so tomorrow's collect can resolve them. */
-        pushLiveLog("Scoring today's setup for tracker...");
-        var signals = await window.LiveML.getTodaySignals({
-          count: 20,
-          onProgress: function (current, total, msg) { pushLiveLog("[" + Math.round((total > 0 ? current / total * 100 : 0)) + "%] " + (msg || "Scoring " + current + "/" + total + "...")); }
-        });
-        setLiveSignals(signals);
-        pushLiveLog("Signals ready: " + signals.length + " symbols scored, top pick: " + (signals.length > 0 ? signals[0].symbol + " (" + (signals[0].winProbability * 100).toFixed(1) + "%)" : "none"));
-        await loadLiveStatus();
-      } catch (err) {
-        pushLiveLog("ERROR: " + err.message);
-        setError("Live collection failed: " + err.message);
-      } finally {
-        setLiveBusy(false);
-      }
-    }
-
-    async function handleLiveRetrain() {
-      if (!window.LiveML) { setError("LiveML module not loaded"); return; }
-      setLiveBusy(true);
-      pushLiveLog("Retraining live expert on confirmed outcomes only...");
-      try {
-        var result = await window.LiveML.retrain({
-          numFolds: 5,
-          epochsPerFold: 20,
-          onProgress: function (current, total, msg) { pushLiveLog(msg); }
-        });
-        pushLiveLog("RETRAIN: walk-forward acc=" + result.walkForwardAcc + "%, avgAUC=" + result.avgAuc + " | " + (result.promotion ? result.promotion.reason : ""));
-        pushLiveLog("Proven signs: " + (result.signs ? result.signs.signs.length : 0) + " | Base up-rate: " + (result.signs ? result.signs.baseRate : 0) + "%");
-        await loadLiveStatus();
-      } catch (err) {
-        pushLiveLog("ERROR: " + err.message);
-        setError("Live retrain failed: " + err.message);
-      } finally {
-        setLiveBusy(false);
-      }
-    }
-
     async function handleTodaySignals() {
       if (!window.LiveML) { setError("LiveML module not loaded"); return; }
       setLiveBusy(true);
       setLiveSignals(null);
+      setValidationReport(null);
+      setImprovementReport(null);
+      setActiveLiveStep(1);
+      pushLiveLog("=== STEP 1: Morning Scan ===");
       pushLiveLog("Scoring today's setup for the universe (latest bar)...");
       try {
         var signals = await window.LiveML.getTodaySignals({
@@ -2052,10 +2015,74 @@ window.PatternDashboard = (function () {
         });
         setLiveSignals(signals);
         await loadLiveStatus();
-        pushLiveLog("Signals ready: " + signals.length + " symbols scored from " + (window.LiveML.getUniverse ? window.LiveML.getUniverse().length : "?") + " total, top pick: " + (signals.length > 0 ? signals[0].symbol + " (" + (signals[0].winProbability * 100).toFixed(1) + "%)" : "none"));
+        pushLiveLog("STEP 1 COMPLETE: " + signals.length + " signals scored");
+        if (signals.length > 0) {
+          pushLiveLog("Top pick: " + signals[0].symbol + " | Win Prob: " + (signals[0].winProbability * 100).toFixed(1) + "% | Tech Score: " + (signals[0].technicalScore || "N/A") + " | Expected: " + (signals[0].expectedChgPct != null ? (signals[0].expectedChgPct >= 0 ? "+" : "") + signals[0].expectedChgPct + "%" : "N/A"));
+        }
+        pushLiveLog("Run Step 2 (Evening Validate) after market close to check predictions.");
       } catch (err) {
         pushLiveLog("ERROR: " + err.message);
         setError("Today's signals failed: " + err.message);
+      } finally {
+        setLiveBusy(false);
+      }
+    }
+
+    async function handleEveningValidate() {
+      if (!window.LiveML) { setError("LiveML module not loaded"); return; }
+      setLiveBusy(true);
+      setValidationReport(null);
+      setActiveLiveStep(2);
+      pushLiveLog("=== STEP 2: Evening Validation ===");
+      pushLiveLog("Resolving yesterday's picks against actual market data...");
+      try {
+        var report = await window.LiveML.resolveAndValidate({
+          onProgress: function (current, total, msg) { pushLiveLog("[" + Math.round((total > 0 ? current / total * 100 : 0)) + "%] " + msg); }
+        });
+        setValidationReport(report);
+        pushLiveLog("STEP 2 COMPLETE: " + report.summary.resolved + " picks resolved, " + report.summary.hits + " hits, " + report.summary.misses + " misses");
+        if (report.summary.hitRate != null) {
+          pushLiveLog("Hit rate: " + report.summary.hitRate + "% | Base rate: " + (liveStatus && liveStatus.corpus && liveStatus.corpus.baseRate != null ? liveStatus.corpus.baseRate + "%" : "N/A"));
+        }
+        // Also refresh today's signals for context
+        pushLiveLog("Refreshing today's signals for comparison...");
+        var signals = await window.LiveML.getTodaySignals({ count: 20, track: false });
+        setLiveSignals(signals);
+        await loadLiveStatus();
+      } catch (err) {
+        pushLiveLog("ERROR: " + err.message);
+        setError("Evening validation failed: " + err.message);
+      } finally {
+        setLiveBusy(false);
+      }
+    }
+
+    async function handleNightLearn() {
+      if (!window.LiveML) { setError("LiveML module not loaded"); return; }
+      setLiveBusy(true);
+      setImprovementReport(null);
+      setActiveLiveStep(3);
+      pushLiveLog("=== STEP 3: Night Learning ===");
+      pushLiveLog("Retraining model on confirmed outcomes...");
+      try {
+        var report = await window.LiveML.retrainWithLearning({
+          numFolds: 5,
+          epochsPerFold: 20,
+          onProgress: function (current, total, msg) { pushLiveLog(msg); }
+        });
+        setImprovementReport(report);
+        pushLiveLog("STEP 3 COMPLETE: Model retrained and ready for tomorrow");
+        if (report.before.walkForwardAcc != null && report.after.walkForwardAcc != null) {
+          pushLiveLog("WF Accuracy: " + report.before.walkForwardAcc + "% → " + report.after.walkForwardAcc + "% (" + (report.improvement.accDelta >= 0 ? "+" : "") + report.improvement.accDelta + "%)");
+        }
+        if (report.promotion) {
+          pushLiveLog("Promotion: " + report.promotion.reason);
+        }
+        pushLiveLog("Ready for tomorrow's Step 1 (Morning Scan).");
+        await loadLiveStatus();
+      } catch (err) {
+        pushLiveLog("ERROR: " + err.message);
+        setError("Night learning failed: " + err.message);
       } finally {
         setLiveBusy(false);
       }
@@ -2461,197 +2488,224 @@ window.PatternDashboard = (function () {
       var signs = liveStatus && liveStatus.signs;
       var importance = liveStatus && liveStatus.champion && liveStatus.champion.featureImportance;
       var brPct = function (br) { return br != null ? (br > 0 && br < 1 ? br * 100 : br) : null; };
+      var base = liveStatus && liveStatus.corpus && liveStatus.corpus.baseRate != null ? brPct(liveStatus.corpus.baseRate) : null;
+
+      // Helper: step button style
+      function stepBtn(active, color) {
+        return { fontSize: 10, fontWeight: 700, color: active ? "#fff" : color, background: active ? color : "transparent", border: "1px solid " + color, padding: "3px 8px", borderRadius: 4 };
+      }
 
       return React.createElement("div", null,
-        // Status
+        // ── Status Header ──
         React.createElement("div", { style: cardStyle },
-          React.createElement("div", { style: labelStyle }, "Live Expert — Learns From Confirmed Outcomes Only"),
+          React.createElement("div", { style: labelStyle }, "Live Expert — Daily Learning Cycle"),
           React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
-            "Collects daily OHLCV for every stock, records the indicator state at each prior close, and labels it with the realized next-day move. The model is retrained only on what already happened — every sample is verified. It then reports which indicator states ('signs') were followed by up-days, with sample counts."
+            "Three-step daily workflow: Morning scan picks top 20 stocks, evening validates predictions against actuals, night retrains the model to improve for tomorrow."
           ),
-          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginTop: 10 } },
-            statCard("Corpus Samples", corpus ? corpus.count : 0),
+          // Step indicators
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginTop: 12, flexWrap: "wrap" } },
+            React.createElement("span", { style: stepBtn(activeLiveStep === 1, "#16a34a") }, "STEP 1: Morning"),
+            React.createElement("span", { style: { color: "var(--text5)", fontSize: 12 } }, "\u2192"),
+            React.createElement("span", { style: stepBtn(activeLiveStep === 2, "#d97706") }, "STEP 2: Evening"),
+            React.createElement("span", { style: { color: "var(--text5)", fontSize: 12 } }, "\u2192"),
+            React.createElement("span", { style: stepBtn(activeLiveStep === 3, "#7c3aed") }, "STEP 3: Night")
+          ),
+          // Status cards
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10, marginTop: 12 } },
+            statCard("Corpus", corpus ? corpus.count : 0),
             statCard("Symbols", corpus ? corpus.symbols : 0),
-            statCard("Base Up-Rate", corpus ? (brPct(corpus.baseRate) != null ? brPct(corpus.baseRate).toFixed(1) + "%" : "N/A") : "N/A"),
-            statCard("Range", corpus ? (corpus.firstDate || "—") + " → " + (corpus.lastDate || "—") : "N/A"),
-            statCard("Last Collect", liveStatus && liveStatus.lastCollect ? new Date(liveStatus.lastCollect).toLocaleString() : "Never"),
-            statCard("Last Retrain", liveStatus && liveStatus.lastRetrain ? new Date(liveStatus.lastRetrain).toLocaleString() : "Never"),
+            statCard("Base Rate", corpus ? (brPct(corpus.baseRate) != null ? brPct(corpus.baseRate).toFixed(1) + "%" : "N/A") : "N/A"),
             statCard("WF Accuracy", liveStatus && liveStatus.walkForwardAcc != null ? liveStatus.walkForwardAcc + "%" : "N/A"),
-            statCard("Avg AUC", liveStatus && liveStatus.avgAuc != null ? (liveStatus.avgAuc * 100).toFixed(1) + "%" : "N/A")
+            statCard("AUC", liveStatus && liveStatus.avgAuc != null ? (liveStatus.avgAuc * 100).toFixed(1) + "%" : "N/A"),
+            statCard("Last Retrain", liveStatus && liveStatus.lastRetrain ? new Date(liveStatus.lastRetrain).toLocaleDateString() : "Never")
           ),
-          React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8, marginTop: 12 } },
-            React.createElement("div", { style: { fontSize: 11, color: "var(--text4)", lineHeight: 1.4 } },
-              "After market close, click Step 1 then Step 2. Step 1 scores the universe and records picks. Step 2 resolves yesterday's picks and collects training data."
-            ),
-            React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
-              React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "var(--accent, #16a34a)", background: "rgba(22,163,74,.1)", padding: "2px 6px", borderRadius: 4 } }, "STEP 1"),
-              React.createElement("button", {
-                onClick: handleTodaySignals,
-                disabled: liveBusy,
-                style: { padding: "8px 16px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: liveBusy ? "not-allowed" : "pointer", opacity: hasLive ? 1 : 0.5, fontWeight: 600 }
-              }, "Score Today's Signals")
-            ),
-            React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
-              React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#d97706", background: "rgba(217,119,6,.1)", padding: "2px 6px", borderRadius: 4 } }, "STEP 2"),
-              React.createElement("button", {
-                onClick: handleCollectLive,
-                disabled: liveBusy,
-                style: { padding: "8px 16px", borderRadius: 6, background: liveBusy ? "#9ca3af" : "var(--accent, #16a34a)", color: "#fff", border: "none", cursor: liveBusy ? "not-allowed" : "pointer", fontWeight: 600, opacity: hasLive ? 1 : 0.5 }
-              }, liveBusy ? "Working..." : "Collect & Resolve"),
-              React.createElement("button", {
-                onClick: handleLiveRetrain,
-                disabled: liveBusy,
-                style: { padding: "8px 16px", borderRadius: 6, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: liveBusy ? "not-allowed" : "pointer", opacity: hasLive ? 1 : 0.5 }
-              }, "Retrain Model")
-            )
+          // Action buttons
+          React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 } },
+            React.createElement("button", {
+              onClick: handleTodaySignals, disabled: liveBusy,
+              style: { padding: "8px 16px", borderRadius: 6, background: liveBusy ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", cursor: liveBusy ? "not-allowed" : "pointer", fontWeight: 600, opacity: hasLive ? 1 : 0.5 }
+            }, liveBusy ? "Working..." : "Step 1: Morning Scan"),
+            React.createElement("button", {
+              onClick: handleEveningValidate, disabled: liveBusy,
+              style: { padding: "8px 16px", borderRadius: 6, background: liveBusy ? "#9ca3af" : "#d97706", color: "#fff", border: "none", cursor: liveBusy ? "not-allowed" : "pointer", fontWeight: 600, opacity: hasLive ? 1 : 0.5 }
+            }, liveBusy ? "Working..." : "Step 2: Evening Validate"),
+            React.createElement("button", {
+              onClick: handleNightLearn, disabled: liveBusy,
+              style: { padding: "8px 16px", borderRadius: 6, background: liveBusy ? "#9ca3af" : "#7c3aed", color: "#fff", border: "none", cursor: liveBusy ? "not-allowed" : "pointer", fontWeight: 600, opacity: hasLive ? 1 : 0.5 }
+            }, liveBusy ? "Working..." : "Step 3: Night Learn")
           )
         ),
 
-        // Feature importance (horizontal bars)
-        importance && importance.length > 0 && React.createElement("div", { style: cardStyle },
-          React.createElement("div", { style: labelStyle }, "What Signs Drive Up-Days (Permutation Importance)"),
-          React.createElement("div", { style: { marginTop: 8 } },
-            importance.slice(0, 10).map(function (fi) {
-              var maxImp = Math.max.apply(null, importance.map(function (f) { return Math.abs(f.importance); }));
-              var width = maxImp > 0 ? Math.max(2, Math.abs(fi.importance) / maxImp * 100) : 2;
-              var color = fi.importance >= 0 ? "var(--accent, #16a34a)" : "#ef4444";
-              return React.createElement("div", { key: fi.feature, style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 } },
-                React.createElement("span", { style: { width: 110, fontSize: 12, fontWeight: 600 } }, fi.feature),
-                React.createElement("div", { style: { flex: 1, background: "var(--bg3)", borderRadius: 4, height: 14 } },
-                  React.createElement("div", { style: { width: width + "%", background: color, borderRadius: 4, height: 14 } })
-                ),
-                React.createElement("span", { style: { width: 70, fontSize: 11, color: "var(--text3)" } }, fi.importance.toFixed(3))
-              );
-            })
-          ),
-          React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 6 } },
-            "Positive = accuracy drops when this sign is shuffled (it matters). Negative = the model's use of it was overfit (removing it helps)."
-          )
-        ),
-
-        // Proven signs
-        signs && signs.signs && signs.signs.length > 0 && React.createElement("div", { style: cardStyle },
-          React.createElement("div", { style: labelStyle }, "Proven Signs (min " + 30 + " samples, lift ≥ " + (0.03 * 100) + "%)"),
-          React.createElement("div", { style: { maxHeight: 260, overflowY: "auto", marginTop: 8 } },
-            signs.signs.map(function (s) {
-              var color = s.lift >= 0 ? "var(--accent, #16a34a)" : "#ef4444";
-              return React.createElement("div", { key: s.feature + s.bucket, style: { display: "flex", justifyContent: "space-between", padding: "6px 8px", borderBottom: "1px solid var(--border)", fontSize: 12 } },
-                React.createElement("span", null,
-                  React.createElement("strong", null, s.feature + " " + s.bucket),
-                  " · n=" + s.n
-                ),
-                React.createElement("span", { style: { fontWeight: 700, color: color } },
-                  s.upRate + "% up-rate" + (s.lift >= 0 ? " (+" : " (") + s.lift + "% lift)" + " · avg " + s.avgReturn + "%"
+        // ── STEP 1: Today's Top 20 with justifications ──
+        liveSignals && liveSignals.length > 0 && React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: Object.assign({}, labelStyle, { color: "#16a34a" }) }, "Step 1: Morning Scan — Top " + liveSignals.length + " Picks"),
+          React.createElement("div", { style: { maxHeight: 500, overflowY: "auto" } },
+            React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11, marginTop: 8 } },
+              React.createElement("thead", null,
+                React.createElement("tr", null,
+                  React.createElement("th", { style: { textAlign: "left", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "#"),
+                  React.createElement("th", { style: { textAlign: "left", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Symbol"),
+                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Win Prob"),
+                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Tech Score"),
+                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Exp Chg"),
+                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Prev Chg"),
+                  React.createElement("th", { style: { textAlign: "left", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Pattern"),
+                  React.createElement("th", { style: { textAlign: "left", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Justification")
                 )
-              );
-            })
-          )
-        ),
-
-        // Per-feature bucket tables
-        signs && signs.tables && React.createElement("div", { style: cardStyle },
-          React.createElement("div", { style: labelStyle }, "Sign Tables (win rate by bucket)"),
-          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12, marginTop: 8 } },
-            Object.keys(signs.tables).map(function (key) {
-              var rows = signs.tables[key];
-              return React.createElement("div", { key: key, style: { border: "1px solid var(--border)", borderRadius: 8, padding: 8 } },
-                React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 4 } }, key + " (base " + signs.baseRate + "%)"),
-                rows.map(function (r) {
-                  var color = r.lift >= 3 ? "var(--accent, #16a34a)" : r.lift <= -3 ? "#ef4444" : "var(--text2)";
-                  return React.createElement("div", { key: r.bucket, style: { display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11 } },
-                    React.createElement("span", { style: { color: "var(--text3)" } }, r.bucket + " (n=" + r.n + ")"),
-                    React.createElement("span", { style: { fontWeight: 600, color: color } }, r.upRate + "% · " + (r.avgReturn >= 0 ? "+" : "") + r.avgReturn + "%")
+              ),
+              React.createElement("tbody", null,
+                liveSignals.map(function (s, idx) {
+                  var probColor = s.winProbability >= 0.6 ? "#16a34a" : s.winProbability >= 0.5 ? "#f59e0b" : "var(--text2)";
+                  var techColor = s.technicalScore >= 70 ? "#16a34a" : s.technicalScore >= 40 ? "#f59e0b" : "#ef4444";
+                  var expColor = s.expectedChgPct != null ? (s.expectedChgPct >= 0 ? "#16a34a" : "#ef4444") : "var(--text3)";
+                  var chgColor = s.chgPct != null ? (s.chgPct >= 0 ? "#16a34a" : "#ef4444") : "var(--text3)";
+                  return React.createElement("tr", { key: s.symbol, style: { borderBottom: "1px solid var(--border)" } },
+                    React.createElement("td", { style: { padding: "5px 6px", color: "var(--text3)" } }, idx + 1),
+                    React.createElement("td", { style: { padding: "5px 6px", fontWeight: 700 } }, s.symbol),
+                    React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", fontWeight: 700, color: probColor } }, (s.winProbability * 100).toFixed(1) + "%"),
+                    React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", fontWeight: 700, color: techColor } }, s.technicalScore != null ? s.technicalScore : "\u2014"),
+                    React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", fontWeight: 600, color: expColor } }, s.expectedChgPct != null ? (s.expectedChgPct >= 0 ? "+" : "") + s.expectedChgPct + "%" : "\u2014"),
+                    React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", color: chgColor } }, s.chgPct != null ? (s.chgPct >= 0 ? "+" : "") + s.chgPct + "%" : "\u2014"),
+                    React.createElement("td", { style: { padding: "5px 6px", fontSize: 10, color: "var(--text3)", maxWidth: 150 } }, s.patternSummary || "\u2014"),
+                    React.createElement("td", { style: { padding: "5px 6px", fontSize: 10, color: "var(--text3)", maxWidth: 300, lineHeight: 1.4 } }, s.justification || "\u2014")
                   );
                 })
-              );
-            })
-          ),
-          React.createElement("div", { style: { marginTop: 10 } },
-            React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 4 } }, "Two-Sign Combos (sorted by up-rate)"),
-            signs.combos && signs.combos.map(function (c) {
-              return React.createElement("div", { key: c.combo, style: { display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11 } },
-                React.createElement("span", { style: { color: "var(--text3)" } }, c.combo + " (n=" + c.n + ")"),
-                React.createElement("span", { style: { fontWeight: 600, color: c.lift >= 3 ? "var(--accent, #16a34a)" : c.lift <= -3 ? "#ef4444" : "var(--text2)" } },
-                  c.upRate + "% · " + (c.avgReturn >= 0 ? "+" : "") + c.avgReturn + "%"
-                )
-              );
-            })
-          )
-        ),
-
-        // Today's signals
-        liveSignals && liveSignals.length > 0 && React.createElement("div", { style: cardStyle },
-          React.createElement("div", { style: labelStyle }, "Today's Setup — Live Expert's Top Signals"),
-          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12, marginTop: 8 } },
-              React.createElement("thead", null,
-              React.createElement("tr", null,
-                React.createElement("th", { style: { textAlign: "left", padding: "4px", color: "var(--text3)" } }, "#"),
-                React.createElement("th", { style: { textAlign: "left", padding: "4px", color: "var(--text3)" } }, "Symbol"),
-                React.createElement("th", { style: { textAlign: "right", padding: "4px", color: "var(--text3)" } }, "Win Prob"),
-                React.createElement("th", { style: { textAlign: "right", padding: "4px", color: "var(--text3)" } }, "Chg %"),
-                React.createElement("th", { style: { textAlign: "left", padding: "4px", color: "var(--text3)" } }, "Signals")
               )
-            ),
-            React.createElement("tbody", null,
-              liveSignals.map(function (s, idx) {
-                var color = s.winProbability >= 0.6 ? "var(--accent, #16a34a)" : s.winProbability >= 0.5 ? "#f59e0b" : "var(--text2)";
-                var chgColor = s.chgPct != null ? (s.chgPct >= 0 ? "var(--accent, #16a34a)" : "#ef4444") : "var(--text3)";
-                return React.createElement("tr", { key: s.symbol },
-                  React.createElement("td", { style: { padding: "4px", color: "var(--text3)", width: 24 } }, idx + 1),
-                  React.createElement("td", { style: { padding: "4px", fontWeight: 600 } }, s.symbol),
-                  React.createElement("td", { style: { padding: "4px", textAlign: "right", fontWeight: 700, color: color } }, (s.winProbability * 100).toFixed(1) + "%"),
-                  React.createElement("td", { style: { padding: "4px", textAlign: "right", color: chgColor } }, s.chgPct != null ? (s.chgPct >= 0 ? "+" : "") + s.chgPct + "%" : "—"),
-                  React.createElement("td", { style: { padding: "4px", fontSize: 11, color: "var(--text3)" } },
-                    "RSI " + s.features.rsi + " · BB " + s.features.bb_position + " · ATR " + s.features.atr_pct + "% · Vol " + s.features.volume_ratio +
-                    " · MACD " + s.features.macd_hist + " · EMA " + s.features.ema_slope + "% · ADX " + s.features.adx + " · Score " + (s.features.entry_score != null ? s.features.entry_score : "—")
-                  )
-                );
-              })
             )
+          ),
+          React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 6 } },
+            "Top pick: " + liveSignals[0].symbol + " | Win Prob: " + (liveSignals[0].winProbability * 100).toFixed(1) + "% | Tech Score: " + (liveSignals[0].technicalScore || "N/A") + " | Expected: " + (liveSignals[0].expectedChgPct != null ? (liveSignals[0].expectedChgPct >= 0 ? "+" : "") + liveSignals[0].expectedChgPct + "%" : "N/A")
           )
         ),
 
-        // Prediction accuracy tracker
-        liveTracker && React.createElement("div", { style: cardStyle },
-          React.createElement("div", { style: labelStyle }, "Prediction Accuracy — Did Yesterday's Picks Print?"),
-          liveSignals && liveSignals.length > 0 && React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
-            "Today's scored picks: " + liveSignals.length + " (top: " + liveSignals[0].symbol + " at " + (liveSignals[0].winProbability * 100).toFixed(1) + "%) — pending resolution. Run Step 2 (Collect & Resolve) after market close to settle them."
+        // ── STEP 2: Evening Validation Report ──
+        validationReport && validationReport.days.length > 0 && React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: Object.assign({}, labelStyle, { color: "#d97706" }) }, "Step 2: Evening Validation — Predicted vs Actual"),
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 10, marginTop: 8 } },
+            statCard("Total Picks", validationReport.summary.total),
+            statCard("Hits", React.createElement("span", { style: { color: "#16a34a", fontWeight: 700 } }, validationReport.summary.hits)),
+            statCard("Misses", React.createElement("span", { style: { color: "#ef4444", fontWeight: 700 } }, validationReport.summary.misses)),
+            statCard("Hit Rate", validationReport.summary.hitRate != null ? validationReport.summary.hitRate + "%" : "N/A"),
+            statCard("Base Rate", base != null ? base + "%" : "N/A"),
+            statCard("Alpha", validationReport.summary.hitRate != null && base != null ? (validationReport.summary.hitRate - base >= 0 ? "+" : "") + (validationReport.summary.hitRate - base).toFixed(1) + "%" : "N/A")
           ),
+          validationReport.days.map(function (day) {
+            return React.createElement("div", { key: day.date, style: { marginTop: 10 } },
+              React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 4 } }, day.date + " — " + day.hits + "/" + day.resolvedCount + " hits (" + (day.hitRate != null ? day.hitRate.toFixed(0) + "%" : "N/A") + ")" + (day.avgReturn != null ? " | Avg Return: " + (day.avgReturn >= 0 ? "+" : "") + day.avgReturn + "%" : "")),
+              React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } },
+                React.createElement("thead", null,
+                  React.createElement("tr", null,
+                    React.createElement("th", { style: { textAlign: "left", padding: "3px 6px", color: "var(--text3)" } }, "Symbol"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Predicted"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Recommendation"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Actual Chg"),
+                    React.createElement("th", { style: { textAlign: "center", padding: "3px 6px", color: "var(--text3)" } }, "Verdict")
+                  )
+                ),
+                React.createElement("tbody", null,
+                  day.picks.map(function (p) {
+                    var verdictColor = p.verdict === "CORRECT_WIN" ? "#16a34a" : p.verdict === "CORRECT_LOSS" ? "#6b7280" : p.verdict === "MISSED" ? "#ef4444" : "#f59e0b";
+                    var verdictBg = p.verdict === "CORRECT_WIN" ? "rgba(22,163,74,.1)" : p.verdict === "MISSED" ? "rgba(239,68,68,.1)" : "transparent";
+                    return React.createElement("tr", { key: p.symbol, style: { background: verdictBg } },
+                      React.createElement("td", { style: { padding: "3px 6px", fontWeight: 600 } }, p.symbol),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", color: p.predictedProb > 0.5 ? "#16a34a" : "var(--text3)" } }, (p.predictedProb * 100).toFixed(1) + "%"),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", fontSize: 10 } }, p.recommendation || "\u2014"),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", fontWeight: 600, color: p.actualChg != null ? (p.actualChg >= 0 ? "#16a34a" : "#ef4444") : "var(--text3)" } }, p.actualChg != null ? (p.actualChg >= 0 ? "+" : "") + p.actualChg + "%" : "\u2014"),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "center", fontWeight: 700, color: verdictColor, fontSize: 10 } }, p.verdict)
+                    );
+                  })
+                )
+              )
+            );
+          })
+        ),
+
+        // ── STEP 3: Night Learning Report ──
+        improvementReport && React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: Object.assign({}, labelStyle, { color: "#7c3aed" }) }, "Step 3: Night Learning — Model Improvement"),
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginTop: 10 } },
+            React.createElement("div", { style: { border: "1px solid var(--border)", borderRadius: 8, padding: 10 } },
+              React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", marginBottom: 4 } }, "Before Retrain"),
+              React.createElement("div", { style: { fontSize: 13, fontWeight: 600 } }, "WF Acc: " + (improvementReport.before.walkForwardAcc != null ? improvementReport.before.walkForwardAcc + "%" : "N/A")),
+              React.createElement("div", { style: { fontSize: 13, fontWeight: 600 } }, "AUC: " + (improvementReport.before.avgAuc != null ? (improvementReport.before.avgAuc * 100).toFixed(1) + "%" : "N/A"))
+            ),
+            React.createElement("div", { style: { border: "1px solid var(--border)", borderRadius: 8, padding: 10 } },
+              React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", marginBottom: 4 } }, "After Retrain"),
+              React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#16a34a" } }, "WF Acc: " + (improvementReport.after.walkForwardAcc != null ? improvementReport.after.walkForwardAcc + "%" : "N/A")),
+              React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#16a34a" } }, "AUC: " + (improvementReport.after.avgAuc != null ? (improvementReport.after.avgAuc * 100).toFixed(1) + "%" : "N/A"))
+            ),
+            React.createElement("div", { style: { border: "1px solid var(--border)", borderRadius: 8, padding: 10 } },
+              React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", marginBottom: 4 } }, "Improvement"),
+              React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: improvementReport.improvement.accDelta != null && improvementReport.improvement.accDelta >= 0 ? "#16a34a" : "#ef4444" } },
+                "Acc: " + (improvementReport.improvement.accDelta != null ? (improvementReport.improvement.accDelta >= 0 ? "+" : "") + improvementReport.improvement.accDelta + "%" : "N/A")
+              ),
+              React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: improvementReport.improvement.aucDelta != null && improvementReport.improvement.aucDelta >= 0 ? "#16a34a" : "#ef4444" } },
+                "AUC: " + (improvementReport.improvement.aucDelta != null ? (improvementReport.improvement.aucDelta >= 0 ? "+" : "") + improvementReport.improvement.aucDelta : "N/A")
+              )
+            )
+          ),
+          improvementReport.promotion && React.createElement("div", { style: { marginTop: 8, padding: 8, borderRadius: 6, background: improvementReport.promotion.promoted ? "rgba(22,163,74,.1)" : "rgba(239,68,68,.1)", fontSize: 12 } },
+            React.createElement("strong", null, improvementReport.promotion.promoted ? "Model Promoted" : "Model Kept"),
+            ": " + improvementReport.promotion.reason
+          ),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 8 } },
+            "Model retrained on confirmed outcomes. Ready for tomorrow's Step 1 (Morning Scan)."
+          )
+        ),
+
+        // ── Feature importance (horizontal bars) ──
+        importance && importance.length > 0 && React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Feature Importance (Permutation)"),
+          React.createElement("div", { style: { marginTop: 8 } },
+            importance.slice(0, 8).map(function (fi) {
+              var maxImp = Math.max.apply(null, importance.map(function (f) { return Math.abs(f.importance); }));
+              var width = maxImp > 0 ? Math.max(2, Math.abs(fi.importance) / maxImp * 100) : 2;
+              var color = fi.importance >= 0 ? "#16a34a" : "#ef4444";
+              return React.createElement("div", { key: fi.feature, style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 } },
+                React.createElement("span", { style: { width: 100, fontSize: 11, fontWeight: 600 } }, fi.feature),
+                React.createElement("div", { style: { flex: 1, background: "var(--bg3)", borderRadius: 4, height: 10 } },
+                  React.createElement("div", { style: { width: width + "%", background: color, borderRadius: 4, height: 10 } })
+                ),
+                React.createElement("span", { style: { width: 60, fontSize: 10, color: "var(--text3)" } }, fi.importance.toFixed(3))
+              );
+            })
+          )
+        ),
+
+        // ── Historical Tracker (last 7 days) ──
+        liveTracker && liveTracker.days.length > 0 && React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Historical Tracker (Last 7 Days)"),
           (function () {
             var days = liveTracker.days.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; });
             var resolved = days.filter(function (d) { return d.resolvedCount > 0; });
             var allPicks = 0, allHits = 0;
             resolved.forEach(function (d) { allPicks += d.picks.length; allHits += d.hits; });
             var allRate = allPicks > 0 ? (allHits / allPicks) * 100 : null;
-            var base = liveStatus && liveStatus.corpus && liveStatus.corpus.baseRate != null ? brPct(liveStatus.corpus.baseRate) : null;
             var shown = days.slice(0, 7);
             return React.createElement("div", null,
-              React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
-                allRate != null
-                  ? "All-time: " + allHits + "/" + allPicks + " (" + allRate.toFixed(1) + "%)" + (base != null ? " vs base up-rate " + base + "% — " + (allRate >= base ? "beating the base rate" : "below the base rate") : "") + ". Pending " + (days.length > 0 ? days.reduce(function (s, d) { return s + (d.picks.length - d.resolvedCount); }, 0) : 0) + " picks — run Step 2 (Collect & Resolve) after close."
-                  : "Run Step 1 (Score Today's Signals) then Step 2 (Collect & Resolve) after market close to track picks."
+              allRate != null && React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4 } },
+                "All-time: " + allHits + "/" + allPicks + " (" + allRate.toFixed(1) + "%)" + (base != null ? " vs base " + base + "%" : "")
               ),
-              React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12, marginTop: 8 } },
+              React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11, marginTop: 6 } },
                 React.createElement("thead", null,
                   React.createElement("tr", null,
-                    React.createElement("th", { style: { textAlign: "left", padding: "4px", color: "var(--text3)" } }, "Date"),
-                    React.createElement("th", { style: { textAlign: "right", padding: "4px", color: "var(--text3)" } }, "Picks"),
-                    React.createElement("th", { style: { textAlign: "right", padding: "4px", color: "var(--text3)" } }, "Hits"),
-                    React.createElement("th", { style: { textAlign: "right", padding: "4px", color: "var(--text3)" } }, "Misses"),
-                    React.createElement("th", { style: { textAlign: "right", padding: "4px", color: "var(--text3)" } }, "Hit Rate")
+                    React.createElement("th", { style: { textAlign: "left", padding: "3px 6px", color: "var(--text3)" } }, "Date"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Picks"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Hits"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Misses"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Hit Rate")
                   )
                 ),
                 React.createElement("tbody", null,
                   shown.map(function (d) {
-                    var total = d.picks.length;
                     var rate = d.resolvedCount > 0 ? (d.hits / d.resolvedCount) * 100 : null;
                     var rateColor = rate == null ? "var(--text3)" : rate >= (base != null ? base : 50) ? "#16a34a" : "#ef4444";
                     return React.createElement("tr", { key: d.date },
-                      React.createElement("td", { style: { padding: "4px", fontWeight: 600 } }, d.date),
-                      React.createElement("td", { style: { padding: "4px", textAlign: "right" } }, total),
-                      React.createElement("td", { style: { padding: "4px", textAlign: "right", color: "#16a34a", fontWeight: 700 } }, d.hits),
-                      React.createElement("td", { style: { padding: "4px", textAlign: "right", color: "#ef4444", fontWeight: 700 } }, d.misses),
-                      React.createElement("td", { style: { padding: "4px", textAlign: "right", color: rateColor, fontWeight: 700 } }, rate != null ? rate.toFixed(0) + "%" : "—")
+                      React.createElement("td", { style: { padding: "3px 6px", fontWeight: 600 } }, d.date),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right" } }, d.picks.length),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", color: "#16a34a", fontWeight: 700 } }, d.hits),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", color: "#ef4444", fontWeight: 700 } }, d.misses),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", color: rateColor, fontWeight: 700 } }, rate != null ? rate.toFixed(0) + "%" : "\u2014")
                     );
                   })
                 )
@@ -2660,8 +2714,9 @@ window.PatternDashboard = (function () {
           })()
         ),
 
-        // Log
+        // ── Log ──
         liveLog.length > 0 && React.createElement("div", { style: Object.assign({}, cardStyle, { maxHeight: 200, overflowY: "auto", fontFamily: "monospace", fontSize: 11 }) },
+          React.createElement("div", { style: labelStyle }, "Activity Log"),
           liveLog.map(function (entry, i) {
             return React.createElement("div", { key: i, style: { marginBottom: 2 } },
               React.createElement("span", { style: { color: "var(--text3)" } }, String(entry.time) + " "),

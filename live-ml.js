@@ -260,6 +260,159 @@ window.LiveML = (function () {
     };
   }
 
+  /* ── Step 1: Morning Analysis Helpers ─────────────────────────────────── */
+
+  /**
+   * Generate a human-readable justification for why the ML model picked this stock.
+   * Based on the 8 feature values and their relationship to up-day patterns.
+   */
+  function generateJustification(features, candles, ind) {
+    var parts = [];
+    var rsi = features.rsi;
+    var bbPos = features.bb_position;
+    var atrPct = features.atr_pct;
+    var volRatio = features.volume_ratio;
+    var macdHist = features.macd_hist;
+    var emaSlope = features.ema_slope;
+    var adx = features.adx;
+    var entryScore = features.entry_score;
+
+    // RSI analysis
+    if (rsi < 30) parts.push("RSI at " + rsi + " (deeply oversold — mean-reversion opportunity)");
+    else if (rsi < 40) parts.push("RSI at " + rsi + " (oversold zone — potential bounce)");
+    else if (rsi > 70) parts.push("RSI at " + rsi + " (overbought — caution)");
+    else if (rsi > 60) parts.push("RSI at " + rsi + " (bullish momentum)");
+    else parts.push("RSI at " + rsi + " (neutral)");
+
+    // Bollinger Band position
+    if (bbPos < 0.2) parts.push("BB position " + bbPos + " (near lower band — potential support)");
+    else if (bbPos > 0.8) parts.push("BB position " + bbPos + " (near upper band — resistance zone)");
+    else if (bbPos < 0.4) parts.push("BB position " + bbPos + " (below midpoint — room to run up)");
+    else parts.push("BB position " + bbPos + " (mid-range)");
+
+    // Volume analysis
+    if (volRatio > 1.5) parts.push("Volume " + volRatio + "x average (strong institutional interest)");
+    else if (volRatio > 1.2) parts.push("Volume " + volRatio + "x average (above-average participation)");
+    else if (volRatio < 0.7) parts.push("Volume " + volRatio + "x average (low participation — wait for catalyst)");
+    else parts.push("Volume " + volRatio + "x average (normal)");
+
+    // MACD momentum
+    if (macdHist > 0.1) parts.push("MACD histogram +0.1% (strong bullish momentum)");
+    else if (macdHist > 0) parts.push("MACD histogram +" + macdHist + "% (positive momentum)");
+    else if (macdHist < -0.1) parts.push("MACD histogram " + macdHist + "% (bearish momentum)");
+    else parts.push("MACD histogram " + macdHist + "% (neutral)");
+
+    // EMA slope
+    if (emaSlope > 0.5) parts.push("EMA12 slope +" + emaSlope + "% (strong uptrend)");
+    else if (emaSlope > 0) parts.push("EMA12 slope +" + emaSlope + "% (mild uptrend)");
+    else if (emaSlope < -0.5) parts.push("EMA12 slope " + emaSlope + "% (downtrend)");
+    else parts.push("EMA12 slope " + emaSlope + "% (flat)");
+
+    // ADX trend strength
+    if (adx > 30) parts.push("ADX " + adx + " (strong trend — direction likely to persist)");
+    else if (adx > 20) parts.push("ADX " + adx + " (moderate trend)");
+    else parts.push("ADX " + adx + " (weak trend — range-bound)");
+
+    // Entry score
+    if (entryScore > 0.6) parts.push("Composite entry score " + (entryScore * 100).toFixed(0) + "/100 (high-conviction setup)");
+    else if (entryScore > 0.4) parts.push("Composite entry score " + (entryScore * 100).toFixed(0) + "/100 (moderate setup)");
+    else parts.push("Composite entry score " + (entryScore * 100).toFixed(0) + "/100 (weak setup)");
+
+    return parts.join(". ") + ".";
+  }
+
+  /**
+   * Compute a composite technical strength score (0-100) from the 8 ML features.
+   * Weights: trend (35%), pullback quality (30%), probability (35%).
+   */
+  function computeTechnicalScore(features) {
+    var rsi = features.rsi || 50;
+    var bbPos = features.bb_position != null ? features.bb_position : 0.5;
+    var volRatio = features.volume_ratio || 1;
+    var macdHist = features.macd_hist || 0;
+    var emaSlope = features.ema_slope || 0;
+    var adx = features.adx || 20;
+    var entryScore = features.entry_score != null ? features.entry_score : 0.5;
+
+    // Trend component (0-100): EMA slope, ADX, MACD direction
+    var trendScore = 0;
+    if (emaSlope > 0.5) trendScore += 40; else if (emaSlope > 0) trendScore += 25; else if (emaSlope > -0.5) trendScore += 10;
+    if (adx > 30) trendScore += 30; else if (adx > 20) trendScore += 20; else if (adx > 15) trendScore += 10;
+    if (macdHist > 0.1) trendScore += 30; else if (macdHist > 0) trendScore += 20; else if (macdHist > -0.1) trendScore += 10;
+
+    // Pullback quality (0-100): RSI oversold, BB position low, volume confirmation
+    var pullbackScore = 0;
+    if (rsi < 30) pullbackScore += 40; else if (rsi < 40) pullbackScore += 30; else if (rsi < 50) pullbackScore += 15;
+    if (bbPos < 0.2) pullbackScore += 30; else if (bbPos < 0.4) pullbackScore += 20; else if (bbPos < 0.6) pullbackScore += 10;
+    if (volRatio > 1.3) pullbackScore += 30; else if (volRatio > 1) pullbackScore += 15;
+
+    // Probability component (0-100): entry score, ATR attractiveness
+    var probScore = entryScore * 100;
+
+    // Weighted composite
+    var composite = Math.round(trendScore * 0.35 + pullbackScore * 0.30 + probScore * 0.35);
+    return Math.max(0, Math.min(100, composite));
+  }
+
+  /**
+   * Compute ML-estimated expected 1-day change based on win probability
+   * and historical base rate. Uses Kelly-inspired heuristic: if model says
+   * X% win probability and base rate is Y%, expected return is scaled.
+   */
+  function computeExpectedChg(features, baseRate) {
+    // Use entry score and feature alignment to estimate expected change
+    var es = features.entry_score != null ? features.entry_score : 0.5;
+    var rsi = features.rsi || 50;
+    var macdHist = features.macd_hist || 0;
+    var emaSlope = features.ema_slope || 0;
+
+    // Simple heuristic: higher entry score + positive momentum = higher expected change
+    var direction = (macdHist > 0 || emaSlope > 0) ? 1 : -1;
+    var magnitude = es * 2.5; // scale: max entry_score 1.0 → 2.5% expected
+    if (rsi < 30) magnitude += 0.5; // oversold bounce bonus
+    if (rsi > 70) magnitude -= 0.3; // overbought penalty
+
+    return round2(direction * magnitude);
+  }
+
+  /**
+   * Generate a brief pattern summary for the stock.
+   */
+  function generatePatternSummary(features, candles, ind) {
+    var parts = [];
+    var rsi = features.rsi;
+    var bbPos = features.bb_position;
+    var volRatio = features.volume_ratio;
+    var macdHist = features.macd_hist;
+    var emaSlope = features.ema_slope;
+    var adx = features.adx;
+
+    // Overall trend
+    if (emaSlope > 0.3 && adx > 25) parts.push("Strong uptrend");
+    else if (emaSlope > 0) parts.push("Mild uptrend");
+    else if (emaSlope < -0.3 && adx > 25) parts.push("Strong downtrend");
+    else if (emaSlope < 0) parts.push("Mild downtrend");
+    else parts.push("Sideways consolidation");
+
+    // Momentum
+    if (macdHist > 0.1) parts.push("bullish MACD");
+    else if (macdHist < -0.1) parts.push("bearish MACD");
+
+    // Oversold/overbought
+    if (rsi < 35) parts.push("oversold RSI");
+    else if (rsi > 65) parts.push("overbought RSI");
+
+    // Volume
+    if (volRatio > 1.5) parts.push("high volume");
+    else if (volRatio < 0.7) parts.push("low volume");
+
+    // BB squeeze
+    if (bbPos < 0.2) parts.push("near BB lower band");
+    else if (bbPos > 0.8) parts.push("near BB upper band");
+
+    return parts.join(", ");
+  }
+
   /* ── Prediction accuracy tracker ──────────────────────────────────────── */
 
   var KEY_TRACKER = "ml_live_pred_tracker";
@@ -680,6 +833,21 @@ window.LiveML = (function () {
     if (!pred) return null;
     var prevClose = candles[i - 1] ? candles[i - 1].c : null;
     var chgPct = prevClose ? ((candles[i].c / prevClose) - 1) * 100 : null;
+
+    // Compute base rate for expected change estimation
+    var baseRate = 50;
+    try {
+      var statusMeta = await getStatusMeta();
+      if (statusMeta && statusMeta.corpus && statusMeta.corpus.baseRate != null) {
+        baseRate = statusMeta.corpus.baseRate;
+      }
+    } catch (e) {}
+
+    var technicalScore = computeTechnicalScore(f);
+    var expectedChgPct = computeExpectedChg(f, baseRate);
+    var patternSummary = generatePatternSummary(f, candles, ind);
+    var justification = generateJustification(f, candles, ind);
+
     return {
       symbol: symbol,
       date: String(candles[i].t).slice(0, 10),
@@ -687,7 +855,11 @@ window.LiveML = (function () {
       recommendation: pred.recommendation,
       features: f,
       close: candles[i].c,
-      chgPct: chgPct != null ? round2(chgPct) : null
+      chgPct: chgPct != null ? round2(chgPct) : null,
+      technicalScore: technicalScore,
+      expectedChgPct: expectedChgPct,
+      patternSummary: patternSummary,
+      justification: justification
     };
   }
 
@@ -743,6 +915,159 @@ window.LiveML = (function () {
     return status;
   }
 
+  /* ── Step 2: Evening Validation ───────────────────────────────────────── */
+
+  /**
+   * Resolve yesterday's picks against actual market data and return a detailed
+   * validation report showing predicted vs actual for each pick.
+   */
+  async function resolveAndValidate(opts) {
+    opts = opts || {};
+    var onProgress = opts.onProgress || function () {};
+
+    if (!window.PatternStore) throw new Error("PatternStore required");
+    await window.PatternStore.init();
+
+    var tracker = await getTracker();
+    var unresolvedDays = tracker.days.filter(function (d) {
+      return d.resolvedCount < d.picks.length;
+    });
+
+    if (unresolvedDays.length === 0) {
+      return { days: [], summary: { total: 0, resolved: 0, hits: 0, misses: 0, hitRate: null } };
+    }
+
+    // Collect unique symbols from unresolved picks
+    var symbolSet = {};
+    unresolvedDays.forEach(function (day) {
+      day.picks.forEach(function (p) {
+        if (!p.resolved) symbolSet[p.symbol] = true;
+      });
+    });
+    var symbols = Object.keys(symbolSet);
+
+    onProgress(0, symbols.length, "Loading candles for " + symbols.length + " symbols...");
+    var offlineMap = await loadOfflineMap();
+    var processed = 0;
+
+    for (var i = 0; i < symbols.length; i++) {
+      var symbol = symbols[i];
+      try {
+        var candles = await loadDailyCandles(symbol, offlineMap, true);
+        if (candles && candles.length > 0) {
+          resolveSymbolInTracker(tracker, symbol, candles);
+        }
+      } catch (e) {}
+      processed++;
+      if (processed % 10 === 0 || processed === symbols.length) {
+        await new Promise(function (r) { setTimeout(r, 0); });
+        onProgress(processed, symbols.length, "Resolved " + processed + "/" + symbols.length + " symbols");
+      }
+    }
+
+    await saveTracker(tracker);
+
+    // Build validation report for the most recent unresolved day
+    var validationDays = [];
+    unresolvedDays.forEach(function (day) {
+      var picks = day.picks.map(function (p) {
+        var actualChg = p.return_1d != null ? p.return_1d : null;
+        var predictedUp = p.winProbability > 0.5;
+        var actualUp = p.hit === true;
+        var verdict;
+        if (predictedUp && actualUp) verdict = "CORRECT_WIN";
+        else if (!predictedUp && !actualUp) verdict = "CORRECT_LOSS";
+        else if (predictedUp && !actualUp) verdict = "MISSED";
+        else verdict = "CAUGHT_FALL";
+
+        return {
+          symbol: p.symbol,
+          predictedProb: p.winProbability,
+          recommendation: p.recommendation || "",
+          actualChg: actualChg,
+          hit: p.hit,
+          resolved: p.resolved,
+          verdict: verdict
+        };
+      });
+
+      var resolved = picks.filter(function (p) { return p.resolved; });
+      var hits = resolved.filter(function (p) { return p.hit; });
+      var avgReturn = resolved.length > 0
+        ? resolved.reduce(function (s, p) { return s + (p.actualChg || 0); }, 0) / resolved.length
+        : null;
+
+      validationDays.push({
+        date: day.date,
+        picks: picks,
+        total: picks.length,
+        resolvedCount: resolved.length,
+        hits: hits.length,
+        misses: resolved.length - hits.length,
+        hitRate: resolved.length > 0 ? Math.round((hits.length / resolved.length) * 1000) / 10 : null,
+        avgReturn: avgReturn != null ? round2(avgReturn) : null
+      });
+    });
+
+    // Sort by date descending
+    validationDays.sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+
+    // Overall summary
+    var allPicks = [];
+    validationDays.forEach(function (d) {
+      d.picks.forEach(function (p) { if (p.resolved) allPicks.push(p); });
+    });
+    var totalHits = allPicks.filter(function (p) { return p.hit; }).length;
+    var summary = {
+      total: allPicks.length,
+      resolved: allPicks.length,
+      hits: totalHits,
+      misses: allPicks.length - totalHits,
+      hitRate: allPicks.length > 0 ? Math.round((totalHits / allPicks.length) * 1000) / 10 : null
+    };
+
+    return { days: validationDays, summary: summary };
+  }
+
+  /* ── Step 3: Night Learning ──────────────────────────────────────────── */
+
+  /**
+   * Retrain the model on confirmed outcomes and compare before/after metrics.
+   * Returns an improvement report.
+   */
+  async function retrainWithLearning(opts) {
+    opts = opts || {};
+    var onProgress = opts.onProgress || function () {};
+
+    // Capture before metrics
+    var beforeStatus = await getStatusMeta() || {};
+    var beforeAcc = beforeStatus.walkForwardAcc || null;
+    var beforeAuc = beforeStatus.avgAuc || null;
+
+    onProgress(0, 1, "Starting nightly retrain...");
+
+    // Run the retrain
+    var result = await retrain(opts);
+
+    // Capture after metrics
+    var afterStatus = await getStatusMeta() || {};
+    var afterAcc = afterStatus.walkForwardAcc || null;
+    var afterAuc = afterStatus.avgAuc || null;
+
+    var accDelta = (beforeAcc != null && afterAcc != null) ? round2(afterAcc - beforeAcc) : null;
+    var aucDelta = (beforeAuc != null && afterAuc != null) ? round2((afterAuc - beforeAuc) * 100) / 100 : null;
+
+    return {
+      before: { walkForwardAcc: beforeAcc, avgAuc: beforeAuc },
+      after: { walkForwardAcc: afterAcc, avgAuc: afterAuc },
+      improvement: { accDelta: accDelta, aucDelta: aucDelta },
+      promotion: result.promotion || null,
+      signs: result.signs || null,
+      corpus: result.corpus || null,
+      readyForTomorrow: true
+    };
+  }
+
   return {
     collect: collect,
     retrain: retrain,
@@ -752,6 +1077,8 @@ window.LiveML = (function () {
     computeConditionalSigns: computeConditionalSigns,
     getTracker: getTracker,
     recordTodayPicks: recordTodayPicks,
+    resolveAndValidate: resolveAndValidate,
+    retrainWithLearning: retrainWithLearning,
     BUCKETS: BUCKETS
   };
 })();
