@@ -144,16 +144,15 @@ window.LiveML = (function () {
      writes the appended bars back to the offline IndexedDB record so future
      collects and the rest of the app (charts, screener) see today's bar
      instead of re-fetching the same candles repeatedly. */
-  async function refreshStaleOffline(symbol, candles, offlineMap) {
+  async function refreshStaleOffline(symbol, candles, offlineMap, skipBeforeClose) {
     if (!window.OHLCVFetcher || !window.OHLCVFetcher.fetchOHLCVCached) return candles;
     var rec = offlineLookup(offlineMap, symbol);
     if (!rec) return candles;
     var recDaily = (rec.daily || rec.data) || null;
     var offLast = lastBarDate(recDaily);
     var today = istToday();
-    /* Refresh when: (a) snapshot doesn't have today's bar at all, or
-       (b) snapshot has today's bar but was downloaded before market close
-       (3:30 PM IST) — the close price may be stale. */
+    /* Before market close today's bar doesn't exist yet — nothing to refresh. */
+    if (skipBeforeClose && Date.now() < marketCloseIST()) return candles;
     var needsRefresh = false;
     if (!offLast || offLast < today) {
       needsRefresh = true;
@@ -161,7 +160,7 @@ window.LiveML = (function () {
       needsRefresh = rec.downloadedAt < marketCloseIST();
     }
     if (!needsRefresh) return candles;
-    var liveRes = await withTimeout(window.OHLCVFetcher.fetchOHLCVCached(symbol, "daily"), 15000);
+    var liveRes = await withTimeout(window.OHLCVFetcher.fetchOHLCVCached(symbol, "daily"), 10000);
     var liveC = liveRes && liveRes.data ? liveRes.data : null;
     if (!liveC || liveC.length === 0) return candles;
     var liveNew = liveC.filter(function (x) {
@@ -845,7 +844,7 @@ window.LiveML = (function () {
 
   /* ── Today's signals (latest bar per symbol) ───────────────────────────── */
 
-  async function predictToday(symbol, offlineMap, diagnostics) {
+  async function predictToday(symbol, offlineMap, diagnostics, elapsed) {
     var reject = function (reason) {
       if (diagnostics) diagnostics.rejects[reason] = (diagnostics.rejects[reason] || 0) + 1;
       return null;
@@ -855,7 +854,7 @@ window.LiveML = (function () {
     var fromOffline = !!offlineLookup(offlineMap, symbol);
     if (fromOffline) {
       try {
-        var refreshed = await refreshStaleOffline(symbol, candles, offlineMap);
+        var refreshed = await refreshStaleOffline(symbol, candles, offlineMap, true);
         if (refreshed !== candles) candles = refreshed;
       } catch (_e) {}
     }
@@ -940,18 +939,24 @@ window.LiveML = (function () {
     var out = [];
     var diagnostics = { rejects: {}, scored: 0 };
     var started = Date.now();
+    var lastProgress = 0;
+    var BUDGET_MS = 120000;
     for (var i = 0; i < universe.length; i++) {
       var symbol = universe[i];
-      /* Score the WHOLE universe so the top-N is a true market-wide ranking.
-         If live fallback is burning time, degrade to offline-only symbols. */
-      if (!offlineLookup(offlineMap, symbol) && Date.now() - started > 120000) continue;
+      var elapsed = Date.now() - started;
+      if (elapsed > BUDGET_MS && !offlineLookup(offlineMap, symbol)) continue;
+      if (elapsed > BUDGET_MS * 2) {
+        onProgress(i, universe.length, "Budget exhausted (" + Math.round(elapsed / 1000) + "s), stopping with " + out.length + " signals");
+        break;
+      }
       try {
-        var sig = await predictToday(symbol, offlineMap, diagnostics);
+        var sig = await predictToday(symbol, offlineMap, diagnostics, elapsed);
         if (sig) out.push(sig);
       } catch (e) {}
-      if (i % 25 === 0 || i === universe.length - 1) {
+      if (Date.now() - lastProgress > 2000 || i === universe.length - 1) {
+        lastProgress = Date.now();
         await new Promise(function (r) { setTimeout(r, 0); });
-        onProgress(i + 1, universe.length, "Scored " + (i + 1) + "/" + universe.length + " symbols (" + out.length + " signals)");
+        onProgress(i + 1, universe.length, "Scored " + (i + 1) + "/" + universe.length + " symbols (" + out.length + " signals, " + Math.round((lastProgress - started) / 1000) + "s)");
       }
     }
     if (opts.onDiagnostics) {
