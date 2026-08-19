@@ -668,6 +668,7 @@ window.PatternDashboard = (function () {
       loadMLDriftHistory();
       loadMLPromoHistory();
       loadLiveStatus();
+      loadPersistedScan();
     }, []);
 
     // Load ML model when ML tab is active
@@ -1991,12 +1992,41 @@ window.PatternDashboard = (function () {
 
     /* ── Live Expert Tab ────────────────────────────────────────────────── */
 
+    var _liveLogRef = [];
     function pushLiveLog(msg) {
-      setLiveLog(function (prev) {
-        var n = prev.slice(-50);
-        n.push({ time: new Date().toLocaleTimeString(), msg: msg });
-        return n;
-      });
+      var entry = { time: new Date().toLocaleTimeString(), msg: msg };
+      _liveLogRef = _liveLogRef.concat([entry]).slice(-50);
+      setLiveLog(_liveLogRef.slice());
+    }
+
+    function flushLiveLogLive() {
+      var snapshot = _liveLogRef.slice();
+      if (window.LiveML && window.LiveML.saveLiveLog) {
+        window.LiveML.saveLiveLog(snapshot).catch(function () {});
+      }
+    }
+
+    async function loadPersistedScan() {
+      if (!window.LiveML) return;
+      try {
+        if (window.LiveML.loadMorningScan) {
+          var entry = await window.LiveML.loadMorningScan();
+          if (entry && entry.signals && entry.signals.length) {
+            setLiveSignals(entry.signals);
+            var age = Date.now() - (entry.timestamp || 0);
+            if (age < 12 * 3600 * 1000) setActiveLiveStep(1);
+          }
+        }
+      } catch (e) {}
+      try {
+        if (window.LiveML.loadLiveLog) {
+          var logLines = await window.LiveML.loadLiveLog();
+          if (logLines && logLines.length) {
+            _liveLogRef = logLines;
+            setLiveLog(logLines);
+          }
+        }
+      } catch (e) {}
     }
 
     async function handleTodaySignals() {
@@ -2030,10 +2060,12 @@ window.PatternDashboard = (function () {
           pushLiveLog("Top pick: " + signals[0].symbol + " | Win Prob: " + (signals[0].winProbability * 100).toFixed(1) + "% | Tech Score: " + (signals[0].technicalScore || "N/A") + " | Expected: " + (signals[0].expectedChgPct != null ? (signals[0].expectedChgPct >= 0 ? "+" : "") + signals[0].expectedChgPct + "%" : "N/A") + (signals[0].modelUsed ? " [ML]" : " [Tech]"));
         }
         pushLiveLog("Run Step 2 (Evening Validate) after market close to check predictions.");
+        await window.LiveML.saveMorningScan(signals);
       } catch (err) {
         pushLiveLog("ERROR: " + err.message);
         setError("Today's signals failed: " + err.message);
       } finally {
+        flushLiveLogLive();
         setLiveBusy(false);
       }
     }
@@ -2058,11 +2090,13 @@ window.PatternDashboard = (function () {
         pushLiveLog("Refreshing today's signals for comparison...");
         var signals = await window.LiveML.getTodaySignals({ count: 20, track: false });
         setLiveSignals(signals);
+        if (window.LiveML.saveMorningScan) await window.LiveML.saveMorningScan(signals);
         await loadLiveStatus();
       } catch (err) {
         pushLiveLog("ERROR: " + err.message);
         setError("Evening validation failed: " + err.message);
       } finally {
+        flushLiveLogLive();
         setLiveBusy(false);
       }
     }
@@ -2094,6 +2128,7 @@ window.PatternDashboard = (function () {
         pushLiveLog("ERROR: " + err.message);
         setError("Night learning failed: " + err.message);
       } finally {
+        flushLiveLogLive();
         setLiveBusy(false);
       }
     }
@@ -2555,10 +2590,13 @@ window.PatternDashboard = (function () {
                 React.createElement("tr", null,
                   React.createElement("th", { style: { textAlign: "left", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "#"),
                   React.createElement("th", { style: { textAlign: "left", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Symbol"),
+                  React.createElement("th", { style: { textAlign: "left", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1, fontSize: 10 } }, "Scan Time"),
+                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Live Price"),
+                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Pred Close"),
+                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Exp %"),
                   React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Win Prob"),
-                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Tech Score"),
-                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Exp Chg"),
-                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Prev Chg"),
+                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Tech"),
+                  React.createElement("th", { style: { textAlign: "right", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "1D Chg"),
                   React.createElement("th", { style: { textAlign: "left", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Pattern"),
                   React.createElement("th", { style: { textAlign: "left", padding: "4px 6px", color: "var(--text3)", position: "sticky", top: 0, background: "var(--bg1)", zIndex: 1 } }, "Justification")
                 )
@@ -2569,22 +2607,27 @@ window.PatternDashboard = (function () {
                   var techColor = s.technicalScore >= 70 ? "#16a34a" : s.technicalScore >= 40 ? "#f59e0b" : "#ef4444";
                   var expColor = s.expectedChgPct != null ? (s.expectedChgPct >= 0 ? "#16a34a" : "#ef4444") : "var(--text3)";
                   var chgColor = s.chgPct != null ? (s.chgPct >= 0 ? "#16a34a" : "#ef4444") : "var(--text3)";
+                  var scanTimeStr = s.scanTime ? new Date(s.scanTime).toLocaleTimeString() : (s.date || "\u2014");
+                  var predCloseColor = s.expectedChgPct != null ? (s.expectedChgPct >= 0 ? "#16a34a" : "#ef4444") : "var(--text3)";
                   return React.createElement("tr", { key: s.symbol, style: { borderBottom: "1px solid var(--border)" } },
                     React.createElement("td", { style: { padding: "5px 6px", color: "var(--text3)" } }, idx + 1),
                     React.createElement("td", { style: { padding: "5px 6px", fontWeight: 700 } }, s.symbol),
+                    React.createElement("td", { style: { padding: "5px 6px", fontSize: 10, color: "var(--text3)" } }, scanTimeStr),
+                    React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", fontWeight: 600 } }, s.close != null ? "\u20B9" + s.close.toFixed(2) : "\u2014"),
+                    React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", fontWeight: 700, color: predCloseColor } }, s.predictedClose != null ? "\u20B9" + s.predictedClose.toFixed(2) : "\u2014"),
+                    React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", fontWeight: 600, color: expColor } }, s.expectedChgPct != null ? (s.expectedChgPct >= 0 ? "+" : "") + s.expectedChgPct + "%" : "\u2014"),
                     React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", fontWeight: 700, color: probColor } }, (s.winProbability * 100).toFixed(1) + "%"),
                     React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", fontWeight: 700, color: techColor } }, s.technicalScore != null ? s.technicalScore : "\u2014"),
-                    React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", fontWeight: 600, color: expColor } }, s.expectedChgPct != null ? (s.expectedChgPct >= 0 ? "+" : "") + s.expectedChgPct + "%" : "\u2014"),
-                    React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", color: chgColor } }, s.chgPct != null ? (s.chgPct >= 0 ? "+" : "") + s.chgPct + "%" : "\u2014"),
+                    React.createElement("td", { style: { padding: "5px 6px", textAlign: "right", color: chgColor, fontSize: 10 } }, s.chgPct != null ? (s.chgPct >= 0 ? "+" : "") + s.chgPct + "%" : "\u2014"),
                     React.createElement("td", { style: { padding: "5px 6px", fontSize: 10, color: "var(--text3)", maxWidth: 150 } }, s.patternSummary || "\u2014"),
-                    React.createElement("td", { style: { padding: "5px 6px", fontSize: 10, color: "var(--text3)", maxWidth: 300, lineHeight: 1.4 } }, s.justification || "\u2014")
+                    React.createElement("td", { style: { padding: "5px 6px", fontSize: 10, color: "var(--text3)", maxWidth: 250, lineHeight: 1.4 } }, s.justification || "\u2014")
                   );
                 })
               )
             )
           ),
           React.createElement("p", { style: { fontSize: 11, color: "var(--text3)", marginTop: 6 } },
-            "Top pick: " + liveSignals[0].symbol + " | Win Prob: " + (liveSignals[0].winProbability * 100).toFixed(1) + "% | Tech Score: " + (liveSignals[0].technicalScore || "N/A") + " | Expected: " + (liveSignals[0].expectedChgPct != null ? (liveSignals[0].expectedChgPct >= 0 ? "+" : "") + liveSignals[0].expectedChgPct + "%" : "N/A")
+            "Top pick: " + liveSignals[0].symbol + " | Live: \u20B9" + (liveSignals[0].close != null ? liveSignals[0].close.toFixed(2) : "?") + " | Pred: \u20B9" + (liveSignals[0].predictedClose != null ? liveSignals[0].predictedClose.toFixed(2) : "?") + " | Exp: " + (liveSignals[0].expectedChgPct != null ? (liveSignals[0].expectedChgPct >= 0 ? "+" : "") + liveSignals[0].expectedChgPct + "%" : "N/A")
           )
         ),
 
@@ -2606,9 +2649,12 @@ window.PatternDashboard = (function () {
                 React.createElement("thead", null,
                   React.createElement("tr", null,
                     React.createElement("th", { style: { textAlign: "left", padding: "3px 6px", color: "var(--text3)" } }, "Symbol"),
-                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Predicted"),
-                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Recommendation"),
-                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Actual Chg"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Scan Price"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Pred Close"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Actual Close"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Close Err"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "1D Chg"),
+                    React.createElement("th", { style: { textAlign: "right", padding: "3px 6px", color: "var(--text3)" } }, "Prob"),
                     React.createElement("th", { style: { textAlign: "center", padding: "3px 6px", color: "var(--text3)" } }, "Verdict")
                   )
                 ),
@@ -2616,11 +2662,15 @@ window.PatternDashboard = (function () {
                   day.picks.map(function (p) {
                     var verdictColor = p.verdict === "CORRECT_WIN" ? "#16a34a" : p.verdict === "CORRECT_LOSS" ? "#6b7280" : p.verdict === "MISSED" ? "#ef4444" : "#f59e0b";
                     var verdictBg = p.verdict === "CORRECT_WIN" ? "rgba(22,163,74,.1)" : p.verdict === "MISSED" ? "rgba(239,68,68,.1)" : "transparent";
+                    var errColor = p.closeError != null ? (Math.abs(p.closeError) < 1 ? "#16a34a" : Math.abs(p.closeError) < 3 ? "#f59e0b" : "#ef4444") : "var(--text3)";
                     return React.createElement("tr", { key: p.symbol, style: { background: verdictBg } },
                       React.createElement("td", { style: { padding: "3px 6px", fontWeight: 600 } }, p.symbol),
-                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", color: p.predictedProb > 0.5 ? "#16a34a" : "var(--text3)" } }, (p.predictedProb * 100).toFixed(1) + "%"),
-                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", fontSize: 10 } }, p.recommendation || "\u2014"),
-                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", fontWeight: 600, color: p.actualChg != null ? (p.actualChg >= 0 ? "#16a34a" : "#ef4444") : "var(--text3)" } }, p.actualChg != null ? (p.actualChg >= 0 ? "+" : "") + p.actualChg + "%" : "\u2014"),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right" } }, p.scanPrice != null ? "\u20B9" + p.scanPrice.toFixed(2) : "\u2014"),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", fontWeight: 600, color: "#16a34a" } }, p.predictedClose != null ? "\u20B9" + p.predictedClose.toFixed(2) : "\u2014"),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", fontWeight: 600, color: p.actualClose != null ? "#3b82f6" : "var(--text3)" } }, p.actualClose != null ? "\u20B9" + p.actualClose.toFixed(2) : "\u2014"),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", fontWeight: 600, color: errColor } }, p.closeError != null ? (p.closeError >= 0 ? "+" : "") + p.closeError + "%" : "\u2014"),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", color: p.actualChg != null ? (p.actualChg >= 0 ? "#16a34a" : "#ef4444") : "var(--text3)" } }, p.actualChg != null ? (p.actualChg >= 0 ? "+" : "") + p.actualChg + "%" : "\u2014"),
+                      React.createElement("td", { style: { padding: "3px 6px", textAlign: "right", fontSize: 10 } }, (p.predictedProb * 100).toFixed(1) + "%"),
                       React.createElement("td", { style: { padding: "3px 6px", textAlign: "center", fontWeight: 700, color: verdictColor, fontSize: 10 } }, p.verdict)
                     );
                   })

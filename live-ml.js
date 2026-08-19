@@ -413,6 +413,42 @@ window.LiveML = (function () {
     return parts.join(", ");
   }
 
+  /* ── Morning scan persistence ─────────────────────────────────────────── */
+
+  var KEY_MORNING_SCAN = "ml_live_morning_scan";
+  var KEY_LIVE_LOG = "ml_live_log";
+
+  async function saveMorningScan(signals) {
+    try {
+      var entry = {
+        signals: (signals || []).map(function (s) {
+          return { symbol: s.symbol, date: s.date, scanTime: s.scanTime, winProbability: s.winProbability, recommendation: s.recommendation, modelUsed: s.modelUsed, close: s.close, predictedClose: s.predictedClose, chgPct: s.chgPct, technicalScore: s.technicalScore, expectedChgPct: s.expectedChgPct, patternSummary: s.patternSummary, justification: s.justification, features: s.features };
+        }),
+        timestamp: Date.now()
+      };
+      await window.PatternStore.setMeta(KEY_MORNING_SCAN, entry);
+    } catch (e) {}
+  }
+
+  async function loadMorningScan() {
+    var entry = null;
+    try { entry = await window.PatternStore.getMeta(KEY_MORNING_SCAN); } catch (e) {}
+    return entry || null;
+  }
+
+  async function saveLiveLog(log) {
+    try {
+      var trimmed = (log || []).slice(-100);
+      await window.PatternStore.setMeta(KEY_LIVE_LOG, { lines: trimmed, timestamp: Date.now() });
+    } catch (e) {}
+  }
+
+  async function loadLiveLog() {
+    var entry = null;
+    try { entry = await window.PatternStore.getMeta(KEY_LIVE_LOG); } catch (e) {}
+    return (entry && entry.lines) || [];
+  }
+
   /* ── Prediction accuracy tracker ──────────────────────────────────────── */
 
   var KEY_TRACKER = "ml_live_pred_tracker";
@@ -439,7 +475,7 @@ window.LiveML = (function () {
       var d = s.date || "";
       if (!d) return;
       if (!byDate[d]) byDate[d] = [];
-      byDate[d].push({ symbol: s.symbol, winProbability: s.winProbability, recommendation: s.recommendation || "" });
+      byDate[d].push({ symbol: s.symbol, winProbability: s.winProbability, recommendation: s.recommendation || "", close: s.close || null, predictedClose: s.predictedClose || null });
     });
     var dates = Object.keys(byDate);
     for (var i = 0; i < dates.length; i++) {
@@ -486,6 +522,7 @@ window.LiveML = (function () {
         pick.resolved = true;
         pick.hit = c2 > c1;
         pick.return_1d = round3(((c2 / c1) - 1) * 100);
+        pick.actualClose = c2;
         if (pick.hit) day.hits++; else day.misses++;
         day.resolvedCount++;
       }
@@ -873,14 +910,19 @@ window.LiveML = (function () {
 
     if (diagnostics) diagnostics.scored = (diagnostics.scored || 0) + 1;
 
+    var scanTime = Date.now();
+    var predictedClose = candles[i].c != null && expectedChgPct != null ? round2(candles[i].c * (1 + expectedChgPct / 100)) : null;
+
     return {
       symbol: symbol,
       date: String(candles[i].t).slice(0, 10),
+      scanTime: scanTime,
       winProbability: winProbability,
       recommendation: recommendation,
       modelUsed: modelUsed,
       features: f,
       close: candles[i].c,
+      predictedClose: predictedClose,
       chgPct: chgPct != null ? round2(chgPct) : null,
       technicalScore: technicalScore,
       expectedChgPct: expectedChgPct,
@@ -1010,10 +1052,22 @@ window.LiveML = (function () {
         else if (predictedUp && !actualUp) verdict = "MISSED";
         else verdict = "CAUGHT_FALL";
 
+        var scanPrice = p.close || null;
+        var predictedClose = p.predictedClose || null;
+        var actualClose = p.actualClose || null;
+        var closeError = null;
+        if (predictedClose != null && actualClose != null) {
+          closeError = round2(((actualClose - predictedClose) / predictedClose) * 100);
+        }
+
         return {
           symbol: p.symbol,
           predictedProb: p.winProbability,
           recommendation: p.recommendation || "",
+          scanPrice: scanPrice,
+          predictedClose: predictedClose,
+          actualClose: actualClose,
+          closeError: closeError,
           actualChg: actualChg,
           hit: p.hit,
           resolved: p.resolved,
@@ -1109,6 +1163,10 @@ window.LiveML = (function () {
     recordTodayPicks: recordTodayPicks,
     resolveAndValidate: resolveAndValidate,
     retrainWithLearning: retrainWithLearning,
+    saveMorningScan: saveMorningScan,
+    loadMorningScan: loadMorningScan,
+    saveLiveLog: saveLiveLog,
+    loadLiveLog: loadLiveLog,
     BUCKETS: BUCKETS
   };
 })();
