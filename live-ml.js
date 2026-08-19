@@ -808,33 +808,28 @@ window.LiveML = (function () {
 
   /* ── Today's signals (latest bar per symbol) ───────────────────────────── */
 
-  async function predictToday(symbol, offlineMap) {
-    if (!window.MLTrainer) return null;
-    var model = null;
-    try {
-      await window.PatternStore.init();
-      model = await window.PatternStore.getMeta(MODEL_KEYS.champion);
-    } catch (e) {}
-    if (!model || !model.network || model.network.inputSize !== window.MLTrainer.FEATURE_KEYS.length) return null;
+  async function predictToday(symbol, offlineMap, diagnostics) {
+    var reject = function (reason) {
+      if (diagnostics) diagnostics.rejects[reason] = (diagnostics.rejects[reason] || 0) + 1;
+      return null;
+    };
 
     var candles = await loadDailyCandles(symbol, offlineMap, false);
-    /* Refresh only if offline snapshot is stale (downloaded before market close). */
     var fromOffline = !!offlineLookup(offlineMap, symbol);
     if (fromOffline) {
-      var refreshed = await refreshStaleOffline(symbol, candles, offlineMap);
-      if (refreshed !== candles) candles = refreshed;
+      try {
+        var refreshed = await refreshStaleOffline(symbol, candles, offlineMap);
+        if (refreshed !== candles) candles = refreshed;
+      } catch (_e) {}
     }
-    if (!candles || candles.length < WARMUP + 2) return null;
+    if (!candles || candles.length < WARMUP + 2) return reject("no_candles");
 
     var ind = computeIndicators(candles);
     var i = candles.length - 1;
     var f = featuresAt(i, candles, ind);
-    var pred = window.MLTrainer.predictSync(f, model);
-    if (!pred) return null;
     var prevClose = candles[i - 1] ? candles[i - 1].c : null;
     var chgPct = prevClose ? ((candles[i].c / prevClose) - 1) * 100 : null;
 
-    // Compute base rate for expected change estimation
     var baseRate = 50;
     try {
       var statusMeta = await getStatusMeta();
@@ -848,11 +843,42 @@ window.LiveML = (function () {
     var patternSummary = generatePatternSummary(f, candles, ind);
     var justification = generateJustification(f, candles, ind);
 
+    var winProbability = null;
+    var recommendation = null;
+    var modelUsed = false;
+
+    if (window.MLTrainer) {
+      var model = null;
+      try {
+        if (!model) model = await window.PatternStore.getMeta(MODEL_KEYS.champion);
+        if (!model) model = await window.PatternStore.getMeta(MODEL_KEYS.legacy);
+      } catch (e) {}
+      if (model && model.network && model.network.inputSize === window.MLTrainer.FEATURE_KEYS.length) {
+        var pred = window.MLTrainer.predictSync(f, model);
+        if (pred) {
+          winProbability = pred.winProbability;
+          recommendation = pred.recommendation;
+          modelUsed = true;
+        }
+      }
+    }
+
+    if (winProbability == null) {
+      winProbability = Math.round(Math.max(0.10, Math.min(0.90, technicalScore / 100)) * 1000) / 1000;
+      recommendation = technicalScore >= 70 ? "STRONG_BUY" :
+                        technicalScore >= 55 ? "BUY" :
+                        technicalScore >= 40 ? "WATCHLIST" :
+                        technicalScore >= 25 ? "NEUTRAL" : "AVOID";
+    }
+
+    if (diagnostics) diagnostics.scored = (diagnostics.scored || 0) + 1;
+
     return {
       symbol: symbol,
       date: String(candles[i].t).slice(0, 10),
-      winProbability: pred.winProbability,
-      recommendation: pred.recommendation,
+      winProbability: winProbability,
+      recommendation: recommendation,
+      modelUsed: modelUsed,
       features: f,
       close: candles[i].c,
       chgPct: chgPct != null ? round2(chgPct) : null,
@@ -870,6 +896,7 @@ window.LiveML = (function () {
     var onProgress = opts.onProgress || function () {};
     var offlineMap = await loadOfflineMap();
     var out = [];
+    var diagnostics = { rejects: {}, scored: 0 };
     var started = Date.now();
     for (var i = 0; i < universe.length; i++) {
       var symbol = universe[i];
@@ -877,13 +904,16 @@ window.LiveML = (function () {
          If live fallback is burning time, degrade to offline-only symbols. */
       if (!offlineLookup(offlineMap, symbol) && Date.now() - started > 120000) continue;
       try {
-        var sig = await predictToday(symbol, offlineMap);
+        var sig = await predictToday(symbol, offlineMap, diagnostics);
         if (sig) out.push(sig);
       } catch (e) {}
       if (i % 25 === 0 || i === universe.length - 1) {
         await new Promise(function (r) { setTimeout(r, 0); });
         onProgress(i + 1, universe.length, "Scored " + (i + 1) + "/" + universe.length + " symbols (" + out.length + " signals)");
       }
+    }
+    if (opts.onDiagnostics) {
+      opts.onDiagnostics(diagnostics);
     }
     out.sort(function (a, b) {
       if (b.winProbability !== a.winProbability) return b.winProbability - a.winProbability;

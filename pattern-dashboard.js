@@ -2009,15 +2009,25 @@ window.PatternDashboard = (function () {
       pushLiveLog("=== STEP 1: Morning Scan ===");
       pushLiveLog("Scoring today's setup for the universe (latest bar)...");
       try {
+        var diagLog = null;
         var signals = await window.LiveML.getTodaySignals({
           count: 20,
-          onProgress: function (current, total, msg) { pushLiveLog("[" + Math.round((total > 0 ? current / total * 100 : 0)) + "%] " + (msg || "Scoring " + current + "/" + total + "...")); }
+          onProgress: function (current, total, msg) { pushLiveLog("[" + Math.round((total > 0 ? current / total * 100 : 0)) + "%] " + (msg || "Scoring " + current + "/" + total + "...")); },
+          onDiagnostics: function (d) { diagLog = d; }
         });
         setLiveSignals(signals);
         await loadLiveStatus();
+        if (diagLog) {
+          var rejectKeys = Object.keys(diagLog.rejects || {});
+          if (rejectKeys.length > 0) {
+            var parts = rejectKeys.map(function (k) { return k + ": " + diagLog.rejects[k]; });
+            pushLiveLog("Rejects: " + parts.join(", "));
+          }
+          pushLiveLog("Scored: " + (diagLog.scored || 0) + " / " + (diagLog.scored || 0) + (diagLog.scored > 0 ? " (model-based: " + signals.filter(function (s) { return s.modelUsed; }).length + ")" : ""));
+        }
         pushLiveLog("STEP 1 COMPLETE: " + signals.length + " signals scored");
         if (signals.length > 0) {
-          pushLiveLog("Top pick: " + signals[0].symbol + " | Win Prob: " + (signals[0].winProbability * 100).toFixed(1) + "% | Tech Score: " + (signals[0].technicalScore || "N/A") + " | Expected: " + (signals[0].expectedChgPct != null ? (signals[0].expectedChgPct >= 0 ? "+" : "") + signals[0].expectedChgPct + "%" : "N/A"));
+          pushLiveLog("Top pick: " + signals[0].symbol + " | Win Prob: " + (signals[0].winProbability * 100).toFixed(1) + "% | Tech Score: " + (signals[0].technicalScore || "N/A") + " | Expected: " + (signals[0].expectedChgPct != null ? (signals[0].expectedChgPct >= 0 ? "+" : "") + signals[0].expectedChgPct + "%" : "N/A") + (signals[0].modelUsed ? " [ML]" : " [Tech]"));
         }
         pushLiveLog("Run Step 2 (Evening Validate) after market close to check predictions.");
       } catch (err) {
