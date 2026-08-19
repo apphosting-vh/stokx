@@ -92,7 +92,7 @@ window.LiveML = (function () {
     if (liveFirst && window.OHLCVFetcher && window.OHLCVFetcher.fetchOHLCVCached) {
       /* Live first — try Yahoo, fall back to offline if it fails or is too short. */
       try {
-        var r = await withTimeout(window.OHLCVFetcher.fetchOHLCVCached(symbol + ".NS", "daily"), 15000);
+        var r = await withTimeout(window.OHLCVFetcher.fetchOHLCVCached(symbol + ".NS", "daily"), 10000);
         var c = r && r.data ? r.data : (Array.isArray(r) ? r : null);
         if (c && c.length >= WARMUP + 5) return c;
       } catch (e) {}
@@ -105,7 +105,7 @@ window.LiveML = (function () {
     if (offlineDaily && offlineDaily.length >= WARMUP + 5) return offlineDaily;
     if (window.OHLCVFetcher && window.OHLCVFetcher.fetchOHLCVCached) {
       try {
-        var r2 = await withTimeout(window.OHLCVFetcher.fetchOHLCVCached(symbol + ".NS", "daily"), 15000);
+        var r2 = await withTimeout(window.OHLCVFetcher.fetchOHLCVCached(symbol + ".NS", "daily"), 10000);
         var c2 = r2 && r2.data ? r2.data : (Array.isArray(r2) ? r2 : null);
         if (c2 && c2.length >= WARMUP + 5) return c2;
       } catch (e) {}
@@ -844,7 +844,7 @@ window.LiveML = (function () {
 
   /* ── Today's signals (latest bar per symbol) ───────────────────────────── */
 
-  async function predictToday(symbol, offlineMap, diagnostics, elapsed) {
+  async function predictToday(symbol, offlineMap, diagnostics) {
     var reject = function (reason) {
       if (diagnostics) diagnostics.rejects[reason] = (diagnostics.rejects[reason] || 0) + 1;
       return null;
@@ -950,7 +950,7 @@ window.LiveML = (function () {
         break;
       }
       try {
-        var sig = await predictToday(symbol, offlineMap, diagnostics, elapsed);
+        var sig = await predictToday(symbol, offlineMap, diagnostics);
         if (sig) out.push(sig);
       } catch (e) {}
       if (Date.now() - lastProgress > 2000 || i === universe.length - 1) {
