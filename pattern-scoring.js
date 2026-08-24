@@ -499,16 +499,12 @@ window.PatternScoring = (function () {
 
       var adjustedScore = clamp(round2(patternScore * patternWeight + mlScore * mlWeight), 0, 100);
 
-      // Re-classify
+      // Re-classify using the user's configured thresholds (Score Configuration).
+      // The ML recommendation must NOT override classification with hardcoded
+      // cutoffs — it already influences classification via the score blend.
       var adjustedClassification = scoreResult.classification;
       if (window.BacktestEngine && window.BacktestEngine.classifyScore) {
         adjustedClassification = window.BacktestEngine.classifyScore(adjustedScore);
-      }
-      // Also consider ML recommendation
-      if (prediction.recommendation === "STRONG_BUY" && adjustedScore >= 60) {
-        adjustedClassification = "STRONG_BUY";
-      } else if (prediction.recommendation === "AVOID" && adjustedScore < 40) {
-        adjustedClassification = "AVOID";
       }
 
       return {

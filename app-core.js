@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.3.5";
+window.__STOX_APP_VERSION = "4.3.6";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -8570,6 +8570,23 @@ var SCREENER_DECISION_MAP = {
   AVOID:       { label: 'AVOID',       color: '#ef4444' },
 };
 
+/* Re-derives the decision badge from a numeric score against CURRENT Score
+   Configuration thresholds. Stored scan results keep their old labels from
+   scan time, so without this, threshold edits appear to have no effect. */
+function relabelDecision(score, storedDecision) {
+  if (score == null) return storedDecision;
+  try {
+    var TI = window.TechIndicators;
+    var c = (TI && TI.getScoreConfig ? TI.getScoreConfig().classification : null) || {};
+    var sb = c.strongBuy != null ? c.strongBuy : 80;
+    var b = c.buy != null ? c.buy : 65;
+    var wl = c.watchlist != null ? c.watchlist : 50;
+    var n = c.neutral != null ? c.neutral : 35;
+    var cls = score >= sb ? "STRONG_BUY" : score >= b ? "BUY" : score >= wl ? "WATCHLIST" : score >= n ? "NEUTRAL" : "AVOID";
+    return SCREENER_DECISION_MAP[cls] || storedDecision || { label: cls, color: "var(--text6)" };
+  } catch (e) { return storedDecision; }
+}
+
 /* Wraps the new computeMultiTFEntryScore + per-timeframe computeEntryScore
    into the old result shape { finalScore, decision, baseScore, penalties, bonuses, weekly, daily, hourly } */
 function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles, indexCandles, indexWeeklyCandles) {
@@ -9600,7 +9617,7 @@ function StockScreener(props) {
           ),
           React.createElement("tbody", null,
             filtered.map(function(r) {
-              var d = r.result.decision;
+              var d = relabelDecision(r.result.finalScore, r.result.decision);
               return React.createElement("tr", { key: r.s.t, style: { background: selected[r.s.t] ? "var(--accentbg)" : "var(--bg3)", transition: "background .15s" } },
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
                   React.createElement("input", { type: "checkbox", checked: !!selected[r.s.t], onChange: function() { toggleSelect(r.s.t); }, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
@@ -9769,7 +9786,7 @@ function ScreenerSnapshots(props) {
         ),
         React.createElement("tbody", null,
           results.map(function(r) {
-            var d = r.result.decision;
+            var d = relabelDecision(r.result.finalScore, r.result.decision);
             return React.createElement("tr", { key: r.s.t },
               React.createElement("td", { style: Object.assign({}, snapTdStyle, { fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" }) }, r.s.t.replace(".NS", "")),
               React.createElement("td", { style: Object.assign({}, snapTdStyle, { color: "var(--text4)", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }) }, r.s.n),

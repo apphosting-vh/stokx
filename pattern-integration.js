@@ -290,14 +290,9 @@
     if (window.BacktestEngine && window.BacktestEngine.classifyScore) {
       classification = window.BacktestEngine.classifyScore(adjustedScore);
     }
-    // ML recommendation can override classification at extremes
-    if (mlPrediction) {
-      if (mlPrediction.recommendation === "STRONG_BUY" && adjustedScore >= 60) {
-        classification = "STRONG_BUY";
-      } else if (mlPrediction.recommendation === "AVOID" && adjustedScore < 40) {
-        classification = "AVOID";
-      }
-    }
+    /* Classification always follows the user's configured thresholds.
+       (The old hardcoded "ML rec STRONG_BUY + score>=60 → STRONG_BUY" override
+       bypassed Score Configuration and was removed.) */
 
     var SCREENER_DECISION_MAP = {
       STRONG_BUY: { label: "STRONG BUY", color: "#16a34a" },
