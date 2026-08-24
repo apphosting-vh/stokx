@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.3.2";
+window.__STOX_APP_VERSION = "4.3.3";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -9030,65 +9030,107 @@ function StockScreener(props) {
     bg.done = 0;
     bg.total = batch.length;
     bg.current = "";
+    bg.index = 0;
+    bg.batch = batch;
+    bg.finished = false;
     setBgRefreshing(true);
     setBgProgress({ done: 0, total: batch.length, current: "" });
     setSelected({});
     var indexDaily = null, indexWeekly = null;
     try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {}
     try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); indexWeekly = (_idxR2 && _idxR2.data) || null; } catch(e) {}
-    for (var i = 0; i < batch.length; i++) {
-      if (!bg.active) break;
-      var stk = batch[i].s;
-      var tk = stk.t.replace(".NS", "");
-      bg.current = tk;
-      window.dispatchEvent(new CustomEvent("stox:screener-bg-progress", { detail: { done: i, total: batch.length, current: tk, active: true } }));
-      try {
-        var [resW, resD, resH] = await Promise.all([
-          DF.fetchOHLCVCached(tk, "weekly"),
-          DF.fetchOHLCVCached(tk, "daily"),
-          DF.fetchOHLCVCached(tk, "1h")
-        ]);
-        if (resW.data && resW.data.length >= 12 && resD.data && resD.data.length >= 12) {
-          var livePriceRes = await fetchTickerPrice(tk);
-          var dc = resD.data;
-          var _dc_d = dc[dc.length - 1].t, _dc_n = new Date(Date.now() + 19800000).toISOString().split("T")[0], _dc_skip = _dc_d && _dc_d.length >= 10 && _dc_d.substring(0, 10) === _dc_n && dc.length >= 2 ? 1 : 0;
-          var _yi = dc.length - 1 - _dc_skip;
-          var lastDailyClose = dc[_yi].c;
-          var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
-          var lc = quotePrice != null ? quotePrice : lastDailyClose;
-          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
-           try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch(_e) {}
-           var conf10d = null, conf10dLog = null, conf10dEmp = null;
-           try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
-           var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
-           var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
-           var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
-           var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
-           var c252d = _yi - 252 >= 0 ? dc[_yi - 252].c : null;
-           var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
-           var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
-           var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
-           var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
-           var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
-           var _patMeta = buildPatMeta(result);
-           var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
-           if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta };
-          bg.timestamps[stk.t] = Date.now();
-        }
-      } catch(e) {}
-      bg.done = i + 1;
-      try { await dbSetSetting("stox_screener_data", { results: bg.results, timestamps: bg.timestamps, scanTime: scanTime }); } catch(e) {}
-      try { if (window.__fsa && window.__fsa.writeNow) await window.__fsa.writeNow(); } catch(e) {}
-      window.dispatchEvent(new CustomEvent("stox:screener-bg-progress", { detail: { done: i + 1, total: batch.length, current: tk, results: bg.results, timestamps: bg.timestamps, active: i + 1 < batch.length } }));
-    }
-    bg.active = false;
-    bg.current = "";
-    setBgRefreshing(false);
-    try { await dbSetSetting("stox_screener_data", { results: bg.results, timestamps: bg.timestamps, scanTime: scanTime }); } catch(e) {}
-    try { if (window.__fsa && window.__fsa.writeNow) await window.__fsa.writeNow(); } catch(e) {}
-    window.dispatchEvent(new CustomEvent("stox:data-changed"));
-    showToast("Background refresh complete: " + batch.length + " stock" + (batch.length !== 1 ? "s" : "") + " updated", 3000);
+    bg.indexDaily = indexDaily;
+    bg.indexWeekly = indexWeekly;
+    bg.tickOne();
   };
+
+  function bgTickOne() {
+    var bg = window.__stoxScreenerBg;
+    if (!bg || !bg.active) return;
+    var i = bg.index;
+    if (i >= bg.batch.length) {
+      bg.active = false;
+      bg.finished = true;
+      bg.current = "";
+      setBgRefreshing(false);
+      try { dbSetSetting("stox_screener_data", { results: bg.results, timestamps: bg.timestamps, scanTime: scanTime }); } catch(e) {}
+      try { if (window.__fsa && window.__fsa.writeNow) window.__fsa.writeNow(); } catch(e) {}
+      window.dispatchEvent(new CustomEvent("stox:data-changed"));
+      window.dispatchEvent(new CustomEvent("stox:screener-bg-progress", { detail: { done: bg.done, total: bg.total, current: "", results: bg.results, timestamps: bg.timestamps, active: false } }));
+      showToast("Background refresh complete: " + bg.batch.length + " stock" + (bg.batch.length !== 1 ? "s" : "") + " updated", 3000);
+      return;
+    }
+    var stk = bg.batch[i].s;
+    var tk = stk.t.replace(".NS", "");
+    bg.current = tk;
+    window.dispatchEvent(new CustomEvent("stox:screener-bg-progress", { detail: { done: i, total: bg.batch.length, current: tk, active: true } }));
+    var indexDaily = bg.indexDaily, indexWeekly = bg.indexWeekly;
+    Promise.all([
+      DF.fetchOHLCVCached(tk, "weekly"),
+      DF.fetchOHLCVCached(tk, "daily"),
+      DF.fetchOHLCVCached(tk, "1h")
+    ]).then(function(arr) {
+      var resW = arr[0], resD = arr[1], resH = arr[2];
+      if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) {
+        bg.index++;
+        return null;
+      }
+      return fetchTickerPrice(tk).then(function(livePriceRes) {
+        var dc = resD.data;
+        var _dc_d = dc[dc.length - 1].t, _dc_n = new Date(Date.now() + 19800000).toISOString().split("T")[0], _dc_skip = _dc_d && _dc_d.length >= 10 && _dc_d.substring(0, 10) === _dc_n && dc.length >= 2 ? 1 : 0;
+        var _yi = dc.length - 1 - _dc_skip;
+        var lastDailyClose = dc[_yi].c;
+        var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
+        var lc = quotePrice != null ? quotePrice : lastDailyClose;
+        var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
+        try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch(_e) {}
+        var conf10d = null, conf10dLog = null, conf10dEmp = null;
+        try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
+        var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
+        var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
+        var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
+        var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
+        var c252d = _yi - 252 >= 0 ? dc[_yi - 252].c : null;
+        var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
+        var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
+        var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
+        var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
+        var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
+        var _patMeta = buildPatMeta(result);
+        var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
+        if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta };
+        bg.timestamps[stk.t] = Date.now();
+        return null;
+      });
+    }).catch(function() {}).then(function() {
+      if (!bg.active) return;
+      bg.index++;
+      bg.done = bg.index;
+      try { dbSetSetting("stox_screener_data", { results: bg.results, timestamps: bg.timestamps, scanTime: scanTime }); } catch(e) {}
+      window.dispatchEvent(new CustomEvent("stox:screener-bg-progress", { detail: { done: bg.done, total: bg.batch.length, current: bg.current, results: bg.results, timestamps: bg.timestamps, active: bg.index < bg.batch.length } }));
+      bg.scheduleNext();
+    });
+  }
+
+  function bgScheduleNext() {
+    var bg = window.__stoxScreenerBg;
+    if (!bg || !bg.active) return;
+    bg._timer = setTimeout(bgTickOne, 50);
+  }
+
+  if (!window.__stoxScreenerBg || !window.__stoxScreenerBg._bound) {
+    var bg = window.__stoxScreenerBg = window.__stoxScreenerBg || {};
+    bg.tickOne = bgTickOne;
+    bg.scheduleNext = bgScheduleNext;
+    bg._bound = true;
+    document.addEventListener("visibilitychange", function() {
+      var bg2 = window.__stoxScreenerBg;
+      if (!bg2 || !bg2.active) return;
+      if (!document.hidden && !bg2._timer) {
+        bg2.scheduleNext();
+      }
+    });
+  }
 
   var toggleSelect = function(ticker) {
     setSelected(function(p) { var c = Object.assign({}, p); c[ticker] = !c[ticker]; return c; });
@@ -9240,39 +9282,40 @@ function StockScreener(props) {
     try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); indexWeekly = (_idxR2 && _idxR2.data) || null; } catch(e) {}
     for (var i = 0; i < stocks.length; i += BATCH) {
       var batch = stocks.slice(i, i + BATCH);
-      var promises = batch.map(async function(s) {
-        try {
-          var tk = s.t.replace(".NS", "");
-          var [resW, resD, resH] = await Promise.all([
-            DF.fetchOHLCVCached(tk, "weekly"),
-            DF.fetchOHLCVCached(tk, "daily"),
-            DF.fetchOHLCVCached(tk, "1h")
-          ]);
+      var promises = batch.map(function(s) {
+        var tk = s.t.replace(".NS", "");
+        return Promise.all([
+          DF.fetchOHLCVCached(tk, "weekly"),
+          DF.fetchOHLCVCached(tk, "daily"),
+          DF.fetchOHLCVCached(tk, "1h")
+        ]).then(function(arr) {
+          var resW = arr[0], resD = arr[1], resH = arr[2];
           if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) return null;
-          var livePriceRes = await fetchTickerPrice(tk);
-          var dc = resD.data;
-          var _dc_d = dc[dc.length - 1].t, _dc_n = new Date(Date.now() + 19800000).toISOString().split("T")[0], _dc_skip = _dc_d && _dc_d.length >= 10 && _dc_d.substring(0, 10) === _dc_n && dc.length >= 2 ? 1 : 0;
-          var _yi = dc.length - 1 - _dc_skip;
-          var lastDailyClose = dc[_yi].c;
-          var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
-          var lc = quotePrice != null ? quotePrice : lastDailyClose;
-          var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
-          try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch(_e) {}
-          var conf10d = null, conf10dLog = null, conf10dEmp = null;
-          try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
-          var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
-          var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
-          var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
-          var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
-          var c252d = _yi - 252 >= 0 ? dc[_yi - 252].c : null;
-          var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
-          var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
-          var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
-          var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
-          var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
-          var _patMeta = buildPatMeta(result);
-          return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta };
-        } catch(e) { return null; }
+          return fetchTickerPrice(tk).then(function(livePriceRes) {
+            var dc = resD.data;
+            var _dc_d = dc[dc.length - 1].t, _dc_n = new Date(Date.now() + 19800000).toISOString().split("T")[0], _dc_skip = _dc_d && _dc_d.length >= 10 && _dc_d.substring(0, 10) === _dc_n && dc.length >= 2 ? 1 : 0;
+            var _yi = dc.length - 1 - _dc_skip;
+            var lastDailyClose = dc[_yi].c;
+            var quotePrice = livePriceRes && livePriceRes.price != null ? livePriceRes.price : null;
+            var lc = quotePrice != null ? quotePrice : lastDailyClose;
+            var result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, indexDaily, indexWeekly, tk);
+            try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch(_e) {}
+            var conf10d = null, conf10dLog = null, conf10dEmp = null;
+            try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
+            var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
+            var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
+            var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
+            var c21d = _yi - 21 >= 0 ? dc[_yi - 21].c : null;
+            var c252d = _yi - 252 >= 0 ? dc[_yi - 252].c : null;
+            var todayChg = quotePrice != null && lc > 0 && yesterdayClose > 0 ? Math.round((lc - yesterdayClose) / yesterdayClose * 10000) / 100 : null;
+            var dayChg = quotePrice != null && lc > 0 && dbyClose > 0 ? Math.round((lc - dbyClose) / dbyClose * 10000) / 100 : null;
+            var weekChg = lc > 0 && c5d > 0 ? Math.round((lc - c5d) / c5d * 10000) / 100 : null;
+            var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
+            var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
+            var _patMeta = buildPatMeta(result);
+            return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta };
+          });
+        }).catch(function() { return null; });
       });
       var batchResults = await Promise.all(promises);
       batchResults.forEach(function(r) { if (r) out.push(r); });
