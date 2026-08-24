@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.3.6";
+window.__STOX_APP_VERSION = "4.3.7";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -2495,6 +2495,9 @@ const ExitScoreTrend = ({ ticker, buyPrice, buyDate, entryScore }) => {
 const SessionConfidencePanel = ({ ticker, buyPrice, buyDate, entryScore }) => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
+  /* Target % must live in component scope — the render body references it
+     (previously declared inside the fetch callback → ReferenceError). */
+  const _tgtPct = TI && TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4;
   const [loading, setLoading] = React.useState(true);
   const [conf, setConf] = React.useState(null);
   const [exitScore, setExitScore] = React.useState(null);
@@ -2514,7 +2517,6 @@ const SessionConfidencePanel = ({ ticker, buyPrice, buyDate, entryScore }) => {
         if (entry <= 0) { setErr("no_entry"); return; }
         const buyD = buyDate ? new Date(buyDate + "T12:00:00") : null;
         const holdingDays = buyD ? Math.max(0, Math.floor((Date.now() - buyD.getTime()) / 86400000)) : 0;
-        const _tgtPct = TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 4;
         const c = TI.computeSessionConfidence(i15, d, { entry_price: entry, target_pct: _tgtPct });
         const e = TI.computeExitScore(d, { entry_price: entry, holding_days: holdingDays, entry_score: entryScore != null ? entryScore : 50 });
         setConf(c);
