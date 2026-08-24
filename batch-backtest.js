@@ -304,13 +304,30 @@ window.BatchBacktest = (function () {
       var useMLBlend = cfg.useMLBlend !== false;
       if (!allScoredBars || !allScoredBars.length || !pattern || !candles) return null;
 
+      /* Blend factor: the re-weighted pillar average lives on a totally
+         different distribution than entryScore, so it is MIXED with the raw
+         score instead of replacing it — absolute thresholds stay comparable. */
+      var BLEND_ALPHA = 0.5;
+      /* Minimum in-sample trades before learned per-symbol weights are
+         trusted; below this they're noise, so raw scores are kept. */
+      var MIN_SAMPLE_TRADES = cfg.minSampleTrades != null ? cfg.minSampleTrades : 30;
+      var smallSample = !(pattern.tradeStats && pattern.tradeStats.totalTrades >= MIN_SAMPLE_TRADES);
+
       var weights = pattern.indicatorWeights || null;
-      var powers = pattern.indicatorPowers || null;
       var pillarMax = { trendHealth: 35, pullbackQuality: 30, prob4: 35, swingPotential: 20 };
       if (window.TechIndicators && window.TechIndicators.getScoreConfig) {
         var sc = window.TechIndicators.getScoreConfig();
         if (sc && sc.pillarMax) pillarMax = sc.pillarMax;
       }
+      /* Snapshot the normalization scale actually used for this run; warn
+         when it drifted from the scale recorded by earlier runs (a silent
+         rescale here changes which historical bars clear any threshold). */
+      try {
+        if (pattern.pillarMaxSnapshot && JSON.stringify(pattern.pillarMaxSnapshot) !== JSON.stringify(pillarMax)) {
+          console.warn("[BatchBT] " + (pattern.symbol || "?") + ": pillarMax changed since previous scoring run", { was: pattern.pillarMaxSnapshot, now: pillarMax });
+        }
+      } catch (_e) {}
+      try { pattern.pillarMaxSnapshot = JSON.parse(JSON.stringify(pillarMax)); } catch (_e2) {}
 
       var uniformW = true;
       if (weights && usePatternWeights) {
@@ -321,6 +338,7 @@ window.BatchBacktest = (function () {
           else if (Math.abs(w - _firstW) > 0.001) uniformW = false;
         });
       }
+      var applyReweight = usePatternWeights && !uniformW && weights && !smallSample;
 
       // Pre-compute ML indicator cache once for this symbol (O(N))
       var mlCache = (mlModel && useMLBlend) ? buildMLIndicatorCache(candles) : null;
@@ -333,6 +351,12 @@ window.BatchBacktest = (function () {
       var patternOnlyScored = [];
       var mlBlendedScored = (mlModel && mlCache && useMLBlend) ? [] : null;
 
+      /* P2: threshold-free comparison — top-decile selection per symbol,
+         capped so long histories don't explode simulation cost. */
+      var DECILE_FRAC = 0.10, DECILE_MIN = 5, DECILE_MAX = 80;
+      var decileN = Math.max(DECILE_MIN, Math.min(DECILE_MAX, Math.round(allScoredBars.length * DECILE_FRAC)));
+      var rawAll = [], patAll = [], mlAll = [];
+
       for (var bi = 0; bi < allScoredBars.length; bi++) {
         var bar = allScoredBars[bi];
         var pillars = {
@@ -342,11 +366,14 @@ window.BatchBacktest = (function () {
           swingPotential: bar.swingPotential || 0
         };
 
-        // Pattern re-weighting (same logic as before)
+        // Pattern re-weighting: 50/50 blend of raw entry score and the
+        // weighted-average pillar score. Replacing the raw score outright
+        // (old behavior) put an absolute threshold on a different
+        // distribution and selected the overextended tail — the cause of
+        // the below-coin-flip adjusted win rates.
         var patternScore = bar.entryScore;
-        var powerBonusTotal = 0;
 
-        if (usePatternWeights && !uniformW && weights) {
+        if (applyReweight) {
           var totalWeighted = 0, totalWeight = 0;
           ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
             var w = weights[p] != null ? weights[p] : 0.25;
@@ -354,11 +381,11 @@ window.BatchBacktest = (function () {
             var normalizedPillar = _clamp(pillars[p] / max, 0, 1);
             totalWeighted += normalizedPillar * w;
             totalWeight += w;
-            if (powers && powers[p] && powers[p].infoValue > 0.05 && normalizedPillar > 0.5) {
-              powerBonusTotal += round3(powers[p].infoValue * normalizedPillar * 2);
-            }
           });
-          patternScore = _clamp(round2(totalWeight > 0 ? (totalWeighted / totalWeight) * 100 : bar.entryScore + powerBonusTotal), 0, 100);
+          if (totalWeight > 0) {
+            var reweighted = _clamp(round2((totalWeighted / totalWeight) * 100), 0, 100);
+            patternScore = _clamp(round2(BLEND_ALPHA * bar.entryScore + (1 - BLEND_ALPHA) * reweighted), 0, 100);
+          }
         }
 
         var base = {
@@ -372,10 +399,13 @@ window.BatchBacktest = (function () {
           modifiers: bar.modifiers
         };
 
+        rawAll.push(Object.assign({ adjustedScore: bar.entryScore }, base));
+
         // Pattern-only pass
         if (patternScore >= threshold) {
           patternOnlyScored.push(Object.assign({ adjustedScore: patternScore }, base));
         }
+        patAll.push(Object.assign({ adjustedScore: patternScore }, base));
 
         // ML-blended pass
         if (mlBlendedScored && mlCache) {
@@ -387,16 +417,27 @@ window.BatchBacktest = (function () {
           if (mlScore >= threshold) {
             mlBlendedScored.push(Object.assign({ adjustedScore: mlScore }, base));
           }
+          mlAll.push(Object.assign({ adjustedScore: mlScore }, base));
         }
       }
 
-      // Simulate and measure both passes
+      function _topDecile(arr) {
+        return arr.slice().sort(function (a, b) { return b.adjustedScore - a.adjustedScore; }).slice(0, decileN);
+      }
+
+      // Simulate and measure both passes + threshold-free decile baselines
       var patternOnly = simulateAndMeasure(patternOnlyScored, candles, engine, cfg, pattern.symbol);
       var mlBlended = mlBlendedScored ? simulateAndMeasure(mlBlendedScored, candles, engine, cfg, pattern.symbol) : null;
+      var decile = {
+        n: decileN,
+        raw: simulateAndMeasure(_topDecile(rawAll), candles, engine, cfg, pattern.symbol),
+        patternOnly: simulateAndMeasure(_topDecile(patAll), candles, engine, cfg, pattern.symbol),
+        mlBlended: (mlModel && mlCache && useMLBlend) ? simulateAndMeasure(_topDecile(mlAll), candles, engine, cfg, pattern.symbol) : null
+      };
       if (useMLBlend) {
         console.log("[BatchBT] ML scoring: patternOnlyBars=" + patternOnlyScored.length + " mlBlendedBars=" + (mlBlendedScored ? mlBlendedScored.length : "null") + " patternOnlyWR=" + (patternOnly ? patternOnly.winRate : "?") + " mlBlendedWR=" + (mlBlended ? mlBlended.winRate : "?"));
       }
-      return { patternOnly: patternOnly, mlBlended: mlBlended };
+      return { patternOnly: patternOnly, mlBlended: mlBlended, decile: decile, smallSample: smallSample };
     }
 
     /**
@@ -741,8 +782,16 @@ window.BatchBacktest = (function () {
       // trades, produces patternOnly and mlBlended metrics for comparison.
       var mlModel = await loadMLModelForBacktest();
       var pass2Symbols = Object.keys(results);
-      var adjWinRateSum = 0, adjCount = 0;
-      var mlWinRateSum = 0, mlCount = 0;
+      /* P0: only symbols that actually produced trades contribute to the
+         averages — "no qualifying bars" (winRate 0 / totalSignals 0) used to
+         be averaged in as a fake 0% and crushed the adjusted win rate. */
+      var adjWinRateSum = 0, adjCount = 0, adjSignalTotal = 0;
+      var mlWinRateSum = 0, mlCount = 0, mlSignalTotal = 0;
+      var smallSampleSkipped = 0;
+      /* P2 accumulators: threshold-free top-decile comparison */
+      var dRawSum = 0, dRawCount = 0;
+      var dPatSum = 0, dPatCount = 0;
+      var dMlSum = 0, dMlCount = 0;
       for (var ai = 0; ai < pass2Symbols.length; ai++) {
         var sym = pass2Symbols[ai];
         var pat = results[sym];
@@ -762,8 +811,17 @@ window.BatchBacktest = (function () {
           if (adjResult) {
             pat.adjustedMetrics = adjResult.patternOnly || null;
             pat.mlAdjustedMetrics = adjResult.mlBlended || null;
-            if (adjResult.patternOnly && adjResult.patternOnly.winRate != null) { adjWinRateSum += adjResult.patternOnly.winRate; adjCount++; }
-            if (adjResult.mlBlended && adjResult.mlBlended.winRate != null) { mlWinRateSum += adjResult.mlBlended.winRate; mlCount++; }
+            if (adjResult.smallSample) smallSampleSkipped++;
+            var _po = adjResult.patternOnly;
+            if (_po && _po.winRate != null && _po.totalSignals > 0) { adjWinRateSum += _po.winRate; adjCount++; adjSignalTotal += _po.totalSignals; }
+            var _mo = adjResult.mlBlended;
+            if (_mo && _mo.winRate != null && _mo.totalSignals > 0) { mlWinRateSum += _mo.winRate; mlCount++; mlSignalTotal += _mo.totalSignals; }
+            var _dc = adjResult.decile;
+            if (_dc) {
+              if (_dc.raw && _dc.raw.winRate != null && _dc.raw.totalSignals > 0) { dRawSum += _dc.raw.winRate; dRawCount++; }
+              if (_dc.patternOnly && _dc.patternOnly.winRate != null && _dc.patternOnly.totalSignals > 0) { dPatSum += _dc.patternOnly.winRate; dPatCount++; }
+              if (_dc.mlBlended && _dc.mlBlended.winRate != null && _dc.mlBlended.totalSignals > 0) { dMlSum += _dc.mlBlended.winRate; dMlCount++; }
+            }
           }
         } catch (e) { console.warn("Adjusted metrics failed for " + sym + ":", e.message); }
         // Clean up internal fields
@@ -772,6 +830,17 @@ window.BatchBacktest = (function () {
       }
       summary.avgAdjustedWinRate = adjCount > 0 ? round2(adjWinRateSum / adjCount) : null;
       summary.avgMLWinRate = mlCount > 0 ? round2(mlWinRateSum / mlCount) : null;
+      summary.adjSymsCounted = adjCount;
+      summary.adjTradesTotal = adjSignalTotal;
+      summary.mlSymsCounted = mlCount;
+      summary.mlTradesTotal = mlSignalTotal;
+      summary.smallSampleSkipped = smallSampleSkipped;
+      summary.decile = {
+        avgRawWR: dRawCount > 0 ? round2(dRawSum / dRawCount) : null,
+        avgPatternWR: dPatCount > 0 ? round2(dPatSum / dPatCount) : null,
+        avgMLWR: dMlCount > 0 ? round2(dMlSum / dMlCount) : null,
+        syms: Math.max(dRawCount, dPatCount)
+      };
       summary.mlModelLoaded = mlModel != null;
 
       // ── Re-save patterns after Pass 2 to persist adjustedMetrics/mlAdjustedMetrics ──

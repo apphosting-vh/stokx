@@ -1010,6 +1010,14 @@ window.PatternDashboard = (function () {
           avgAdjustedWinRate: result.summary.avgAdjustedWinRate || null,
           avgMLWinRate: result.summary.avgMLWinRate || null,
           mlModelLoaded: result.summary.mlModelLoaded || false,
+          totalTrades: result.summary.totalTrades != null ? result.summary.totalTrades : null,
+          successCount: result.summary.successCount != null ? result.summary.successCount : null,
+          adjTradesTotal: result.summary.adjTradesTotal != null ? result.summary.adjTradesTotal : null,
+          adjSymsCounted: result.summary.adjSymsCounted != null ? result.summary.adjSymsCounted : null,
+          mlTradesTotal: result.summary.mlTradesTotal != null ? result.summary.mlTradesTotal : null,
+          mlSymsCounted: result.summary.mlSymsCounted != null ? result.summary.mlSymsCounted : null,
+          smallSampleSkipped: result.summary.smallSampleSkipped || 0,
+          decile: result.summary.decile || null,
           runConfig: { usePatternWeights: btConfig.usePatternWeights !== false, useMLBlend: btConfig.useMLBlend !== false }
         });
 
@@ -1264,15 +1272,40 @@ window.PatternDashboard = (function () {
           React.createElement("div", { style: { display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10 } },
             React.createElement("div", { style: { textAlign: "center" } },
               React.createElement("div", { style: { fontSize: 10, color: "var(--text4)", textTransform: "uppercase", letterSpacing: .5 } }, "Raw Win Rate"),
-              React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: "var(--text)" } }, btResult.avgWinRate != null ? btResult.avgWinRate + "%" : "\u2014")
+              React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: "var(--text)" } }, btResult.avgWinRate != null ? btResult.avgWinRate + "%" : "\u2014"),
+              btResult.totalTrades != null ? React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, btResult.totalTrades + " trades") : null
             ),
             React.createElement("div", { style: { textAlign: "center" } },
               React.createElement("div", { style: { fontSize: 10, color: "#06b6d4", textTransform: "uppercase", letterSpacing: .5 } }, "Pattern Adj WR" + (btResult.runConfig && btResult.runConfig.usePatternWeights === false ? " (off)" : "")),
-              React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: "#06b6d4" } }, btResult.avgAdjustedWinRate != null ? btResult.avgAdjustedWinRate + "%" : "\u2014")
+              React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: "#06b6d4" } }, btResult.avgAdjustedWinRate != null ? btResult.avgAdjustedWinRate + "%" : "\u2014"),
+              btResult.avgAdjustedWinRate != null && btResult.adjTradesTotal != null
+                ? React.createElement("div", { style: { fontSize: 9, color: "#06b6d4", opacity: .7 } }, btResult.adjTradesTotal + " trades \u00B7 " + btResult.adjSymsCounted + "/" + (btResult.successCount || "?") + " sym")
+                : React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, "no qualifying bars")
             ),
             React.createElement("div", { style: { textAlign: "center" } },
               React.createElement("div", { style: { fontSize: 10, color: "#a78bfa", textTransform: "uppercase", letterSpacing: .5 } }, "ML Blended WR" + (btResult.runConfig && btResult.runConfig.useMLBlend === false ? " (off)" : "")),
-              React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: btResult.mlModelLoaded ? "#a78bfa" : "var(--text6)" } }, btResult.avgMLWinRate != null ? btResult.avgMLWinRate + "%" : (btResult.mlModelLoaded === false ? "No model" : "\u2014"))
+              React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: btResult.mlModelLoaded ? "#a78bfa" : "var(--text6)" } }, btResult.avgMLWinRate != null ? btResult.avgMLWinRate + "%" : (btResult.mlModelLoaded === false ? "No model" : "\u2014")),
+              btResult.mlModelLoaded && btResult.avgMLWinRate != null && btResult.mlTradesTotal != null
+                ? React.createElement("div", { style: { fontSize: 9, color: "#a78bfa", opacity: .7 } }, btResult.mlTradesTotal + " trades \u00B7 " + btResult.mlSymsCounted + "/" + (btResult.successCount || "?") + " sym")
+                : null
+            )
+          ),
+          // Threshold-free comparison row (top-decile selection per symbol)
+          btResult.decile && btResult.decile.avgRawWR != null && React.createElement("div", { style: { borderTop: "1px solid rgba(128,128,128,.2)", paddingTop: 8 } },
+            React.createElement("div", { style: { fontSize: 10, color: "var(--text4)", textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 } }, "Threshold-free \u00B7 top 10% of bars per symbol"),
+            React.createElement("div", { style: { display: "flex", gap: 16, flexWrap: "wrap" } },
+              React.createElement("div", { style: { textAlign: "center" } },
+                React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase" } }, "Raw"),
+                React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--text)" } }, btResult.decile.avgRawWR + "%")
+              ),
+              React.createElement("div", { style: { textAlign: "center" } },
+                React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase" } }, "Pattern"),
+                React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "#06b6d4" } }, btResult.decile.avgPatternWR != null ? btResult.decile.avgPatternWR + "%" : "\u2014")
+              ),
+              React.createElement("div", { style: { textAlign: "center" } },
+                React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase" } }, "ML"),
+                React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: "#a78bfa" } }, btResult.decile.avgMLWR != null ? btResult.decile.avgMLWR + "%" : "\u2014")
+              )
             )
           ),
           (function () {
@@ -1295,6 +1328,9 @@ window.PatternDashboard = (function () {
               parts.push(React.createElement("span", { key: "b" }, ". " + mlLabel + " pattern-adjusted win rate by " + Math.abs(adjVsMl) + " points"));
             } else if (!btResult.mlModelLoaded && runCfg.useMLBlend !== false) {
               parts.push(React.createElement("span", { key: "b" }, ". No champion model loaded \u2014 ML blend not applied"));
+            }
+            if (btResult.smallSampleSkipped > 0) {
+              parts.push(React.createElement("span", { key: "c" }, ". Re-weighting skipped on " + btResult.smallSampleSkipped + " low-sample patterns (<30 trades)"));
             }
             if (!parts.length) return null;
             return React.createElement("div", { style: { fontSize: 12, color: "var(--text3)", lineHeight: 1.6 } }, parts);
