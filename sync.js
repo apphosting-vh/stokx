@@ -128,6 +128,7 @@ var fsaReadFile = async function(handle) {
       wlTracker: d.wlTracker || [],
       wlTrackerPrices: d.wlTrackerPrices || {},
       notes: d.notes || [],
+      scoreConfig: d.scoreConfig || null,
       patterns: d.patterns || null
     };
   } catch (e) {
@@ -170,6 +171,23 @@ window.__fsaInit = async function() {
         var text = await file.text();
         var parsed = JSON.parse(text);
         var pd = parsed && parsed.data ? parsed.data : null;
+        /* Restore saved Score Configuration from the FSA file (runs on every boot
+           with a granted handle — keeps config in sync across browsers/devices) */
+        var fsc = pd ? pd.scoreConfig : null;
+        if (fsc && typeof fsc === "object") {
+          var scCurVer = (window.TechIndicators && window.TechIndicators.getScoreConfigVersion) ? window.TechIndicators.getScoreConfigVersion() : null;
+          if (scCurVer == null || fsc._v === scCurVer) {
+            try {
+              var scLocal = null;
+              try { scLocal = JSON.parse(localStorage.getItem("stox_score_config")); } catch (e2) {}
+              if (!scLocal || JSON.stringify(scLocal) !== JSON.stringify(fsc)) {
+                localStorage.setItem("stox_score_config", JSON.stringify(fsc));
+                if (window.TechIndicators && window.TechIndicators.setScoreConfig) window.TechIndicators.setScoreConfig(fsc);
+                window.dispatchEvent(new CustomEvent("stox:score-config-restored", { detail: fsc }));
+              }
+            } catch (e2) {}
+          }
+        }
         var hasPatterns = pd && pd.patterns != null &&
           ((pd.patterns.patterns && pd.patterns.patterns.length > 0) ||
            (pd.patterns.features && pd.patterns.features.length > 0) ||

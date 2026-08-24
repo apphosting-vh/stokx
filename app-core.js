@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.3.3";
+window.__STOX_APP_VERSION = "4.3.5";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -7875,7 +7875,36 @@ const ScoreTunerPanel = () => {
     setScoreConfigState(def);
     try { localStorage.removeItem("stox_score_config"); } catch(e) {}
     if (TI.setScoreConfig) TI.setScoreConfig(def);
+    /* Push the cleared config to the FSA file too, otherwise the old saved
+       config would be restored from it on next reload */
+    try { if (window.__fsa && window.__fsa.writeNow) window.__fsa.writeNow().catch(function() {}); } catch(e) {}
   }
+
+  const [cfgSaveBusy, setCfgSaveBusy] = useState(false);
+  async function saveScoreConfig() {
+    setCfgSaveBusy(true);
+    try {
+      var cfg = JSON.parse(JSON.stringify(scoreConfig));
+      cfg._v = (TI.getScoreConfigVersion) ? TI.getScoreConfigVersion() : undefined;
+      try { localStorage.setItem("stox_score_config", JSON.stringify(cfg)); } catch(e) {}
+      if (TI.setScoreConfig) TI.setScoreConfig(cfg);
+      var fsaConnected = !!(window.__fsa && window.__fsa.handle && window.__fsa.writeNow);
+      var fsaOk = false;
+      if (fsaConnected) { try { fsaOk = await window.__fsa.writeNow(); } catch(e) {} }
+      showToast(fsaOk
+        ? "Score configuration saved \u2014 browser + FSA file"
+        : (fsaConnected ? "Saved locally \u2014 FSA write failed" : "Saved locally \u2014 no FSA file connected"), 3500);
+    } finally {
+      setCfgSaveBusy(false);
+    }
+  }
+
+  /* Live-apply score config restored from the FSA file at boot */
+  useEffect(function() {
+    var h = function(ev) { if (ev && ev.detail) setScoreConfigState(ev.detail); };
+    window.addEventListener("stox:score-config-restored", h);
+    return function() { window.removeEventListener("stox:score-config-restored", h); };
+  }, []);
 
   /* ── Offline data: load metadata on mount ── */
   useEffect(function() {
@@ -8376,9 +8405,12 @@ const ScoreTunerPanel = () => {
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 } },
           React.createElement("div", null,
             React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, "Score Configuration"),
-            React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, "Adjust weights and thresholds. Changes apply immediately to entry score calculations. Saved to localStorage.")
+            React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, "Adjust weights and thresholds. Changes apply immediately to entry score calculations. Click Save to persist to browser storage and your connected FSA file \u2014 the config auto-loads from FSA on reload.")
           ),
-          React.createElement("button", { onClick: resetScoreConfig, className: "stx-btn", style: { fontSize: 11, padding: "6px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "Reset Defaults")
+          React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+            React.createElement("button", { onClick: saveScoreConfig, disabled: cfgSaveBusy, className: "stx-btn", style: { fontSize: 11, padding: "6px 10px", border: "1px solid var(--accent)", background: "var(--accentbg)", color: "var(--accent)", fontWeight: 700, cursor: cfgSaveBusy ? "wait" : "pointer", opacity: cfgSaveBusy ? 0.6 : 1 } }, cfgSaveBusy ? "Saving\u2026" : "Save"),
+            React.createElement("button", { onClick: resetScoreConfig, className: "stx-btn", style: { fontSize: 11, padding: "6px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "Reset Defaults")
+          )
         ),
         /* Pillar Max Scores */
         React.createElement("div", { style: { marginBottom: 16 } },
