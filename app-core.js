@@ -9146,6 +9146,15 @@ function StockScreener(props) {
     });
   };
 
+  var removeSelected = function() {
+    var tickers = Object.keys(selected).filter(function(t) { return selected[t]; });
+    if (!tickers.length) return;
+    var tickSet = {};
+    tickers.forEach(function(t) { tickSet[t] = true; });
+    setResults(function(prev) { return prev.filter(function(r) { return !tickSet[r.s.t]; }); });
+    setSelected({});
+  };
+
   var toggleBookmark = function(ticker) {
     setBookmarks(function(p) {
       var c = Object.assign({}, p);
@@ -9425,6 +9434,11 @@ function StockScreener(props) {
           className: "stx-btn",
           style: { padding: "8px 14px", fontSize: 11, fontWeight: 700, border: "1px solid #f59e0b", background: "rgba(245,158,11,.08)", color: "#f59e0b", cursor: "pointer" }
         }, "+ WT (" + selectedCount + ")") : null,
+        results.length > 0 && !scanning && selectedCount > 0 ? React.createElement("button", {
+          onClick: removeSelected,
+          className: "stx-btn",
+          style: { padding: "8px 14px", fontSize: 11, fontWeight: 700, border: "1px solid #ef4444", background: "rgba(239,68,68,.08)", color: "#ef4444", cursor: "pointer" }
+        }, "\u2715 Remove (" + selectedCount + ")") : null,
         results.length > 0 && !scanning ? React.createElement("button", {
           onClick: saveSnapshot,
           className: "stx-btn",
