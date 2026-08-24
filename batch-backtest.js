@@ -306,8 +306,15 @@ window.BatchBacktest = (function () {
 
       /* Blend factor: the re-weighted pillar average lives on a totally
          different distribution than entryScore, so it is MIXED with the raw
-         score instead of replacing it — absolute thresholds stay comparable. */
+         score instead of replacing it — absolute thresholds stay comparable.
+         User-tunable via Score Configuration ("Pattern Weight Blend"). */
       var BLEND_ALPHA = 0.5;
+      if (window.TechIndicators && window.TechIndicators.getScoreConfig) {
+        try {
+          var _pa = window.TechIndicators.getScoreConfig().patternBlendAlpha;
+          if (_pa != null && isFinite(_pa)) BLEND_ALPHA = Math.max(0, Math.min(1, Number(_pa)));
+        } catch (_blendE) {}
+      }
       /* Minimum in-sample trades before learned per-symbol weights are
          trusted; below this they're noise, so raw scores are kept. */
       var MIN_SAMPLE_TRADES = cfg.minSampleTrades != null ? cfg.minSampleTrades : 30;

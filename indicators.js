@@ -2893,6 +2893,12 @@ window.TechIndicators = (function () {
       watchlist: 50,
       neutral: 35,
     },
+
+    /* Batch backtest Pass-2 re-scoring mix:
+       adjusted = patternBlendAlpha * rawEntryScore + (1 - alpha) * learnedPillarAverage.
+       1.0 = ignore learned weights; very low values apply an absolute threshold
+       to a foreign score distribution (the old below-coin-flip win-rate bug). */
+    patternBlendAlpha: 0.5,
   };
 
   var SCORE_CONFIG_DEFAULTS = JSON.parse(JSON.stringify(SCORE_CONFIG));

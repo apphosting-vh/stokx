@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.3.9";
+window.__STOX_APP_VERSION = "4.3.10";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -8423,6 +8423,21 @@ const ScoreTunerPanel = () => {
             React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-mono)", minWidth: 30 } }, scoreConfig.horizonDays || 10),
             React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "days")
           )
+        ),
+        /* Pattern Weight Blend */
+        React.createElement("div", { style: { marginBottom: 16 } },
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pattern Weight Blend"),
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8 } }, "Backtest re-scoring mix \u2014 weight given to the raw entry score vs learned per-symbol pillar weights. 100% ignores learned weights; very low values made historical adjusted win rates collapse."),
+          (function () {
+            var _alpha = (scoreConfig.patternBlendAlpha != null && isFinite(scoreConfig.patternBlendAlpha)) ? Number(scoreConfig.patternBlendAlpha) : 0.5;
+            var _pct = Math.round(_alpha * 100);
+            return React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+              React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "Raw score weight"),
+              React.createElement("input", { className: "inp", type: "range", min: 0, max: 100, step: 10, value: _pct, onChange: function(e) { updateScoreConfig("patternBlendAlpha", String(Number(e.target.value) / 100)); }, style: { width: 160, accentColor: "var(--accent)" } }),
+              React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-mono)", minWidth: 40 } }, _pct + "%"),
+              React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "learned weights " + (100 - _pct) + "%")
+            );
+          })()
         ),
         /* Pillar Max Scores */
         React.createElement("div", { style: { marginBottom: 16 } },
