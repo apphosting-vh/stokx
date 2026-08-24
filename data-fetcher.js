@@ -6,6 +6,7 @@ window.OHLCVFetcher = (function () {
 
   /* ── CORS Proxies ─────────────────────────────────────────────────────── */
   var Y_PROXY_FNS = [
+    function (u) { return "https://young-unit-81fc.lenovotabpro99.workers.dev/?url=" + encodeURIComponent(u); },
     function (u) { return "https://api.cors.lol/?url=" + encodeURIComponent(u); },
     function (u) { return "https://corsproxy.io/?" + encodeURIComponent(u); },
     function (u) { return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); },

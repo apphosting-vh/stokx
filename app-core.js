@@ -460,6 +460,7 @@ const _readBody = (r, ms = 4000) => Promise.race([r.text(), new Promise((_, rej)
 const _unwrap = (txt) => { try { const j = JSON.parse(txt); if (typeof j?.contents === "string") return j.contents; } catch {} return txt; };
 
 const PROXY_FNS = [
+  (u) => "https://young-unit-81fc.lenovotabpro99.workers.dev/?url=" + encodeURIComponent(u),
   (u) => "https://api.cors.lol/?url=" + encodeURIComponent(u),
   (u) => "https://corsproxy.io/?" + encodeURIComponent(u),
   (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
@@ -511,6 +512,7 @@ const fetchHistoricalPrices = async (rawTicker, fromDate) => {
     const hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
   const symbols = [ticker + ".NS"];
     const proxyFns = [
+      u => "https://young-unit-81fc.lenovotabpro99.workers.dev/?url=" + encodeURIComponent(u),
       u => "https://api.cors.lol/?url=" + encodeURIComponent(u),
       u => "https://corsproxy.io/?" + encodeURIComponent(u),
       u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
@@ -581,6 +583,7 @@ async function fetchMarketIndices() {
     /* ── NSE India API for all Indian indexes ── */
     const nseUrl = "https://www.nseindia.com/api/allIndices";
     const nseProxies = [
+      "https://young-unit-81fc.lenovotabpro99.workers.dev/?url=" + encodeURIComponent(nseUrl),
       "https://api.cors.lol/?url=" + encodeURIComponent(nseUrl),
       "https://corsproxy.io/?" + encodeURIComponent(nseUrl),
       "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(nseUrl),
@@ -621,6 +624,7 @@ async function fetchMarketIndices() {
     const fetchStooq = async (item) => {
       const stooqUrl = "https://stooq.com/q/l/?s=" + encodeURIComponent(item.stooq) + "&f=sd2t2ohlcv&h&e=csv";
       const proxies = [
+        "https://young-unit-81fc.lenovotabpro99.workers.dev/?url=" + encodeURIComponent(stooqUrl),
         "https://api.cors.lol/?url=" + encodeURIComponent(stooqUrl),
         "https://corsproxy.io/?" + encodeURIComponent(stooqUrl),
         "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(stooqUrl),

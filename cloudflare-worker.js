@@ -1,128 +1,77 @@
 /*
-  Dedicated Yahoo Finance CORS proxy — deploy this on YOUR OWN Cloudflare
-  Workers account (free tier: 100,000 requests/day, no shared rate limit
-  with other users). This is what data-fetcher.js's "Proxy Worker" field
-  should point to.
+   Cloudflare Worker — private CORS reverse-proxy for this app.
 
-  DEPLOY (no CLI needed, ~2 minutes):
-  1. Go to https://dash.cloudflare.com  → sign up free if you don't have
-     an account.
-  2. Left sidebar → Workers & Pages → Create → "Create Worker".
-  3. Give it any name (e.g. "stox-proxy") → Deploy.
-  4. Click "Edit code" → delete the default template → paste this
-     entire file → Save and Deploy.
-  5. Copy the *.workers.dev URL Cloudflare gives you (shown at the top,
-     e.g. https://stox-proxy.yourname.workers.dev).
-  6. Paste that URL into the "Proxy Worker" field in the Nifty 200
-     Screener panel and hit Save.
+   SETUP (~5 min):
+   1. Create free account: https://dash.cloudflare.com/sign-up
+   2. Dashboard → Workers & Pages → Create → Create Worker → name it (e.g. "stock-proxy") → Deploy
+   3. Click "Edit code", delete everything, paste this entire file, click Deploy.
+   4. Your endpoint is: https://stock-proxy.<your-subdomain>.workers.dev/?url=<encoded-url>
+   5. Test in browser:
+      https://stock-proxy.<your-subdomain>.workers.dev/?url=https%3A%2F%2Fquery1.finance.yahoo.com%2Fv8%2Ffinance%2Fchart%2FRELIANCE.NS%3Finterval%3D1d%26range%3D1d
+      → should print JSON chart data.
+   Free tier: 100,000 requests/day, no credit card.
 
-  That's it — the scanner will now route through this instead of the
-  shared public proxies whenever it's set.
+   SECURITY: only the 4 data hosts below are proxied — the Worker cannot be
+   abused as an open proxy by strangers.
 */
 
-const ALLOWED_HOSTS = new Set([
+const ALLOWED_HOSTS = [
   "query1.finance.yahoo.com",
   "query2.finance.yahoo.com",
-]);
+  "www.nseindia.com",
+  "stooq.com",
+];
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "*",
+  "Access-Control-Max-Age": "86400",
+};
 
 export default {
   async fetch(request) {
-    // CORS preflight
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
+    const raw = new URL(request.url).searchParams.get("url");
+    if (!raw) return jsonError("Missing ?url= parameter", 400);
+
+    let target;
+    try { target = new URL(raw); } catch (e) { return jsonError("Invalid url parameter", 400); }
+    if (!ALLOWED_HOSTS.includes(target.hostname)) {
+      return jsonError("Host not allowed: " + target.hostname, 403);
+    }
+
+    let upstream;
+    try {
+      upstream = await fetch(target.toString(), {
+        method: "GET",
+        redirect: "follow",
         headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, OPTIONS",
-          "Access-Control-Allow-Headers": "*",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+          "Accept": "application/json,text/csv,*/*",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Referer": target.origin + "/",
         },
       });
-    }
-
-    const { searchParams } = new URL(request.url);
-    const target = searchParams.get("url");
-    if (!target) {
-      return new Response(JSON.stringify({ error: "Missing url param" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
-    }
-
-    let targetUrl;
-    try {
-      targetUrl = new URL(target);
     } catch (e) {
-      return new Response(JSON.stringify({ error: "Invalid url param" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
+      return jsonError("Upstream fetch failed: " + e.message, 502);
     }
 
-    // Lock this proxy down to Yahoo Finance only, so it can't be abused as
-    // an open relay if the URL ever leaks.
-    if (!ALLOWED_HOSTS.has(targetUrl.hostname)) {
-      return new Response(JSON.stringify({ error: "Host not allowed" }), {
-        status: 403,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
-    }
-
-    /* Retry transient Yahoo errors server-side so the client never sees
-       them — but ONLY real transient failures (network errors, 5xx).
-       A 429 means Yahoo has soft-blocked this Worker's egress IP; retrying
-       250-500ms later just re-hits the same block and burns another
-       request against it, making the block last longer. On 429 we return
-       immediately and let the client's own backoff/cooldown decide when
-       to try again, instead of quietly multiplying requests into a block
-       that hasn't cleared yet. */
-    const UA_POOL = [
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
-      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    ];
-    const MAX_WORKER_RETRIES = 2;
-    const RETRY_DELAY_MS = 250;
-    const FETCH_OPTS = {
-      headers: {
-        "User-Agent": UA_POOL[Math.floor(Math.random() * UA_POOL.length)],
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://finance.yahoo.com/",
-      },
-    };
-
-    let lastError = null;
-    for (let attempt = 0; attempt <= MAX_WORKER_RETRIES; attempt++) {
-      try {
-        const upstream = await fetch(targetUrl.toString(), FETCH_OPTS);
-        if (upstream.status >= 500 && attempt < MAX_WORKER_RETRIES) {
-          await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
-          continue;
-        }
-        const body = await upstream.text();
-        return new Response(body, {
-          status: upstream.status,
-          headers: {
-            "Content-Type": upstream.headers.get("content-type") || "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "no-store",
-          },
-        });
-      } catch (e) {
-        lastError = e;
-        if (attempt < MAX_WORKER_RETRIES) {
-          await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
-          continue;
-        }
-      }
-    }
-    return new Response(JSON.stringify({ error: "Upstream fetch failed: " + String(lastError) }), {
-      status: 502,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-    });
+    const body = await upstream.arrayBuffer();
+    const headers = new Headers(CORS_HEADERS);
+    const ct = upstream.headers.get("content-type");
+    if (ct) headers.set("Content-Type", ct);
+    headers.set("Cache-Control", "no-store");
+    return new Response(body, { status: upstream.status, headers });
   },
 };
+
+function jsonError(msg, status) {
+  return new Response(JSON.stringify({ error: msg }), {
+    status,
+    headers: Object.assign({ "Content-Type": "application/json" }, CORS_HEADERS),
+  });
+}
