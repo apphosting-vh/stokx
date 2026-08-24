@@ -8,7 +8,7 @@ window.OHLCVFetcher = (function () {
   var Y_PROXY_FNS = [
     function (u) { return "https://api.cors.lol/?url=" + encodeURIComponent(u); },
     function (u) { return "https://corsproxy.io/?" + encodeURIComponent(u); },
-    function (u) { return "https://api.allorigins.win/raw?url=" + encodeURIComponent(u); },
+    function (u) { return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); },
   ];
 
   var Y_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];

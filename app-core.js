@@ -462,7 +462,7 @@ const _unwrap = (txt) => { try { const j = JSON.parse(txt); if (typeof j?.conten
 const PROXY_FNS = [
   (u) => "https://api.cors.lol/?url=" + encodeURIComponent(u),
   (u) => "https://corsproxy.io/?" + encodeURIComponent(u),
-  (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+  (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
 ];
 
 async function fetchTickerPrice(rawTicker) {
@@ -513,7 +513,7 @@ const fetchHistoricalPrices = async (rawTicker, fromDate) => {
     const proxyFns = [
       u => "https://api.cors.lol/?url=" + encodeURIComponent(u),
       u => "https://corsproxy.io/?" + encodeURIComponent(u),
-      u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+      u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
     ];
     for (const sym of symbols) {
       for (const host of hosts) {
@@ -583,7 +583,7 @@ async function fetchMarketIndices() {
     const nseProxies = [
       "https://api.cors.lol/?url=" + encodeURIComponent(nseUrl),
       "https://corsproxy.io/?" + encodeURIComponent(nseUrl),
-      "https://api.allorigins.win/raw?url=" + encodeURIComponent(nseUrl),
+      "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(nseUrl),
     ];
     let nseData = null;
     for (const proxyUrl of nseProxies) {
@@ -623,7 +623,7 @@ async function fetchMarketIndices() {
       const proxies = [
         "https://api.cors.lol/?url=" + encodeURIComponent(stooqUrl),
         "https://corsproxy.io/?" + encodeURIComponent(stooqUrl),
-        "https://api.allorigins.win/raw?url=" + encodeURIComponent(stooqUrl),
+        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(stooqUrl),
       ];
       for (const proxyUrl of proxies) {
         try {
@@ -1440,7 +1440,7 @@ function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
         var r = await _fetchX(url, {}, 6000);
         if (r.ok) { var txt = await _readBody(r); var j = JSON.parse(_unwrap(txt)); ok = !!(j?.chart?.result?.[0]?.meta?.regularMarketPrice); if (!ok) err = "no price in response"; }
         else err = "HTTP " + r.status;
-      } catch (e) { err = e.message || "timeout/error"; }
+      } catch (e) { err = (e && e.name === "AbortError") ? "timeout - no response within limit" : (e.message || "timeout/error"); }
       var proxyName = "https://" + (url.match(/https?:\/\/([^\/]+)/) || [])[1] || ("Proxy " + (pi + 1));
       results.push({ proxy: proxyName, ok: ok, err: err });
     }
