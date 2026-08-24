@@ -81,6 +81,15 @@ window.LiveML = (function () {
     return map[symbol] || map[symbol + ".NS"] || map[symbol.replace(/\.NS$/, "").replace(/\.BO$/, "")] || null;
   }
 
+  /* Yield to the event loop so progress callbacks can paint. */
+  function yieldTick() { return new Promise(function (r) { setTimeout(r, 0); }); }
+
+  /* Make sure PatternStore is initialized — getMeta/setMeta reject otherwise,
+     which silently degraded every prediction (base rate, ML model lookups). */
+  async function ensureStoreInit() {
+    try { if (window.PatternStore && window.PatternStore.init) await window.PatternStore.init(); } catch (e) {}
+  }
+
   /* Load daily candles.
      - firstRun (no prior collects): offline first, live fallback.
      - subsequent runs: live first (Yahoo), offline fallback. Ensures latest
@@ -844,7 +853,9 @@ window.LiveML = (function () {
 
   /* ── Today's signals (latest bar per symbol) ───────────────────────────── */
 
-  async function predictToday(symbol, offlineMap, diagnostics) {
+  /* ctx (optional): { baseRate, model } cached per-scan by getTodaySignals so
+     we don't do 2-3 IndexedDB reads inside every predictToday call. */
+  async function predictToday(symbol, offlineMap, diagnostics, ctx) {
     var reject = function (reason) {
       if (diagnostics) diagnostics.rejects[reason] = (diagnostics.rejects[reason] || 0) + 1;
       return null;
@@ -867,12 +878,16 @@ window.LiveML = (function () {
     var chgPct = prevClose ? ((candles[i].c / prevClose) - 1) * 100 : null;
 
     var baseRate = 50;
-    try {
-      var statusMeta = await getStatusMeta();
-      if (statusMeta && statusMeta.corpus && statusMeta.corpus.baseRate != null) {
-        baseRate = statusMeta.corpus.baseRate;
-      }
-    } catch (e) {}
+    if (ctx && ctx.baseRate != null) {
+      baseRate = ctx.baseRate;
+    } else {
+      try {
+        var statusMeta = await getStatusMeta();
+        if (statusMeta && statusMeta.corpus && statusMeta.corpus.baseRate != null) {
+          baseRate = statusMeta.corpus.baseRate;
+        }
+      } catch (e) {}
+    }
 
     var technicalScore = computeTechnicalScore(f);
     var expectedChgPct = computeExpectedChg(f, baseRate);
@@ -885,10 +900,14 @@ window.LiveML = (function () {
 
     if (window.MLTrainer) {
       var model = null;
-      try {
-        if (!model) model = await window.PatternStore.getMeta(MODEL_KEYS.champion);
-        if (!model) model = await window.PatternStore.getMeta(MODEL_KEYS.legacy);
-      } catch (e) {}
+      if (ctx && ctx.model !== undefined) {
+        model = ctx.model;
+      } else {
+        try {
+          if (!model) model = await window.PatternStore.getMeta(MODEL_KEYS.champion);
+          if (!model) model = await window.PatternStore.getMeta(MODEL_KEYS.legacy);
+        } catch (e) {}
+      }
       if (model && model.network && model.network.inputSize === window.MLTrainer.FEATURE_KEYS.length) {
         var pred = window.MLTrainer.predictSync(f, model);
         if (pred) {
@@ -935,29 +954,65 @@ window.LiveML = (function () {
     var universe = opts.symbols || getUniverse().map(function (s) { return s.t; });
     var count = opts.count || 20;
     var onProgress = opts.onProgress || function () {};
-    var offlineMap = await loadOfflineMap();
     var out = [];
     var diagnostics = { rejects: {}, scored: 0 };
     var started = Date.now();
-    var lastProgress = 0;
-    var BUDGET_MS = 120000;
-    for (var i = 0; i < universe.length; i++) {
-      var symbol = universe[i];
-      var elapsed = Date.now() - started;
-      if (elapsed > BUDGET_MS && !offlineLookup(offlineMap, symbol)) continue;
-      if (elapsed > BUDGET_MS * 2) {
-        onProgress(i, universe.length, "Budget exhausted (" + Math.round(elapsed / 1000) + "s), stopping with " + out.length + " signals");
-        break;
+    /* Hard watchdog — the scan can never hang forever, no matter what stalls. */
+    var DEADLINE_MS = opts.budgetMs || 180000;
+
+    if (!universe.length) {
+      onProgress(0, 0, "Universe is empty (window.NIFTY_200 missing?)");
+      return out;
+    }
+
+    await ensureStoreInit();
+
+    /* Per-scan caches (previously: 2-3 IndexedDB reads per symbol => ~600
+       redundant awaits across a 200-symbol scan). */
+    var baseRate = 50;
+    try {
+      var statusMeta = await getStatusMeta();
+      if (statusMeta && statusMeta.corpus && statusMeta.corpus.baseRate != null) baseRate = statusMeta.corpus.baseRate;
+    } catch (e) {}
+    var championModel = null;
+    try {
+      championModel = await window.PatternStore.getMeta(MODEL_KEYS.champion);
+      if (!championModel) championModel = await window.PatternStore.getMeta(MODEL_KEYS.legacy);
+    } catch (e) {}
+    var scanCtx = { baseRate: baseRate, model: championModel };
+
+    /* Offline map load is guarded too — an IDB open without onblocked can stall. */
+    var offlineMap = null;
+    try { offlineMap = await withTimeout(loadOfflineMap(), 15000); } catch (e) {}
+
+    onProgress(0, universe.length, "Scanning " + universe.length + " symbols (budget " + Math.round(DEADLINE_MS / 1000) + "s)...");
+
+    /* Parallel worker pool instead of fully serial fetching:
+       6 concurrent symbol pipelines cut a cold scan from ~10 min to ~1-2 min. */
+    var CONCURRENCY = Math.max(2, Math.min(8, opts.concurrency || 6));
+    var nextIdx = 0, done = 0, lastProgress = 0;
+
+    async function worker() {
+      for (;;) {
+        if (Date.now() - started > DEADLINE_MS) return;
+        var my = nextIdx++;
+        if (my >= universe.length) return;
+        try {
+          var sig = await withTimeout(predictToday(universe[my], offlineMap, diagnostics, scanCtx), 45000);
+          if (sig) out.push(sig);
+        } catch (e) {}
+        done++;
+        if (Date.now() - lastProgress > 2000 || done === universe.length) {
+          lastProgress = Date.now();
+          await yieldTick();
+          onProgress(done, universe.length, "Scored " + done + "/" + universe.length + " symbols (" + out.length + " signals, " + Math.round((lastProgress - started) / 1000) + "s)");
+        }
       }
-      try {
-        var sig = await predictToday(symbol, offlineMap, diagnostics);
-        if (sig) out.push(sig);
-      } catch (e) {}
-      if (Date.now() - lastProgress > 2000 || i === universe.length - 1) {
-        lastProgress = Date.now();
-        await new Promise(function (r) { setTimeout(r, 0); });
-        onProgress(i + 1, universe.length, "Scored " + (i + 1) + "/" + universe.length + " symbols (" + out.length + " signals, " + Math.round((lastProgress - started) / 1000) + "s)");
-      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
+    if (done < universe.length) {
+      onProgress(done, universe.length, "Time budget reached (" + Math.round((Date.now() - started) / 1000) + "s): scored " + done + "/" + universe.length + ", keeping " + out.length + " signals");
     }
     if (opts.onDiagnostics) {
       opts.onDiagnostics(diagnostics);

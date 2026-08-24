@@ -646,6 +646,9 @@ window.PatternDashboard = (function () {
     var liveStatus = _liveStatus[0], setLiveStatus = _liveStatus[1];
     var _liveBusy = useState(false);
     var liveBusy = _liveBusy[0], setLiveBusy = _liveBusy[1];
+    // Live scan progress { done, total } so the button shows movement instead of a frozen "Working..."
+    var _liveProg = useState(null);
+    var liveProg = _liveProg[0], setLiveProg = _liveProg[1];
     var _liveLog = useState([]);
     var liveLog = _liveLog[0], setLiveLog = _liveLog[1];
     var _liveSignals = useState(null);
@@ -2032,6 +2035,7 @@ window.PatternDashboard = (function () {
     async function handleTodaySignals() {
       if (!window.LiveML) { setError("LiveML module not loaded"); return; }
       setLiveBusy(true);
+      setLiveProg(null);
       setLiveSignals(null);
       setValidationReport(null);
       setImprovementReport(null);
@@ -2042,7 +2046,10 @@ window.PatternDashboard = (function () {
         var diagLog = null;
         var signals = await window.LiveML.getTodaySignals({
           count: 20,
-          onProgress: function (current, total, msg) { pushLiveLog("[" + Math.round((total > 0 ? current / total * 100 : 0)) + "%] " + (msg || "Scoring " + current + "/" + total + "...")); },
+          onProgress: function (current, total, msg) {
+            setLiveProg({ done: current, total: total });
+            pushLiveLog("[" + Math.round((total > 0 ? current / total * 100 : 0)) + "%] " + (msg || "Scoring " + current + "/" + total + "..."));
+          },
           onDiagnostics: function (d) { diagLog = d; }
         });
         setLiveSignals(signals);
@@ -2066,6 +2073,7 @@ window.PatternDashboard = (function () {
         setError("Today's signals failed: " + err.message);
       } finally {
         flushLiveLogLive();
+        setLiveProg(null);
         setLiveBusy(false);
       }
     }
@@ -2569,7 +2577,7 @@ window.PatternDashboard = (function () {
             React.createElement("button", {
               onClick: handleTodaySignals, disabled: liveBusy,
               style: { padding: "8px 16px", borderRadius: 6, background: liveBusy ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", cursor: liveBusy ? "not-allowed" : "pointer", fontWeight: 600, opacity: hasLive ? 1 : 0.5 }
-            }, liveBusy ? "Working..." : "Step 1: Morning Scan"),
+            }, liveBusy ? ("Working..." + (liveProg && liveProg.total ? " " + liveProg.done + "/" + liveProg.total : "")) : "Step 1: Morning Scan"),
             React.createElement("button", {
               onClick: handleEveningValidate, disabled: liveBusy,
               style: { padding: "8px 16px", borderRadius: 6, background: liveBusy ? "#9ca3af" : "#d97706", color: "#fff", border: "none", cursor: liveBusy ? "not-allowed" : "pointer", fontWeight: 600, opacity: hasLive ? 1 : 0.5 }
