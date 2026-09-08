@@ -1038,6 +1038,24 @@ window.BacktestEngine = (function () {
       agg.blindHoldout = blindHO;
       if (blindHO) agg.blindHoldoutConsistent = (blindHO.train.expectancyPct > 0 && blindHO.holdout.expectancyPct > 0) || (blindHO.train.expectancyPct < 0 && blindHO.holdout.expectancyPct < 0);
 
+      // Pooled win/loss/timeout averages + break-even win rate from the real
+      // barrier mix (see batchSummary for the formula).
+      var _wS = 0, _wC = 0, _lS = 0, _lC = 0, _tS = 0, _tC = 0;
+      allOosTrades.forEach(function (t) {
+        if (t.hitTarget) { _wC++; _wS += t.finalReturnPct || 0; }
+        else if (t.barrier === "LOSS") { _lC++; _lS += t.finalReturnPct || 0; }
+        else { _tC++; _tS += t.finalReturnPct || 0; }
+      });
+      agg.avgWinPct = _wC ? Math.round(_wS / _wC * 100) / 100 : null;
+      agg.avgLossPct = _lC ? Math.round(_lS / _lC * 100) / 100 : null;
+      agg.avgTimeoutPct = _tC ? Math.round(_tS / _tC * 100) / 100 : null;
+      if (allOosTrades.length && agg.avgWinPct != null && agg.avgWinPct > 0) {
+        var _pL = _lC / allOosTrades.length, _pT = _tC / allOosTrades.length;
+        agg.breakEvenWinRate = Math.round(Math.max(0, Math.min(100, ((-_pL * (agg.avgLossPct || 0) - _pT * (agg.avgTimeoutPct || 0)) / agg.avgWinPct) * 100)) * 10) / 10;
+      } else {
+        agg.breakEvenWinRate = null;
+      }
+
       var calibration = calibrateConfidence(allOosTrades);
 
       return { symbol: symbol, folds: folds, aggregate: agg, threshold: threshold, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, calibration: calibration };
@@ -1047,6 +1065,9 @@ window.BacktestEngine = (function () {
       if (!agg.totalOosSignals) return "No test signals generated \u2014 try a lower threshold or longer history.";
       var parts = [];
       parts.push("Out-of-sample win rate " + (agg.overallWinRate != null ? agg.overallWinRate + "%" : "—") + " across " + agg.totalOosSignals + " signals in " + agg.folds + " folds (" + agg.foldsWithSignals + " with signals).");
+      if (agg.breakEvenWinRate != null) {
+        parts.push("Break-even win rate is " + agg.breakEvenWinRate + "% (losses + timeouts) \u2014 you're at " + (agg.overallWinRate != null ? agg.overallWinRate + "% (" + (agg.overallWinRate >= agg.breakEvenWinRate ? "above" : "below") + ")" : "—") + ".");
+      }
       if (agg.consistency != null) {
         parts.push(agg.consistency >= 60
           ? "The edge held in " + agg.consistency + "% of folds — consistent across regimes."
@@ -1100,7 +1121,7 @@ window.BacktestEngine = (function () {
                 avgConfEmp = ceN > 0 ? Math.round(ceSum / ceN * 10) / 10 : null;
                 avgEntryScore = esN > 0 ? Math.round(esSum / esN * 10) / 10 : null;
               }
-              results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, expectancyPct: single.stats.totalSignals ? single.stats.expectancyPct : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, timeoutTrades: single.stats.totalSignals ? single.stats.timeoutTrades : 0, barrierBreakdown: single.stats.totalSignals ? single.stats.barrierBreakdown : null, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, avgTrend: avgTrend, avgPullback: avgPullback, avgProb4: avgProb4, avgSwing: avgSwing, avgHoldDays: avgHoldDays, avgConfLog: avgConfLog, avgConfEmp: avgConfEmp, avgEntryScore: avgEntryScore, detail: single });
+              results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, expectancyPct: single.stats.totalSignals ? single.stats.expectancyPct : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, timeoutTrades: single.stats.totalSignals ? single.stats.timeoutTrades : 0, barrierBreakdown: single.stats.totalSignals ? single.stats.barrierBreakdown : null, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, avgWinPct: single.stats.totalSignals ? single.stats.avgWinPct : null, avgLossPct: single.stats.totalSignals ? single.stats.avgLossPct : null, avgTimeoutPct: single.stats.totalSignals ? single.stats.avgTimeoutPct : null, avgTrend: avgTrend, avgPullback: avgPullback, avgProb4: avgProb4, avgSwing: avgSwing, avgHoldDays: avgHoldDays, avgConfLog: avgConfLog, avgConfEmp: avgConfEmp, avgEntryScore: avgEntryScore, detail: single });
             }
           } catch (e) {
             results.push({ symbol: sym, error: (e && e.message) || String(e) });
@@ -1124,9 +1145,26 @@ window.BacktestEngine = (function () {
       var totalWins = valid.reduce(function (s, r) { return s + r.winningTrades; }, 0);
       var totalLosses = valid.reduce(function (s, r) { return s + r.losingTrades; }, 0);
       var totalTimeouts = valid.reduce(function (s, r) { return s + (r.timeoutTrades || 0); }, 0);
-      var pfSum = 0, pfN = 0;
-      valid.forEach(function (r) { if (typeof r.profitFactor === "number") { pfSum += r.profitFactor; pfN++; } });
-      var byWinRate = valid.slice().sort(function (a, b) { return b.winRate - a.winRate; });
+var pfSum = 0, pfN = 0;
+valid.forEach(function (r) { if (typeof r.profitFactor === "number") { pfSum += r.profitFactor; pfN++; } });
+var wSum = 0, wCnt = 0, lSum = 0, lCnt = 0, tSum = 0, tCnt = 0;
+valid.forEach(function (r) {
+  if (r.winningTrades) { wCnt += r.winningTrades; wSum += (r.avgWinPct || 0) * r.winningTrades; }
+  if (r.losingTrades) { lCnt += r.losingTrades; lSum += (r.avgLossPct || 0) * r.losingTrades; }
+  if (r.timeoutTrades) { tCnt += r.timeoutTrades; tSum += (r.avgTimeoutPct || 0) * r.timeoutTrades; }
+});
+var pooledAvgWinPct = wCnt ? wSum / wCnt : 0;
+var pooledAvgLossPct = lCnt ? lSum / lCnt : 0;
+var pooledAvgTimeoutPct = tCnt ? tSum / tCnt : 0;
+/* Break-even win rate from the true barrier mix: p_be*avgWin + p_loss*avgLoss
+   + p_timeout*avgTimeout = 0, solved for p_be (win rate is wins/totalSignals,
+   so timeouts sit in the denominator exactly like the displayed win rate). */
+var breakEvenWinRate = null;
+if (totalSignals && pooledAvgWinPct > 0) {
+  var pLoss = lCnt / totalSignals, pTimeout = tCnt / totalSignals;
+  breakEvenWinRate = Math.round(Math.max(0, Math.min(100, ((-pLoss * pooledAvgLossPct - pTimeout * pooledAvgTimeoutPct) / pooledAvgWinPct) * 100)) * 10) / 10;
+}
+var byWinRate = valid.slice().sort(function (a, b) { return b.winRate - a.winRate; });
       var byReturn = valid.slice().sort(function (a, b) { return b.avgReturnPct - a.avgReturnPct; });
       var byExpectancy = valid.slice().sort(function (a, b) { return (b.expectancyPct || b.avgReturnPct) - (a.expectancyPct || a.avgReturnPct); });
       return {
@@ -1142,6 +1180,10 @@ window.BacktestEngine = (function () {
         avgExpectancy: Math.round(valid.reduce(function (s, r) { return s + (r.expectancyPct || r.avgReturnPct) * r.totalSignals; }, 0) / totalSignals * 100) / 100,
         avgReturn: Math.round(valid.reduce(function (s, r) { return s + r.avgReturnPct * r.totalSignals; }, 0) / totalSignals * 100) / 100,
         avgProfitFactor: pfN ? Math.round(pfSum / pfN * 100) / 100 : null,
+avgWinPct: wCnt ? Math.round(pooledAvgWinPct * 100) / 100 : null,
+avgLossPct: lCnt ? Math.round(pooledAvgLossPct * 100) / 100 : null,
+avgTimeoutPct: tCnt ? Math.round(pooledAvgTimeoutPct * 100) / 100 : null,
+breakEvenWinRate: breakEvenWinRate,
         bestByWinRate: byWinRate.length ? byWinRate[0].symbol : null,
         bestWinRate: byWinRate.length ? byWinRate[0].winRate : null,
         worstByWinRate: byWinRate.length ? byWinRate[byWinRate.length - 1].symbol : null,
