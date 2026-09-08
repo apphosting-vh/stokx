@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.3.10";
+window.__STOX_APP_VERSION = "4.4.0";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -4404,7 +4404,7 @@ const EntryScorePanel = ({ shares }) => {
           var result = computeCompatEntryScore(resW.data, resD.data, null, _idxD, null);
           try { result = window.applyPatternIntel(result, tk, resD.data); } catch(e) {}
           if (result && result._patternApplied) {
-            var pm = { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight };
+            var pm = buildPatMeta(result);
             var idx = copy.findIndex(function(e) { return e.id === missing[i].id; });
             if (idx >= 0) { copy[idx] = Object.assign({}, copy[idx], { patMeta: pm }); changed = true; }
           }
@@ -5336,7 +5336,8 @@ const EntryScorePanel = ({ shares }) => {
                               title: patMetaTooltip(entry.patMeta),
                               style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: entry.patMeta.delta > 0 ? "#16a34a22" : entry.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: entry.patMeta.delta > 0 ? "#16a34a" : entry.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (entry.patMeta.delta > 0 ? "#16a34a44" : entry.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
                             }, "P" + (entry.patMeta.delta > 0 ? "+" + entry.patMeta.delta : entry.patMeta.delta < 0 ? entry.patMeta.delta : ""))
-                          : null
+                          : null,
+                        mlBadge(entry.patMeta)
                       )
                     : "\u2014"
                 ),
@@ -5822,7 +5823,7 @@ const WatchlistTracker = () => {
           var result = computeCompatEntryScore(resW.data, resD.data, null, _idxD, null);
           try { result = window.applyPatternIntel(result, tk, resD.data); } catch(e) {}
           if (result && result._patternApplied) {
-            var pm = { applied: true, delta: result._patternDelta, originalScore: result._patternOriginalScore, winRate: result._patternWinRate, trades: result._patternTrades, topWeight: result._patternTopWeight };
+            var pm = buildPatMeta(result);
             var idx = copy.findIndex(function(r) { return r.id === missing[i].id; });
             if (idx >= 0) { copy[idx] = Object.assign({}, copy[idx], { patMeta: pm }); changed = true; }
           }
@@ -7118,7 +7119,7 @@ const BacktestSuitePanel = () => {
         onFold: (f, t) => setProgress({ phase: "Testing fold " + f + " / " + t + "\u2026", done: f, total: t })
       });
       if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
-      setModeResult({ mode: "walkforward", data: res });
+      setModeResult({ mode: "walkforward", data: Object.assign({}, res, { engine: eng }) });
     } catch (e) { setErr((e && e.message) || String(e)); }
     finally { setRunning(false); setProgress(null); }
   };
@@ -7614,6 +7615,9 @@ const BacktestSuitePanel = () => {
 
   const renderWalkForward = (d) => {
     const a = d.aggregate || {};
+    var _oosAll = [];
+    if (d && d.folds) d.folds.forEach(function(f) { if (f._oosTrades) _oosAll = _oosAll.concat(f._oosTrades); });
+    const kelly = d && d.engine && d.engine.kellyFraction ? d.engine.kellyFraction(_oosAll, 0.5) : null;
     return React.createElement("div", null,
       a.verdict && React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, marginBottom: 16, background: "rgba(6,182,212,.06)", border: "1px solid rgba(6,182,212,.2)", fontSize: 12, color: "var(--text2)", lineHeight: 1.6 } }, a.verdict),
       React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } },
@@ -7624,7 +7628,9 @@ const BacktestSuitePanel = () => {
         Stat("Avg Test Return", a.avgOosReturn != null ? React.createElement("span", { style: { color: retColor(a.avgOosReturn) } }, fmtR(a.avgOosReturn)) : "\u2014", "per trade, entry to exit"),
         Stat("Consistency", a.consistency != null ? fmtPct(a.consistency) : "\u2014", "% of folds with win rate \u2265 40%"),
         Stat("Train\u2013Test Gap", a.avgTrainTestGap != null ? fmt2(a.avgTrainTestGap) + "pts" : "\u2014", "how much test results trail training results"),
-        Stat("Positive Folds", a.positiveFolds + " / " + fmtS(a.folds), "folds with positive avg return")
+        Stat("Positive Folds", a.positiveFolds + " / " + fmtS(a.folds), "folds with positive avg return"),
+        Stat("Portfolio Sharpe", a.portfolioSharpe != null ? fmt2(a.portfolioSharpe) : "\u2014", "annualized, pooled trade std"),
+        Stat("Kelly (OOS)", kelly ? (kelly.kellyFraction * 100).toFixed(1) + "%" : "\u2014", kelly ? "half-Kelly, " + kelly.tradeCount + " trades" : "needs \u2265 20 OOS trades")
       ),
       card("Fold Details", "Each fold: Train on past data, then test on the next unseen period.",
         React.createElement("div", { style: { overflowX: "auto" } },
@@ -7640,6 +7646,48 @@ const BacktestSuitePanel = () => {
               cell(f.oos.profitFactor != null ? fmtPF(f.oos.profitFactor) : "\u2014")
             )))
           )
+        )
+      ),
+      (a.regimeCoverage && a.regimeCoverage.length) && card("Market Regime Coverage", "Each out-of-sample entry tagged with the market regime proxy at that bar (Nifty index 20-day vs 60-day moving average). Shows which regimes the strategy actually encountered.",
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null,
+              cell("Regime", tdL), cell("Signals", td), cell("Win Rate", td), cell("Avg Return", td)
+            )),
+            React.createElement("tbody", null, a.regimeCoverage.map(function(b) {
+              return React.createElement("tr", { key: b.regime },
+                cell(String(b.regime), tdL), cell(b.n),
+                cell(b.winRate != null ? React.createElement("span", { style: { color: retColor(b.winRate - 50), fontWeight: 700 } }, fmtPct(b.winRate)) : "\u2014"),
+                cell(b.avgReturnPct != null ? React.createElement("span", { style: { color: retColor(b.avgReturnPct) } }, fmtR(b.avgReturnPct)) : "\u2014"));
+            }))
+          )
+        )
+      ),
+      a.blindHoldout && card("Blind Holdout \u2014 Overfit Check", "A final window the strategy never saw during training, separated by a " + a.blindHoldout.embargoBars + "-bar embargo gap (" + a.blindHoldout.holdoutPeriod[0] + " \u2192 " + a.blindHoldout.holdoutPeriod[1] + ").",
+        React.createElement("div", null,
+          React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 } },
+            Stat("Train Expectancy", fmtR(a.blindHoldout.train.expectancyPct), a.blindHoldout.train.totalSignals + " train signals", retColor(a.blindHoldout.train.expectancyPct)),
+            Stat("Holdout Expectancy", fmtR(a.blindHoldout.holdout.expectancyPct), a.blindHoldout.holdout.totalSignals + " holdout signals", retColor(a.blindHoldout.holdout.expectancyPct)),
+            Stat("Train Win Rate", fmtPct(a.blindHoldout.train.winRate), "train window"),
+            Stat("Holdout Win Rate", fmtPct(a.blindHoldout.holdout.winRate), "unseen window"),
+            Stat("Holdout PF", a.blindHoldout.holdout.profitFactor != null ? fmtPF(a.blindHoldout.holdout.profitFactor) : "\u2014", "profit factor on holdout")
+          ),
+          a.blindHoldoutConsistent
+            ? React.createElement("div", { style: { padding: "10px 12px", borderRadius: 8, background: "rgba(34,197,94,.07)", border: "1px solid rgba(34,197,94,.2)", fontSize: 11, color: "#16a34a", fontWeight: 600 } }, "\u2713 Signature consistent \u2014 train and holdout agree on the sign of expectancy, so the edge is unlikely to be curve-fit.")
+            : React.createElement("div", { style: { padding: "10px 12px", borderRadius: 8, background: "rgba(239,68,68,.07)", border: "1px solid rgba(239,68,68,.2)", fontSize: 11, color: "#ef4444", fontWeight: 600 } }, "\u2717 Signature diverged in the blind holdout \u2014 handle with care, possible overfit.")
+        )
+      ),
+      kelly && card("Kelly Position Sizing", "Sized from the pooled out-of-sample trades of all folds. Conservative half-Kelly is recommended; each name is capped at 25% and total exposure at 60% of capital (see allocatePositions).",
+        React.createElement("div", null,
+          React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 } },
+            Stat("OOS Trades", kelly.tradeCount, "trade count"),
+            Stat("Win Rate", fmtPct(kelly.winRate)),
+            Stat("Avg Win / Loss", fmtR(kelly.avgWinPct) + " / " + fmtR(kelly.avgLossPct)),
+            Stat("Payoff Ratio", fmt2(kelly.payoffRatio)),
+            Stat("Full Kelly", (kelly.kellyFull * 100).toFixed(1) + "%"),
+            Stat("Recommended", (kelly.kellyFraction * 100).toFixed(1) + "%", "half-Kelly per position, capped at 25%")
+          ),
+          React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", lineHeight: 1.6 } }, "allocatePositions() independently enforces the 25% per-name cap and 60% total-exposure cap, so a multi-signal day never over-leverages the book.")
         )
       ),
       d.calibration && d.calibration.buckets && d.calibration.buckets.length > 0 && card("Confidence Accuracy Check", "How well the model's confidence predictions match reality. Each row groups signals by similar predicted probability, then checks the actual win rate.",
@@ -8764,8 +8812,24 @@ function buildPatMeta(result) {
     topWeight: result._patternTopWeight,
     calibrated: !!result._patternHasCalibration,
     powerBonus: result._powerBonusApplied || 0,
-    powerBonusBreakdown: result._powerBonusBreakdown || null
+    powerBonusBreakdown: result._powerBonusBreakdown || null,
+    ml: result._mlWinProb != null ? {
+      winProb: result._mlWinProb,
+      recommendation: result._mlRecommendation || null,
+      blendWeight: (result._mlWinProb >= 0.7 || result._mlWinProb <= 0.3) ? 0.35 : 0.25
+    } : null
   };
+}
+
+function mlBadge(pm) {
+  if (!pm || !pm.ml || pm.ml.winProb == null) return null;
+  var wp = Math.round(pm.ml.winProb * 100);
+  var level = wp >= 55 ? "up" : wp <= 45 ? "down" : "flat";
+  var col = level === "up" ? { bg: "#a78bfa22", fg: "#a78bfa", bd: "#a78bfa44" } : level === "down" ? { bg: "#e11d4822", fg: "#fb7185", bd: "#e11d4844" } : { bg: "#6b728022", fg: "#9ca3af", bd: "#6b728044" };
+  return React.createElement("span", {
+    title: "ML win probability " + wp + "% \u00b7 blended " + Math.round((pm.ml.blendWeight || 0.25) * 100) + "% into entry score" + (pm.ml.recommendation ? " \u00b7 rec " + pm.ml.recommendation : ""),
+    style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: col.bg, color: col.fg, border: "1px solid " + col.bd }
+  }, "M" + wp);
 }
 
 function patMetaTooltip(pm) {
@@ -8781,6 +8845,9 @@ function patMetaTooltip(pm) {
       });
     }
     parts.push("bonus: " + pbParts.join(" "));
+  }
+  if (pm.ml && pm.ml.winProb != null) {
+    parts.push("ML: " + Math.round(pm.ml.winProb * 100) + "% win-prob, blended " + Math.round(pm.ml.blendWeight * 100) + "%" + (pm.ml.recommendation ? ", rec " + pm.ml.recommendation : ""));
   }
   return parts.join(", ") + ")";
 }
@@ -9784,7 +9851,8 @@ function StockScreener(props) {
                           title: patMetaTooltip(r.patMeta),
                           style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: r.patMeta.delta > 0 ? "#16a34a22" : r.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: r.patMeta.delta > 0 ? "#16a34a" : r.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (r.patMeta.delta > 0 ? "#16a34a44" : r.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
                         }, "P" + (r.patMeta.delta > 0 ? "+" + r.patMeta.delta : r.patMeta.delta < 0 ? r.patMeta.delta : ""))
-                      : null
+                      : null,
+                    mlBadge(r.patMeta)
                   )
                 ),
                 React.createElement("td", { style: tdStyle }, r.result.weekly ? React.createElement("span", { style: { fontWeight: 700, color: r.result.weekly.decision.color } }, r.result.weekly.total) : "\u2014"),
