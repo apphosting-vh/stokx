@@ -116,42 +116,48 @@
 
   /**
    * Compute ML features for synchronous prediction.
-   * When dailyCandles is provided, computes real indicators.
-   * Otherwise falls back to neutral defaults (entry_score only).
+   * When dailyCandles is provided, computes real 18-key expanded features
+   * (Phase 3/4) so the feature vector matches FEATURE_KEYS length exactly —
+   * predictSync rejects shorter inputs. Otherwise falls back to neutral
+   * defaults (entry_score only).
+   * @param {Object} compatResult - compat entry-score result
+   * @param {Array} dailyCandles - daily OHLCV
+   * @param {Object} opts - { symbol, indexFeatures } (indexFeatures optional;
+   *        when absent, bull_bear/market_momentum default to neutral 0, which
+   *        matches the training distribution for index-less samples).
    */
-  function computeMLFeaturesFromCompat(compatResult, dailyCandles) {
+  function computeMLFeaturesFromCompat(compatResult, dailyCandles, opts) {
+    opts = opts || {};
+    var symbol = opts.symbol || (compatResult && (compatResult.symbol || compatResult.tk)) || null;
+    var indexFeatures = opts.indexFeatures || null;
     if (!compatResult) return null;
     if (dailyCandles && dailyCandles.length >= 30 && window.TechIndicators) {
       try {
         var TI = window.TechIndicators;
         var n = dailyCandles.length - 1;
-        var close = dailyCandles[n].c;
-        var rsiArr = TI.rsi(dailyCandles, 14);
-        var macdObj = TI.macd(dailyCandles, 12, 26, 9);
-        var bbObj = TI.bollingerBands(dailyCandles, 20, 2);
-        var atrArr = TI.atr(dailyCandles, 14);
-        var emaFastArr = TI.ema(dailyCandles, 12);
-        var adxObj = TI.adx(dailyCandles, 14);
-        var volSma = TI.sma(TI.volumes(dailyCandles), 20);
-        return {
-          rsi: rsiArr[n] != null ? Math.round(rsiArr[n] * 100) / 100 : 50,
-          macd_hist: macdObj && macdObj.histogram && close > 0 ? Math.round(macdObj.histogram[n] / close * 100 * 1000) / 1000 : 0,
-          bb_position: (bbObj.upper && bbObj.lower)
-            ? Math.round(((close - (bbObj.lower[n] || 0)) / Math.max(0.01, (bbObj.upper[n] || 0) - (bbObj.lower[n] || 0))) * 1000) / 1000
-            : 0.5,
-          atr_pct: atrArr[n] && close > 0 ? Math.round((atrArr[n] / close) * 100 * 1000) / 1000 : 0,
-          adx: adxObj && adxObj.adx ? Math.round((adxObj.adx[n] || 0) * 100) / 100 : 20,
-          ema_slope: emaFastArr[n] != null && emaFastArr[Math.max(0, n - 3)] != null
-            ? Math.round(((emaFastArr[n] - emaFastArr[Math.max(0, n - 3)]) / Math.max(0.01, emaFastArr[Math.max(0, n - 3)])) * 100 * 1000) / 1000
-            : 0,
-          volume_ratio: volSma && volSma[n] ? Math.round(dailyCandles[n].v / Math.max(1, volSma[n]) * 100) / 100 : 1,
-          entry_score: compatResult.finalScore || 0
-        };
-      } catch (e) {}
+        var feats = TI.computeExpandedFeatures(dailyCandles, n, compatResult.finalScore || 0, symbol, indexFeatures);
+        // Guard: ensure every FEATURE_KEYS key is present with a neutral default,
+        // regardless of which code path produced the object.
+        var keys = ["rsi", "atr_pct", "bb_position", "volume_ratio", "macd_hist", "ema_slope", "adx", "entry_score",
+          "trend_structure", "price_vs_sma200", "ema20_50_cross", "volatility_regime", "mfi", "vol_price_trend",
+          "bull_bear", "market_momentum", "cap_tier", "rsi_regime"];
+        var defaults = { rsi: 50, atr_pct: 0, bb_position: 0.5, volume_ratio: 1, macd_hist: 0, ema_slope: 0, adx: 20, entry_score: compatResult.finalScore || 0, trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0, volatility_regime: 0, mfi: 50, vol_price_trend: 0, bull_bear: 0, market_momentum: 0, cap_tier: -1, rsi_regime: 0 };
+        var out = {};
+        for (var i = 0; i < keys.length; i++) {
+          var k = keys[i];
+          var v = feats != null ? feats[k] : undefined;
+          out[k] = v != null && isFinite(v) ? v : defaults[k];
+        }
+        out.entry_score = compatResult.finalScore || 0;
+        return out;
+      } catch (e) { /* fall through to defaults */ }
     }
     return {
       rsi: 50, macd_hist: 0, bb_position: 0.5, atr_pct: 0,
       adx: 20, ema_slope: 0, volume_ratio: 1,
+      trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0,
+      volatility_regime: 0, mfi: 50, vol_price_trend: 0,
+      bull_bear: 0, market_momentum: 0, cap_tier: -1, rsi_regime: 0,
       entry_score: compatResult.finalScore || 0
     };
   }
@@ -262,7 +268,7 @@
     var mlPrediction = null;
     if (_cachedScoringConfig.useMLBlend && _cachedMLModel && window.MLTrainer && window.MLTrainer.predictSync) {
       try {
-        var mlFeatures = computeMLFeaturesFromCompat(compatResult, dailyCandles);
+        var mlFeatures = computeMLFeaturesFromCompat(compatResult, dailyCandles, { symbol: pattern.symbol || compatResult.tk });
         // Gate: model was trained on entry scores >= entryScoreMin (scores of
         // actual opened trades). Below that, fall back to pattern-weighted only.
         if (_cachedMLModel.entryScoreMin != null && (mlFeatures.entry_score == null || mlFeatures.entry_score < _cachedMLModel.entryScoreMin)) {
@@ -424,14 +430,16 @@
       // 2b. Pre-load ML model for synchronous prediction in screener
       await preloadMLModel();
 
+      // 2c. Expose direct-call helpers (applyPatternIntel, applyPatternConfCal).
+      //     Registered BEFORE DOM patching so sync screener paths always work
+      //     even if patchNavigation/patchScoring fail in a non-DOM context.
+      exposePatternHelpers();
+
       // 3. Patch navigation to include Pattern Lab tab
       patchNavigation();
 
       // 4. Enhance scoring to use patterns when available
       patchScoring();
-
-      // 5. Expose direct-call helpers for screener paths
-      exposePatternHelpers();
 
       var cacheCount = Object.keys(_patternMemoryCache).length;
       console.log("[PatternIntel] System ready — screener will use calibrated pattern data (" + cacheCount + " patterns cached)");
@@ -501,6 +509,12 @@
     };
 
     console.log("[PatternIntel] Direct-call helpers exposed (window.applyPatternIntel, window.applyPatternConfCal)");
+
+    /**
+     * Reload the sync ML champion into the in-memory cache for synchronous
+     * screener prediction. Returns the loaded model (or null).
+     */
+    window.preloadPatternMLModel = preloadMLModel;
   }
 
   /**
@@ -807,6 +821,12 @@
   }
 
   // Auto-init when DOM is ready
+  // Direct-call helpers (window.applyPatternIntel, window.applyPatternConfCal)
+  // are registered immediately, before DOM patching, so the sync screener ML
+  // blend always works even if patchNavigation/patchScoring fail in a
+  // non-DOM context.
+  try { exposePatternHelpers(); } catch (e) {}
+
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () {
       setTimeout(function () { window.initPatternIntelligence(); }, 500);

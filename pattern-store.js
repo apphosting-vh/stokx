@@ -98,7 +98,10 @@ var _weightBlend = null;
    *   tradeStats: {
    *     totalTrades, winRate, avgReturn, avgWin, avgLoss,
    *     profitFactor, maxConsecWins, maxConsecLosses,
-   *     avgDaysToTarget, maxDrawdown, sharpeApprox
+   *     avgDaysToTarget, maxDrawdown, sharpeApprox,
+   *     winningTrades, losingTrades, timeoutTrades, expectancyPct,
+   *     barrierBreakdown: { win, loss, timeout, timeoutRatePct },
+   *     stopRatePct       // % stopped out at the stop barrier
    *   },
    *   pillarConsumption: {
    *     trendHealth: { max, touched, atMax, atMaxPct, avg, median },
@@ -205,9 +208,16 @@ var _weightBlend = null;
   /**
    * Store raw per-trade features for ML training.
    * Features array: [
-   *   { symbol, features: { rsi, macd_hist, bb_position, atr_pct, obv_trend, ... }, label: { return_10d, is_winner } },
+   *   { symbol, features: { rsi, atr_pct, bb_position, volume_ratio, macd_hist, ema_slope, adx, entry_score,
+   *     trend_structure, price_vs_sma200, ema20_50_cross, volatility_regime, mfi, vol_price_trend,
+   *     bull_bear, market_momentum, cap_tier, rsi_regime, ... },
+   *     label: { return_10d, is_winner, barrier: 'WIN'|'LOSS'|'TIMEOUT', is_stop, days_to_target } },
    *   ...
    * ]
+   * label.barrier mirrors the Phase-1 triple-barrier outcome from
+   * backtest-engine.simulateTrade; 'WIN' ⇒ hit target (is_winner true),
+   * 'LOSS' ⇒ hit the stop-loss barrier, 'TIMEOUT' ⇒ expired at the holding
+   * period without hitting either barrier.
    */
   function putFeatures(symbol, features) {
     return new Promise(function (resolve, reject) {
@@ -257,6 +267,10 @@ var _weightBlend = null;
    * Store the rolling live corpus for a symbol (array of bar-level samples:
    * { symbol, entryDate, features: { rsi, atr_pct, bb_position, volume_ratio },
    *   label: { is_winner, return_1d } }).
+   * NOTE: the live corpus uses the short 1-day horizon variant
+   * (label { is_winner, return_1d }) for real-time drift monitoring, whereas
+   * the batch training corpus (putFeatures) uses the 10-day triple-barrier
+   * label schema { return_10d, is_winner, barrier, is_stop, days_to_target }.
    */
   function putLiveFeatures(symbol, features) {
     return new Promise(function (resolve, reject) {

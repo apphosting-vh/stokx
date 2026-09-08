@@ -169,17 +169,20 @@ window.MLTrainer = (function () {
     return { output: activations[activations.length - 1][0], activations: activations };
   }
 
-  function backward(nn, inputVector, target, lr, clipValue, gradAccum) {
+  function backward(nn, inputVector, target, lr, clipValue, gradAccum, weight) {
     lr = lr || 0.01;
     clipValue = clipValue || 5.0;
+    weight = weight != null ? weight : 1;
     var result = forward(nn, inputVector, true);
     var predicted = result.output;
     var activations = result.activations;
     var numLayers = nn.layers.length;
     var deltas = new Array(numLayers);
 
-    // Output delta
-    deltas[numLayers - 1] = [Math.max(-clipValue, Math.min(clipValue, predicted - target))];
+    // Output delta — cross-entropy with sigmoid is (predicted - target);
+    // scaling by the per-sample weight down-weights low-impact trades and
+    // up-weights large winners/losers (expectancy weighting).
+    deltas[numLayers - 1] = [Math.max(-clipValue, Math.min(clipValue, weight * (predicted - target)))];
 
     // Hidden deltas with gradient clipping
     for (var l = numLayers - 2; l >= 0; l--) {
@@ -318,8 +321,74 @@ window.MLTrainer = (function () {
   /* ── Feature Keys ──────────────────────────────────────────────────── */
   var FEATURE_KEYS = [
     "rsi", "atr_pct", "bb_position", "volume_ratio",
-    "macd_hist", "ema_slope", "adx", "entry_score"
+    "macd_hist", "ema_slope", "adx", "entry_score",
+    // Expanded (Phase 3): trend structure, volatility regime, volume/flow,
+    // market regime, cap tier
+    "trend_structure", "price_vs_sma200", "ema20_50_cross",
+    "volatility_regime", "mfi", "vol_price_trend",
+    "bull_bear", "market_momentum", "cap_tier", "rsi_regime"
   ];
+
+  /* ════════════════════════════════════════════════════════════════════════
+     Phase 4 — Calibration & Expectancy-Weighting Helpers
+     ════════════════════════════════════════════════════════════════════════ */
+
+  /* Sample weight from realized return magnitude (expectancy weighting):
+     larger |return| samples dominate the loss so the model focuses on the most
+     impactful outcomes. Expiry exits (return near 0) get a mild floor weight. */
+  function computeSampleWeight(label) {
+    var r = label && label.return_10d != null ? Math.abs(label.return_10d) : 0;
+    var w = 1 + r;
+    if (label && label.barrier === "TIMEOUT") w = Math.max(w, 0.6);
+    return w;
+  }
+
+  /* Soft 3-class target: WIN -> 1, LOSS -> 0, TIMEOUT -> 0.5.
+     Lets the network learn "did it reach target" while treating expiry as a
+     neutral outcome instead of a hard loss. */
+  function computeSoftTarget(label) {
+    if (label && label.barrier === "WIN") return 1;
+    if (label && label.barrier === "LOSS") return 0;
+    if (label && label.barrier === "TIMEOUT") return 0.5;
+    return label && label.is_winner ? 1 : 0;
+  }
+
+  function logit(p) {
+    var c = Math.max(1e-7, Math.min(1 - 1e-7, p));
+    return Math.log(c / (1 - c));
+  }
+
+  /* Platt scaling: calibrated = 1/(1+exp(A*s+B)) with s = logit(p).
+     Fits A,B by NLL gradient descent on the validation distribution. */
+  function fitPlattCalibration(points) {
+    if (!points || points.length < 20) return null;
+    var A = 0, B = 0;
+    var lr = 0.05;
+    for (var step = 0; step < 200; step++) {
+      var gA = 0, gB = 0;
+      for (var i = 0; i < points.length; i++) {
+        var p = points[i].predicted;
+        var y = points[i].actual != null ? points[i].actual : (points[i].label && points[i].label.is_winner ? 1 : 0);
+        var s = logit(p);
+        var pc = 1 / (1 + Math.exp(-(A * s + B)));
+        var diff = pc - y;
+        gA += diff * s;
+        gB += diff;
+      }
+      gA /= points.length;
+      gB /= points.length;
+      A -= lr * gA;
+      B -= lr * gB;
+      if (Math.abs(gA) < 1e-4 && Math.abs(gB) < 1e-4) break;
+    }
+    return { A: A, B: B };
+  }
+
+  function applyPlattCalibration(calib, p) {
+    if (!calib || p == null || (calib.A == null && calib.B == null)) return p;
+    var s = logit(p);
+    return 1 / (1 + Math.exp(-(calib.A * s + calib.B)));
+  }
 
   /* ════════════════════════════════════════════════════════════════════════
      Model Versioning & Champion-Challenger (Phase 2 & 3)
@@ -711,12 +780,13 @@ window.MLTrainer = (function () {
             var sample = trainBatch[s];
             var normalized = foldNormalizer.transform(sample.features);
             var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
-            var target = sample.label.is_winner ? 1 : 0;
-            var predicted = backward(foldNN, inputVector, target, effectiveLR, 5.0, gradAccum);
+            var target = computeSoftTarget(sample.label);
+            var w = computeSampleWeight(sample.label);
+            var predicted = backward(foldNN, inputVector, target, effectiveLR, 5.0, gradAccum, w);
             gradCount++;
             var pC = Math.max(1e-7, Math.min(1 - 1e-7, predicted));
-            epochLoss += -(target * Math.log(pC) + (1 - target) * Math.log(1 - pC));
-            if ((predicted >= 0.5 ? 1 : 0) === target) epochCorrect++;
+            epochLoss += w * -(target * Math.log(pC) + (1 - target) * Math.log(1 - pC));
+            if ((predicted >= 0.5 ? 1 : 0) === (sample.label.is_winner ? 1 : 0)) epochCorrect++;
           }
           if (gradCount > 0) applyGrads(foldNN, gradAccum, effectiveLR, gradCount);
           if (b % 4 === 0) await new Promise(function (r) { setTimeout(r, 0); });
@@ -866,8 +936,9 @@ window.MLTrainer = (function () {
           for (var s = fb * fullBatchSize; s < Math.min((fb + 1) * fullBatchSize, trainBatch.length); s++) {
             var norm = fullNormalizer.transform(trainBatch[s].features);
             var vec = FEATURE_KEYS.map(function (k) { return norm[k]; });
-            var target = trainBatch[s].label.is_winner ? 1 : 0;
-            backward(fullNN, vec, target, fullLR, 5.0, gradAccum);
+            var target = computeSoftTarget(trainBatch[s].label);
+            var w = computeSampleWeight(trainBatch[s].label);
+            backward(fullNN, vec, target, fullLR, 5.0, gradAccum, w);
             gradCount++;
           }
           if (gradCount > 0) applyGrads(fullNN, gradAccum, fullLR, gradCount);
@@ -878,12 +949,28 @@ window.MLTrainer = (function () {
       // Feature importance
       var importance = computePermutationImportance(fullNN, fullNormalizer, validSamples.slice(0, Math.min(200, validSamples.length)));
 
+      // Phase 4 — Platt calibration fit on the held-out tail (after bestFoldIdx)
+      // so probabilities are honest for real-time prediction.
+      var calibSamples = validSamples.slice(bestTrainEnd);
+      var calibration = null;
+      if (calibSamples.length >= 20) {
+        var calibPoints = calibSamples.map(function (sample) {
+          var norm = fullNormalizer.transform(sample.features);
+          var vec = FEATURE_KEYS.map(function (k) { return norm[k]; });
+          var r = forward(fullNN, vec, false);
+          return { predicted: r.output, actual: computeSoftTarget(sample.label) };
+        });
+        calibration = fitPlattCalibration(calibPoints);
+      }
+
       // Record the minimum entry score seen in training — live predictions
       // below this extrapolate into untrained territory and should be gated.
-      var serializedModel = serialize(fullNN, fullNormalizer, entryScoreMin);
+      var serializedModel = serialize(fullNN, fullNormalizer, entryScoreMin, calibration);
 
       resultSummary.featureImportance = importance;
       resultSummary.modelData = serializedModel;
+      resultSummary.calibrationApplied = !!calibration;
+      resultSummary.labelMode = "3class_soft";
       resultSummary.championKey = null; // will be set after promotion
 
       // Save as candidate
@@ -1150,12 +1237,13 @@ window.MLTrainer = (function () {
             var sample = trainBatches[s];
             var normalized = normalizer.transform(sample.features);
             var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
-            var target = sample.label.is_winner ? 1 : 0;
-            var predicted = backward(nn, inputVector, target, lr, 5.0, gradAccum);
+            var target = computeSoftTarget(sample.label);
+            var w = computeSampleWeight(sample.label);
+            var predicted = backward(nn, inputVector, target, lr, 5.0, gradAccum, w);
             gradCount++;
             var pClamped = Math.max(1e-7, Math.min(1 - 1e-7, predicted));
-            epochLoss += -(target * Math.log(pClamped) + (1 - target) * Math.log(1 - pClamped));
-            if ((predicted >= 0.5 ? 1 : 0) === target) epochCorrect++;
+            epochLoss += w * -(target * Math.log(pClamped) + (1 - target) * Math.log(1 - pClamped));
+            if ((predicted >= 0.5 ? 1 : 0) === (sample.label.is_winner ? 1 : 0)) epochCorrect++;
           }
           if (gradCount > 0) applyGrads(nn, gradAccum, lr, gradCount);
           if (b % 4 === 0) await new Promise(function (r) { setTimeout(r, 0); });
@@ -1191,7 +1279,21 @@ window.MLTrainer = (function () {
 
       // Retain the best-epoch weights and report their real validation score
       if (bestWeights) restoreWeights(nn, bestWeights);
-      var retainedValAcc = validateSamples(nn, normalizer, valSamples).valAcc;
+      var valResult = validateSamples(nn, normalizer, valSamples);
+      var retainedValAcc = valResult.valAcc;
+
+      // Phase 4 — Platt calibration on the validation distribution so the
+      // network's probabilities are honest (actual win-rate at p=0.7 ≈ 0.7).
+      var calibPoints = valResult.foldPredictions || [];
+      // Rebuild calibration points using the soft 3-class target so TIMEOUT
+      // trades are treated as neutral (0.5) rather than hard losses.
+      calibPoints = valSamples.map(function (sample) {
+        var normalized = normalizer.transform(sample.features);
+        var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
+        var result = forward(nn, inputVector, false);
+        return { predicted: result.output, actual: computeSoftTarget(sample.label) };
+      });
+      var calibration = fitPlattCalibration(calibPoints);
 
       onProgress(1, 1, "Saving model...");
       var entryScoreMin = validSamples.reduce(function (mn, s) {
@@ -1199,7 +1301,7 @@ window.MLTrainer = (function () {
         return v < mn ? v : mn;
       }, Infinity);
       if (entryScoreMin === Infinity) entryScoreMin = null;
-      var model = serialize(nn, normalizer, entryScoreMin);
+      var model = serialize(nn, normalizer, entryScoreMin, calibration);
       var importance = computePermutationImportance(nn, normalizer, valSamples.length > 100 ? valSamples.slice(0, 100) : valSamples);
 
       if (window.PatternStore) {
@@ -1217,6 +1319,8 @@ window.MLTrainer = (function () {
           featureImportance: importance,
           method: "single_split",
           entryScoreMin: entryScoreMin,
+          calibrationApplied: !!calibration,
+          labelMode: "3class_soft",
           versionId: "legacy"
         };
 
@@ -1281,17 +1385,22 @@ window.MLTrainer = (function () {
       var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
       var result = forward(nn, inputVector, false);
 
+      // Phase 4 — Platt calibration so probabilities are honest.
+      var prob = applyPlattCalibration(model.calibration, result.output);
+
       // Record for drift tracking
       recordPrediction(result.output);
 
       return {
-        winProbability: Math.round(result.output * 1000) / 1000,
-        recommendation: result.output >= 0.65 ? "STRONG_BUY" :
-                         result.output >= 0.55 ? "BUY" :
-                         result.output >= 0.45 ? "WATCHLIST" :
-                         result.output >= 0.35 ? "NEUTRAL" : "AVOID",
-        confidence: result.output >= 0.55 || result.output <= 0.35 ? "high" :
-                    result.output >= 0.45 ? "medium" : "low"
+        winProbability: Math.round(prob * 1000) / 1000,
+        rawOutput: Math.round(result.output * 1000) / 1000,
+        calibrated: !!model.calibration,
+        recommendation: prob >= 0.65 ? "STRONG_BUY" :
+                         prob >= 0.55 ? "BUY" :
+                         prob >= 0.45 ? "WATCHLIST" :
+                         prob >= 0.35 ? "NEUTRAL" : "AVOID",
+        confidence: prob >= 0.55 || prob <= 0.35 ? "high" :
+                    prob >= 0.45 ? "medium" : "low"
       };
     });
   }
@@ -1311,12 +1420,15 @@ window.MLTrainer = (function () {
     });
     var inputVector = FEATURE_KEYS.map(function (k) { return normalized[k]; });
     var result = forward(nn, inputVector, false);
+    var prob = applyPlattCalibration(loadedModel.calibration, result.output);
     return {
-      winProbability: Math.round(result.output * 1000) / 1000,
-      recommendation: result.output >= 0.65 ? "STRONG_BUY" :
-                       result.output >= 0.55 ? "BUY" :
-                       result.output >= 0.45 ? "WATCHLIST" :
-                       result.output >= 0.35 ? "NEUTRAL" : "AVOID"
+      winProbability: Math.round(prob * 1000) / 1000,
+      rawOutput: Math.round(result.output * 1000) / 1000,
+      calibrated: !!loadedModel.calibration,
+      recommendation: prob >= 0.65 ? "STRONG_BUY" :
+                       prob >= 0.55 ? "BUY" :
+                       prob >= 0.45 ? "WATCHLIST" :
+                       prob >= 0.35 ? "NEUTRAL" : "AVOID"
     };
   }
 
@@ -1365,9 +1477,9 @@ window.MLTrainer = (function () {
      Serialization
      ════════════════════════════════════════════════════════════════════════ */
 
-  function serialize(nn, normalizer, entryScoreMin) {
+  function serialize(nn, normalizer, entryScoreMin, calibration) {
     var out = {
-      version: 2,
+      version: 3,
       network: {
         inputSize: nn.inputSize,
         hiddenUnits: nn.hiddenUnits,
@@ -1379,6 +1491,7 @@ window.MLTrainer = (function () {
       featureKeys: FEATURE_KEYS
     };
     if (entryScoreMin != null) out.entryScoreMin = entryScoreMin;
+    if (calibration) out.calibration = calibration;
     return out;
   }
 
@@ -1504,6 +1617,11 @@ window.MLTrainer = (function () {
     continuousRetrain: continuousRetrain,
     // Phase 4: ML Observability
     getDriftHistory: getDriftHistory,
-    getPromotionHistory: getPromotionHistory
+    getPromotionHistory: getPromotionHistory,
+    // Phase 4: Calibration & 3-class labels
+    applyPlattCalibration: applyPlattCalibration,
+    fitPlattCalibration: fitPlattCalibration,
+    computeSoftTarget: computeSoftTarget,
+    computeSampleWeight: computeSampleWeight
   };
 })();

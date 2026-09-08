@@ -52,14 +52,16 @@ window.BacktestEngine = (function () {
     var months = {};
     trades.forEach(function (t) {
       var m = String(t.entryDate).slice(0, 7);
-      if (!months[m]) months[m] = { trades: 0, wins: 0, ret: 0, score: 0 };
+      if (!months[m]) months[m] = { trades: 0, wins: 0, losses: 0, timeouts: 0, ret: 0, score: 0 };
       months[m].trades++; months[m].score += t.entryScore;
       if (t.hitTarget) months[m].wins++;
+      else if (t.barrier === "LOSS") months[m].losses++;
+      else months[m].timeouts++;
       months[m].ret += t.finalReturnPct;
     });
     return Object.keys(months).map(function (m) {
       var d = months[m];
-      return { month: m, trades: d.trades, winRate: d.trades ? Math.round((d.wins / d.trades) * 1000) / 10 : null, avgReturn: d.trades ? Math.round((d.ret / d.trades) * 100) / 100 : null, avgScore: d.trades ? Math.round((d.score / d.trades) * 10) / 10 : null };
+      return { month: m, trades: d.trades, winRate: d.trades ? Math.round((d.wins / d.trades) * 1000) / 10 : null, expectancyPct: d.trades ? Math.round((d.ret / d.trades) * 100) / 100 : null, avgScore: d.trades ? Math.round((d.score / d.trades) * 10) / 10 : null, wins: d.wins, losses: d.losses, timeouts: d.timeouts };
     }).sort(function (a, b) { return a.month.localeCompare(b.month); });
   }
 
@@ -72,10 +74,19 @@ window.BacktestEngine = (function () {
       if (!grouped[k] || !grouped[k].length) return;
       var g = grouped[k];
       var wins = g.filter(function (t) { return t.hitTarget; }).length;
+      var losses = g.filter(function (t) { return t.barrier === "LOSS"; }).length;
+      var timeouts = g.filter(function (t) { return t.barrier === "TIMEOUT"; }).length;
+      var avgRet = g.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / g.length;
+      var gp = g.filter(function (t) { return t.finalReturnPct > 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0);
+      var gl = Math.abs(g.filter(function (t) { return t.finalReturnPct < 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0));
       out[k] = {
         trades: g.length,
         winRate: Math.round((wins / g.length) * 1000) / 10,
-        avgReturn: Math.round((g.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / g.length) * 100) / 100
+        lossRate: Math.round((losses / g.length) * 1000) / 10,
+        timeoutRate: Math.round((timeouts / g.length) * 1000) / 10,
+        expectancyPct: Math.round(avgRet * 100) / 100,
+        profitFactor: gl > 0 ? Math.round((gp / gl) * 100) / 100 : (gp > 0 ? "∞" : 0),
+        avgReturn: Math.round(avgRet * 100) / 100
       };
     });
     return out;
@@ -105,6 +116,229 @@ window.BacktestEngine = (function () {
     return Math.round(((mean - riskFreeRate) / std) * 100) / 100;
   }
 
+  /* Phase 6 — Validation helpers. */
+
+  /* Regime at a candle index (proxy using the instrument's own MAs since a
+     stock-level WF doesn't carry the index series). Returns "bull" | "bear" |
+     "neutral" | "unknown" based on price vs MA50 and MA200. */
+  function regimeAtBar(candles, idx) {
+    if (!candles || idx == null || idx < 50) return "unknown";
+    var closes = candles.map(function (c) { return c.c; });
+    var sum50 = 0, sum200 = 0;
+    for (var i = Math.max(0, idx - 49); i <= idx; i++) sum50 += closes[i];
+    var ma50 = sum50 / 50;
+    if (idx >= 200) {
+      for (var j = idx - 199; j <= idx; j++) sum200 += closes[j];
+      var ma200 = sum200 / 200;
+      if (closes[idx] > ma200 && ma50 > ma200) return "bull";
+      if (closes[idx] < ma200 && ma50 < ma200) return "bear";
+      return "neutral";
+    }
+    return closes[idx] > ma50 ? "bull" : "bear";
+  }
+
+  /* Regime coverage across a set of trades — how many fell in each regime and
+     the win rate within each. */
+  function regimeCoverage(trades) {
+    var byRegime = {};
+    trades.forEach(function (t) {
+      var r = t.regime || "unknown";
+      if (!byRegime[r]) byRegime[r] = { n: 0, wins: 0, totalReturn: 0 };
+      byRegime[r].n++;
+      if (t.hitTarget) byRegime[r].wins++;
+      byRegime[r].totalReturn += t.finalReturnPct || 0;
+    });
+    var out = [];
+    Object.keys(byRegime).forEach(function (r) {
+      var b = byRegime[r];
+      out.push({
+        regime: r,
+        n: b.n,
+        winRate: b.n ? Math.round((b.wins / b.n) * 1000) / 10 : null,
+        avgReturnPct: b.n ? Math.round((b.totalReturn / b.n) * 100) / 100 : null
+      });
+    });
+    out.sort(function (a, b) { return b.n - a.n; });
+    return out;
+  }
+
+  /* Annualized portfolio Sharpe from pooled trade returns assuming ~252/avgHold
+     round-trips per year. Mean/std of per-trade returns, scaled by sqrt(N/yr). */
+  function portfolioSharpe(trades, holdingDays) {
+    var hd = holdingDays || 10;
+    if (!trades || trades.length < 5) return null;
+    var rets = trades.map(function (t) { return t.finalReturnPct || 0; });
+    var mean = rets.reduce(function (s, r) { return s + r; }, 0) / rets.length;
+    var variance = rets.reduce(function (s, r) { return s + (r - mean) * (r - mean); }, 0) / (rets.length - 1);
+    var std = Math.sqrt(variance);
+    if (std === 0) return null;
+    var roundsPerYear = 252 / hd;
+    return Math.round((mean / std) * Math.sqrt(roundsPerYear) * 100) / 100;
+  }
+
+  /* Blind holdout: a fixed-size final window that is never touched by training.
+     Reports in-sample vs holdout expectancy so overfit can be detected.
+     Runs at module scope, so warmup/holdingPeriodDays and the trade collector
+     (collectTrades, defined inside create()) are passed in via opts. */
+  function blindHoldout(candles, opts, ctx) {
+    opts = opts || {};
+    ctx = ctx || {};
+    var symbol = opts.symbol || "";
+    var warmupN = opts.warmup != null ? opts.warmup : 60;
+    var holdDays = opts.holdingPeriodDays != null ? opts.holdingPeriodDays : 14;
+    var collect = opts.collect != null ? opts.collect : null;
+    if (!collect) return null;
+    var holdoutBars = opts.holdoutBars != null ? opts.holdoutBars : Math.max(60, Math.floor((candles.length || 0) * 0.25));
+    var L = candles.length;
+    if (L < warmupN + holdDays + holdoutBars + 20) {
+      return null;
+    }
+    var matureEnd = L - holdDays - 1 - (opts.realisticEntry ? 1 : 0);
+    var holdoutStart = matureEnd - holdoutBars + 1;
+    var embargoBars = ctx.embargo != null ? ctx.embargo : 60;
+    var trainEnd = holdoutStart - 1 - embargoBars;
+
+    // Train window: collect trades on the pre-holdout slice
+    var trainTrades = trainEnd >= warmupN
+      ? collect(candles, warmupN, trainEnd, { symbol: symbol, sampleEvery: opts.sampleEvery || 1 })
+      : { trades: [], scored: [] };
+    var holdoutTrades = collect(candles, holdoutStart, matureEnd, { symbol: symbol, sampleEvery: opts.sampleEvery || 1 });
+
+    function summarize(t) {
+      var st = calculateStats(t.trades || [], symbol);
+      return {
+        totalSignals: st.totalSignals,
+        winRate: st.totalSignals ? st.winRate : 0,
+        losingTrades: st.totalSignals ? st.losingTrades : 0,
+        timeoutTrades: st.totalSignals ? st.timeoutTrades : 0,
+        expectancyPct: st.totalSignals ? st.expectancyPct : 0,
+        avgReturnPct: st.totalSignals ? st.avgReturnPct : 0,
+        profitFactor: st.totalSignals ? st.profitFactor : null
+      };
+    }
+
+    return {
+      holdoutPeriod: [String(candles[holdoutStart].t).slice(0, 10), String(candles[matureEnd].t).slice(0, 10)],
+      train: summarize(trainTrades),
+      holdout: summarize(holdoutTrades),
+      embargoBars: embargoBars
+    };
+  }
+
+  /* Phase 7 — Position sizing (Kelly). */
+
+  /* Compute Kelly fraction from a trade set. Uses win rate + avg win / avg loss
+     ratio. Returns the full Kelly, and a conservative half/fraction Kelly.
+     b = avg win (per unit), p = win prob, q = 1-p.
+     Kelly f* = p - q/b. We express returns in %, so b = avgWinPct / avgLossPct
+     (the payoff ratio). */
+  function kellyFraction(trades, kellyMultiplier) {
+    var km = kellyMultiplier != null ? kellyMultiplier : 0.5;
+    if (!trades || trades.length < 20) return null;
+    var wins = trades.filter(function (t) { return t.finalReturnPct > 0; });
+    var losses = trades.filter(function (t) { return t.finalReturnPct <= 0; });
+    if (!wins.length || !losses.length) return null;
+    var p = wins.length / trades.length;
+    var q = 1 - p;
+    var avgWin = wins.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / wins.length;
+    var avgLoss = Math.abs(losses.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / losses.length);
+    if (avgLoss <= 0) return null;
+    var payoff = avgWin / avgLoss;
+    var f_star = p - q / payoff;
+    if (f_star <= 0) f_star = 0;
+    return {
+      winRate: Math.round(p * 1000) / 10,
+      avgWinPct: Math.round(avgWin * 100) / 100,
+      avgLossPct: Math.round(avgLoss * 100) / 100,
+      payoffRatio: Math.round(payoff * 1000) / 1000,
+      kellyFull: Math.round(f_star * 100) / 100,
+      kellyFraction: Math.round(Math.max(0, f_star * km) * 1000) / 1000,
+      kellyMultiplier: km,
+      tradeCount: trades.length
+    };
+  }
+
+  /* Portfolio allocation: given a list of candidate signals each with an
+     expectancy estimate and a total capital budget, allocate weights capped by
+     per-position and total-position limits. Positions are ranked by
+     expectancy; each receives budget*totalCap*(e/totalE) capped at
+     perPositionCap of the budget, and any unallocated budget is redistributed
+     among the uncapped positions so cap limits are never exceeded. */
+  function allocatePositions(signals, budget, opts) {
+    opts = opts || {};
+    var maxPositions = opts.maxPositions || 5;
+    var perPositionCap = opts.perPositionCap || 0.25; // 25% max per name
+    var totalCap = opts.totalCap || 0.6;              // invest at most totalCap of budget
+    if (!signals || !signals.length) return [];
+    var ranked = signals.slice().
+      filter(function (s) { return s.expectancy != null && s.expectancy > 0; }).
+      sort(function (a, b) { return b.expectancy - a.expectancy; }).
+      slice(0, maxPositions);
+    if (!ranked.length) return [];
+    var units = budget != null ? budget : 1;
+    var allocBudget = Math.max(0, totalCap * units);
+    var perCap = Math.min(perPositionCap * units, allocBudget);
+    var totalExp = ranked.reduce(function (s, x) { return s + x.expectancy; }, 0);
+    if (!(totalExp > 0)) return [];
+
+    var allocs = new Array(ranked.length).fill(0);
+    function pass() {
+      var open = [];
+      for (var i = 0; i < ranked.length; i++) {
+        if (allocs[i] < perCap) {
+          open.push({ idx: i, e: ranked[i].expectancy });
+        }
+      }
+      return open;
+    }
+    // Iterative redistribution: targets proportional to expectancy, capped per-position.
+    var target = allocBudget;
+    var safety = 0;
+    while (safety < 8) {
+      safety++;
+      var open = pass();
+      if (!open.length) break;
+      var openE = 0;
+      for (var oi = 0; oi < open.length; oi++) openE += open[oi].e;
+      if (!(openE > 0)) break;
+      var gapBudget = allocBudget;
+      for (var ai = 0; ai < allocs.length; ai++) gapBudget -= allocs[ai];
+      if (gapBudget <= 1e-9) break;
+      var distributed = false;
+      for (var oi2 = 0; oi2 < open.length; oi2++) {
+        var slot = open[oi2];
+        var want = gapBudget * (slot.e / openE);
+        var room = perCap - allocs[slot.idx];
+        var give = Math.min(want, Math.max(0, room));
+        if (give < 0) continue;
+        allocs[slot.idx] += give;
+        distributed = distributed || give > 1e-9;
+      }
+      if (!distributed) break;
+    }
+    // Normalize: if over-allocated (float), scale down to cap.
+    var used = allocs.reduce(function (s, x) { return s + x; }, 0);
+    if (used > allocBudget && used > 0) {
+      var scale = allocBudget / used;
+      for (var si = 0; si < allocs.length; si++) allocs[si] = allocs[si] * scale;
+      used = allocs.reduce(function (s, x) { return s + x; }, 0);
+    }
+
+    var out = [];
+    for (var o = 0; o < ranked.length; o++) {
+      var s = ranked[o];
+      var a = Math.round(allocs[o] * 100) / 100;
+      out.push({
+        symbol: s.symbol,
+        expectancyPct: s.expectancy,
+        weight: allocBudget > 0 ? Math.round((a / allocBudget) * 10000) / 100 : 0,
+        allocation: a,
+        sharesHint: s.close && s.close > 0 ? Math.max(1, Math.floor(a / s.close)) : null
+      });
+    }
+    return out;
+  }
+
   function equityCurve(trades) {
     if (!trades || !trades.length) return null;
     var sorted = trades.slice().sort(function (a, b) { return a.entryDate.localeCompare(b.entryDate); });
@@ -130,29 +364,44 @@ window.BacktestEngine = (function () {
     }
     var n = trades.length;
     var wins = trades.filter(function (t) { return t.hitTarget; });
-    var losses = trades.filter(function (t) { return !t.hitTarget; });
+    var losses = trades.filter(function (t) { return t.barrier === "LOSS"; });
+    var timeouts = trades.filter(function (t) { return t.barrier === "TIMEOUT"; });
     var winRate = (wins.length / n) * 100;
     var avgReturn = trades.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / n;
     var avgWin = wins.length ? wins.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / wins.length : 0;
     var avgLoss = losses.length ? losses.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / losses.length : 0;
+    var avgTimeout = timeouts.length ? timeouts.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / timeouts.length : null;
     var avgDays = wins.length ? wins.reduce(function (s, t) { return s + (t.daysToTarget || 0); }, 0) / wins.length : null;
     var grossProfit = trades.filter(function (t) { return t.finalReturnPct > 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0);
     var grossLoss = Math.abs(trades.filter(function (t) { return t.finalReturnPct < 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0));
     var profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? Infinity : 0);
+    // Expectancy per trade: average return across all trades (the key metric)
+    var expectancy = avgReturn;
     var eq = equityCurve(trades);
     return {
       symbol: symbol,
       totalSignals: n,
       winningTrades: wins.length,
       losingTrades: losses.length,
+      timeoutTrades: timeouts.length,
       winRate: Math.round(winRate * 10) / 10,
+      expectancyPct: Math.round(expectancy * 100) / 100,
       avgReturnPct: Math.round(avgReturn * 100) / 100,
       avgWinPct: Math.round(avgWin * 100) / 100,
       avgLossPct: Math.round(avgLoss * 100) / 100,
+      avgTimeoutPct: avgTimeout != null ? Math.round(avgTimeout * 100) / 100 : null,
       avgDaysToTarget: avgDays != null ? Math.round(avgDays * 10) / 10 : null,
       profitFactor: profitFactor === Infinity ? "∞" : Math.round(profitFactor * 100) / 100,
+      barrierBreakdown: {
+        win: wins.length,
+        loss: losses.length,
+        timeout: timeouts.length,
+        winRatePct: Math.round(winRate * 10) / 10,
+        lossRatePct: Math.round((losses.length / n) * 1000) / 10,
+        timeoutRatePct: Math.round((timeouts.length / n) * 1000) / 10
+      },
       maxConsecutiveWins: maxConsecutive(trades.map(function (t) { return t.hitTarget; }), true),
-      maxConsecutiveLosses: maxConsecutive(trades.map(function (t) { return t.hitTarget; }), false),
+      maxConsecutiveLosses: maxConsecutive(trades.map(function (t) { return t.barrier === "LOSS"; }), true),
       scoreBrackets: scoreBrackets(trades),
       monthlyBreakdown: monthlyBreakdown(trades),
       equityCurve: eq,
@@ -167,6 +416,7 @@ window.BacktestEngine = (function () {
     cfg = cfg || {};
     var scoreFn = cfg.scoreFn || null;
     var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 4.0);
+    var stopLossPct = cfg.stopLossPct != null ? cfg.stopLossPct : 2.0;
     var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 14);
     var threshold = cfg.threshold != null ? cfg.threshold : 65;
     var warmup = cfg.warmup != null ? cfg.warmup : 60;
@@ -245,6 +495,9 @@ window.BacktestEngine = (function () {
       var useRealisticExit = opts.realisticExit !== undefined ? opts.realisticExit : realisticExit;
       var slip = opts.slippagePct != null ? opts.slippagePct : slippagePct;
       var broker = opts.brokeragePct != null ? opts.brokeragePct : brokeragePct;
+      var tradeTargetPct = opts.targetProfitPct != null ? opts.targetProfitPct : targetProfitPct;
+      var tradeStopLossPct = opts.stopLossPct != null ? opts.stopLossPct : stopLossPct;
+      var tradeHoldingPeriod = opts.holdingPeriodDays != null ? opts.holdingPeriodDays : holdingPeriodDays;
       var lookAheadNeeded = useRealisticEntry ? 2 : 1;
       if (entryIdx + lookAheadNeeded > candles.length) return null;
 
@@ -258,48 +511,76 @@ window.BacktestEngine = (function () {
       }
 
       var entryPriceAdj = entryPrice * (1 + slip / 100) * (1 + broker / 100);
-      // Exact target: raw price level that yields targetProfitPct net after exit slippage + brokerage
-      // exitProceeds = targetPrice * (1 - slip/100) * (1 - broker/100) = entryPriceAdj * (1 + targetProfitPct/100)
       var exitCostFactor = (1 - slip / 100) * (1 - broker / 100);
-      var targetPrice = entryPriceAdj * (1 + targetProfitPct / 100) / exitCostFactor;
+      var targetPrice = entryPriceAdj * (1 + tradeTargetPct / 100) / exitCostFactor;
+      var stopLossPrice = entryPriceAdj * (1 - tradeStopLossPct / 100) / exitCostFactor;
 
       var entryDate = String(candles[entryDateIdx].t).slice(0, 10);
       var hitTarget = false, daysToTarget = null, exitPrice = entryPriceAdj, exitDate = entryDate;
+      var barrier = "TIMEOUT";
       var maxProfitPct = 0, maxLossPct = 0;
-      var maxHolding = Math.min(holdingPeriodDays, candles.length - entryDateIdx - 1);
+      var maxHolding = Math.min(tradeHoldingPeriod, candles.length - entryDateIdx - 1);
 
       for (var j = 1; j <= maxHolding; j++) {
         var cur = candles[entryDateIdx + j];
         var prevClose = candles[entryDateIdx + j - 1].c;
 
         if (useRealisticExit) {
-          // Check gap open above target
+          // Gap open below stop-loss: exit at open
+          if (cur.o <= stopLossPrice) {
+            daysToTarget = j;
+            exitDate = String(cur.t).slice(0, 10);
+            exitPrice = cur.o * (1 - slip / 100) * (1 - broker / 100);
+            barrier = "LOSS";
+            break;
+          }
+          // Gap open above target: exit at open
           if (cur.o >= targetPrice) {
             hitTarget = true;
             daysToTarget = j;
             exitDate = String(cur.t).slice(0, 10);
             exitPrice = cur.o * (1 - slip / 100) * (1 - broker / 100);
+            barrier = "WIN";
             break;
           }
-          // Normal intraday hit
+          // Intraday stop-loss hit (check low before high — stop takes priority)
+          if (cur.l <= stopLossPrice) {
+            daysToTarget = j;
+            exitDate = String(cur.t).slice(0, 10);
+            exitPrice = stopLossPrice * (1 - slip / 100) * (1 - broker / 100);
+            barrier = "LOSS";
+            break;
+          }
+          // Intraday target hit
           if (cur.h >= targetPrice) {
             hitTarget = true;
             daysToTarget = j;
             exitDate = String(cur.t).slice(0, 10);
             exitPrice = targetPrice * (1 - slip / 100) * (1 - broker / 100);
+            barrier = "WIN";
             break;
           }
         } else {
-          // Original optimistic: exit at raw target high without costs
-          var targetPriceRaw = entryPriceAdj * (1 + targetProfitPct / 100);
+          // Optimistic mode: no exit costs on stop-loss
+          var stopLossRaw = entryPriceAdj * (1 - tradeStopLossPct / 100);
+          if (cur.l <= stopLossRaw) {
+            daysToTarget = j;
+            exitDate = String(cur.t).slice(0, 10);
+            exitPrice = stopLossRaw;
+            barrier = "LOSS";
+            break;
+          }
+          var targetPriceRaw = entryPriceAdj * (1 + tradeTargetPct / 100);
           if (cur.h >= targetPriceRaw) {
             hitTarget = true;
             daysToTarget = j;
             exitDate = String(cur.t).slice(0, 10);
             exitPrice = targetPriceRaw;
+            barrier = "WIN";
             break;
           }
         }
+
         // Track max profit/loss before exit (based on close, adjusted for exit costs)
         var pnlClose = cur.c * exitCostFactor;
         var pnl = (pnlClose - entryPriceAdj) / entryPriceAdj * 100;
@@ -312,9 +593,7 @@ window.BacktestEngine = (function () {
         }
       }
 
-      // Final return after all costs
       var finalReturn = (exitPrice - entryPriceAdj) / entryPriceAdj * 100;
-      // If exit price is not set (shouldn't happen), fallback
       if (exitPrice === undefined) exitPrice = entryPriceAdj;
 
       return {
@@ -326,7 +605,9 @@ window.BacktestEngine = (function () {
         entryScore: ROUND2(score.entryScore),
         signal: score.classification || classifyScore(score.entryScore),
         targetPrice: ROUND2(targetPrice),
+        stopLossPrice: ROUND2(stopLossPrice),
         hitTarget: hitTarget,
+        barrier: barrier,
         daysToTarget: daysToTarget,
         finalReturnPct: ROUND2(finalReturn),
         maxProfitPct: ROUND2(maxProfitPct),
@@ -695,7 +976,7 @@ window.BacktestEngine = (function () {
           inSampleBars: inSampleEnd - inSampleStart + 1,
           oosScoredBars: oosCount,
           inSample: { totalSignals: isStats.totalSignals, winRate: isStats.totalSignals ? isStats.winRate : null, avgReturnPct: isStats.totalSignals ? isStats.avgReturnPct : null, profitFactor: isStats.totalSignals ? isStats.profitFactor : null },
-          oos: { totalSignals: oosStats.totalSignals, winRate: oosStats.totalSignals ? oosStats.winRate : null, avgReturnPct: oosStats.totalSignals ? oosStats.avgReturnPct : null, profitFactor: oosStats.totalSignals ? oosStats.profitFactor : null, winningTrades: oosStats.winningTrades, losingTrades: oosStats.losingTrades },
+          oos: { totalSignals: oosStats.totalSignals, winRate: oosStats.totalSignals ? oosStats.winRate : null, expectancyPct: oosStats.totalSignals ? oosStats.expectancyPct : null, avgReturnPct: oosStats.totalSignals ? oosStats.avgReturnPct : null, profitFactor: oosStats.totalSignals ? oosStats.profitFactor : null, winningTrades: oosStats.winningTrades, losingTrades: oosStats.losingTrades, timeoutTrades: oosStats.timeoutTrades, barrierBreakdown: oosStats.barrierBreakdown },
           _oosTrades: oos.trades
         });
 
@@ -707,7 +988,7 @@ window.BacktestEngine = (function () {
 
       var withSignals = folds.filter(function (fl) { return fl.oos.totalSignals > 0; });
       var oosTradesAll = withSignals.map(function (fl) {
-        return { n: fl.oos.totalSignals, wins: fl.oos.winningTrades, avgReturn: fl.oos.avgReturnPct };
+        return { n: fl.oos.totalSignals, wins: fl.oos.winningTrades, losses: fl.oos.losingTrades, timeouts: fl.oos.timeoutTrades || 0, avgReturn: fl.oos.avgReturnPct, expectancyPct: fl.oos.expectancyPct };
       });
       var totalOosSignals = oosTradesAll.reduce(function (s, t) { return s + t.n; }, 0);
       var totalOosWins = oosTradesAll.reduce(function (s, t) { return s + t.wins; }, 0);
@@ -721,6 +1002,7 @@ window.BacktestEngine = (function () {
           : null,
         avgFoldWinRate: withSignals.length ? Math.round(withSignals.reduce(function (s, fl) { return s + fl.oos.winRate; }, 0) / withSignals.length * 10) / 10 : null,
         avgOosReturn: withSignals.length ? Math.round(withSignals.reduce(function (s, fl) { return s + fl.oos.avgReturnPct; }, 0) / withSignals.length * 100) / 100 : null,
+        avgOosExpectancy: withSignals.length ? Math.round(withSignals.reduce(function (s, fl) { return s + (fl.oos.expectancyPct || fl.oos.avgReturnPct); }, 0) / withSignals.length * 100) / 100 : null,
         positiveFolds: withSignals.filter(function (fl) { return fl.oos.avgReturnPct > 0; }).length,
         consistency: withSignals.length ? Math.round((withSignals.filter(function (fl) { return fl.oos.winRate >= 40; }).length / withSignals.length) * 1000) / 10 : null,
         avgTrainTestGap: null
@@ -733,6 +1015,29 @@ window.BacktestEngine = (function () {
 
       var allOosTrades = [];
       folds.forEach(function(fl) { if (fl._oosTrades) allOosTrades = allOosTrades.concat(fl._oosTrades); });
+      // Phase 6 — tag each OOS trade with the entry regime (MA-based proxy),
+      // compute regime coverage and annualized portfolio Sharpe.
+      var dateToIdx = {};
+      for (var di = 0; di < candles.length; di++) { dateToIdx[String(candles[di].t).slice(0, 10)] = di; }
+      allOosTrades.forEach(function (t) {
+        var eIdx = t.entryDate != null ? dateToIdx[String(t.entryDate).slice(0, 10)] : -1;
+        t.regime = regimeAtBar(candles, eIdx != null ? eIdx : -1);
+      });
+      var regimeCover = regimeCoverage(allOosTrades);
+      var portSharpe = portfolioSharpe(allOosTrades, holdingPeriodDays);
+      agg.regimeCoverage = regimeCover;
+      agg.portfolioSharpe = portSharpe;
+
+      // Phase 6 — blind holdout: final window never seen during training, with
+      // an embargo gap between train and holdout (Phase 3 of the plan requires
+      // a 3-month gap; here we approximate by embargoBars).
+      var blindHO = null;
+      try {
+        blindHO = blindHoldout(candles, { symbol: symbol, holdoutBars: opts.holdoutBars, sampleEvery: sampleEvery, realisticEntry: useRealisticWF, collect: collectTrades, warmup: warmup, holdingPeriodDays: holdingPeriodDays }, { embargo: opts.embargoBars != null ? opts.embargoBars : 60 });
+      } catch (e) { blindHO = null; }
+      agg.blindHoldout = blindHO;
+      if (blindHO) agg.blindHoldoutConsistent = (blindHO.train.expectancyPct > 0 && blindHO.holdout.expectancyPct > 0) || (blindHO.train.expectancyPct < 0 && blindHO.holdout.expectancyPct < 0);
+
       var calibration = calibrateConfidence(allOosTrades);
 
       return { symbol: symbol, folds: folds, aggregate: agg, threshold: threshold, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, calibration: calibration };
@@ -795,7 +1100,7 @@ window.BacktestEngine = (function () {
                 avgConfEmp = ceN > 0 ? Math.round(ceSum / ceN * 10) / 10 : null;
                 avgEntryScore = esN > 0 ? Math.round(esSum / esN * 10) / 10 : null;
               }
-              results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, avgTrend: avgTrend, avgPullback: avgPullback, avgProb4: avgProb4, avgSwing: avgSwing, avgHoldDays: avgHoldDays, avgConfLog: avgConfLog, avgConfEmp: avgConfEmp, avgEntryScore: avgEntryScore, detail: single });
+              results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, expectancyPct: single.stats.totalSignals ? single.stats.expectancyPct : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, timeoutTrades: single.stats.totalSignals ? single.stats.timeoutTrades : 0, barrierBreakdown: single.stats.totalSignals ? single.stats.barrierBreakdown : null, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, avgTrend: avgTrend, avgPullback: avgPullback, avgProb4: avgProb4, avgSwing: avgSwing, avgHoldDays: avgHoldDays, avgConfLog: avgConfLog, avgConfEmp: avgConfEmp, avgEntryScore: avgEntryScore, detail: single });
             }
           } catch (e) {
             results.push({ symbol: sym, error: (e && e.message) || String(e) });
@@ -817,24 +1122,32 @@ window.BacktestEngine = (function () {
       if (!valid.length) return { message: "No valid results" };
       var totalSignals = valid.reduce(function (s, r) { return s + r.totalSignals; }, 0);
       var totalWins = valid.reduce(function (s, r) { return s + r.winningTrades; }, 0);
+      var totalLosses = valid.reduce(function (s, r) { return s + r.losingTrades; }, 0);
+      var totalTimeouts = valid.reduce(function (s, r) { return s + (r.timeoutTrades || 0); }, 0);
       var pfSum = 0, pfN = 0;
       valid.forEach(function (r) { if (typeof r.profitFactor === "number") { pfSum += r.profitFactor; pfN++; } });
       var byWinRate = valid.slice().sort(function (a, b) { return b.winRate - a.winRate; });
       var byReturn = valid.slice().sort(function (a, b) { return b.avgReturnPct - a.avgReturnPct; });
+      var byExpectancy = valid.slice().sort(function (a, b) { return (b.expectancyPct || b.avgReturnPct) - (a.expectancyPct || a.avgReturnPct); });
       return {
         symbolsTested: results.length,
         symbolsWithSignals: valid.length,
         symbolsNoSignals: results.length - valid.length,
         totalSignals: totalSignals,
         totalWins: totalWins,
+        totalLosses: totalLosses,
+        totalTimeouts: totalTimeouts,
         overallWinRate: totalSignals ? Math.round((totalWins / totalSignals) * 1000) / 10 : null,
         avgWinRate: Math.round(valid.reduce(function (s, r) { return s + r.winRate; }, 0) / valid.length * 10) / 10,
+        avgExpectancy: Math.round(valid.reduce(function (s, r) { return s + (r.expectancyPct || r.avgReturnPct) * r.totalSignals; }, 0) / totalSignals * 100) / 100,
         avgReturn: Math.round(valid.reduce(function (s, r) { return s + r.avgReturnPct * r.totalSignals; }, 0) / totalSignals * 100) / 100,
         avgProfitFactor: pfN ? Math.round(pfSum / pfN * 100) / 100 : null,
         bestByWinRate: byWinRate.length ? byWinRate[0].symbol : null,
         bestWinRate: byWinRate.length ? byWinRate[0].winRate : null,
         worstByWinRate: byWinRate.length ? byWinRate[byWinRate.length - 1].symbol : null,
         worstWinRate: byWinRate.length ? byWinRate[byWinRate.length - 1].winRate : null,
+        bestByExpectancy: byExpectancy.length ? byExpectancy[0].symbol : null,
+        bestExpectancy: byExpectancy.length ? (byExpectancy[0].expectancyPct || byExpectancy[0].avgReturnPct) : null,
         bestByReturn: byReturn.length ? byReturn[0].symbol : null,
         bestReturn: byReturn.length ? byReturn[0].avgReturnPct : null
       };
@@ -851,17 +1164,17 @@ window.BacktestEngine = (function () {
 
     function exportSingleCSV(res) {
       var st = res.stats;
-      var headers = ["Symbol", "Entry Date", "Exit Date", "Entry Price", "Exit Price", "Entry Score", "10DLN", "10DEM", "Signal", "Target", "Hit Target", "Days", "Return %", "Max Fav %", "Max Adv %", "Trend", "Pullback", "Prob4", "Swing", "Modifiers"];
+      var headers = ["Symbol", "Entry Date", "Exit Date", "Entry Price", "Exit Price", "Entry Score", "10DLN", "10DEM", "Signal", "Target", "Stop Loss", "Barrier", "Hit Target", "Days", "Return %", "Max Fav %", "Max Adv %", "Trend", "Pullback", "Prob4", "Swing", "Modifiers"];
       var rows = (st && st.trades ? st.trades : []).map(function (t) {
-        return [res.symbol, t.entryDate, t.exitDate, t.entryPrice, t.exitPrice, t.entryScore, t.confLog != null ? Math.round(t.confLog * 1000) / 10 : null, t.confEmp != null ? Math.round(t.confEmp * 1000) / 10 : null, t.signal, t.targetPrice, t.hitTarget ? "YES" : "NO", t.daysToTarget || "", t.finalReturnPct, t.maxProfitPct, t.maxLossPct, t.trendScore, t.pullbackScore, t.probabilityScore, t.swingScore, t.modifiers];
+        return [res.symbol, t.entryDate, t.exitDate, t.entryPrice, t.exitPrice, t.entryScore, t.confLog != null ? Math.round(t.confLog * 1000) / 10 : null, t.confEmp != null ? Math.round(t.confEmp * 1000) / 10 : null, t.signal, t.targetPrice, t.stopLossPrice || "", t.barrier || "", t.hitTarget ? "YES" : "NO", t.daysToTarget || "", t.finalReturnPct, t.maxProfitPct, t.maxLossPct, t.trendScore, t.pullbackScore, t.probabilityScore, t.swingScore, t.modifiers];
       });
       return csvRows(headers, rows);
     }
 
     function exportBatchCSV(res) {
-      var headers = ["Symbol", "Signals", "Wins", "Losses", "Win Rate %", "Avg Return %", "Profit Factor"];
+      var headers = ["Symbol", "Signals", "Wins", "Losses", "Timeouts", "Win Rate %", "Expectancy %", "Avg Return %", "Profit Factor"];
       var rows = (res.results || []).map(function (r) {
-        return [r.symbol, r.totalSignals, r.winningTrades, r.losingTrades, r.winRate, r.avgReturnPct, r.profitFactor];
+        return [r.symbol, r.totalSignals, r.winningTrades, r.losingTrades, r.timeoutTrades || 0, r.winRate, r.expectancyPct || r.avgReturnPct, r.avgReturnPct, r.profitFactor];
       });
       return csvRows(headers, rows);
     }
@@ -925,7 +1238,7 @@ window.BacktestEngine = (function () {
       for (var ti = 0; ti < thRange.length; ti++) {
         var th = thRange[ti];
         if (hooks.onProgress) hooks.onProgress(ti, totalSteps, "Sweeping total score ≥ " + th);
-        var eng = create({ threshold: th, scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, multiTFMap: cfg.multiTFMap, indexCandles: cfg.indexCandles, realisticEntry: cfg.realisticEntry, realisticExit: cfg.realisticExit, slippagePct: cfg.slippagePct, brokeragePct: cfg.brokeragePct });
+        var eng = create({ threshold: th, scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, stopLossPct: stopLossPct, holdingPeriodDays: holdingPeriodDays, multiTFMap: cfg.multiTFMap, indexCandles: cfg.indexCandles, realisticEntry: cfg.realisticEntry, realisticExit: cfg.realisticExit, slippagePct: cfg.slippagePct, brokeragePct: cfg.brokeragePct });
         var batch = await eng.runBatch(subMap, { symbols: symbols, sampleEvery: opts.sampleEvery || 2 });
         var sm = batch.summary;
         thResults.push({
@@ -951,7 +1264,7 @@ window.BacktestEngine = (function () {
           { key: 'swingPotential', optKey: 'minSwingPotential', label: 'Swing Potential', max: pillarSweepCfg ? pillarSweepCfg.swingPotential : 20, values: pillarSweep.swingPotential || [0, 5, 10, 15, 20] }
         ];
         // Single engine with threshold=0 — scores are cached and reused across all pillar values
-        var pillarEng = create({ scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: 0, multiTFMap: cfg.multiTFMap, indexCandles: cfg.indexCandles, realisticEntry: cfg.realisticEntry, realisticExit: cfg.realisticExit, slippagePct: cfg.slippagePct, brokeragePct: cfg.brokeragePct });
+        var pillarEng = create({ scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, stopLossPct: stopLossPct, holdingPeriodDays: holdingPeriodDays, threshold: 0, multiTFMap: cfg.multiTFMap, indexCandles: cfg.indexCandles, realisticEntry: cfg.realisticEntry, realisticExit: cfg.realisticExit, slippagePct: cfg.slippagePct, brokeragePct: cfg.brokeragePct });
         var pillarOffset = 0;
         for (var pi = 0; pi < pillars.length; pi++) {
           var p = pillars[pi];
@@ -1122,6 +1435,123 @@ window.BacktestEngine = (function () {
     }
 
     /**
+     * sweepParameters — Multi-dimensional parameter sweep.
+     * Sweeps targetProfitPct × stopLossPct × entry-score threshold and reports
+     * expectancy, win rate, timeout rate, profit factor and annualized return so
+     * the best stop/target/score combination can be selected.
+     *
+     * opts:
+     *   targetPcts    : number[]   (default [2.5, 3.0, 3.5, 4.0])
+     *   stopPcts      : number[]   (default [1.5, 2.0, 2.5])
+     *   scoreThresholds : number[] (default [55, 60, 65, 70])
+     *   symbols       : string[] subset of dataMap keys
+     *   sampleEvery   : number     (default 2)
+     *   holdingPeriodDays : number (default 10)
+     *
+     * Returns { cells: [...], best: {...} }
+     */
+    async function sweepParameters(dataMap, opts, hooks) {
+      opts = opts || {};
+      hooks = hooks || {};
+      var symbols = opts.symbols || Object.keys(dataMap || {});
+      var targetPcts = opts.targetPcts || [2.5, 3.0, 3.5, 4.0];
+      var stopPcts = opts.stopPcts || [1.5, 2.0, 2.5];
+      var thRange = opts.scoreThresholds || [55, 60, 65, 70];
+      var holdingDays = opts.holdingPeriodDays != null ? opts.holdingPeriodDays : holdingPeriodDays;
+
+      var subMap = {};
+      symbols.forEach(function (s) { if (dataMap[s]) subMap[s] = dataMap[s]; });
+
+      var totalSteps = targetPcts.length * stopPcts.length * thRange.length;
+      var step = 0;
+      var cells = [];
+      var resultsBySpec = {};
+      var best = null;
+
+      for (var t = 0; t < targetPcts.length; t++) {
+        for (var sIdx = 0; sIdx < stopPcts.length; sIdx++) {
+          for (var ti = 0; ti < thRange.length; ti++) {
+            var tgt = targetPcts[t];
+            var stp = stopPcts[sIdx];
+            var th = thRange[ti];
+            step++;
+            if (hooks.onProgress) hooks.onProgress(step, totalSteps, "tgt=" + tgt + "% stop=" + stp + "% th=" + th);
+
+            var eng = create({
+              threshold: th,
+              scoreFn: cfg.scoreFn,
+              targetProfitPct: tgt,
+              stopLossPct: stp,
+              holdingPeriodDays: holdingDays,
+              multiTFMap: cfg.multiTFMap,
+              indexCandles: cfg.indexCandles,
+              realisticEntry: cfg.realisticEntry,
+              realisticExit: cfg.realisticExit,
+              slippagePct: cfg.slippagePct,
+              brokeragePct: cfg.brokeragePct
+            });
+            var batch;
+            try {
+              batch = await eng.runBatch(subMap, { symbols: symbols, sampleEvery: opts.sampleEvery || 2 });
+            } catch (e) {
+              batch = null;
+            }
+            var sm = batch ? batch.summary : null;
+            var timeoutRate = 0;
+            if (sm && sm.totalSignals > 0 && sm.totalTimeouts != null) {
+              timeoutRate = sm.totalSignals > 0 ? Math.round((sm.totalTimeouts / sm.totalSignals) * 1000) / 10 : 0;
+            }
+            var exp = sm && sm.avgExpectancy != null ? sm.avgExpectancy : (sm ? sm.avgReturn : 0);
+            var annRet = 0;
+            if (sm && sm.avgReturn != null && holdingDays > 0) {
+              // Approximate annualized per-position return assuming ~252/10 round-trips/yr.
+              annRet = Math.round(sm.avgReturn * (252 / holdingDays) * 1000) / 1000;
+            }
+            var cell = {
+              targetPct: tgt,
+              stopLossPct: stp,
+              threshold: th,
+              signals: sm ? sm.totalSignals : 0,
+              winRate: sm && sm.overallWinRate != null ? sm.overallWinRate : 0,
+              timeoutRate: timeoutRate,
+              avgReturn: sm ? sm.avgReturn : 0,
+              expectancy: exp,
+              profitFactor: sm && sm.avgProfitFactor != null ? sm.avgProfitFactor : 0,
+              annualized: annRet,
+              symbolsTested: sm ? sm.symbolsWithSignals : 0
+            };
+            cells.push(cell);
+            var specKey = "t" + tgt + "_s" + stp + "_x" + th;
+            resultsBySpec[specKey] = cell;
+            if (sm && (!best || ((sm.avgExpectancy || 0) > (best.expectancy || 0)))) {
+              best = cell;
+            }
+            await yieldToUI();
+          }
+        }
+      }
+
+      return {
+        targets: targetPcts,
+        stops: stopPcts,
+        thresholds: thRange,
+        cells: cells,
+        best: best
+      };
+    }
+
+    /**
+     * exportSweepParametersCSV — Export multi-dim parameter sweep cells to CSV.
+     */
+    function exportSweepParametersCSV(sweepResult) {
+      var headers = ["Target %", "Stop %", "Threshold", "Signals", "Win Rate %", "Timeout %", "Avg Return %", "Expectancy %", "Profit Factor", "Annualized Return %"];
+      var rows = (sweepResult && sweepResult.cells ? sweepResult.cells : []).map(function (c) {
+        return [c.targetPct, c.stopLossPct, c.threshold, c.signals, c.winRate, c.timeoutRate, c.avgReturn, c.expectancy, c.profitFactor, c.annualized];
+      });
+      return csvRows(headers, rows);
+    }
+
+    /**
      * exportSweepCSV — Export sweep results to CSV.
      * type: 'threshold' | 'pillar' | 'component'
      */
@@ -1168,14 +1598,25 @@ window.BacktestEngine = (function () {
       runWalkForward: runWalkForward,
       runBatch: runBatch,
       sweepEntryScore: sweepEntryScore,
+      sweepParameters: sweepParameters,
       analyzeComponentPower: analyzeComponentPower,
+      kellyFraction: kellyFraction,
+      allocatePositions: allocatePositions,
+      portfolioSharpe: portfolioSharpe,
+      blindHoldout: blindHoldout,
+      regimeCoverage: regimeCoverage,
+      regimeAtBar: regimeAtBar,
       exportSingleCSV: exportSingleCSV,
       exportBatchCSV: exportBatchCSV,
       exportWalkForwardCSV: exportWalkForwardCSV,
       exportSweepCSV: exportSweepCSV,
+      exportSweepParametersCSV: exportSweepParametersCSV,
       clearScoreCache: function () { scoreCache.clear(); cacheOrder = []; },
       getScoreErrors: getScoreErrors,
-      clearScoreErrors: clearScoreErrors
+      clearScoreErrors: clearScoreErrors,
+      getTargetProfitPct: function () { return targetProfitPct; },
+      getStopLossPct: function () { return stopLossPct; },
+      getHoldingPeriodDays: function () { return holdingPeriodDays; }
     };
   }
 

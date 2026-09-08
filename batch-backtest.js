@@ -157,7 +157,7 @@ window.BatchBacktest = (function () {
           macdObj: TI.macd(candles, 12, 26, 9),
           bbObj: TI.bollingerBands(candles, 20, 2),
           atr: TI.atr(candles, 14),
-          emaFast: TI.ema(candles, 12),
+          emaFast: TI.ema(TI.closes(candles), 12),
           adxObj: TI.adx(candles, 14),
           volSma: TI.sma(TI.volumes(candles), 20),
           volumes: TI.volumes(candles)
@@ -170,13 +170,13 @@ window.BatchBacktest = (function () {
      * to computeMLFeaturesFromCompat's real-feature branch (pattern-integration.js:96-122).
      * Uses the pre-computed indicator cache (O(1) per bar).
      */
-    function mlFeaturesAtBar(bar, idx, cache, entryScore) {
+    function mlFeaturesAtBar(bar, idx, cache, entryScore, opts) {
       if (!cache || idx == null) return null;
       var close = bar.c || 0;
       if (close <= 0) return null;
       try {
         var n = idx;
-        return {
+        var base = {
           rsi: cache.rsi[n] != null ? Math.round(cache.rsi[n] * 100) / 100 : 50,
           macd_hist: cache.macdObj && cache.macdObj.histogram && close > 0
             ? Math.round(cache.macdObj.histogram[n] / close * 100 * 1000) / 1000 : 0,
@@ -191,6 +191,20 @@ window.BatchBacktest = (function () {
           volume_ratio: cache.volSma && cache.volSma[n] ? Math.round(cache.volumes[n] / Math.max(1, cache.volSma[n]) * 100) / 100 : 1,
           entry_score: entryScore || 0
         };
+        // Phase 3/4 — merge expanded features so the 18-key model vector is
+        // consistent with training (cap tier + market regime included).
+        var TI = window.TechIndicators;
+        if (TI && TI.computeExpandedFeatures && opts && opts.candles) {
+          try {
+            var idxFx = null;
+            if (TI.computeMarketRegimeFeatures) {
+              try { idxFx = TI.computeMarketRegimeFeatures(opts.indexCandles || null); } catch (_e3) {}
+            }
+            var exp = TI.computeExpandedFeatures(opts.candles, idx, entryScore || 0, opts.symbol || null, idxFx);
+            if (exp) base = Object.assign({}, base, exp);
+          } catch (_e4) {}
+        }
+        return base;
       } catch (e) { return null; }
     }
 
@@ -417,7 +431,7 @@ window.BatchBacktest = (function () {
         // ML-blended pass
         if (mlBlendedScored && mlCache) {
           var mlScore = patternScore;
-          var features = mlFeaturesAtBar(candles[bar.idx], bar.idx, mlCache, patternScore);
+          var features = mlFeaturesAtBar(candles[bar.idx], bar.idx, mlCache, patternScore, { candles: candles, symbol: pattern.symbol, indexCandles: cfg.indexCandles });
           if (features) {
             mlScore = applyMLBlendAtBar(patternScore, features, mlModel);
           }
@@ -465,6 +479,73 @@ window.BatchBacktest = (function () {
     var usePatternWeights = cfg.usePatternWeights !== false;
     var useMLBlend = cfg.useMLBlend !== false;
     var _cancelled = false;
+
+    // Universe filter config
+    var universeFilterEnabled = cfg.universeFilterEnabled !== false;
+    var minPricePct = cfg.minPricePct != null ? cfg.minPricePct : 50;
+    var minAvgTurnoverCr = cfg.minAvgTurnoverCr != null ? cfg.minAvgTurnoverCr : 5;
+    var turnoverWindowDays = cfg.turnoverWindowDays != null ? cfg.turnoverWindowDays : 20;
+
+    /**
+     * Compute average daily turnover (price × volume) over a rolling window.
+     * Returns value in ₹ Cr.
+     */
+    function computeAvgTurnover(candles, endIdx, windowDays) {
+      if (!candles || !candles.length) return 0;
+      windowDays = windowDays || turnoverWindowDays;
+      var start = Math.max(0, (endIdx != null ? endIdx : candles.length - 1) - windowDays + 1);
+      var end = endIdx != null ? endIdx : candles.length - 1;
+      var sum = 0, count = 0;
+      for (var i = start; i <= end && i < candles.length; i++) {
+        var c = candles[i];
+        if (c && c.c > 0 && c.v > 0) {
+          sum += (c.c * c.v);
+          count++;
+        }
+      }
+      // Yahoo volumes are in actual shares; turnover in ₹ = price × volume
+      // Convert to Cr (1 Cr = 10^7)
+      return count > 0 ? (sum / count) / 1e7 : 0;
+    }
+
+    /**
+     * Compute liquidity-scaled slippage based on average turnover.
+     * Higher turnover → lower slippage; low turnover → higher slippage.
+     * Base slippage is used when turnover >= 10 Cr.
+     */
+    function computeLiquiditySlippage(avgTurnoverCr, baseSlippagePct) {
+      baseSlippagePct = baseSlippagePct != null ? baseSlippagePct : slippagePct;
+      if (avgTurnoverCr >= 10) return baseSlippagePct;
+      if (avgTurnoverCr <= 0) return baseSlippagePct * 3;
+      // Scale linearly: at 5 Cr → 1.5x, at 1 Cr → 2.5x
+      var factor = 1 + (1 - Math.min(avgTurnoverCr, 10) / 10) * 2;
+      return Math.round(baseSlippagePct * factor * 100) / 100;
+    }
+
+    /**
+     * Check if a symbol passes the universe filter.
+     * Returns { pass: bool, reason: string, metrics: { price, avgTurnoverCr, capTier } }
+     */
+    function passesUniverseFilter(symbol, candles) {
+      if (!universeFilterEnabled) return { pass: true, reason: "filter_disabled", metrics: {} };
+      if (!candles || candles.length < 20) return { pass: false, reason: "insufficient_data", metrics: {} };
+
+      var lastBar = candles[candles.length - 1];
+      var price = lastBar && lastBar.c ? lastBar.c : 0;
+      var avgTurnover = computeAvgTurnover(candles, candles.length - 1, turnoverWindowDays);
+
+      // Price floor
+      if (price < minPricePct) {
+        return { pass: false, reason: "price_" + price.toFixed(0) + "_below_" + minPricePct, metrics: { price: price, avgTurnoverCr: avgTurnover } };
+      }
+
+      // Liquidity floor
+      if (avgTurnover < minAvgTurnoverCr) {
+        return { pass: false, reason: "turnover_" + avgTurnover.toFixed(1) + "Cr_below_" + minAvgTurnoverCr + "Cr", metrics: { price: price, avgTurnoverCr: avgTurnover } };
+      }
+
+      return { pass: true, reason: "ok", metrics: { price: price, avgTurnoverCr: avgTurnover } };
+    }
 
     /**
      * Run batch backtest for a list of stock symbols.
@@ -669,6 +750,7 @@ window.BatchBacktest = (function () {
       });
 
       var step = sampleEvery || opts.sampleEvery || 2;
+      var universeFilterLog = [];
 
       for (var si = 0; si < symbols.length; si++) {
         if (_cancelled) break;
@@ -680,15 +762,32 @@ window.BatchBacktest = (function () {
           continue;
         }
 
+        // ── Universe filter ──
+        if (universeFilterEnabled) {
+          var ufResult = passesUniverseFilter(symbol, candles);
+          if (!ufResult.pass) {
+            summary.skippedCount++;
+            universeFilterLog.push({ symbol: symbol, reason: ufResult.reason, metrics: ufResult.metrics });
+            if (opts.onProgress) opts.onProgress(si + 1, totalSymbols, symbol, "universe_filtered");
+            await yieldToUI();
+            continue;
+          }
+        }
+
         if (opts.onProgress) {
           opts.onProgress(si + 1, totalSymbols, symbol, "backtesting");
         }
 
         try {
+          // ── Liquidity-scaled slippage ──
+          var avgTurnover = computeAvgTurnover(candles, candles.length - 1, turnoverWindowDays);
+          var symbolSlippage = computeLiquiditySlippage(avgTurnover, slippagePct);
+
           // ── Run single stock backtest (pass hooks so engine yields every 25 bars) ──
           var btResult = await engine.runSingle(candles, {
             symbol: symbol,
-            sampleEvery: step
+            sampleEvery: step,
+            slippagePct: symbolSlippage
           }, {
             onBar: function (d, t) {
               // Callback fires every 25 bars — gives engine a chance to yield
@@ -742,7 +841,7 @@ window.BatchBacktest = (function () {
           // ── Extract features for ML ──
           if (extractFeatures) {
             try {
-              var features = extractFeaturesForML(symbol, candles, trades, scoreFn);
+              var features = extractFeaturesForML(symbol, candles, trades, scoreFn, indexCandles);
               if (features.length > 0 && window.PatternStore) {
                 await window.PatternStore.putFeatures(symbol, features);
               }
@@ -813,7 +912,8 @@ window.BatchBacktest = (function () {
             slippagePct: slippagePct,
             brokeragePct: brokeragePct,
             usePatternWeights: usePatternWeights,
-            useMLBlend: useMLBlend
+            useMLBlend: useMLBlend,
+            indexCandles: indexCandles
           }, mlModel);
           if (adjResult) {
             pat.adjustedMetrics = adjResult.patternOnly || null;
@@ -1129,7 +1229,7 @@ window.BatchBacktest = (function () {
 
     /* ── Feature Extraction for ML ──────────────────────────────────────── */
 
-    function extractFeaturesForML(symbol, candles, trades, scoreFn) {
+    function extractFeaturesForML(symbol, candles, trades, scoreFn, indexCandles) {
       var features = [];
       if (!candles || candles.length < 100 || !window.TechIndicators) return features;
       var TI = window.TechIndicators;
@@ -1139,44 +1239,72 @@ window.BatchBacktest = (function () {
         var macd = TI.macd(candles, 12, 26, 9);
         var bb = TI.bollingerBands(candles, 20, 2);
         var atr = TI.atr(candles, 14);
-        var emaFast = TI.ema(candles, 12);
+        var closesArr = TI.closes ? TI.closes(candles) : candles.map(function (c) { return c.c; });
+        var emaFast = TI.ema(closesArr, 12);
         var obv = TI.obv(candles);
         var supertrend = TI.supertrend(candles, 10, 3);
         var adx = TI.adx(candles, 14);
         var volSma = TI.sma(TI.volumes(candles), 20);
+        var mfiArr = TI.mfi ? TI.mfi(candles, 14) : null;
+        var ema20 = TI.ema(closesArr, 20);
+        var ema50 = TI.ema(closesArr, 50);
+        var sma20 = TI.sma(closesArr, 20);
+        var sma200 = TI.sma(closesArr, 200);
+
+        // Precompute market regime features (portfolio-level, once per index)
+        var indexFeatures = null;
+        if (indexCandles && TI.computeMarketRegimeFeatures) {
+          try { indexFeatures = TI.computeMarketRegimeFeatures(indexCandles); } catch (e) {}
+        }
 
         var featureDateMap = {};
         candles.forEach(function (c, ci) { var d = String(c.t).slice(0, 10); if (!featureDateMap[d]) featureDateMap[d] = ci; });
         trades.forEach(function (trade) {
           var entryIdx = featureDateMap[trade.entryDate] != null ? featureDateMap[trade.entryDate] : -1;
           if (entryIdx < 0) return;
-          /* Indicators (BB20, RSI14, ADX14...) have no valid output during
-             warmup — a NaN feature would be dropped at train time. Backtest
-             trades start post-warmup anyway; this is defensive insurance. */
           if (entryIdx < 20) return;
 
           var close = candles[entryIdx].c;
+          var n = entryIdx;
+
+          // Baseline features (backward compatible)
+          var baseFeats = {
+            rsi: rsi[n] != null ? round2(rsi[n]) : 50,
+            macd_hist: macd && macd.histogram ? round3(macd.histogram[n]) : 0,
+            bb_position: (bb.upper && bb.lower && bb.upper[n] != null && bb.lower[n] != null) ? round3((close - bb.lower[n]) / Math.max(0.01, bb.upper[n] - bb.lower[n])) : 0.5,
+            atr_pct: atr[n] && close > 0 ? round3((atr[n] / close) * 100) : 0,
+            obv_trend: n > 0 && obv && obv[n] != null && obv[n - 1] != null && volSma && volSma[n] ? round3((obv[n] - obv[n - 1]) / Math.max(1, volSma[n])) : 0,
+            supertrend_dir: supertrend && supertrend.trend ? supertrend.trend[n] : 0,
+            adx: adx && adx.adx ? round2(adx.adx[n] || 0) : 0,
+            ema_slope: emaFast[n] != null && emaFast[Math.max(0, n - 3)] != null ? round3(Math.max(-100, Math.min(100, (emaFast[n] - emaFast[Math.max(0, n - 3)]) / Math.max(0.01, emaFast[Math.max(0, n - 3)]) * 100))) : 0,
+            volume_ratio: volSma && volSma[n] ? round2(candles[n].v / Math.max(1, volSma[n])) : 1,
+            entry_score: trade.entryScore || 0
+          };
+
+          // Expanded features (Phase 3)
+          var expanded = {};
+          if (TI.computeExpandedFeatures) {
+            try {
+              var exp = TI.computeExpandedFeatures(candles, entryIdx, trade.entryScore || 0, symbol, indexFeatures);
+              if (exp) expanded = exp;
+            } catch (e) {}
+          }
+
+          var finalFeats = Object.assign({}, baseFeats, expanded);
+          // Ensure all FEATURE_KEYS present with defaults if null
+          var ALL_KEYS = ["rsi", "atr_pct", "bb_position", "volume_ratio", "macd_hist", "ema_slope", "adx", "entry_score",
+            "trend_structure", "price_vs_sma200", "ema20_50_cross", "volatility_regime", "mfi", "vol_price_trend",
+            "bull_bear", "market_momentum", "cap_tier", "rsi_regime", "obv_trend", "supertrend_dir"];
+          ALL_KEYS.forEach(function (k) { if (finalFeats[k] == null) finalFeats[k] = (k === "entry_score") ? (trade.entryScore || 0) : 0; });
+
           features.push({
             symbol: symbol,
             entryDate: trade.entryDate,
-            features: {
-              rsi: rsi[entryIdx] != null ? round2(rsi[entryIdx]) : 50,
-              macd_hist: macd && macd.histogram ? round3(macd.histogram[entryIdx]) : 0,
-              bb_position: (bb.upper && bb.lower && bb.upper[entryIdx] != null && bb.lower[entryIdx] != null) ? round3((close - bb.lower[entryIdx]) / Math.max(0.01, bb.upper[entryIdx] - bb.lower[entryIdx])) : 0.5,
-              atr_pct: atr[entryIdx] && close > 0 ? round3((atr[entryIdx] / close) * 100) : 0,
-              /* OBV is cumulative and can go negative/zero — a raw ratio
-                 (obv[i]/obv[i-1]) flips meaning across sign and 0-activity.
-                 Normalize the signed delta by the 20-bar volume SMA instead. */
-              obv_trend: entryIdx > 0 && obv && obv[entryIdx] != null && obv[entryIdx - 1] != null && volSma && volSma[entryIdx] ? round3((obv[entryIdx] - obv[entryIdx - 1]) / Math.max(1, volSma[entryIdx])) : 0,
-              supertrend_dir: supertrend && supertrend.trend ? supertrend.trend[entryIdx] : 0,
-              adx: adx && adx.adx ? round2(adx.adx[entryIdx] || 0) : 0,
-              ema_slope: emaFast[entryIdx] != null && emaFast[Math.max(0, entryIdx - 3)] != null ? round3(Math.max(-100, Math.min(100, (emaFast[entryIdx] - emaFast[Math.max(0, entryIdx - 3)]) / Math.max(0.01, emaFast[Math.max(0, entryIdx - 3)]) * 100))) : 0,
-              volume_ratio: volSma && volSma[entryIdx] ? round2(candles[entryIdx].v / Math.max(1, volSma[entryIdx])) : 1,
-              entry_score: trade.entryScore || 0
-            },
+            features: finalFeats,
             label: {
               return_10d: round2(trade.finalReturnPct || 0),
               is_winner: !!trade.hitTarget,
+              barrier: trade.barrier || "TIMEOUT",
               days_to_target: trade.daysToTarget || 0,
               max_profit_pct: round2(trade.maxProfitPct || 0),
               max_loss_pct: round2(trade.maxLossPct || 0),
@@ -1242,7 +1370,7 @@ window.BatchBacktest = (function () {
       generateReport: generateReport,
       buildScoreFn: buildScoreFn,
       getConfig: function () {
-        return { targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: threshold, slippagePct: slippagePct, brokeragePct: brokeragePct, timeframe: timeframe, range: range, sampleEvery: sampleEvery };
+        return { targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: threshold, slippagePct: slippagePct, brokeragePct: brokeragePct, timeframe: timeframe, range: range, sampleEvery: sampleEvery, universeFilterEnabled: universeFilterEnabled, minPricePct: minPricePct, minAvgTurnoverCr: minAvgTurnoverCr, turnoverWindowDays: turnoverWindowDays };
       }
     };
   }

@@ -5222,6 +5222,155 @@ window.TechIndicators = (function () {
   }
 
   /* --------------------------------------------------------------------------
+     Market Regime & Expanded Feature Helpers
+     -------------------------------------------------------------------------- */
+
+  /**
+   * Compute market regime features from an index (e.g. NIFTY) candle series.
+   * Used as portfolio-level features joined to all symbols per date.
+   * @returns {Object} { bull_bear, volatility_regime, market_momentum, breadth_unknown }
+   */
+  function computeMarketRegimeFeatures(indexCandles) {
+    if (!indexCandles || indexCandles.length < 100) {
+      return { bull_bear: 0, volatility_regime: 0, market_momentum: 0 };
+    }
+    var closesArr = indexCandles.map(function (c) { return c.c; });
+    var n = closesArr.length - 1;
+    var ma50 = sma(closesArr, 50);
+    var ma200 = sma(closesArr, 200);
+    var bullBear = 0;
+    if (n >= 200 && ma50[n] != null && ma200[n] != null) {
+      bullBear = ma50[n] > ma200[n] ? 1 : -1;
+    } else if (n >= 50 && ma50[n] != null) {
+      // Not enough for MA200 — use MA50 vs MA20 as proxy
+      var ma20 = sma(closesArr, 20);
+      bullBear = ma20[n] > ma50[n] ? 1 : -1;
+    }
+    // Volatility regime via ATR%
+    var atrVals = calcATR(indexCandles, 14);
+    var atrPct = atrVals[n] != null && closesArr[n] > 0 ? atrVals[n] / closesArr[n] : 0;
+    var volRegime = 0;
+    if (atrPct <= 0.01) volRegime = -1;       // low vol
+    else if (atrPct >= 0.03) volRegime = 1;   // high vol
+    // Market momentum: 10-day index return
+    var mom10 = n >= 10 && closesArr[n - 10] > 0 ? (closesArr[n] - closesArr[n - 10]) / closesArr[n - 10] : 0;
+    return { bull_bear: bullBear, volatility_regime: volRegime, market_momentum: Math.round(mom10 * 1000) / 1000 };
+  }
+
+  /**
+   * Compute expanded per-stock features for ML training.
+   * Extends the baseline 8 features with trend structure, volatility regime,
+   * volume/flow, and cap-tier features. All computed at bar index barIdx.
+   * @param {Array} candles - daily OHLCV
+   * @param {Number} barIdx - bar index
+   * @param {Number} entryScore - the entry score (0-100)
+   * @param {String} symbol - for cap-tier lookup
+   * @param {Object} indexFeatures - pre-computed { bull_bear, volatility_regime, market_momentum } (portfolio-level)
+   * @returns {Object} expanded feature map
+   */
+  function computeExpandedFeatures(candles, barIdx, entryScore, symbol, indexFeatures) {
+    var out = {
+      rsi: 50, atr_pct: 0, bb_position: 0.5, volume_ratio: 1,
+      macd_hist: 0, ema_slope: 0, adx: 20, entry_score: entryScore || 0,
+      trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0,
+      volatility_regime: 0, mfi: 50, vol_price_trend: 0,
+      bull_bear: 0, market_momentum: 0, cap_tier: -1, rsi_regime: 0
+    };
+    if (!candles || candles.length < 30 || barIdx == null) return out;
+    var n = Math.min(barIdx, candles.length - 1);
+    if (n < 20) return out;
+    try {
+      var TI = window.TechIndicators;
+      var close = candles[n].c;
+
+      // Trend structure
+      var ema20 = ema(closesArr(candles), 20);
+      var ema50 = ema(closesArr(candles), 50);
+      var sma20 = sma(closesArr(candles), 20);
+      var sma200 = sma(closesArr(candles), 200);
+      var emaFast = ema(closesArr(candles), 12);
+
+      // RSI
+      var rsiV = calcRSI(candles, 14);
+      var adxV = calcADX(candles, 14);
+      var atrV = calcATR(candles, 14);
+      var macdV = calcMACD(candles, 12, 26, 9);
+      var bbV = calcBollingerBands(candles, 20, 2);
+      var volSmaV = sma(volumesArr(candles), 20);
+
+      out.rsi = rsiV[n] != null ? Math.round(rsiV[n] * 100) / 100 : 50;
+      out.atr_pct = atrV[n] && close > 0 ? Math.round((atrV[n] / close) * 100 * 1000) / 1000 : 0;
+      out.bb_position = (bbV.upper && bbV.lower && bbV.upper[n] != null && bbV.lower[n] != null)
+        ? Math.round(((close - bbV.lower[n]) / Math.max(0.01, bbV.upper[n] - bbV.lower[n])) * 1000) / 1000
+        : 0.5;
+      out.volume_ratio = volSmaV && volSmaV[n] ? Math.round((candles[n].v / Math.max(1, volSmaV[n])) * 100) / 100 : 1;
+      out.macd_hist = macdV && macdV.histogram && close > 0 ? Math.round((macdV.histogram[n] / close) * 100 * 1000) / 1000 : 0;
+      out.ema_slope = emaFast[n] != null && emaFast[Math.max(0, n - 3)] != null
+        ? Math.round(((emaFast[n] - emaFast[Math.max(0, n - 3)]) / Math.max(0.01, emaFast[Math.max(0, n - 3)])) * 100 * 1000) / 1000
+        : 0;
+      out.adx = adxV && adxV.adx ? Math.round((adxV.adx[n] || 0) * 100) / 100 : 20;
+
+      // ── Expanded features ──
+      // Trend structure
+      out.trend_structure = 0;
+      if (ema20[n] != null && ema50[n] != null && sma20[n] != null) {
+        // 4-bit: above 20ema, above 50ema, above 20sma, 20>50
+        var v1 = close > ema20[n] ? 1 : 0;
+        var v2 = close > ema50[n] ? 1 : 0;
+        var v3 = close > sma20[n] ? 1 : 0;
+        var v4 = ema20[n] > ema50[n] ? 1 : 0;
+        out.trend_structure = v1 + v2 * 2 + v3 * 4 + v4 * 8;
+      }
+      out.price_vs_sma200 = -1;
+      if (sma200[n] != null) {
+        out.price_vs_sma200 = close > sma200[n] ? 1 : -1;
+      }
+      out.ema20_50_cross = 0;
+      if (n > 1 && ema20[n] != null && ema20[n - 1] != null && ema50[n] != null && ema50[n - 1] != null) {
+        if (ema20[n] > ema50[n] && ema20[n - 1] <= ema50[n - 1]) out.ema20_50_cross = 1;
+        else if (ema20[n] < ema50[n] && ema20[n - 1] >= ema50[n - 1]) out.ema20_50_cross = -1;
+      }
+
+      // Volatility regime (per-stock)
+      var atrPct = out.atr_pct;
+      out.volatility_regime = 0;
+      if (atrPct <= 1.0) out.volatility_regime = -1;
+      else if (atrPct >= 3.5) out.volatility_regime = 1;
+      if (indexFeatures && indexFeatures.volatility_regime != null) {
+        // Blend per-stock with market; keep it 0/±1
+        out.volatility_regime = indexFeatures.volatility_regime !== 0 ? indexFeatures.volatility_regime : out.volatility_regime;
+      }
+
+      // Volume/flow
+      out.vol_price_trend = 0;
+      var mfiV = calcMFI(candles, 14);
+      out.mfi = mfiV[n] != null ? Math.round(mfiV[n] * 100) / 100 : 50;
+      var rsiNow = out.rsi;
+      if (out.volume_ratio > 1.5 && rsiNow > 60) out.vol_price_trend = 1;
+      else if (out.volume_ratio > 1.5 && rsiNow < 40) out.vol_price_trend = -1;
+      else if (out.volume_ratio < 0.7 && rsiNow > 60) out.vol_price_trend = -1;
+
+      // Cap tier & market regime (portfolio-level features joined per date)
+      out.cap_tier = 0;
+      if (symbol && window.StoxUniverse) {
+        var tier = window.StoxUniverse.getCapTier(symbol);
+        out.cap_tier = tier === "large" ? 1 : (tier === "mid" ? 0 : -1);
+      }
+      out.bull_bear = indexFeatures && indexFeatures.bull_bear != null ? indexFeatures.bull_bear : 0;
+      out.market_momentum = indexFeatures && indexFeatures.market_momentum != null ? indexFeatures.market_momentum : 0;
+
+      // RSI/ATR interaction
+      out.rsi_regime = 0;
+      if (rsiNow > 70) out.rsi_regime = 1;
+      else if (rsiNow < 30) out.rsi_regime = -1;
+    } catch (e) { /* fall back to defaults */ }
+    return out;
+  }
+
+  function closesArr(candles) { return candles.map(function (c) { return c.c; }); }
+  function volumesArr(candles) { return candles.map(function (c) { return c.v; }); }
+
+  /* --------------------------------------------------------------------------
      Public API
      -------------------------------------------------------------------------- */
 
@@ -5270,6 +5419,8 @@ window.TechIndicators = (function () {
     getTargetPctDisplay: getTargetPctDisplay,
     getScoreConfigVersion: getScoreConfigVersion,
     getDefaultScoreConfig: getDefaultScoreConfig,
-    setScoreConfig: setScoreConfig
+    setScoreConfig: setScoreConfig,
+    computeMarketRegimeFeatures: computeMarketRegimeFeatures,
+    computeExpandedFeatures: computeExpandedFeatures
   };
 })();

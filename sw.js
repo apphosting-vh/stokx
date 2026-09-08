@@ -1,9 +1,10 @@
-const CACHE_NAME = 'stox-v440';
+const CACHE_NAME = 'stox-v445';
 const urlsToCache = [
   './',
   './index.html',
   './app-core.js',
   './indicators.js',
+  './universe.js',
   './data-fetcher.js',
   './backtest-engine.js',
   './pattern-store.js',

@@ -7817,6 +7817,7 @@ const ScoreTunerPanel = () => {
   const [progress, setProgress] = useState(null);
   const [err, setErr] = useState("");
   const [result, setResult] = useState(null);
+  const [paramSweep, setParamSweep] = useState(null);
   const [activeResultTab, setActiveResultTab] = useState("threshold");
   const cancelRef = useRef(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -8190,6 +8191,41 @@ const ScoreTunerPanel = () => {
     setRunning(false);
   };
 
+  const runParamSweep = async () => {
+    if (running || !result || !result.engine || !dataMap || !Object.keys(dataMap).length) return;
+    setRunning(true);
+    setErr("");
+    setParamSweep(null);
+    try {
+      setProgress({ phase: "Running 3D parameter sweep (target × stop × threshold)...", done: 0, total: 1 });
+      const sweepResult = await result.engine.sweepParameters(dataMap, {
+        symbols: Object.keys(dataMap),
+        targetPcts: [2.5, 3.0, 3.5, 4.0],
+        stopPcts: [1.5, 2.0, 2.5],
+        scoreThresholds: [40, 50, 60, 70],
+        holdingPeriodDays: holding,
+        sampleEvery: sampleEvery
+      }, {
+        onProgress: (done, total, label) => { if (!cancelRef.current) setProgress({ phase: label, done, total }); }
+      });
+      setParamSweep(sweepResult);
+      setProgress(null);
+    } catch (e) {
+      setErr((e && e.message) || String(e));
+      setProgress(null);
+    }
+    setRunning(false);
+  };
+
+  const exportParamSweepCSV = () => {
+    if (!result || !result.engine || !paramSweep) return;
+    const csv = result.engine.exportSweepParametersCSV(paramSweep);
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "stox_param_sweep.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const exportCSV = (type) => {
     if (!result || !result.engine) return;
     const csv = result.engine.exportSweepCSV(result.sweep, type);
@@ -8279,14 +8315,14 @@ const ScoreTunerPanel = () => {
 
     React.createElement("div", null,
       React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 12, borderBottom: "1px solid var(--border)", paddingBottom: 0 } },
-        [["threshold", "Threshold Sweep"], ["pillar", "Pillar Sweep"], ["component", "Component Power"], ["config", "Score Config"]].map(([k, label]) =>
+        [["threshold", "Threshold Sweep"], ["pillar", "Pillar Sweep"], ["component", "Component Power"], ["params", "Param Sweep"], ["config", "Score Config"]].map(([k, label]) =>
           React.createElement("button", {
             key: k, onClick: () => setActiveResultTab(k),
             style: { padding: "8px 14px", fontSize: 11, fontWeight: activeResultTab === k ? 700 : 600, background: "transparent", border: "none", borderBottom: "2px solid " + (activeResultTab === k ? "var(--accent)" : "transparent"), color: activeResultTab === k ? "var(--accent)" : "var(--text5)", cursor: "pointer" }
           }, label)
         ),
         React.createElement("div", { style: { flex: 1 } }),
-        result && activeResultTab !== "config" && React.createElement("button", { onClick: () => exportCSV(activeResultTab), className: "stx-btn", style: { fontSize: 11, padding: "6px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer", marginBottom: 4 } }, "Export CSV")
+        result && activeResultTab !== "config" && activeResultTab !== "params" && React.createElement("button", { onClick: () => exportCSV(activeResultTab), className: "stx-btn", style: { fontSize: 11, padding: "6px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer", marginBottom: 4 } }, "Export CSV")
       ),
 
       result && activeResultTab === "threshold" && React.createElement("div", { className: "stx-card", style: { padding: 12, overflowX: "auto" } },
@@ -8401,6 +8437,47 @@ const ScoreTunerPanel = () => {
             );
           }))
         )
+      ),
+
+      activeResultTab === "params" && result && React.createElement("div", { className: "stx-card", style: { padding: 12, overflowX: "auto" } },
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
+          React.createElement("div", null,
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, "3D Parameter Sweep — Target × Stop × Threshold"),
+            React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } }, "Run the sweep to find the stop/target/threshold combination with the best expectancy. Uses triple-barrier labels (WIN / LOSS / TIMEOUT).")
+          ),
+          React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+            React.createElement("button", { onClick: runParamSweep, disabled: running || !result || !result.engine, className: "stx-btn", style: { fontSize: 11, padding: "6px 12px", border: "1px solid var(--accent)", background: "var(--accentbg)", color: "var(--accent)", fontWeight: 700, cursor: running || !result || !result.engine ? "not-allowed" : "pointer", opacity: running || !result || !result.engine ? 0.6 : 1 } }, running ? "Running\u2026" : (paramSweep ? "Re-run Sweep" : "Run 3D Sweep")),
+            paramSweep && React.createElement("button", { onClick: exportParamSweepCSV, className: "stx-btn", style: { fontSize: 11, padding: "6px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "Export CSV")
+          )
+        ),
+        paramSweep ? (
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null,
+              [React.createElement("th", { key: "t", style: th, title: "Target profit % (triple-barrier upper bound)" }, "Target %"),
+               React.createElement("th", { key: "s", style: th, title: "Stop-loss % (triple-barrier lower bound)" }, "Stop %"),
+               React.createElement("th", { key: "x", style: th, title: "Min entry score threshold" }, "Threshold"),
+               React.createElement("th", { key: "n", style: thR, title: "Qualifying signals across universe" }, "Signals"),
+               React.createElement("th", { key: "w", style: thR, title: "Share of signals hitting target before stop/timeout" }, "Win Rate"),
+               React.createElement("th", { key: "o", style: thR, title: "Share of signals expiring before hitting either barrier" }, "Timeout %"),
+               React.createElement("th", { key: "e", style: thR, title: "Per-trade expectancy (weighted avg return incl. losses)" }, "Expectancy %"),
+               React.createElement("th", { key: "p", style: thR, title: "Gross profit / gross loss; >1 = profitable" }, "PF"),
+               React.createElement("th", { key: "a", style: thR, title: "Approx annualized return (per-position, 252/period round-trips/yr)" }, "Ann.%")] )),
+            React.createElement("tbody", null, (paramSweep.cells || []).map(c => {
+              const isBest = paramSweep.best && c.targetPct === paramSweep.best.targetPct && c.stopLossPct === paramSweep.best.stopLossPct && c.threshold === paramSweep.best.threshold;
+              return React.createElement("tr", { key: c.targetPct + "_" + c.stopLossPct + "_" + c.threshold, style: isBest ? { background: "rgba(6,182,212,.08)", outline: "1px solid var(--accent)" } : undefined },
+                React.createElement("td", { style: td }, c.targetPct.toFixed(1) + "%"),
+                React.createElement("td", { style: td }, c.stopLossPct.toFixed(1) + "%"),
+                React.createElement("td", { style: td }, ">= " + c.threshold),
+                React.createElement("td", { style: tdR }, c.signals),
+                React.createElement("td", { style: Object.assign({}, tdR, { color: c.winRate >= 50 ? "#22c55e" : c.winRate >= 40 ? "#eab308" : "#ef4444", fontWeight: 700 }) }, c.winRate != null ? c.winRate + "%" : "--"),
+                React.createElement("td", { style: Object.assign({}, tdR, { color: c.timeoutRate > 40 ? "#eab308" : "var(--text5)" }) }, c.timeoutRate != null ? c.timeoutRate + "%" : "--"),
+                React.createElement("td", { style: Object.assign({}, tdR, { color: (c.expectancy || 0) >= 0 ? "#22c55e" : "#ef4444", fontWeight: 700 }) }, c.expectancy != null ? c.expectancy.toFixed(2) + "%" : "--"),
+                React.createElement("td", { style: tdR }, c.profitFactor != null ? c.profitFactor.toFixed(2) : "--"),
+                React.createElement("td", { style: Object.assign({}, tdR, { color: (c.annualized || 0) >= 0 ? "#22c55e" : "#ef4444" }) }, c.annualized != null ? c.annualized.toFixed(1) + "%" : "--")
+              );
+            }))
+          )
+        ) : React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", padding: "12px 0" } }, "No sweep run yet. Click \"Run 3D Sweep\" to evaluate target × stop × threshold combinations.")
       ),
 
       activeResultTab === "config" && React.createElement("div", { className: "stx-card", style: { padding: 16 } },

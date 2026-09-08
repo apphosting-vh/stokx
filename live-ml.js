@@ -202,21 +202,21 @@ window.LiveML = (function () {
       bb: bb,
       volSma: TI.sma(TI.volumes(candles), 20),
       macd: macd,
-      emaFast: TI.ema(candles, 12),
+      emaFast: TI.ema(TI.closes(candles), 12),
       adx: adx
     };
   }
 
   /* Feature vector at bar index i — same keys as the ML model. */
-  function featuresAt(i, candles, ind) {
+  function featuresAt(i, candles, ind, symbol, indexCandles) {
     var close = candles[i].c;
     var es = 0.5;
     try {
       var TI = window.TechIndicators;
       if (TI && ind && ind.rsi && ind.adx && ind.macd && ind.bb && ind.atr) {
         var trendScore = 0;
-        var sma20Arr = TI.sma(candles, 20);
-        var sma50Arr = TI.sma(candles, 50);
+        var sma20Arr = TI.sma(TI.closes(candles), 20);
+        var sma50Arr = TI.sma(TI.closes(candles), 50);
         var sma20 = sma20Arr && sma20Arr[i];
         var sma50 = sma50Arr && sma50Arr[i];
         if (sma20 != null && close > sma20) trendScore += 1;
@@ -256,7 +256,7 @@ window.LiveML = (function () {
         es = Math.max(0, Math.min(1, raw));
       }
     } catch (_e) {}
-    return {
+    var base = {
       rsi: ind.rsi[i] != null ? round2(ind.rsi[i]) : 50,
       atr_pct: ind.atr[i] != null && close > 0 ? round3((ind.atr[i] / close) * 100) : 0,
       bb_position: ind.bb.upper && ind.bb.lower ? round3((close - (ind.bb.lower[i] || 0)) / Math.max(0.01, (ind.bb.upper[i] || 0) - (ind.bb.lower[i] || 0))) : 0.5,
@@ -266,6 +266,20 @@ window.LiveML = (function () {
       adx: ind.adx && ind.adx.adx ? round2(ind.adx.adx[i] || 0) : 0,
       entry_score: round3(es)
     };
+    /* Expanded features (Phase 3) — keep live scoring consistent with the
+       training pipeline so the model sees the same 18-key vector. */
+    var expanded = {};
+    try {
+      var TI2 = window.TechIndicators;
+      if (TI2 && TI2.computeExpandedFeatures) {
+        var idxFx = null;
+        if (TI2.computeMarketRegimeFeatures) {
+          try { idxFx = TI2.computeMarketRegimeFeatures(indexCandles); } catch (_e3) {}
+        }
+        expanded = TI2.computeExpandedFeatures(candles, i, es, symbol, idxFx) || {};
+      }
+    } catch (_e2) {}
+    return Object.assign({}, base, expanded);
   }
 
   /* ── Step 1: Morning Analysis Helpers ─────────────────────────────────── */
@@ -626,7 +640,7 @@ window.LiveML = (function () {
           stored.push({
             symbol: symbol,
             entryDate: date,
-            features: featuresAt(t, candles, ind),
+            features: featuresAt(t, candles, ind, symbol, null),
             label: { is_winner: ret > 0, return_1d: round3(ret * 100), days: 1, source: "live" }
           });
         }
@@ -873,7 +887,7 @@ window.LiveML = (function () {
 
     var ind = computeIndicators(candles);
     var i = candles.length - 1;
-    var f = featuresAt(i, candles, ind);
+    var f = featuresAt(i, candles, ind, symbol, null);
     var prevClose = candles[i - 1] ? candles[i - 1].c : null;
     var chgPct = prevClose ? ((candles[i].c / prevClose) - 1) * 100 : null;
 
