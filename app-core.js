@@ -8813,16 +8813,20 @@ function buildPatMeta(result) {
     calibrated: !!result._patternHasCalibration,
     powerBonus: result._powerBonusApplied || 0,
     powerBonusBreakdown: result._powerBonusBreakdown || null,
-    ml: result._mlWinProb != null ? {
-      winProb: result._mlWinProb,
-      recommendation: result._mlRecommendation || null,
-      blendWeight: (result._mlWinProb >= 0.7 || result._mlWinProb <= 0.3) ? 0.35 : 0.25
-    } : null
+    ml: result._mlWinProb != null
+      ? { winProb: result._mlWinProb, recommendation: result._mlRecommendation || null, blendWeight: (result._mlWinProb >= 0.7 || result._mlWinProb <= 0.3) ? 0.35 : 0.25 }
+      : { winProb: null, reason: result._mlReason || "ML blend not applied" }
   };
 }
 
 function mlBadge(pm) {
-  if (!pm || !pm.ml || pm.ml.winProb == null) return null;
+  if (!pm || !pm.ml) return null;
+  if (pm.ml.winProb == null) {
+    return React.createElement("span", {
+      title: "ML blend not applied \u2014 " + (pm.ml.reason || "no champion model saved"),
+      style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: "#6b728016", color: "#6b7280", border: "1px dashed #6b728040" }
+    }, "M\u2014");
+  }
   var wp = Math.round(pm.ml.winProb * 100);
   var level = wp >= 55 ? "up" : wp <= 45 ? "down" : "flat";
   var col = level === "up" ? { bg: "#a78bfa22", fg: "#a78bfa", bd: "#a78bfa44" } : level === "down" ? { bg: "#e11d4822", fg: "#fb7185", bd: "#e11d4844" } : { bg: "#6b728022", fg: "#9ca3af", bd: "#6b728044" };
@@ -8846,8 +8850,12 @@ function patMetaTooltip(pm) {
     }
     parts.push("bonus: " + pbParts.join(" "));
   }
-  if (pm.ml && pm.ml.winProb != null) {
-    parts.push("ML: " + Math.round(pm.ml.winProb * 100) + "% win-prob, blended " + Math.round(pm.ml.blendWeight * 100) + "%" + (pm.ml.recommendation ? ", rec " + pm.ml.recommendation : ""));
+  if (pm.ml) {
+    if (pm.ml.winProb != null) {
+      parts.push("ML: " + Math.round(pm.ml.winProb * 100) + "% win-prob, blended " + Math.round(pm.ml.blendWeight * 100) + "%" + (pm.ml.recommendation ? ", rec " + pm.ml.recommendation : ""));
+    } else {
+      parts.push("ML: not applied (" + (pm.ml.reason || "no champion model") + ")");
+    }
   }
   return parts.join(", ") + ")";
 }
