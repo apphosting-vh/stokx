@@ -2549,7 +2549,7 @@ window.TechIndicators = (function () {
   /* ══════════════════════════════════════════════════════════════════════════
      NEW ENTRY ENGINE — 5-pillar model (0-100):
       Trend Health (25) + Pullback Quality (25) + Barrier Race (30)
-      + Volatility Fit (10) + Regime Alignment (10) = 100,
+      + Volatility Fit (10) + Market/RS Alignment (10) = 100,
      then ±15 modifiers. Designed to keep scores stable on shallow 1-1.5%
      dips toward support (pillar inputs are dip-insensitive, pullback pillar
      even gains on a dip to SMA20/lower-BB support).

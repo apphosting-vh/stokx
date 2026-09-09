@@ -43,7 +43,7 @@ window.LiveML = (function () {
     pullbackQuality: { label: "Pullback Quality", bins: [5, 10, 15, 20], labels: ["<5", "5-10", "10-15", "15-20", "20+"] },
     prob4: { label: "Barrier Race (prob4)", bins: [6, 12, 18, 24], labels: ["<6", "6-12", "12-18", "18-24", "24+"] },
     volatilityFit: { label: "Volatility Fit", bins: [2, 4, 6, 8], labels: ["<2", "2-4", "4-6", "6-8", "8+"] },
-    regimeAlignment: { label: "Regime Alignment", bins: [2, 4, 6, 8], labels: ["<2", "2-4", "4-6", "6-8", "8+"] }
+    regimeAlignment: { label: "Market/RS Alignment", bins: [2, 4, 6, 8], labels: ["<2", "2-4", "4-6", "6-8", "8+"] }
   };
 
   function round2(v) { return Math.round(v * 100) / 100; }
