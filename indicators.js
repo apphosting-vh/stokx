@@ -2868,19 +2868,29 @@ window.TechIndicators = (function () {
       calK: 36.0,
     },
     /* Pillar 4: Volatility Fit (max 10).
-       Two-sided triangular-membership scoring of the setup's ATR-fit:
-       targetATR = targetPct·price/ATR14 (distance to target in ATR units),
-       stopATR = stopPct·price/ATR14 (distance to stop in ATR units). Sweet
-       spots: targetATR ∈ [1.0, 2.5], stopATR ∈ [0.7, 1.5]. */
+       Two independent factors, combined multiplicatively:
+       Factor A (absolute ATR% fit) — since target%/stop% are fixed for the race
+       (3%/2%), the old targetATR/stopATR memberships collapse to a single band
+       on ATR(14)% (ATR14/close×100). Expressed directly in ATR% so it can be
+       tuned to the universe distribution: full marks when ATR% ∈ [absSweetLo,
+       absSweetHi], linear ramps to 0 at absCutoffLo/absCutoffHi.
+       Factor B (per-stock normalcy) — how normal the current volatility is for
+       THIS stock, from its own ATR-percentile rank (0–100). Triangular normal
+       band [relNormalLo, relNormalHi]: 1 inside, ramping to 0 at the cutoffs.
+       Abnormally hot or dead-calm regimes score down.
+       score = pillarMax.volatilityFit × absFit × relFit. This stops the pillar
+       from saturating at 10 for ~83% of a large-cap universe (the old target/
+       stop memberships resolved to an absolute ATR% window of [1.33, 2.86]%
+       which covered almost every NIFTY-200 name). */
     volatilityFit: {
-      targetSweetLo: 1.0,
-      targetSweetHi: 2.5,
-      stopSweetLo: 0.7,
-      stopSweetHi: 1.5,
-      targetCutoffLo: 0.5,
-      targetCutoffHi: 3.5,
-      stopCutoffLo: 0.5,
-      stopCutoffHi: 2.0,
+      absSweetLo: 1.8,
+      absSweetHi: 3.2,
+      absCutoffLo: 1.2,
+      absCutoffHi: 4.2,
+      relNormalLo: 30,
+      relNormalHi: 75,
+      relCutoffLo: 10,
+      relCutoffHi: 90,
     },
     /* Pillar 5: Regime Alignment (max 10).
        10 = index above both its 50 and 200 DMA and index ATR-percentile is
@@ -2925,7 +2935,7 @@ window.TechIndicators = (function () {
   var SCORE_CONFIG_DEFAULTS = JSON.parse(JSON.stringify(SCORE_CONFIG));
   /* Bump this whenever pillarMax or any pillar's sub-score weights change.
      Used to auto-discard stale localStorage configs. */
-  var SCORE_CONFIG_VERSION = 3;
+  var SCORE_CONFIG_VERSION = 4;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.prob4 && SCORE_CONFIG.prob4.targetPct != null) ? Math.round(SCORE_CONFIG.prob4.targetPct * 1000) / 10 : 3; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
@@ -3177,17 +3187,35 @@ window.TechIndicators = (function () {
   }
 
    /* ── Pillar 4: Volatility Fit (max 10) ────────────────────────────────── */
-  function calcVolatilityFitScore(sn) {
+  function calcVolatilityFitScore(sn, candles) {
     var c = SCORE_CONFIG.volatilityFit;
     if (!sn || sn.c == null || sn.c <= 0 || sn.atr14 == null || sn.atr14 <= 0) return 0;
-    var cfg = (SCORE_CONFIG.prob4 && SCORE_CONFIG.prob4.targetPct != null) ? SCORE_CONFIG.prob4 : null;
-    var targetPct = (cfg && cfg.targetPct != null) ? cfg.targetPct : (getTargetPctDisplay() / 100);
-    var stopPct = (cfg && cfg.stopPct != null) ? cfg.stopPct : 0.02;
-    var targetATR = (targetPct * sn.c) / sn.atr14;
-    var stopATR = (stopPct * sn.c) / sn.atr14;
-    var fTarget = triangularMembership(targetATR, c.targetSweetLo, c.targetSweetHi, c.targetCutoffLo, c.targetCutoffHi);
-    var fStop = triangularMembership(stopATR, c.stopSweetLo, c.stopSweetHi, c.stopCutoffLo, c.stopCutoffHi);
-    var score = SCORE_CONFIG.pillarMax.volatilityFit * fTarget * fStop;
+
+    /* Factor A — absolute ATR(14)% fit (universe-tuned band). */
+    var atrPct = sn.atr14 / sn.c * 100;
+    var absFit = triangularMembership(atrPct,
+      c.absSweetLo != null ? c.absSweetLo : 1.8,
+      c.absSweetHi != null ? c.absSweetHi : 3.2,
+      c.absCutoffLo != null ? c.absCutoffLo : 1.2,
+      c.absCutoffHi != null ? c.absCutoffHi : 4.2);
+
+    /* Factor B — per-stock volatility normalcy (own ATR-percentile rank).
+       Triangular normal band [relNormalLo, relNormalHi]: 1 inside, ramping
+       to 0 at relCutoffLo/relCutoffHi. Missing/insufficient history → neutral
+       0.75 so it doesn't zero out the pillar. */
+    var relFit = 0.75;
+    try {
+      var atrPctl = calcATRPercentileRank(candles, 14);
+      if (atrPctl != null) {
+        relFit = triangularMembership(atrPctl,
+          c.relNormalLo != null ? c.relNormalLo : 30,
+          c.relNormalHi != null ? c.relNormalHi : 75,
+          c.relCutoffLo != null ? c.relCutoffLo : 10,
+          c.relCutoffHi != null ? c.relCutoffHi : 90);
+      }
+    } catch (e) { /* degenerate to neutral */ }
+
+    var score = SCORE_CONFIG.pillarMax.volatilityFit * absFit * relFit;
     return round(Math.max(0, Math.min(SCORE_CONFIG.pillarMax.volatilityFit, score)), 1);
   }
 
@@ -3272,7 +3300,7 @@ window.TechIndicators = (function () {
       pullbackQuality: calcPullbackScore(sn, volRegime, candles),
       prob4: tf === 'D' ? calcBarrierRaceScore(candles, sn) : null,
       swingPotential: 0,
-      volatilityFit: tf === 'D' ? calcVolatilityFitScore(sn) : null,
+      volatilityFit: tf === 'D' ? calcVolatilityFitScore(sn, candles) : null,
       regimeAlignment: tf === 'D' ? calcRegimeAlignmentScore(indexCandles) : null,
       spike: sn.spikeLast === true ? 5 : 0,
       stability: round(Math.max(0, Math.min(10, (1 - (sn.stability20 != null ? sn.stability20 : 1)) * 10)), 1),
@@ -3292,7 +3320,7 @@ window.TechIndicators = (function () {
     var pullbackQuality = calcPullbackScore(sn, volRegime, candles);
     var prob4 = calcBarrierRaceScore(candles, sn);
     var swingPotential = 0;
-    var volatilityFit = calcVolatilityFitScore(sn);
+    var volatilityFit = calcVolatilityFitScore(sn, candles);
     var regimeAlignment = calcRegimeAlignmentScore(indexCandles);
     var rawTotal = trendHealth + pullbackQuality + prob4 + volatilityFit + regimeAlignment;
 
