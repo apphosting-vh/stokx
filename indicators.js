@@ -2896,18 +2896,19 @@ window.TechIndicators = (function () {
        market. Replaces the old index-only Regime Alignment pillar, which scored
        every stock identically on a given day and had no forward edge. Weighted
        via a 2y/42k-outcome sweep over 100 NIFTY 200 stocks:
-         rs (max 6)          : graduated Mansfield RS(52w) vs NIFTY — full rs at
-                               >= rsStrongThreshold, half credit for any positive
-                               RS. THE ONLY component with consistent forward
-                               slope (score 0→39.3%, 3→40.5%, 6→43.4% win) and
-                               the only config that stays strictly monotone.
+         rs (max 6)          : CONTINUOUS Mansfield RS(52w) vs NIFTY. Linear
+                               ramp: positive RS earns `rs * min(1, RS/sat)`
+                               points, fully saturating at rsSaturation. RS is
+                               the only component with consistent forward slope
+                               (win rate rises 40.4% → 43.0% → 46.0% across
+                               RS bands 0–5 / 10–20 / 20–50); negative RS → 0.
          longTrend / relMom  : default 0 — withdrawn by data. Long-trend alone
                                was anti-predictive (35.8%); momentum added mid-
-                               bucket noise and broke monotonicity. Kept tunable.
+                               bucket noise. Kept tunable.
        The pillar's job is discrimination & strength attestation, not timing. */
     regimeAlignment: {
       rs: 6,
-      rsStrongThreshold: 10,
+      rsSaturation: 20,
       longTrend: 0,
       longSmaBars: 200,
       relMomentum: 0,
@@ -2947,7 +2948,7 @@ window.TechIndicators = (function () {
   var SCORE_CONFIG_DEFAULTS = JSON.parse(JSON.stringify(SCORE_CONFIG));
   /* Bump this whenever pillarMax or any pillar's sub-score weights change.
      Used to auto-discard stale localStorage configs. */
-  var SCORE_CONFIG_VERSION = 7;
+  var SCORE_CONFIG_VERSION = 8;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.prob4 && SCORE_CONFIG.prob4.targetPct != null) ? Math.round(SCORE_CONFIG.prob4.targetPct * 1000) / 10 : 3; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
@@ -3242,13 +3243,12 @@ window.TechIndicators = (function () {
     if (!sn || sn.c == null || sn.c <= 0) return 0;
     var score = 0;
 
-    /* 1) Relative strength vs the market — graduated Mansfield RS(52w):
-       full marks when strongly outperforming, half for any positive RS. */
+    /* 1) Relative strength vs the market — continuous Mansfield RS(52w):
+       linear ramp from zero at RS≤0 to full `rs` points at rsSaturation. */
     var rsMax = c.rs != null ? c.rs : 6;
-    var rsStrong = c.rsStrongThreshold != null ? c.rsStrongThreshold : 20;
-    if (sn.rsMansfield != null) {
-      if (sn.rsMansfield >= rsStrong) score += rsMax;
-      else if (sn.rsMansfield > 0) score += rsMax / 2;
+    var sat = (c.rsSaturation != null && c.rsSaturation > 0) ? c.rsSaturation : 20;
+    if (sn.rsMansfield != null && sn.rsMansfield > 0) {
+      score += rsMax * Math.max(0, Math.min(1, sn.rsMansfield / sat));
     }
 
     /* 2) Long-term structural uptrend: close above own SMA(longSmaBars),
