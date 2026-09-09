@@ -76,7 +76,7 @@ window.PatternDashboard = (function () {
     ["pullbackQuality", "Pullback Quality"],
     ["prob4", "Barrier Race"],
     ["volatilityFit", "Volatility Fit"],
-    ["regimeAlignment", "Regime Alignment"]
+    ["regimeAlignment", "Market/RS Alignment"]
   ];
   var INS_BRACKETS = ["STRONG_BUY", "BUY", "WATCHLIST", "NEUTRAL", "AVOID"];
   var INS_REGIMES = [["low_vol", "Low Volatility"], ["mid_vol", "Mid Volatility"], ["high_vol", "High Volatility"]];
@@ -2405,7 +2405,7 @@ window.PatternDashboard = (function () {
         ["pullbackQuality", "Pullback"],
         ["prob4", "Barrier Race"],
         ["volatilityFit", "Volatility Fit"],
-        ["regimeAlignment", "Regime"]
+        ["regimeAlignment", "Mkt/RS"]
       ];
       var query = patternSearch.trim().toUpperCase();
       var rows = patternSettings.filter(function (r) {
@@ -2458,7 +2458,7 @@ window.PatternDashboard = (function () {
               style: { padding: "4px 10px", borderRadius: 5, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: Object.keys(bulkSel).length === 0 ? "not-allowed" : "pointer", fontSize: 11, opacity: Object.keys(bulkSel).length === 0 ? 0.5 : 1 }
             }, "Clear"),
             React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } }, "Δ%:"),
-            [["trendHealth", "Trend"], ["pullbackQuality", "Pullback"], ["prob4", "Barrier"], ["volatilityFit", "VolFit"], ["regimeAlignment", "Regime"]].map(function (bk) {
+            [["trendHealth", "Trend"], ["pullbackQuality", "Pullback"], ["prob4", "Barrier"], ["volatilityFit", "VolFit"], ["regimeAlignment", "Mkt/RS"]].map(function (bk) {
               return React.createElement("label", { key: bk[0], style: { fontSize: 11, display: "flex", alignItems: "center", gap: 4, color: "var(--text3)" } },
                 bk[1],
                 React.createElement("input", {

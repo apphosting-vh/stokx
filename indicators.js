@@ -2892,14 +2892,26 @@ window.TechIndicators = (function () {
       relCutoffLo: 10,
       relCutoffHi: 90,
     },
-    /* Pillar 5: Regime Alignment (max 10).
-       10 = index above both its 50 and 200 DMA and index ATR-percentile is
-       not stretched (≤ 80); 5 = mixed (above one MA, or below 50DMA but above
-       200DMA with calm vol); 0 = below 50DMA or ATR-percentile > 80. */
+    /* Pillar 5: Market/RS Alignment (max 10) — stock-level alignment with the
+       market. Replaces the old index-only Regime Alignment pillar, which scored
+       every stock identically on a given day and had no forward edge. Weighted
+       via a 2y/42k-outcome sweep over 100 NIFTY 200 stocks:
+         rs (max 6)          : graduated Mansfield RS(52w) vs NIFTY — full rs at
+                               >= rsStrongThreshold, half credit for any positive
+                               RS. THE ONLY component with consistent forward
+                               slope (score 0→39.3%, 3→40.5%, 6→43.4% win) and
+                               the only config that stays strictly monotone.
+         longTrend / relMom  : default 0 — withdrawn by data. Long-trend alone
+                               was anti-predictive (35.8%); momentum added mid-
+                               bucket noise and broke monotonicity. Kept tunable.
+       The pillar's job is discrimination & strength attestation, not timing. */
     regimeAlignment: {
-      atrPercentileCap: 80,
-      mixedBelowSMA50: 5,
-      sma200Only: 3,
+      rs: 6,
+      rsStrongThreshold: 10,
+      longTrend: 0,
+      longSmaBars: 200,
+      relMomentum: 0,
+      relMomBars: 21,
     },
     /* Modifiers */
     modifiers: {
@@ -2935,7 +2947,7 @@ window.TechIndicators = (function () {
   var SCORE_CONFIG_DEFAULTS = JSON.parse(JSON.stringify(SCORE_CONFIG));
   /* Bump this whenever pillarMax or any pillar's sub-score weights change.
      Used to auto-discard stale localStorage configs. */
-  var SCORE_CONFIG_VERSION = 4;
+  var SCORE_CONFIG_VERSION = 7;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.prob4 && SCORE_CONFIG.prob4.targetPct != null) ? Math.round(SCORE_CONFIG.prob4.targetPct * 1000) / 10 : 3; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
@@ -3219,38 +3231,76 @@ window.TechIndicators = (function () {
     return round(Math.max(0, Math.min(SCORE_CONFIG.pillarMax.volatilityFit, score)), 1);
   }
 
-   /* ── Pillar 5: Regime Alignment (max 10) ────────────────────────────────
-       Index regime gate: Nifty above its 50 AND 200 DMA with index ATR
-       percentile ≤ 80 → full marks; mixed conditions → partial; below the
-       50 DMA or with stretched index vol → 0. Gracefully degrades to 5 when
-       index data is too short to judge. */
-  function calcRegimeAlignmentScore(indexCandles) {
-    var c = SCORE_CONFIG.regimeAlignment;
-    if (!indexCandles || indexCandles.length < 60) return 5;
-    var cl = closes(indexCandles), L = cl.length;
-    var cLast = cl[L - 1];
-    if (cLast == null || cLast <= 0) return 5;
+   /* ── Pillar 5: Market/RS Alignment (max 10) ─────────────────────────────
+       Stock-level alignment with the market (recast from the old index-only
+       Regime Alignment gate). Dominated by Mansfield RS(52w) vs NIFTY — the
+       only component with a measurable forward slope — plus small trend and
+       momentum attendants. Scores 0 on insufficient data; a stock earns marks
+       only by outperforming on its own merits. */
+  function calcMarketRsAlignmentScore(sn, candles, indexCandles) {
+    var c = SCORE_CONFIG.regimeAlignment || {};
+    if (!sn || sn.c == null || sn.c <= 0) return 0;
+    var score = 0;
 
-    var sma50 = null, sma200 = null;
+    /* 1) Relative strength vs the market — graduated Mansfield RS(52w):
+       full marks when strongly outperforming, half for any positive RS. */
+    var rsMax = c.rs != null ? c.rs : 6;
+    var rsStrong = c.rsStrongThreshold != null ? c.rsStrongThreshold : 20;
+    if (sn.rsMansfield != null) {
+      if (sn.rsMansfield >= rsStrong) score += rsMax;
+      else if (sn.rsMansfield > 0) score += rsMax / 2;
+    }
+
+    /* 2) Long-term structural uptrend: close above own SMA(longSmaBars),
+       degrading to SMA(100) / SMA(50) when history is too short. */
+    var longMax = c.longTrend != null ? c.longTrend : 2;
     try {
-      var s50 = calcSMA(indexCandles, 50);
-      if (s50 && s50.length > L - 1 && s50[L - 1] != null) sma50 = s50[L - 1];
-      var s200 = calcSMA(indexCandles, 200);
-      if (s200 && s200.length > L - 1 && s200[L - 1] != null) sma200 = s200[L - 1];
+      var barsOpts = [c.longSmaBars != null ? c.longSmaBars : 200, 100, 50];
+      var smaVal = null;
+      for (var i = 0; i < barsOpts.length; i++) {
+        var b = barsOpts[i];
+        if (candles && candles.length > b) {
+          var s = calcSMA(candles, b);
+          if (s && s.length > 0 && s[s.length - 1] != null) { smaVal = s[s.length - 1]; break; }
+        }
+      }
+      if (smaVal != null && sn.c > smaVal) score += longMax;
     } catch (e) {}
 
-    var above50 = sma50 != null ? cLast > sma50 : null;
-    var above200 = sma200 != null ? cLast > sma200 : null;
+    /* 3) Recent relative momentum vs NIFTY over the trailing relMomBars shared
+       trading days (aligned by timestamp like calcBeta). If the index series is
+       too short or missing, credit half only when the stock itself is rising. */
+    var momMax = c.relMomentum != null ? c.relMomentum : 2;
+    var win = c.relMomBars != null ? c.relMomBars : 21;
+    try {
+      if (candles && candles.length > win) {
+        var cl = closes(candles), L = cl.length;
+        var stockRet = null, idxRet = null;
+        if (cl[L - 1] != null && cl[L - 1 - win] != null && cl[L - 1 - win] > 0) {
+          stockRet = (cl[L - 1] - cl[L - 1 - win]) / cl[L - 1 - win];
+        }
+        if (stockRet != null && indexCandles && indexCandles.length > win) {
+          var sMap = {};
+          for (var a = 0; a < candles.length; a++) sMap[candles[a].t] = candles[a].c;
+          var pairs = [];
+          for (var y = 0; y < indexCandles.length; y++) {
+            var sv = sMap[indexCandles[y].t];
+            if (sv != null && sv > 0 && indexCandles[y].c > 0) pairs.push({ s: sv, i: indexCandles[y].c });
+          }
+          if (pairs.length > win) {
+            var pL = pairs.length, pLast = pairs[pL - 1], pWin = pairs[pL - 1 - win];
+            if (pWin.s > 0 && pWin.i > 0) {
+              idxRet = (pLast.i - pWin.i) / pWin.i;
+              var sOverlapRet = (pLast.s - pWin.s) / pWin.s;
+              if (sOverlapRet >= idxRet) score += momMax;
+            }
+          }
+        }
+        if (idxRet == null && stockRet != null && stockRet > 0) score += momMax / 2;
+      }
+    } catch (e) {}
 
-    var atrPercentile = null;
-    try { atrPercentile = calcATRPercentileRank(indexCandles, 14); } catch (e) {}
-    var volOk = atrPercentile == null || atrPercentile <= (c.atrPercentileCap != null ? c.atrPercentileCap : 80);
-
-    if (above50 === true && above200 === true && volOk) return SCORE_CONFIG.pillarMax.regimeAlignment;
-    if (above50 === false) return 0;
-    if (atrPercentile != null && atrPercentile > (c.atrPercentileCap != null ? c.atrPercentileCap : 80)) return 0;
-    if (above50 === true || above200 === true) return c.mixedBelowSMA50 != null ? c.mixedBelowSMA50 : 5;
-    return c.sma200Only != null ? c.sma200Only : 3;
+    return round(Math.max(0, Math.min(10, score)), 1);
   }
 
   /* Modifiers (±15 each): low-expansion, spike day, stability, MTF alignment (gradient).
@@ -3301,7 +3351,7 @@ window.TechIndicators = (function () {
       prob4: tf === 'D' ? calcBarrierRaceScore(candles, sn) : null,
       swingPotential: 0,
       volatilityFit: tf === 'D' ? calcVolatilityFitScore(sn, candles) : null,
-      regimeAlignment: tf === 'D' ? calcRegimeAlignmentScore(indexCandles) : null,
+      regimeAlignment: tf === 'D' ? calcMarketRsAlignmentScore(sn, candles, indexCandles) : null,
       spike: sn.spikeLast === true ? 5 : 0,
       stability: round(Math.max(0, Math.min(10, (1 - (sn.stability20 != null ? sn.stability20 : 1)) * 10)), 1),
       volRegime: volRegime,
@@ -3321,7 +3371,7 @@ window.TechIndicators = (function () {
     var prob4 = calcBarrierRaceScore(candles, sn);
     var swingPotential = 0;
     var volatilityFit = calcVolatilityFitScore(sn, candles);
-    var regimeAlignment = calcRegimeAlignmentScore(indexCandles);
+    var regimeAlignment = calcMarketRsAlignmentScore(sn, candles, indexCandles);
     var rawTotal = trendHealth + pullbackQuality + prob4 + volatilityFit + regimeAlignment;
 
     var spikeDay = sn.spikeLast === true || (sn.gapPct != null && Math.abs(sn.gapPct) > SCORE_CONFIG.modifiers.spikeGapThreshold);

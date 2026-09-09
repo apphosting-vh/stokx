@@ -1317,7 +1317,7 @@ breakEvenWinRate: breakEvenWinRate,
           { key: 'pullbackQuality', optKey: 'minPullbackQuality', label: 'Pullback Quality', max: pillarSweepCfg ? pillarSweepCfg.pullbackQuality : 25, values: pillarSweep.pullbackQuality || [0, 5, 10, 15, 20, 25] },
           { key: 'prob4', optKey: 'minProb4', label: 'Barrier Race', max: pillarSweepCfg ? pillarSweepCfg.prob4 : 30, values: pillarSweep.prob4 || [0, 5, 10, 15, 20, 25, 30] },
           { key: 'volatilityFit', optKey: 'minVolatilityFit', label: 'Volatility Fit', max: pillarSweepCfg ? pillarSweepCfg.volatilityFit : 10, values: pillarSweep.volatilityFit || [0, 2, 4, 6, 8, 10] },
-          { key: 'regimeAlignment', optKey: 'minRegimeAlignment', label: 'Regime Alignment', max: pillarSweepCfg ? pillarSweepCfg.regimeAlignment : 10, values: pillarSweep.regimeAlignment || [0, 2, 4, 6, 8, 10] }
+          { key: 'regimeAlignment', optKey: 'minRegimeAlignment', label: 'Market/RS Alignment', max: pillarSweepCfg ? pillarSweepCfg.regimeAlignment : 10, values: pillarSweep.regimeAlignment || [0, 2, 4, 6, 8, 10] }
         ];
         // Single engine with threshold=0 — scores are cached and reused across all pillar values
         var pillarEng = create({ scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, stopLossPct: stopLossPct, holdingPeriodDays: holdingPeriodDays, threshold: 0, multiTFMap: cfg.multiTFMap, indexCandles: cfg.indexCandles, realisticEntry: cfg.realisticEntry, realisticExit: cfg.realisticExit, slippagePct: cfg.slippagePct, brokeragePct: cfg.brokeragePct });
