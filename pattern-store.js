@@ -78,7 +78,7 @@ var _weightBlend = null;
    *   symbol: string,
    *   backtestDate: number (timestamp),
    *   backtestVersion: string,
-   *   indicatorWeights: { trendHealth: 0.32, pullbackQuality: 0.28, prob4: 0.22, swingPotential: 0.18 },
+   *   indicatorWeights: { trendHealth: 0.24, pullbackQuality: 0.20, prob4: 0.22, volatilityFit: 0.18, regimeAlignment: 0.16 },
    *   indicatorPowers: { trendHealth: { correlation, infoValue, bucketWinRates }, ... },
    *   calibration: {
    *     global: { calP0, calK, buckets },
@@ -107,7 +107,8 @@ var _weightBlend = null;
    *     trendHealth: { max, touched, atMax, atMaxPct, avg, median },
    *     pullbackQuality: { ... },
    *     prob4: { ... },
-   *     swingPotential: { ... }
+   *     volatilityFit: { ... },
+   *     regimeAlignment: { ... }
    *   },
    *   backtestConfig: { targetProfitPct, holdingPeriodDays, threshold, slippagePct, brokeragePct },
    *   dataQuality: { candleCount, dateRange, timeframe }
@@ -209,6 +210,7 @@ var _weightBlend = null;
    * Store raw per-trade features for ML training.
    * Features array: [
    *   { symbol, features: { rsi, atr_pct, bb_position, volume_ratio, macd_hist, ema_slope, adx, entry_score,
+   *     trendHealth, pullbackQuality, prob4, volatilityFit, regimeAlignment,
    *     trend_structure, price_vs_sma200, ema20_50_cross, volatility_regime, mfi, vol_price_trend,
    *     bull_bear, market_momentum, cap_tier, rsi_regime, ... },
    *     label: { return_10d, is_winner, barrier: 'WIN'|'LOSS'|'TIMEOUT', is_stop, days_to_target } },
@@ -459,7 +461,7 @@ var _weightBlend = null;
     // Simple K-means-like clustering by weight vector (4D)
     var clusters = [];
     var MAX_CLUSTERS = Math.min(8, Math.max(2, Math.floor(valid.length / 10)));
-    var DIMS = ["trendHealth", "pullbackQuality", "prob4", "swingPotential"];
+    var DIMS = ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"];
 
     // Initialize centroids using first MAX_CLUSTERS patterns
     var centroids = valid.slice(0, MAX_CLUSTERS).map(function (p) {
@@ -639,8 +641,9 @@ var _weightBlend = null;
 
   /* ── Manual weight overrides (Pattern Lab → Pattern Settings) ────────────
      Stored as a single meta record: { symbol: { trendHealth, pullbackQuality,
-     prob4, swingPotential } } with weights as 0-1 fractions. The sync cache is
-     populated at init so sync scoring paths can resolve overrides cheaply. */
+     prob4, volatilityFit, regimeAlignment } } with weights as 0-1 fractions.
+     The sync cache is populated at init so sync scoring paths can resolve
+     overrides cheaply. */
 
   function _loadWeightOverrides() {
     _weightOverrides = null;

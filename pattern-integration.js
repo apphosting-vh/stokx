@@ -116,10 +116,10 @@
 
   /**
    * Compute ML features for synchronous prediction.
-   * When dailyCandles is provided, computes real 18-key expanded features
+   * When dailyCandles is provided, computes real expanded features
    * (Phase 3/4) so the feature vector matches FEATURE_KEYS length exactly —
    * predictSync rejects shorter inputs. Otherwise falls back to neutral
-   * defaults (entry_score only).
+   * defaults (entry_score + pillars only).
    * @param {Object} compatResult - compat entry-score result
    * @param {Array} dailyCandles - daily OHLCV
    * @param {Object} opts - { symbol, indexFeatures } (indexFeatures optional;
@@ -131,17 +131,27 @@
     var symbol = opts.symbol || (compatResult && (compatResult.symbol || compatResult.tk)) || null;
     var indexFeatures = opts.indexFeatures || null;
     if (!compatResult) return null;
+    /* Un-collapsed pillar features: feed the raw aggregate pillar scores
+       (0..pillarMax) so training and inference see the same per-pillar signal. */
+    var pillarScores = {
+      trendHealth: compatResult.aggTrendHealth != null ? compatResult.aggTrendHealth : 0,
+      pullbackQuality: compatResult.aggPullbackQuality != null ? compatResult.aggPullbackQuality : 0,
+      prob4: compatResult.aggProb4 != null ? compatResult.aggProb4 : 0,
+      volatilityFit: compatResult.aggVolatilityFit != null ? compatResult.aggVolatilityFit : 0,
+      regimeAlignment: compatResult.aggRegimeAlignment != null ? compatResult.aggRegimeAlignment : 0
+    };
     if (dailyCandles && dailyCandles.length >= 30 && window.TechIndicators) {
       try {
         var TI = window.TechIndicators;
         var n = dailyCandles.length - 1;
-        var feats = TI.computeExpandedFeatures(dailyCandles, n, compatResult.finalScore || 0, symbol, indexFeatures);
+        var feats = TI.computeExpandedFeatures(dailyCandles, n, compatResult.finalScore || 0, symbol, indexFeatures, pillarScores);
         // Guard: ensure every FEATURE_KEYS key is present with a neutral default,
         // regardless of which code path produced the object.
         var keys = ["rsi", "atr_pct", "bb_position", "volume_ratio", "macd_hist", "ema_slope", "adx", "entry_score",
+          "trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment",
           "trend_structure", "price_vs_sma200", "ema20_50_cross", "volatility_regime", "mfi", "vol_price_trend",
           "bull_bear", "market_momentum", "cap_tier", "rsi_regime"];
-        var defaults = { rsi: 50, atr_pct: 0, bb_position: 0.5, volume_ratio: 1, macd_hist: 0, ema_slope: 0, adx: 20, entry_score: compatResult.finalScore || 0, trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0, volatility_regime: 0, mfi: 50, vol_price_trend: 0, bull_bear: 0, market_momentum: 0, cap_tier: -1, rsi_regime: 0 };
+        var defaults = { rsi: 50, atr_pct: 0, bb_position: 0.5, volume_ratio: 1, macd_hist: 0, ema_slope: 0, adx: 20, entry_score: compatResult.finalScore || 0, trendHealth: pillarScores.trendHealth, pullbackQuality: pillarScores.pullbackQuality, prob4: pillarScores.prob4, volatilityFit: pillarScores.volatilityFit, regimeAlignment: pillarScores.regimeAlignment, trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0, volatility_regime: 0, mfi: 50, vol_price_trend: 0, bull_bear: 0, market_momentum: 0, cap_tier: -1, rsi_regime: 0 };
         var out = {};
         for (var i = 0; i < keys.length; i++) {
           var k = keys[i];
@@ -155,6 +165,9 @@
     return {
       rsi: 50, macd_hist: 0, bb_position: 0.5, atr_pct: 0,
       adx: 20, ema_slope: 0, volume_ratio: 1,
+      trendHealth: pillarScores.trendHealth, pullbackQuality: pillarScores.pullbackQuality,
+      prob4: pillarScores.prob4, volatilityFit: pillarScores.volatilityFit,
+      regimeAlignment: pillarScores.regimeAlignment,
       trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0,
       volatility_regime: 0, mfi: 50, vol_price_trend: 0,
       bull_bear: 0, market_momentum: 0, cap_tier: -1, rsi_regime: 0,
@@ -171,7 +184,7 @@
   /**
    * Effective weights for a pattern: manual overrides (Pattern Lab →
    * Pattern Settings) take precedence; otherwise resolved (repaired from
-   * powers if the stored weights are uniform) and blended toward equal 25%
+   * powers if the stored weights are uniform) and blended toward equal 16.7%
    * per the global Learned-weight blend setting. Falls back to stored
    * weights if PatternScoring is unavailable.
    */
@@ -212,10 +225,12 @@
       trendHealth: compatResult.aggTrendHealth != null ? compatResult.aggTrendHealth : 0,
       pullbackQuality: compatResult.aggPullbackQuality != null ? compatResult.aggPullbackQuality : 0,
       prob4: compatResult.aggProb4 != null ? compatResult.aggProb4 : 0,
-      swingPotential: compatResult.aggSwingPotential != null ? compatResult.aggSwingPotential : 0
+      swingPotential: compatResult.aggSwingPotential != null ? compatResult.aggSwingPotential : 0,
+      volatilityFit: compatResult.aggVolatilityFit != null ? compatResult.aggVolatilityFit : 0,
+      regimeAlignment: compatResult.aggRegimeAlignment != null ? compatResult.aggRegimeAlignment : 0
     };
 
-    var pillarMax = { trendHealth: 35, pullbackQuality: 30, prob4: 35, swingPotential: 20 };
+    var pillarMax = { trendHealth: 25, pullbackQuality: 25, prob4: 30, swingPotential: 0, volatilityFit: 10, regimeAlignment: 10 };
     if (window.TechIndicators && window.TechIndicators.getScoreConfig) {
       var sc = window.TechIndicators.getScoreConfig();
       if (sc && sc.pillarMax) pillarMax = sc.pillarMax;
@@ -224,12 +239,12 @@
     // Uniform weights == no re-weighting: the pattern stage is an identity,
     // i.e. equal pillars keep the base score exactly (P±Δ = 0). Without this,
     // the normalized-average scale (0-100) diverges from the base raw-sum
-    // scale (35/30/35/20 maxes + modifiers) and fabricates a delta.
+    // scale (25/25/30/10/10 maxes + modifiers) and fabricates a delta.
     var firstW = null;
     var uniformW = true;
     if (_cachedScoringConfig.usePatternWeights) {
-      ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
-        var w = weights[p] != null ? weights[p] : 0.25;
+      ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (p) {
+        var w = weights[p] != null ? weights[p] : 0.20;
         if (firstW == null) firstW = w;
         else if (Math.abs(w - firstW) > 0.001) uniformW = false;
       });
@@ -243,8 +258,8 @@
     if (uniformW) {
       // Keep the base score; skip the recompute and power bonus entirely.
     } else {
-      ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
-        var w = weights[p] != null ? weights[p] : 0.25;
+      ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (p) {
+        var w = weights[p] != null ? weights[p] : 0.20;
         var max = pillarMax[p] || 25;
         var normalizedPillar = clamp(pillars[p] / max, 0, 1);
         var weighted = normalizedPillar * w;
@@ -287,6 +302,7 @@
         }
       } catch (mlErr) {
         // ML prediction failed silently — use pattern-weighted score
+        compatResult._mlSwallowErr = String((mlErr && mlErr.message) || mlErr);
       }
     }
 
@@ -327,11 +343,21 @@
     compatResult._patternHasCalibration = !!(pattern.calibration && pattern.calibration.global);
     compatResult._powerBonusApplied = round2(powerBonusTotal);
     compatResult._powerBonusBreakdown = pillarBonuses;
-    // ML prediction metadata
+    // ML prediction metadata — also record WHY the blend was skipped so the
+    // UI can show a visible M— status instead of silently degrading.
+    compatResult._mlStatus = mlPrediction ? "active" : "off";
     if (mlPrediction) {
       compatResult._mlEnhanced = true;
       compatResult._mlWinProb = mlPrediction.winProbability;
       compatResult._mlRecommendation = mlPrediction.recommendation;
+    } else if (!_cachedScoringConfig.useMLBlend) {
+      compatResult._mlReason = "ML blend disabled in scoring config";
+    } else if (compatResult._mlSwallowErr) {
+      compatResult._mlReason = "ML prediction failed: " + compatResult._mlSwallowErr;
+    } else if (!_cachedMLModel || !window.MLTrainer || !window.MLTrainer.predictSync) {
+      compatResult._mlReason = "No champion ML model saved — train and save one in the ML tab";
+    } else {
+      compatResult._mlReason = "Entry score below the model's training minimum";
     }
 
     return compatResult;

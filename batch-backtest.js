@@ -14,7 +14,7 @@
      await PatternStore.init();
 
      // Option A: Run using offline data (automatic)
-     var runner = BatchBacktest.create({ targetProfitPct: 4, holdingPeriodDays: 14 });
+     var runner = BatchBacktest.create({ targetProfitPct: 3, holdingPeriodDays: 10 });
      var result = await runner.runBatch(symbols, {
        onProgress: (current, total, symbol, phase) => { ... }
      });
@@ -91,7 +91,7 @@ window.BatchBacktest = (function () {
           try {
             var mtf = TI.computeMultiTFEntryScore(tfResults, idxSlice, null);
             if (mtf && mtf.multiTF_score != null) {
-              return { entryScore: mtf.multiTF_score, raw_score: mtf.raw_score, classification: mtf.classification, trendHealth: mtf.trendHealth, pullbackQuality: mtf.pullbackQuality, prob4: mtf.prob4, swingPotential: mtf.swingPotential, modifiers: mtf.modifiers };
+              return { entryScore: mtf.multiTF_score, raw_score: mtf.raw_score, classification: mtf.classification, trendHealth: mtf.trendHealth, pullbackQuality: mtf.pullbackQuality, prob4: mtf.prob4, swingPotential: mtf.swingPotential, volatilityFit: mtf.volatilityFit, regimeAlignment: mtf.regimeAlignment, modifiers: mtf.modifiers };
             }
           } catch (e) { console.warn("Multi-TF scoring failed:", e.message); }
         }
@@ -101,7 +101,7 @@ window.BatchBacktest = (function () {
       var res;
       try { res = TI.computeEntryScore(candles.slice(0, idx + 1), idxSlice && idxSlice.length ? idxSlice : null); } catch (e) { return null; }
       if (!res || res.entry_score == null) return null;
-      return { entryScore: res.entry_score, raw_score: res.raw_score, classification: res.classification, trendHealth: res.trendHealth, pullbackQuality: res.pullbackQuality, prob4: res.prob4, swingPotential: res.swingPotential, modifiers: res.modifiers };
+      return { entryScore: res.entry_score, raw_score: res.raw_score, classification: res.classification, trendHealth: res.trendHealth, pullbackQuality: res.pullbackQuality, prob4: res.prob4, swingPotential: res.swingPotential, volatilityFit: res.volatilityFit, regimeAlignment: res.regimeAlignment, modifiers: res.modifiers };
     };
   }
 
@@ -167,10 +167,10 @@ window.BatchBacktest = (function () {
 
     /**
      * Compute ML features for a specific bar index — field-for-field identical
-     * to computeMLFeaturesFromCompat's real-feature branch (pattern-integration.js:96-122).
+     * to computeMLFeaturesFromCompat's real-feature branch (pattern-integration.js).
      * Uses the pre-computed indicator cache (O(1) per bar).
      */
-    function mlFeaturesAtBar(bar, idx, cache, entryScore, opts) {
+    function mlFeaturesAtBar(bar, idx, cache, entryScore, opts, pillarScores) {
       if (!cache || idx == null) return null;
       var close = bar.c || 0;
       if (close <= 0) return null;
@@ -191,8 +191,8 @@ window.BatchBacktest = (function () {
           volume_ratio: cache.volSma && cache.volSma[n] ? Math.round(cache.volumes[n] / Math.max(1, cache.volSma[n]) * 100) / 100 : 1,
           entry_score: entryScore || 0
         };
-        // Phase 3/4 — merge expanded features so the 18-key model vector is
-        // consistent with training (cap tier + market regime included).
+        // Phase 3/4 — merge expanded features so the 23-key model vector is
+        // consistent with training (pillars, cap tier + market regime included).
         var TI = window.TechIndicators;
         if (TI && TI.computeExpandedFeatures && opts && opts.candles) {
           try {
@@ -200,7 +200,7 @@ window.BatchBacktest = (function () {
             if (TI.computeMarketRegimeFeatures) {
               try { idxFx = TI.computeMarketRegimeFeatures(opts.indexCandles || null); } catch (_e3) {}
             }
-            var exp = TI.computeExpandedFeatures(opts.candles, idx, entryScore || 0, opts.symbol || null, idxFx);
+            var exp = TI.computeExpandedFeatures(opts.candles, idx, entryScore || 0, opts.symbol || null, idxFx, pillarScores);
             if (exp) base = Object.assign({}, base, exp);
           } catch (_e4) {}
         }
@@ -250,6 +250,8 @@ window.BatchBacktest = (function () {
           pullbackQuality: sb.pullbackQuality,
           prob4: sb.prob4,
           swingPotential: sb.swingPotential,
+          volatilityFit: sb.volatilityFit,
+          regimeAlignment: sb.regimeAlignment,
           raw_score: sb.raw_score,
           modifiers: sb.modifiers,
           classification: window.BacktestEngine && window.BacktestEngine.classifyScore ? window.BacktestEngine.classifyScore(sb.adjustedScore) : null
@@ -335,7 +337,7 @@ window.BatchBacktest = (function () {
       var smallSample = !(pattern.tradeStats && pattern.tradeStats.totalTrades >= MIN_SAMPLE_TRADES);
 
       var weights = pattern.indicatorWeights || null;
-      var pillarMax = { trendHealth: 35, pullbackQuality: 30, prob4: 35, swingPotential: 20 };
+      var pillarMax = { trendHealth: 25, pullbackQuality: 25, prob4: 30, swingPotential: 0, volatilityFit: 10, regimeAlignment: 10 };
       if (window.TechIndicators && window.TechIndicators.getScoreConfig) {
         var sc = window.TechIndicators.getScoreConfig();
         if (sc && sc.pillarMax) pillarMax = sc.pillarMax;
@@ -353,8 +355,8 @@ window.BatchBacktest = (function () {
       var uniformW = true;
       if (weights && usePatternWeights) {
         var _firstW = null;
-        ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
-          var w = weights[p] != null ? weights[p] : 0.25;
+        ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (p) {
+          var w = weights[p] != null ? weights[p] : 0.20;
           if (_firstW == null) _firstW = w;
           else if (Math.abs(w - _firstW) > 0.001) uniformW = false;
         });
@@ -384,7 +386,9 @@ window.BatchBacktest = (function () {
           trendHealth: bar.trendHealth || 0,
           pullbackQuality: bar.pullbackQuality || 0,
           prob4: bar.prob4 || 0,
-          swingPotential: bar.swingPotential || 0
+          swingPotential: bar.swingPotential || 0,
+          volatilityFit: bar.volatilityFit || 0,
+          regimeAlignment: bar.regimeAlignment || 0
         };
 
         // Pattern re-weighting: 50/50 blend of raw entry score and the
@@ -396,8 +400,8 @@ window.BatchBacktest = (function () {
 
         if (applyReweight) {
           var totalWeighted = 0, totalWeight = 0;
-          ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (p) {
-            var w = weights[p] != null ? weights[p] : 0.25;
+          ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (p) {
+            var w = weights[p] != null ? weights[p] : 0.20;
             var max = pillarMax[p] || 25;
             var normalizedPillar = _clamp(pillars[p] / max, 0, 1);
             totalWeighted += normalizedPillar * w;
@@ -416,6 +420,8 @@ window.BatchBacktest = (function () {
           pullbackQuality: bar.pullbackQuality,
           prob4: bar.prob4,
           swingPotential: bar.swingPotential,
+          volatilityFit: bar.volatilityFit,
+          regimeAlignment: bar.regimeAlignment,
           raw_score: bar.raw_score,
           modifiers: bar.modifiers
         };
@@ -431,7 +437,14 @@ window.BatchBacktest = (function () {
         // ML-blended pass
         if (mlBlendedScored && mlCache) {
           var mlScore = patternScore;
-          var features = mlFeaturesAtBar(candles[bar.idx], bar.idx, mlCache, patternScore, { candles: candles, symbol: pattern.symbol, indexCandles: cfg.indexCandles });
+          var barScores = {
+            trendHealth: bar.trendHealth != null ? bar.trendHealth : 0,
+            pullbackQuality: bar.pullbackQuality != null ? bar.pullbackQuality : 0,
+            prob4: bar.prob4 != null ? bar.prob4 : 0,
+            volatilityFit: bar.volatilityFit != null ? bar.volatilityFit : 0,
+            regimeAlignment: bar.regimeAlignment != null ? bar.regimeAlignment : 0
+          };
+          var features = mlFeaturesAtBar(candles[bar.idx], bar.idx, mlCache, patternScore, { candles: candles, symbol: pattern.symbol, indexCandles: cfg.indexCandles }, barScores);
           if (features) {
             mlScore = applyMLBlendAtBar(patternScore, features, mlModel);
           }
@@ -467,8 +480,8 @@ window.BatchBacktest = (function () {
   function create(cfg) {
     cfg = cfg || {};
 
-    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 4.0);
-    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 14);
+    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.0);
+    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 10);
     var threshold = cfg.threshold != null ? cfg.threshold : 65;
     var slippagePct = cfg.slippagePct != null ? cfg.slippagePct : 0.1;
     var brokeragePct = cfg.brokeragePct != null ? cfg.brokeragePct : 0.05;
@@ -533,18 +546,19 @@ window.BatchBacktest = (function () {
       var lastBar = candles[candles.length - 1];
       var price = lastBar && lastBar.c ? lastBar.c : 0;
       var avgTurnover = computeAvgTurnover(candles, candles.length - 1, turnoverWindowDays);
+      var capTier = (window.StoxUniverse && window.StoxUniverse.getCapTier) ? (window.StoxUniverse.getCapTier(symbol) || null) : null;
 
       // Price floor
       if (price < minPricePct) {
-        return { pass: false, reason: "price_" + price.toFixed(0) + "_below_" + minPricePct, metrics: { price: price, avgTurnoverCr: avgTurnover } };
+        return { pass: false, reason: "price_" + price.toFixed(0) + "_below_" + minPricePct, metrics: { price: price, avgTurnoverCr: avgTurnover, capTier: capTier } };
       }
 
       // Liquidity floor
       if (avgTurnover < minAvgTurnoverCr) {
-        return { pass: false, reason: "turnover_" + avgTurnover.toFixed(1) + "Cr_below_" + minAvgTurnoverCr + "Cr", metrics: { price: price, avgTurnoverCr: avgTurnover } };
+        return { pass: false, reason: "turnover_" + avgTurnover.toFixed(1) + "Cr_below_" + minAvgTurnoverCr + "Cr", metrics: { price: price, avgTurnoverCr: avgTurnover, capTier: capTier } };
       }
 
-      return { pass: true, reason: "ok", metrics: { price: price, avgTurnoverCr: avgTurnover } };
+      return { pass: true, reason: "ok", metrics: { price: price, avgTurnoverCr: avgTurnover, capTier: capTier } };
     }
 
     /**
@@ -780,7 +794,7 @@ window.BatchBacktest = (function () {
 
         try {
           // ── Liquidity-scaled slippage ──
-          var avgTurnover = computeAvgTurnover(candles, candles.length - 1, turnoverWindowDays);
+          var avgTurnover = (universeFilterEnabled && ufResult && ufResult.metrics && ufResult.metrics.avgTurnoverCr != null) ? ufResult.metrics.avgTurnoverCr : computeAvgTurnover(candles, candles.length - 1, turnoverWindowDays);
           var symbolSlippage = computeLiquiditySlippage(avgTurnover, slippagePct);
 
           // ── Run single stock backtest (pass hooks so engine yields every 25 bars) ──
@@ -1011,13 +1025,13 @@ window.BatchBacktest = (function () {
       var stats = btResult.stats || {};
 
       // ── 1. Indicator Weights from component power ──
-      var indicatorWeights = { trendHealth: 0.25, pullbackQuality: 0.25, prob4: 0.25, swingPotential: 0.25 };
+      var indicatorWeights = { trendHealth: 0.20, pullbackQuality: 0.20, prob4: 0.20, volatilityFit: 0.20, regimeAlignment: 0.20 };
       var indicatorPowers = {};
 
       if (powerResult && powerResult.components) {
         var comps = powerResult.components;
         var ivs = [];
-        ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (c) {
+        ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (c) {
           if (comps[c] && !comps[c].error) {
             var iv = Math.abs(comps[c].infoValue || 0);
             indicatorPowers[c] = {
@@ -1030,7 +1044,7 @@ window.BatchBacktest = (function () {
         });
 
         // Relative min-max spread on infoValue (NOT a floor on raw magnitude —
-        // a floor of 0.1 collapsed typical sub-0.1 infoValues to equal 25%).
+        // a floor of 0.1 collapsed typical sub-0.1 infoValues to equal 16.7%).
         // Valid components get 0.1-0.9 of the budget, errored ones a fair share.
         if (ivs.length > 0) {
           var minIV = Math.min.apply(null, ivs.map(function (x) { return x.iv; }));
@@ -1038,16 +1052,16 @@ window.BatchBacktest = (function () {
           var valid = ivs.map(function (x) {
             return { c: x.c, w: maxIV > minIV ? (0.1 + 0.8 * (x.iv - minIV) / (maxIV - minIV)) : 0.5 };
           });
-          var erroredCount = 4 - ivs.length;
+          var erroredCount = 5 - ivs.length;
           var validBudget = 1 - erroredCount * 0.1;
           var validSum = valid.reduce(function (s, x) { return s + x.w; }, 0);
           var validScale = validSum > 0 ? validBudget / validSum : 0;
           var validKeys = {};
           valid.forEach(function (x) { validKeys[x.c] = true; indicatorWeights[x.c] = round3(x.w * validScale); });
-          ["trendHealth", "pullbackQuality", "prob4", "swingPotential"].forEach(function (c) {
-            // Errored pillars: overwrite the 0.25 default with their 0.1 fair
+          ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (c) {
+            // Errored pillars: overwrite the 0.20 default with their 0.1 fair
             // share so the total always sums to 1.0 (the pre-initialized
-            // default would otherwise leave errored pillars at 0.25, pushing
+            // default would otherwise leave errored pillars at 0.20, pushing
             // the sum over 1.0).
             if (!validKeys[c]) indicatorWeights[c] = round3((erroredCount * 0.1) / Math.max(1, erroredCount));
           });
@@ -1281,11 +1295,21 @@ window.BatchBacktest = (function () {
             entry_score: trade.entryScore || 0
           };
 
+          // Un-collapsed pillar features — raw per-pillar scores captured on the
+          // trade's entry score (0..pillarMax), matching the live feature path.
+          var tradePillars = {
+            trendHealth: trade.trendScore != null ? trade.trendScore : 0,
+            pullbackQuality: trade.pullbackScore != null ? trade.pullbackScore : 0,
+            prob4: trade.probabilityScore != null ? trade.probabilityScore : 0,
+            volatilityFit: trade.volatilityFitScore != null ? trade.volatilityFitScore : 0,
+            regimeAlignment: trade.regimeAlignmentScore != null ? trade.regimeAlignmentScore : 0
+          };
+
           // Expanded features (Phase 3)
           var expanded = {};
           if (TI.computeExpandedFeatures) {
             try {
-              var exp = TI.computeExpandedFeatures(candles, entryIdx, trade.entryScore || 0, symbol, indexFeatures);
+              var exp = TI.computeExpandedFeatures(candles, entryIdx, trade.entryScore || 0, symbol, indexFeatures, tradePillars);
               if (exp) expanded = exp;
             } catch (e) {}
           }
@@ -1293,9 +1317,11 @@ window.BatchBacktest = (function () {
           var finalFeats = Object.assign({}, baseFeats, expanded);
           // Ensure all FEATURE_KEYS present with defaults if null
           var ALL_KEYS = ["rsi", "atr_pct", "bb_position", "volume_ratio", "macd_hist", "ema_slope", "adx", "entry_score",
+            "trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment",
             "trend_structure", "price_vs_sma200", "ema20_50_cross", "volatility_regime", "mfi", "vol_price_trend",
             "bull_bear", "market_momentum", "cap_tier", "rsi_regime", "obv_trend", "supertrend_dir"];
           ALL_KEYS.forEach(function (k) { if (finalFeats[k] == null) finalFeats[k] = (k === "entry_score") ? (trade.entryScore || 0) : 0; });
+          Object.keys(tradePillars).forEach(function (pk) { if (finalFeats[pk] == null) finalFeats[pk] = tradePillars[pk]; });
 
           features.push({
             symbol: symbol,

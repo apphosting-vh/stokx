@@ -38,7 +38,12 @@ window.LiveML = (function () {
     macd_hist: { label: "MACD Hist %", bins: [-0.5, -0.1, 0, 0.1, 0.5], labels: ["<-0.5%", "-0.5/-0.1%", "-0.1/0%", "0/0.1%", "0.1/0.5%", "0.5%+"] },
     ema_slope: { label: "EMA12 Slope %", bins: [-0.5, 0, 0.3, 0.7], labels: ["<-0.5", "-0.5/0", "0/0.3", "0.3/0.7", "0.7+"] },
     adx: { label: "ADX (14)", bins: [15, 20, 25, 35], labels: ["<15", "15-20", "20-25", "25-35", "35+"] },
-    entry_score: { label: "Entry Score", bins: [30, 45, 55, 65, 75], labels: ["<30", "30-45", "45-55", "55-65", "65-75", "75+"] }
+    entry_score: { label: "Entry Score", bins: [30, 45, 55, 65, 75], labels: ["<30", "30-45", "45-55", "55-65", "65-75", "75+"] },
+    trendHealth: { label: "Trend Health", bins: [5, 10, 15, 20], labels: ["<5", "5-10", "10-15", "15-20", "20+"] },
+    pullbackQuality: { label: "Pullback Quality", bins: [5, 10, 15, 20], labels: ["<5", "5-10", "10-15", "15-20", "20+"] },
+    prob4: { label: "Barrier Race (prob4)", bins: [6, 12, 18, 24], labels: ["<6", "6-12", "12-18", "18-24", "24+"] },
+    volatilityFit: { label: "Volatility Fit", bins: [2, 4, 6, 8], labels: ["<2", "2-4", "4-6", "6-8", "8+"] },
+    regimeAlignment: { label: "Regime Alignment", bins: [2, 4, 6, 8], labels: ["<2", "2-4", "4-6", "6-8", "8+"] }
   };
 
   function round2(v) { return Math.round(v * 100) / 100; }
@@ -264,19 +269,44 @@ window.LiveML = (function () {
       macd_hist: ind.macd && ind.macd.histogram && close > 0 ? round3(ind.macd.histogram[i] / close * 100) : 0,
       ema_slope: ind.emaFast[i] != null && ind.emaFast[Math.max(0, i - 3)] != null ? round3((ind.emaFast[i] - ind.emaFast[Math.max(0, i - 3)]) / Math.max(0.01, ind.emaFast[Math.max(0, i - 3)]) * 100) : 0,
       adx: ind.adx && ind.adx.adx ? round2(ind.adx.adx[i] || 0) : 0,
-      entry_score: round3(es)
+      entry_score: round3(es),
+      trendHealth: 0, pullbackQuality: 0, prob4: 0, volatilityFit: 0, regimeAlignment: 0
     };
-    /* Expanded features (Phase 3) — keep live scoring consistent with the
-       training pipeline so the model sees the same 18-key vector. */
+    /* Expanded features (Phase 3/4) — keep live scoring consistent with the
+       training pipeline so the model sees the same un-collapsed vector:
+       pillars (raw 0..pillarMax from the shared score engine, sliced to the
+       bar date — no lookahead) + cap tier + market regime. */
     var expanded = {};
     try {
       var TI2 = window.TechIndicators;
       if (TI2 && TI2.computeExpandedFeatures) {
+        var pillarScores = null;
+        try {
+          if (TI2.computeEntryScore && candles.slice && i >= 24) {
+            var idxSlice = null;
+            if (indexCandles && indexCandles.length) {
+              var ts = candles[i].t;
+              var lo = 0, hi = indexCandles.length;
+              while (lo < hi) { var mid = (lo + hi) >> 1; if (indexCandles[mid].t <= ts) lo = mid + 1; else hi = mid; }
+              if (lo > 0) idxSlice = indexCandles.slice(0, lo);
+            }
+            var sc = TI2.computeEntryScore(candles.slice(0, i + 1), idxSlice);
+            if (sc && sc.entry_score != null) {
+              pillarScores = {
+                trendHealth: sc.trendHealth != null ? sc.trendHealth : 0,
+                pullbackQuality: sc.pullbackQuality != null ? sc.pullbackQuality : 0,
+                prob4: sc.prob4 != null ? sc.prob4 : 0,
+                volatilityFit: sc.volatilityFit != null ? sc.volatilityFit : 0,
+                regimeAlignment: sc.regimeAlignment != null ? sc.regimeAlignment : 0
+              };
+            }
+          }
+        } catch (_e4) {}
         var idxFx = null;
         if (TI2.computeMarketRegimeFeatures) {
           try { idxFx = TI2.computeMarketRegimeFeatures(indexCandles); } catch (_e3) {}
         }
-        expanded = TI2.computeExpandedFeatures(candles, i, es, symbol, idxFx) || {};
+        expanded = TI2.computeExpandedFeatures(candles, i, es, symbol, idxFx, pillarScores) || {};
       }
     } catch (_e2) {}
     return Object.assign({}, base, expanded);
