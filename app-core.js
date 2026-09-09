@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.5.7";
+window.__STOX_APP_VERSION = "4.5.8";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -9290,6 +9290,7 @@ function StockScreener(props) {
     setSelected({});
     var indexDaily = null, indexWeekly = null;
     try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {}
+    if (!indexDaily) { try { var _idxR3 = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR3 && _idxR3.data) || null; } catch(e) {} }
     try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); indexWeekly = (_idxR2 && _idxR2.data) || null; } catch(e) {}
     bg.indexDaily = indexDaily;
     bg.indexWeekly = indexWeekly;
@@ -9540,7 +9541,9 @@ function StockScreener(props) {
     var BATCH = 3;
     var indexDaily = null, indexWeekly = null;
     try { var _idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR && _idxR.data) || null; } catch(e) {}
+    if (!indexDaily) { try { var _idxR3 = await DF.fetchOHLCVCached("^NSEI", "daily"); indexDaily = (_idxR3 && _idxR3.data) || null; } catch(e) {} }
     try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); indexWeekly = (_idxR2 && _idxR2.data) || null; } catch(e) {}
+    if (!indexDaily) { try { showToast("NIFTY index data unavailable \u2014 the Market/RS column will read \u2014 for this scan. Re-run once indexing is reachable.", 6000); } catch(e) {} }
     for (var i = 0; i < stocks.length; i += BATCH) {
       var batch = stocks.slice(i, i + BATCH);
       var promises = batch.map(function(s) {

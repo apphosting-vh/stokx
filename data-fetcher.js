@@ -53,7 +53,7 @@ window.OHLCVFetcher = (function () {
     interval = interval || "5m";
     range = range || "1mo";
 
-    var symbols = [ticker.toUpperCase() + ".NS"];
+    var symbols = [String(ticker).indexOf("^") === 0 ? ticker : ticker.toUpperCase() + ".NS"];
 
     var startTime = Date.now();
     var TOTAL_TIMEOUT = 25000;
