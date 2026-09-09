@@ -11579,7 +11579,7 @@ function InfoPage() {
             React.createElement("strong", { style: { color: "var(--text2)" } }, "Why it matters: "),
             "Even the best individual stock setups struggle in a bear market. This pillar tilts the score in your favour when the market tailwind is strong, and penalises entries when the broad market is uncertain or falling. It is a small pillar but an important safety net."
           )
-        });
+        );
       })(),
 
       /* Summary bar */
