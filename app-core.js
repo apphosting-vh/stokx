@@ -11487,6 +11487,120 @@ function InfoPage() {
       )
     ),
 
+    /* Pillars Explained — simple plain-English section */
+    React.createElement("div", { className: "stx-card", style: { marginBottom: 20 } },
+      React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 4, color: "var(--text)" } }, "Entry Score — Pillars Explained"),
+      React.createElement("p", { style: { fontSize: 11, color: "var(--text5)", lineHeight: 1.6, marginBottom: 14 } }, "The Entry Score (0–100) tells you how strong a stock's setup looks right now. It is built from five independent pillars that each measure a different aspect of the trade. Think of them as five lenses — each one asks a different question about the stock before you buy."),
+
+      /* Pillar 1: Trend Health */
+      (function() {
+        var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {};
+        var pts = _pm.trendHealth != null ? _pm.trendHealth : 25;
+        return React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", marginBottom: 10 } },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 } },
+            React.createElement("span", { style: { fontSize: 16, fontWeight: 800, color: "var(--accent)", fontFamily: "var(--font-heading)" } }, "\u25C9"),
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)" } }, "Trend Health"),
+            React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, pts + " pts max")
+          ),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65, margin: 0 } },
+            "Is the stock in a healthy uptrend? This pillar checks whether the price is above key moving averages (SMA 20, 50), whether those averages are stacked bullish, whether ADX confirms a strong trend, and whether momentum indicators like MACD agree. Each yes/no sub-signal adds a few points. ",
+            React.createElement("strong", { style: { color: "var(--text2)" } }, "Why it matters: "),
+            "Buying into an established uptrend gives you the wind at your back — the trend is your friend. A low trend score means the stock is drifting sideways or down, where entries are risky."
+          )
+        );
+      })(),
+
+      /* Pillar 2: Pullback Quality */
+      (function() {
+        var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {};
+        var pts = _pm.pullbackQuality != null ? _pm.pullbackQuality : 25;
+        return React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", marginBottom: 10 } },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 } },
+            React.createElement("span", { style: { fontSize: 16, fontWeight: 800, color: "var(--accent)", fontFamily: "var(--font-heading)" } }, "\u25C9"),
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)" } }, "Pullback Quality"),
+            React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, pts + " pts max")
+          ),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65, margin: 0 } },
+            "Is the stock pulling back to a good entry zone? This pillar measures whether the price has dipped 5–15% from its recent high (the sweet spot), whether it is near support levels, whether RSI shows oversold conditions, whether volume confirms buyer interest, and whether there are signs of a reversal (higher low, hammer candle, RSI turning up). ",
+            React.createElement("strong", { style: { color: "var(--text2)" } }, "Why it matters: "),
+            "Even great trends give you better entries on dips. Buying a pullback — not a top — improves your risk/reward. This pillar rewards setups where you're buying the dip within a healthy trend, not chasing a stock at its peak."
+          )
+        );
+      })(),
+
+      /* Pillar 3: Barrier Race */
+      (function() {
+        var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {};
+        var pts = _pm.prob4 != null ? _pm.prob4 : 30;
+        return React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", marginBottom: 10 } },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 } },
+            React.createElement("span", { style: { fontSize: 16, fontWeight: 800, color: "var(--accent)", fontFamily: "var(--font-heading)" } }, "\u25C9"),
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)" } }, "Barrier Race"),
+            React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, pts + " pts max")
+          ),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65, margin: 0 } },
+            "What are the odds the stock hits your +3% target before it hits your -2% stop? This is the most math-heavy pillar. It looks back at the stock's own history, finds similar setups (similar pullback depth, similar context), and counts how often the stock reached the target first versus the stop, within a 10-day window. If history is too short, it uses a statistical model (lognormal probability) as a fallback. ",
+            React.createElement("strong", { style: { color: "var(--text2)" } }, "Why it matters: "),
+            "This is the core risk/reward calculation. It gets the highest weight (30 pts) because the most important question before any trade is: am I more likely to win than lose? A high barrier race score means the stock's recent behaviour favours hitting your profit target."
+          )
+        );
+      })(),
+
+      /* Pillar 4: Volatility Fit */
+      (function() {
+        var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {};
+        var pts = _pm.volatilityFit != null ? _pm.volatilityFit : 10;
+        return React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", marginBottom: 10 } },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 } },
+            React.createElement("span", { style: { fontSize: 16, fontWeight: 800, color: "var(--accent)", fontFamily: "var(--font-heading)" } }, "\u25C9"),
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)" } }, "Volatility Fit"),
+            React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, pts + " pts max")
+          ),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65, margin: 0 } },
+            "Does the stock's typical daily movement (ATR) match your target and stop distances? If a stock's ATR is 1% per day, a 3% target in 10 days is reasonable. But if ATR is 5% per day, that same 3% target is trivially easy (or your stop gets hit constantly). This pillar converts your target% and stop% into ATR units and scores how well they fit. ",
+            React.createElement("strong", { style: { color: "var(--text2)" } }, "Why it matters: "),
+            "A perfectly good trend means nothing if the stock's volatility is a bad match for your trade parameters. This pillar acts as a sizing check — it keeps you out of trades where the math of your target vs. stop doesn't align with how the stock actually moves."
+          )
+        );
+      })(),
+
+      /* Pillar 5: Regime Alignment */
+      (function() {
+        var _pm = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().pillarMax || {}) : {};
+        var pts = _pm.regimeAlignment != null ? _pm.regimeAlignment : 10;
+        return React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", marginBottom: 10 } },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 } },
+            React.createElement("span", { style: { fontSize: 16, fontWeight: 800, color: "var(--accent)", fontFamily: "var(--font-heading)" } }, "\u25C9"),
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)" } }, "Regime Alignment"),
+            React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, pts + " pts max")
+          ),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65, margin: 0 } },
+            "Is the broader market (NIFTY index) supportive? This pillar checks where the NIFTY index sits relative to its own SMA(50) and SMA(200), and whether market-wide volatility is normal. If the index is in a bull regime (above both averages, calm vol), you get full points. If it's weakening, you get partial or zero. ",
+            React.createElement("strong", { style: { color: "var(--text2)" } }, "Why it matters: "),
+            "Even the best individual stock setups struggle in a bear market. This pillar tilts the score in your favour when the market tailwind is strong, and penalises entries when the broad market is uncertain or falling. It is a small pillar but an important safety net."
+          )
+        });
+      })(),
+
+      /* Summary bar */
+      React.createElement("div", { style: { padding: "10px 14px", borderRadius: 10, background: "linear-gradient(135deg, var(--accentbg), var(--bg4))", border: "1px solid var(--border)", marginTop: 4 } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 4 } }, "How they add up"),
+        React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65, margin: 0 } },
+          "All five pillars are scored independently and summed. The raw total can range from 0 to 100. Penalty/bonus modifiers (spike days, stability risk, beta traps, multi-timeframe confirmation) then adjust the final score, which is clamped to 0–100. On spike days, the score is hard-capped at 49 to prevent chasing. The final score is classified as: ",
+          React.createElement("strong", { style: { color: "var(--text)" } }, "80+ Strong Buy"),
+          " | ",
+          React.createElement("strong", { style: { color: "var(--text)" } }, "65+ Buy"),
+          " | ",
+          React.createElement("strong", { style: { color: "var(--text)" } }, "50+ Watchlist"),
+          " | ",
+          React.createElement("strong", { style: { color: "var(--text)" } }, "35+ Neutral"),
+          " | ",
+          React.createElement("strong", { style: { color: "var(--text)" } }, "<35 Avoid"),
+          "."
+        )
+      )
+    ),
+
     /* Methodology reference */
     React.createElement("div", { className: "stx-card", style: { marginBottom: 20 } },
       React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--text)" } }, "Methodology"),
