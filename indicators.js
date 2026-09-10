@@ -2642,6 +2642,22 @@ window.TechIndicators = (function () {
       var bbWidth = gv(bbWidthArr);
       var bbWidthPrev5 = (L1 - 5 >= 0 && L1 - 5 < bbWidthArr.length) ? bbWidthArr[L1 - 5] : null;
 
+      /* Breakout structure fields (Pillar 2 alternate path): prior-bar 20-bar
+         Donchian upper (window [L-21, L-2], no current-bar lookahead) and bars
+         since the most recent close at/below ITS OWN prior-bar Donchian level
+         (each historical close vs the level as of the bar before it). */
+      var dcUpperPrior = null, barsSinceBreakout = null;
+      try {
+        var dnPeriod = (SCORE_CONFIG.pullbackQuality && SCORE_CONFIG.pullbackQuality.breakoutDonchianPeriod != null) ? SCORE_CONFIG.pullbackQuality.breakoutDonchianPeriod : 20;
+        var _dcSnap = calcDonchianChannels(candles, dnPeriod);
+        if (_dcSnap && _dcSnap.upper && (L1 - 1) >= 0 && _dcSnap.upper[L1 - 1] != null) {
+          dcUpperPrior = _dcSnap.upper[L1 - 1];
+          for (var _bi = L1; _bi >= 1; _bi--) {
+            if (cl[_bi] != null && _dcSnap.upper[_bi - 1] != null && cl[_bi] <= _dcSnap.upper[_bi - 1]) { barsSinceBreakout = L1 - _bi; break; }
+          }
+        }
+      } catch (e) { dcUpperPrior = null; barsSinceBreakout = null; }
+
       var upDayVol = 0, dnDayVol = 0;
       for (var j = Math.max(1, L - 20); j < L; j++) {
         if (cl[j] >= cl[j - 1]) upDayVol += vo[j]; else dnDayVol += vo[j];
@@ -2744,7 +2760,8 @@ window.TechIndicators = (function () {
         weeklyHABullish: weeklyHABullish,
         buyRef: buyRef,
         pullbackDepth: pullbackDepth, nearSupportCount: nearSupportCount,
-        swingHigh20: swingHigh20, barsSinceHigh20: barsSinceHigh20
+        swingHigh20: swingHigh20, barsSinceHigh20: barsSinceHigh20,
+        dcUpperPrior: dcUpperPrior, barsSinceBreakout: barsSinceBreakout
       };
     } catch (e) { return null; }
   }
@@ -2819,7 +2836,20 @@ window.TechIndicators = (function () {
       sma20Slope: 2.5,
       sma20SlopeThreshold: 0,
     },
-    /* Pillar 2: Pullback Quality (max 25) */
+    /* Pillar 2: Pullback Quality (max 25).
+       Two alternate structures, scored separately, pillar = max of the two:
+       (a) the mean-reversion pullback path below; (b) the breakout path, a
+       gated sub-block that ONLY activates when the pullback gate (pullbackDepth
+       0.04-0.25) is NOT met — i.e. price is at/near its highs rather than
+       retraced. Breakout path max ≈ 10, under the pillar's 25 cap.
+       Breakout components: fresh cross above the prior-bar 20-bar Donchian
+       upper (breakoutConfirm), volume above volRatioThreshold (breakoutVolume),
+       close in the top 30% of its own range (breakoutCloseStrength), breakout
+       within breakoutFreshMaxBars (breakoutFreshness), and a contracting
+       Bollinger base (breakoutBaseTightness). extensionCapATR is a MULTIPLICATIVE
+       gate (same absFit × relFit trick as Volatility Fit): a breakout more than
+       extensionCapATR ATRs above the level zeroes the whole breakout sub-score —
+       that's chasing, not a fresh entry. */
     pullbackQuality: {
       distATR_inner: 7,
       distATR_innerRange: 1.0,
@@ -2846,6 +2876,15 @@ window.TechIndicators = (function () {
       reversalCandle: 2,
       rsiUpturn: 1.5,
       turnConfirm: 6,
+      /* Breakout alternate structure (max 10, pillared as max(pathPull, pathBk) */
+      breakoutConfirm: 3,
+      breakoutVolume: 3,
+      breakoutCloseStrength: 1.5,
+      breakoutFreshness: 1,
+      breakoutBaseTightness: 1.5,
+      breakoutExtensionCapATR: 1.5,
+      breakoutFreshMaxBars: 2,
+      breakoutDonchianPeriod: 20,
     },
     /* Pillar 3: Barrier Race (max 30).
        Estimates P(WIN completes before LOSS/TIMEOUT does) over the holding
@@ -2948,7 +2987,7 @@ window.TechIndicators = (function () {
   var SCORE_CONFIG_DEFAULTS = JSON.parse(JSON.stringify(SCORE_CONFIG));
   /* Bump this whenever pillarMax or any pillar's sub-score weights change.
      Used to auto-discard stale localStorage configs. */
-  var SCORE_CONFIG_VERSION = 8;
+  var SCORE_CONFIG_VERSION = 9;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.prob4 && SCORE_CONFIG.prob4.targetPct != null) ? Math.round(SCORE_CONFIG.prob4.targetPct * 1000) / 10 : 3; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
@@ -2995,6 +3034,11 @@ window.TechIndicators = (function () {
      RSI upturn) — that pillar was removed and its signal folded in here. */
   function calcPullbackScore(sn, volRegime, candles) {
     var c = SCORE_CONFIG.pullbackQuality;
+    /* Shared structure gate: is the stock in a mean-reversion pullback right
+       now (retraced 0.04-0.25 from its 20d high)? If yes → pullback path only.
+       If no → price is at/near highs, so the breakout path is the alternative
+       that gets considered instead. */
+    var inPullback = sn.pullbackDepth != null && sn.pullbackDepth >= 0.04 && sn.pullbackDepth <= 0.25;
     var s = 0;
     if (sn.c != null && sn.buyRef != null && sn.buyRef > 0 && sn.atr14 != null && sn.atr14 > 0) {
       var distATR = (sn.c - sn.buyRef) / sn.atr14;
@@ -3012,8 +3056,7 @@ window.TechIndicators = (function () {
     /* Folded Swing Potential turn-confirmation — only scrutinized when the
        stock is structurally in a pullback right now (same gate the old
        swing pillar used, so it stays strictly a reversal judgment). */
-    if (candles && sn.pullbackDepth != null && sn.pullbackDepth >= 0.04 && sn.pullbackDepth <= 0.25 &&
-        sn.barsSinceHigh20 != null && sn.barsSinceHigh20 >= 2 && sn.barsSinceHigh20 <= 15) {
+    if (candles && inPullback && sn.barsSinceHigh20 != null && sn.barsSinceHigh20 >= 2 && sn.barsSinceHigh20 <= 15) {
       var turnScore = 0;
       var cl = closes(candles), hi = highs(candles), lo = lows(candles), op = opens(candles), L = cl.length;
       var priorLow = Infinity;
@@ -3034,8 +3077,52 @@ window.TechIndicators = (function () {
 
       s += Math.min(turnScore, c.turnConfirm);
     }
+    var sPull = s;
 
-    return Math.min(s, SCORE_CONFIG.pillarMax.pullbackQuality);
+    /* Breakout alternate structure — evaluated ONLY when the pullback gate is
+       NOT met (stock at/near highs) AND price is currently above the prior-bar
+       Donchian upper. Takes max(pullbackPath, breakoutPath), never sums them.
+       A stock either pulled back to support or broke out above resistance —
+       a stock at its highs is not a pullback setup. */
+    var sBreak = 0;
+    if (!inPullback && sn.c != null && sn.dcUpperPrior != null && sn.dcUpperPrior > 0 &&
+        sn.atr14 != null && sn.atr14 > 0 && sn.c > sn.dcUpperPrior) {
+      /* Extension guard — hard cutoff, not a scaled blend: a breakout more
+         than extensionCapATR ATRs above the level zeroes the whole sub-score.
+         It is a distance-only guard; staleness in TIME is handled separately
+         by barsSinceBreakout / freshCross below. */
+      var extATR = (sn.c - sn.dcUpperPrior) / sn.atr14;
+      var extCap = c.breakoutExtensionCapATR != null ? c.breakoutExtensionCapATR : 1.5;
+      if (extATR <= extCap) {
+        /* Confirmed breakout: close crossed above the prior-bar Donchian upper
+           on THIS bar — barsSinceBreakout == 1 means the prior close was still
+           at/below its own level, so today is the actual crossing bar. */
+        var freshCross = sn.barsSinceBreakout != null && sn.barsSinceBreakout === 1;
+        if (freshCross) sBreak += c.breakoutConfirm;
+
+        /* Volume confirmation — reuses volRatio + volRatioThreshold (no new
+           threshold invented). */
+        if (sn.volRatio != null && sn.volRatio > c.volRatioThreshold) sBreak += c.breakoutVolume;
+
+        /* Close strength: close in the top 30% of its own bar's range =
+           conviction, not a faded breakout. */
+        var brng = (sn.h != null && sn.l != null) ? sn.h - sn.l : 0;
+        var rangePos = brng > 0 ? (sn.c - sn.l) / brng : 0;
+        if (rangePos > 0.7) sBreak += c.breakoutCloseStrength;
+
+        /* Freshness: penalize chasing — full marks only within a few bars of
+           the first close above the level. */
+        var freshCap = c.breakoutFreshMaxBars != null ? c.breakoutFreshMaxBars : 2;
+        if (sn.barsSinceBreakout != null && sn.barsSinceBreakout <= freshCap) sBreak += c.breakoutFreshness;
+
+        /* Base tightness: breakout from a contracting base (BB width narrowing
+           over the last 5 bars) beats a breakout from an already-extended run. */
+        if (sn.bbWidth != null && sn.bbWidthPrev5 != null && sn.bbWidth < sn.bbWidthPrev5) sBreak += c.breakoutBaseTightness;
+      }
+    }
+
+    /* Pillar = max(pullbackPath, breakoutPath), capped at the 25-pt pillar max. */
+    return Math.min(Math.max(sPull, sBreak), SCORE_CONFIG.pillarMax.pullbackQuality);
   }
 
    /* ── Pillar 3: Barrier Race (max 30) ──────────────────────────
