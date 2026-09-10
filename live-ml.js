@@ -964,10 +964,10 @@ window.LiveML = (function () {
 
     if (winProbability == null) {
       winProbability = Math.round(Math.max(0.10, Math.min(0.90, technicalScore / 100)) * 1000) / 1000;
-      recommendation = technicalScore >= 70 ? "STRONG_BUY" :
-                        technicalScore >= 55 ? "BUY" :
-                        technicalScore >= 40 ? "WATCHLIST" :
-                        technicalScore >= 25 ? "NEUTRAL" : "AVOID";
+      recommendation = technicalScore >= 80 ? "STRONG_BUY" :
+                        technicalScore >= 70 ? "BUY" :
+                        technicalScore >= 50 ? "WATCHLIST" :
+                        technicalScore >= 35 ? "NEUTRAL" : "AVOID";
     }
 
     if (diagnostics) diagnostics.scored = (diagnostics.scored || 0) + 1;

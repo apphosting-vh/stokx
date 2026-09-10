@@ -30,7 +30,7 @@ window.BacktestEngine = (function () {
       window.TechIndicators._scoreConfigClassification = t;
     }
     var sb = (t && t.strongBuy != null) ? t.strongBuy : 80;
-    var b  = (t && t.buy != null)       ? t.buy       : 65;
+    var b  = (t && t.buy != null)       ? t.buy       : 70;
     var wl = (t && t.watchlist != null) ? t.watchlist : 50;
     var n  = (t && t.neutral != null)    ? t.neutral   : 35;
     if (s >= sb) return "STRONG_BUY";

@@ -2972,7 +2972,7 @@ window.TechIndicators = (function () {
     /* Classification thresholds */
     classification: {
       strongBuy: 80,
-      buy: 65,
+      buy: 70,
       watchlist: 50,
       neutral: 35,
     },
@@ -2987,7 +2987,7 @@ window.TechIndicators = (function () {
   var SCORE_CONFIG_DEFAULTS = JSON.parse(JSON.stringify(SCORE_CONFIG));
   /* Bump this whenever pillarMax or any pillar's sub-score weights change.
      Used to auto-discard stale localStorage configs. */
-  var SCORE_CONFIG_VERSION = 9;
+  var SCORE_CONFIG_VERSION = 10;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.prob4 && SCORE_CONFIG.prob4.targetPct != null) ? Math.round(SCORE_CONFIG.prob4.targetPct * 1000) / 10 : 3; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }

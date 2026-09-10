@@ -2,7 +2,7 @@
    StoX — Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js — React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.5.9";
+window.__STOX_APP_VERSION = "4.5.10";
 
 /* Apply saved score config on startup — discard if version mismatch */
 (function() {
@@ -8750,7 +8750,7 @@ function relabelDecision(score, storedDecision) {
     var TI = window.TechIndicators;
     var c = (TI && TI.getScoreConfig ? TI.getScoreConfig().classification : null) || {};
     var sb = c.strongBuy != null ? c.strongBuy : 80;
-    var b = c.buy != null ? c.buy : 65;
+    var b = c.buy != null ? c.buy : 70;
     var wl = c.watchlist != null ? c.watchlist : 50;
     var n = c.neutral != null ? c.neutral : 35;
     var cls = score >= sb ? "STRONG_BUY" : score >= b ? "BUY" : score >= wl ? "WATCHLIST" : score >= n ? "NEUTRAL" : "AVOID";
@@ -9633,7 +9633,7 @@ function StockScreener(props) {
   });
 
   var _cfg = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig().classification : null;
-  var _buyTh = _cfg ? _cfg.buy : 65, _wlTh = _cfg ? _cfg.watchlist : 50;
+  var _buyTh = _cfg ? _cfg.buy : 70, _wlTh = _cfg ? _cfg.watchlist : 50;
 
   var filtered = filter === "all" ? sorted : sorted.filter(function(r) {
     if (filter === "buy") return r.result.finalScore >= _buyTh;
@@ -10938,7 +10938,7 @@ function SingleStockAnalysis({ requestedTicker }) {
                 var s = t[1];
                 var total = s && s.total != null ? s.total : null;
                 var _cbCfg = (TI && TI.getScoreConfig) ? TI.getScoreConfig().classification : null;
-                var _cbSB = _cbCfg ? _cbCfg.strongBuy : 80, _cbB = _cbCfg ? _cbCfg.buy : 65, _cbW = _cbCfg ? _cbCfg.watchlist : 50, _cbN = _cbCfg ? _cbCfg.neutral : 35;
+                var _cbSB = _cbCfg ? _cbCfg.strongBuy : 80, _cbB = _cbCfg ? _cbCfg.buy : 70, _cbW = _cbCfg ? _cbCfg.watchlist : 50, _cbN = _cbCfg ? _cbCfg.neutral : 35;
                 return React.createElement("div", { key: t[0], style: { flex: 1 } },
                   React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 8, color: "var(--text6)", fontFamily: "var(--font-mono)" } },
                     React.createElement("span", null, t[0]),
@@ -11654,7 +11654,7 @@ function InfoPage() {
           React.createElement("p", { style: subH }, "Modifiers (penalties / bonuses)"),
           React.createElement("p", null, "Low beta trap \u2014 Beta < 0.5 AND ATR(10) < 1.5% (unlikely to deliver the 4% move) (-10). Spike day \u2014 open gap > 3% or latest-bar volatility-adaptive spike (never chase a spike) (-10). Stability risk \u2014 calcStabilityScore(20) < 0.3 (erratic action) (-15). Multi-TF confirmation \u2014 weekly + daily raw both >=65 from this same model (+10)."),
           React.createElement("p", { style: subH }, "Classification"),
-          React.createElement("p", null, (function() { var _cc = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().classification || {}) : {}; var _sb = _cc.strongBuy != null ? _cc.strongBuy : 80; var _bu = _cc.buy != null ? _cc.buy : 65; var _wl = _cc.watchlist != null ? _cc.watchlist : 50; var _nt = _cc.neutral != null ? _cc.neutral : 35; return _sb + "+ STRONG_BUY (100% alloc) | " + _bu + "+ BUY (70%) | " + _wl + "+ WATCHLIST (40%) | " + _nt + "+ NEUTRAL (0%) | <" + _nt + " AVOID (0%)"; })()),
+          React.createElement("p", null, (function() { var _cc = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().classification || {}) : {}; var _sb = _cc.strongBuy != null ? _cc.strongBuy : 80; var _bu = _cc.buy != null ? _cc.buy : 70; var _wl = _cc.watchlist != null ? _cc.watchlist : 50; var _nt = _cc.neutral != null ? _cc.neutral : 35; return _sb + "+ STRONG_BUY (100% alloc) | " + _bu + "+ BUY (70%) | " + _wl + "+ WATCHLIST (40%) | " + _nt + "+ NEUTRAL (0%) | <" + _nt + " AVOID (0%)"; })()),
           React.createElement("p", { style: subH }, "MTF Weights"),
           React.createElement("p", null, "Daily 55% | Hourly 30% | Weekly 15%")
         ),
@@ -12246,7 +12246,7 @@ async function scanEntries(universe) {
   var DF = window.OHLCVFetcher, TI = window.TechIndicators;
   if (!DF || !TI) return [];
   var _scCfg = (TI.getScoreConfig) ? TI.getScoreConfig().classification : null;
-  var _scanBuyTh = _scCfg ? _scCfg.buy : 65;
+  var _scanBuyTh = _scCfg ? _scCfg.buy : 70;
   var idxD = await DF.fetchOHLCVCached('^NSEI', 'daily');
   var idxW = await DF.fetchOHLCVCached('^NSEI', 'weekly');
   var results = [];

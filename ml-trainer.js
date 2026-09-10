@@ -1404,9 +1404,9 @@ window.MLTrainer = (function () {
         winProbability: Math.round(prob * 1000) / 1000,
         rawOutput: Math.round(result.output * 1000) / 1000,
         calibrated: !!model.calibration,
-        recommendation: prob >= 0.65 ? "STRONG_BUY" :
-                         prob >= 0.55 ? "BUY" :
-                         prob >= 0.45 ? "WATCHLIST" :
+        recommendation: prob >= 0.80 ? "STRONG_BUY" :
+                         prob >= 0.70 ? "BUY" :
+                         prob >= 0.50 ? "WATCHLIST" :
                          prob >= 0.35 ? "NEUTRAL" : "AVOID",
         confidence: prob >= 0.55 || prob <= 0.35 ? "high" :
                     prob >= 0.45 ? "medium" : "low"
@@ -1434,9 +1434,9 @@ window.MLTrainer = (function () {
       winProbability: Math.round(prob * 1000) / 1000,
       rawOutput: Math.round(result.output * 1000) / 1000,
       calibrated: !!loadedModel.calibration,
-      recommendation: prob >= 0.65 ? "STRONG_BUY" :
-                       prob >= 0.55 ? "BUY" :
-                       prob >= 0.45 ? "WATCHLIST" :
+      recommendation: prob >= 0.80 ? "STRONG_BUY" :
+                       prob >= 0.70 ? "BUY" :
+                       prob >= 0.50 ? "WATCHLIST" :
                        prob >= 0.35 ? "NEUTRAL" : "AVOID"
     };
   }
