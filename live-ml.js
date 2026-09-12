@@ -41,8 +41,8 @@ window.LiveML = (function () {
     entry_score: { label: "Entry Score", bins: [30, 45, 55, 65, 75], labels: ["<30", "30-45", "45-55", "55-65", "65-75", "75+"] },
     trendHealth: { label: "Trend Health", bins: [5, 10, 15, 20], labels: ["<5", "5-10", "10-15", "15-20", "20+"] },
     pullbackQuality: { label: "Pullback Quality", bins: [5, 10, 15, 20], labels: ["<5", "5-10", "10-15", "15-20", "20+"] },
-    prob4: { label: "Barrier Race (prob4)", bins: [6, 12, 18, 24], labels: ["<6", "6-12", "12-18", "18-24", "24+"] },
-    volatilityFit: { label: "Volatility Fit", bins: [2, 4, 6, 8], labels: ["<2", "2-4", "4-6", "6-8", "8+"] },
+    swingPotential: { label: "Swing Potential", bins: [4, 8, 12, 16], labels: ["<4", "4-8", "8-12", "12-16", "16+"] },
+    breakoutContinuation: { label: "Breakout Continuation", bins: [4, 8, 12, 16, 20], labels: ["<4", "4-8", "8-12", "12-16", "16-20", "20+"] },
     regimeAlignment: { label: "Market/RS Alignment", bins: [2, 4, 6, 8], labels: ["<2", "2-4", "4-6", "6-8", "8+"] }
   };
 
@@ -270,7 +270,7 @@ window.LiveML = (function () {
       ema_slope: ind.emaFast[i] != null && ind.emaFast[Math.max(0, i - 3)] != null ? round3((ind.emaFast[i] - ind.emaFast[Math.max(0, i - 3)]) / Math.max(0.01, ind.emaFast[Math.max(0, i - 3)]) * 100) : 0,
       adx: ind.adx && ind.adx.adx ? round2(ind.adx.adx[i] || 0) : 0,
       entry_score: round3(es),
-      trendHealth: 0, pullbackQuality: 0, prob4: 0, volatilityFit: 0, regimeAlignment: 0
+      trendHealth: 0, pullbackQuality: 0, swingPotential: 0, breakoutContinuation: 0, regimeAlignment: 0
     };
     /* Expanded features (Phase 3/4) — keep live scoring consistent with the
        training pipeline so the model sees the same un-collapsed vector:
@@ -295,8 +295,8 @@ window.LiveML = (function () {
               pillarScores = {
                 trendHealth: sc.trendHealth != null ? sc.trendHealth : 0,
                 pullbackQuality: sc.pullbackQuality != null ? sc.pullbackQuality : 0,
-                prob4: sc.prob4 != null ? sc.prob4 : 0,
-                volatilityFit: sc.volatilityFit != null ? sc.volatilityFit : 0,
+                swingPotential: sc.swingPotential != null ? sc.swingPotential : 0,
+                breakoutContinuation: sc.breakoutContinuation != null ? sc.breakoutContinuation : 0,
                 regimeAlignment: sc.regimeAlignment != null ? sc.regimeAlignment : 0
               };
             }

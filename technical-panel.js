@@ -392,7 +392,7 @@ window.TechnicalIndicatorsPanel = (function () {
       URGENT_EXIT: { label: "Urgent Exit", color: "#ef4444" },
       EXIT: { label: "Exit", color: "#f97316" },
       PARTIAL_EXIT: { label: "Partial Exit", color: "#eab308" },
-      TIGHTEN_STOP: { label: "Tighten Stop", color: "#3b82f6" },
+      REDUCE_POSITION: { label: "Reduce Position", color: "#3b82f6" },
       MONITOR: { label: "Monitor", color: "#a855f7" },
       HOLD: { label: "Hold", color: "#16a34a" }
     };
@@ -417,38 +417,24 @@ window.TechnicalIndicatorsPanel = (function () {
         var now = new Date();
         holdingDays = Math.floor((now - bd) / 864e5);
       }
-      var _tp = (window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().prob4 && window.TechIndicators.getScoreConfig().prob4.targetPct != null) ? window.TechIndicators.getScoreConfig().prob4.targetPct : 0.04;
+      var _tp = (window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().forwardSim && window.TechIndicators.getScoreConfig().forwardSim.targetPct != null) ? window.TechIndicators.getScoreConfig().forwardSim.targetPct : 0.04;
       var target = ep * (1 + _tp);
-      var stopLoss = ep - (atr * 1.5);
-      var highWatermark = cp;
-      if (candles && candles.length > 0) {
-        for (var ci = 0; ci < candles.length; ci++) {
-          if (candles[ci].h > highWatermark) highWatermark = candles[ci].h;
-        }
-      }
-      var trailingStop = highWatermark - (atr * 2);
       var pnlPct = ep > 0 ? ((cp - ep) / ep * 100) : 0;
       var aboveEntry2Pct = cp >= ep * 1.02;
 
       var rules = [];
       rules.push({ label: "Take Profit (+" + Math.round(_tp * 100) + "%)", price: target, trigger: cp >= target, active: cp >= target, type: "exit", color: "#16a34a" });
-      rules.push({ label: "Stop Loss (1.5\u00d7ATR)", price: stopLoss, trigger: cp <= stopLoss, active: cp <= stopLoss, type: "exit", color: "#ef4444" });
-      if (aboveEntry2Pct) {
-        rules.push({ label: "Trailing Stop (2\u00d7ATR from high)", price: trailingStop, trigger: cp <= trailingStop, active: cp <= trailingStop, type: "exit", color: "#ef4444" });
-      }
       var timeStopActive = holdingDays >= 20 && cp < ep * 1.02;
       rules.push({ label: "Time Stop (20d, <2% gain)", price: null, trigger: timeStopActive, active: timeStopActive, type: "exit", color: "#f97316" });
-      var partialActive = aboveEntry2Pct && holdingDays >= 3 && !cp >= target;
+      var partialActive = aboveEntry2Pct && holdingDays >= 3 && cp < target;
       rules.push({ label: "Partial Exit 50% (+2%, 3d+)", price: ep * 1.02, trigger: partialActive, active: partialActive && !timeStopActive, type: "partial", color: "#eab308" });
 
       var activeRule = null;
       if (cp >= target) activeRule = rules[0];
-      else if (cp <= stopLoss) activeRule = rules[1];
-      else if (aboveEntry2Pct && cp <= trailingStop) activeRule = rules[2];
-      else if (timeStopActive) activeRule = rules[3];
-      else if (partialActive && !timeStopActive) activeRule = rules[4];
+      else if (timeStopActive) activeRule = rules[1];
+      else if (partialActive && !timeStopActive) activeRule = rules[2];
 
-      exitRecs = { rules: rules, activeRule: activeRule, pnlPct: pnlPct, holdingDays: holdingDays, target: target, stopLoss: stopLoss, trailingStop: trailingStop };
+      exitRecs = { rules: rules, activeRule: activeRule, pnlPct: pnlPct, holdingDays: holdingDays, target: target };
     }
 
     return React.createElement("div", {

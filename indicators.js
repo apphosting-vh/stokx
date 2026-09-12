@@ -1566,8 +1566,8 @@ window.TechIndicators = (function () {
   function classifyExitScore(s) {
     if (s >= 85) return { classification: 'URGENT_EXIT', signal: 'URGENT_EXIT', action: 'Full exit immediately' };
     if (s >= 70) return { classification: 'EXIT', signal: 'EXIT', action: 'Full exit at current price or next bar open' };
-    if (s >= 55) return { classification: 'PARTIAL_EXIT', signal: 'PARTIAL_EXIT', action: 'Exit 50%, tighten trailing stop to 1.5x ATR' };
-    if (s >= 40) return { classification: 'TIGHTEN_STOP', signal: 'TIGHTEN_STOP', action: 'Move stop to breakeven or 1x ATR below current' };
+    if (s >= 55) return { classification: 'PARTIAL_EXIT', signal: 'PARTIAL_EXIT', action: 'Exit 50%' };
+    if (s >= 40) return { classification: 'REDUCE_POSITION', signal: 'REDUCE_POSITION', action: 'Reduce position — consider taking partial profits' };
     if (s >= 25) return { classification: 'MONITOR', signal: 'MONITOR', action: 'No action — watch for escalation next bar' };
     return { classification: 'HOLD', signal: 'HOLD', action: 'All conditions intact — continue holding' };
   }
@@ -1749,13 +1749,9 @@ window.TechIndicators = (function () {
     if (sn.zigzagDirection === 'DOWN') s += 0.5;
     if (sn.chopIndex !== null && sn.prevChopIndex !== null && sn.chopIndex > sn.prevChopIndex && sn.chopIndex > 61.8) s += 0.5;
     if (sn.atr14 !== null && entryPrice > 0) {
-      var stopLoss = entryPrice - sn.atr14 * 1.5;
-      var target = entryPrice * (1 + (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct : 0.03));
-      var risk = currentPrice - stopLoss;
+      var target = entryPrice * (1 + (SCORE_CONFIG.forwardSim.targetPct != null ? SCORE_CONFIG.forwardSim.targetPct : 0.035));
       var reward = target - currentPrice;
-      if (risk > 0 && reward > 0) { var rr = reward / risk; if (rr < 1.0) s += 1.5; else if (rr < 1.5) s += 0.5; }
-      else if (risk <= 0) s += 1.5;
-      else if (reward <= 0) s += 1.0;
+      if (reward <= 0) s += 1.0;
     }
     return Math.min(s, 10);
   }
@@ -1884,6 +1880,13 @@ window.TechIndicators = (function () {
     if (s >= t.watchlist) return { classification: 'WATCHLIST', signal: 'WATCHLIST', allocation_pct: 40 };
     if (s >= t.neutral) return { classification: 'NEUTRAL', signal: 'NEUTRAL', allocation_pct: 0 };
     return { classification: 'AVOID', signal: 'AVOID', allocation_pct: 0 };
+  }
+  /* Entry-score scale: max reachable raw total = sum of pillarMax (100 by
+     default). Caps on final entry scores must track this sum rather than a
+     hardcoded constant, because pillarMax is user-tunable. */
+  function totalPillarMax() {
+    var pm = SCORE_CONFIG.pillarMax || {};
+    return (pm.trendHealth || 0) + (pm.pullbackQuality || 0) + (pm.swingPotential || 0) + (pm.breakoutContinuation || 0) + (pm.regimeAlignment || 0);
   }
   function computeIndexTrendScore(indexCandles, indexWeeklyCandles) {
     try {
@@ -2547,12 +2550,17 @@ window.TechIndicators = (function () {
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
-     NEW ENTRY ENGINE — 5-pillar model (0-100):
-      Trend Health (25) + Pullback Quality (25) + Barrier Race (30)
-      + Volatility Fit (10) + Market/RS Alignment (10) = 100,
-     then ±15 modifiers. Designed to keep scores stable on shallow 1-1.5%
-     dips toward support (pillar inputs are dip-insensitive, pullback pillar
-     even gains on a dip to SMA20/lower-BB support).
+     NEW ENTRY ENGINE — 5-pillar model (nominal 100, reachable ~90):
+      Trend Health (28) + Pullback Quality (28) + Swing Potential (24)
+      + Breakout Continuation (8) + Market/RS Alignment (6) = 94 nominal,
+     then ±15 modifiers. Classification thresholds derived from the 4y/175k-bar
+     per-cap harness (64/58/48/35). The old Volatility Fit pillar (10) was
+     removed after the pillar-variation harness showed it flat-to-negative at
+     the top; spike/stability modifiers still police poor volatility
+     conditions. V14 (from the 4y per-cap harness): Breakout Continuation cut
+     22 → 8 (anti-predictive at every level — every breakout band cleared below
+     the 32% base WR); the freed budget went to Trend + Pullback (the two
+     pillars with monotonic WR lift).
      ══════════════════════════════════════════════════════════════════════════ */
 
   /* Weekly Heikin-Ashi trend (higher timeframe), synthesized from daily bars
@@ -2604,7 +2612,7 @@ window.TechIndicators = (function () {
     } catch (e) { return null; }
   }
 
-   /* Slim entry snapshot: only the fields the 4 pillars + modifiers consume.
+   /* Slim entry snapshot: only the fields the 5 pillars + modifiers consume.
      (Exit scoring keeps the full buildTFSnapshot.) `tf` controls the weekly-HA
      component: real weekly candles for W, synthesized weekly from daily for D,
      none for H. */
@@ -2807,22 +2815,71 @@ window.TechIndicators = (function () {
     return { atrPct: atrPct, atrPercentile: atrPercentile, regime: regime };
   }
 
-  /* ── Configurable Entry Score Parameters ─────────────────────────────────
+  /* ── Configurable Entry Score Parameters ────────────────────────────────
      All thresholds and weights are stored here so the UI can tune them
-     without editing source code. Updated via setScoreConfig(). */
+     without editing source code. Updated via setScoreConfig().
+
+     ════════════════════════════════════════════════════════════════════
+     VERSION 17 — LOCKED 2026-09-12  (mod16 pass: tempered modifiers + OOS)
+     ────────────────────────────────────────────────────────────────────
+     Combo locked in:  +3.5% / 15 sessions / no stop loss — NIFTY 200, 5y
+     daily cache, production multi-TF entry score (W→D frames; weekly
+     resampled from daily in the harness since hourly isn't cached).
+     This pass re-derived every scoring constant (SWING_CAL/BREAKOUT_CAL
+     {p0,k}, the pillarMax budgets, the classification thresholds) from the
+     SAME 5y forward outcomes as run R4, but SCORED with the V16 TEMPERED
+     modifier block (stability graduated −6, spike cap-only, mtfAlign
+     6/72/60, lowExpansion −6, highVol 5). No previously-derived calibration
+     constant was reused; the pillar-max variation anchored at the pre-R4
+     defaults {28,28,24,8,6} exactly like R4 so the two archives compare.
+     Harness run (preserved for audit): c11/tx-sweep/recalib/deriver-mod16.js
+     (mod16 namespace; R4 archive deriver.js/report.json untouched).
+     Trace files: raw-derivation-mod16.json, rows-pass-bk24-mod16.json,
+     pass-mod16.json, pillar-variation-mod16.json, standalone-mod16.json,
+     report-mod16.json. Out-of-sample snapshot (train 60% / test 40% +
+     recent-20%): snapshot-mod16.json.
+     Constants LOCKED by this pass: SWING_CAL {p0:0.65,k:49.8} and
+     BREAKOUT_CAL {p0:0.65,k:38.1} (identical to R4 — outcome re-derivation),
+     pillarMax {28,28,12,22,4}, classification {62,60,58,34}, forwardSim
+     3.5% / 15 sessions. Joint config at threshold 65: n=399 / WR 71.2% /
+     ER 0.61% / PF 1.28. OOS-validated: test-40% ER 1.16% (vs train 0.42%),
+     train-derived caps held out at ER 1.01% (t65) / 1.22% (strongBuy).
+     Audit rule: any citation in this file dated BEFORE 2026-09-12 is
+     PRE-pass provenance and is superseded wherever a value changed today;
+     this banner is the authoritative lock-in date.
+     ════════════════════════════════════════════════════════════════════ */
   var SCORE_CONFIG = {
-    /* Horizon for confidence calculation */
-    horizonDays: 10,
-    /* Pillar max scores — five pillars summing to exactly 100:
-       Trend Health 25 + Pullback Quality 25 + Barrier Race 30
-       + Volatility Fit 10 + Regime Alignment 10. (swingPotential stays in the
-       shape at 0 so legacy consumers that read the key keep working; it never
-       contributes to rawTotal.) */
-    pillarMax: { trendHealth: 25, pullbackQuality: 25, prob4: 30, swingPotential: 0, volatilityFit: 10, regimeAlignment: 10 },
+    /* Outcome horizon for the win-rate backtest and forward-sim target
+       (sessions). Locked 15 @2026-09-12 by calibration run R4. */
+    horizonDays: 15,
+    /* Forward outcome simulation constant (target barrier for the win-rate
+       backtest). No stop loss: positions are held to the horizon unless the
+       +target barrier is touched. LOCKED 3.5%/15d @2026-09-12 (run R4) — the
+       combo the current constants trace back to. The 4y harness's 4%/20d pick
+       (WR 61.8%, PF 1.23) predates this pass. The stop side remains removed:
+       the harness confirmed stop exits added no predictive signal. */
+    forwardSim: { targetPct: 0.035 },
+    /* Pillar max scores — five pillars (nominal sum 100). LOCKED @2026-09-12
+       by the mod16 pass (see VERSION banner): Trend Health 28 (flat →
+       kept) + Pullback Quality 28 (restored to the full cap: under the
+       tempered V16 modifiers the untempered 16-cut from run R4 no longer
+       clears the 0.05 ER bar, so the pillar keeps its natural ceiling) +
+       Swing Potential 12 (ER peak 0.26% n=303 vs base 0.18% — high swing
+       scores carry the big-win tail but bad ER; trimmed 24→12) + Breakout
+       Continuation 22 (ER peak 0.40% n=755 vs base 0.18% — the predictive top
+       band again sits at scores (16,24]; re-confirmed by the OOS snapshot) +
+       Regime Alignment 4 (ER peak 0.23% n=501 vs base 0.18%; the pillar is
+       the strong standalone discriminator — top-quintile lift +5pt — so a
+       block at the top is retained, but the cap trims 6→4). Barrier Race (30)
+       and Volatility Fit (10) remain removed per the pre-pass (V14)
+       diagnostics. Joint recommended config evaluates at threshold 65 to
+       n=399 / WR 71.2% / ER 0.61% / PF 1.28; test-40% ER 1.16% (overfit
+       direction is negative — the config strengthens out of sample). */
+    pillarMax: { trendHealth: 28, pullbackQuality: 28, swingPotential: 12, breakoutContinuation: 22, regimeAlignment: 4 },
     /* MTF weights */
     tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
 
-    /* Pillar 1: Trend Health (max 25) */
+    /* Pillar 1: Trend Health (max 28) */
     trendHealth: {
       priceAboveSMA50: 5,
       SMA20AboveSMA50: 5,
@@ -2836,7 +2893,7 @@ window.TechIndicators = (function () {
       sma20Slope: 2.5,
       sma20SlopeThreshold: 0,
     },
-    /* Pillar 2: Pullback Quality (max 25).
+    /* Pillar 2: Pullback Quality (max 28).
        Two alternate structures, scored separately, pillar = max of the two:
        (a) the mean-reversion pullback path below; (b) the breakout path, a
        gated sub-block that ONLY activates when the pullback gate (pullbackDepth
@@ -2847,7 +2904,7 @@ window.TechIndicators = (function () {
        close in the top 30% of its own range (breakoutCloseStrength), breakout
        within breakoutFreshMaxBars (breakoutFreshness), and a contracting
        Bollinger base (breakoutBaseTightness). extensionCapATR is a MULTIPLICATIVE
-       gate (same absFit × relFit trick as Volatility Fit): a breakout more than
+       gate (absolute ATR gap × extension ramp): a breakout more than
        extensionCapATR ATRs above the level zeroes the whole breakout sub-score —
        that's chasing, not a fresh entry. */
     pullbackQuality: {
@@ -2869,69 +2926,83 @@ window.TechIndicators = (function () {
       pullbackDepthMax: 0.25,
       supportConfluence: 3,
       supportConfluenceThreshold: 2,
-      /* Swing Potential's turn-confirmation block folded in (its pillar was
-         removed as a standalone 20-pt bonus): higher low, hammer/reversal
-         candle, RSI upturn — capped together at turnConfirm. */
-      higherLow: 2.5,
-      reversalCandle: 2,
-      rsiUpturn: 1.5,
-      turnConfirm: 6,
-      /* Breakout alternate structure (max 10, pillared as max(pathPull, pathBk) */
-      breakoutConfirm: 3,
-      breakoutVolume: 3,
-      breakoutCloseStrength: 1.5,
-      breakoutFreshness: 1,
-      breakoutBaseTightness: 1.5,
+      /* Breakout structural-confirm bonus (max 4, pillared as max(pathPull,
+         pathBk)). SHRUNK from the old 10-pt breakout path: the standalone
+         Breakout Continuation pillar now carries the core breakout probability.
+         Only the fresh same-bar cross confirm + volume confirm survive here —
+         the signals the empirical continuation model doesn't use. closeStrength/
+         freshness/baseTightness points departed with the path. */
+      breakoutConfirm: 2,
+      breakoutVolume: 2,
       breakoutExtensionCapATR: 1.5,
       breakoutFreshMaxBars: 2,
       breakoutDonchianPeriod: 20,
     },
-    /* Pillar 3: Barrier Race (max 30).
-       Estimates P(WIN completes before LOSS/TIMEOUT does) over the holding
-       window for the target-vs-stop double-barrier race. Primary estimate is
-       empirical (first-barrier touches counted over similar-setup windows
-       in the stock's own history, in each window's own ATR terms); falls back
-       to a lognormal double-barrier reflection approximation when the sample
-       is too thin. Calibrated to the display scale via
-       P(display) = 50 + (logit(p) − logit(calP0)) × calK, with calP0/calK
-       anchored to the ~41% break-even win-rate for 3%/2% (target = 1.5× risk). */
-    prob4: {
-      targetPct: 0.03,
-      stopPct: 0.02,
-      horizonDays: 10,
-      lookback: 300,       /* max bars back for the empirical scan */
-      minSample: 10,       /* below this, fall back to the closed form */
-      similarSetups: true, /* pullback-shaped windows first, all windows second */
-      driftCap: 0.004,     /* daily log-drift cap for the closed form */
-      calP0: 0.40,
-      calK: 36.0,
+    /* Pillar 3: Swing Potential (max 12 @2026-09-12, mod16 pass) — reinstated from the archived 4.3.10
+       implementation. Reversal-from-pullback probability, not breakout/
+       momentum: zero unless the stock is structurally in a pullback right now
+       (depth 4–25% off the 20d high, 2–15 bars since the high). Probability is
+       the empirical reversal rate over the stock's own history (recovery to the
+       +targetPct% single-barrier touch within horizonDays — win condition is
+       ENTRY-RELATIVE, matching the forward-sim target, not swing-high-relative),
+       falling back to a mean-reversion-adjusted lognormal barrier touch;
+       calibrated via
+       display = 50 + (logit(p) − logit(p0)) × k with SWING_CAL {p0: 0.65, k: 49.8}
+       (LOCKED @2026-09-12, run R4).
+       p0 is the MEASURED universe single-barrier touch break-even (0.65 pooled
+       @2026-09-12, run R4 — pre-pass text cited 56.99% at +3%/10d over the 2y
+       universe, superseded), re-derived after the win definition was switched
+       from the old ≥0.98×swing-high recovery to the actual test target; k is
+       re-derived from the pullback per-stock rate distribution.
+       ProbScore = (display/100) × reversalProbability (14). Turn confirmation
+       (higher low, pure-hammer reversal candle, RSI upturn from <40) adds up to
+       turnConfirm (6). Was briefly folded into Pullback Quality (the higherLow/
+       reversalCandle/rsiUpturn keys lived there); restored here as a standalone
+       pillar per the archive, so the folded block in calcPullbackScore is
+       removed to avoid double-counting turn signals. */
+    swingPotential: {
+      reversalProbability: 14,
+      turnConfirm: 6,
+      higherLow: 2.5,
+      reversalCandle: 2,
+      rsiUpturn: 1.5,
     },
-    /* Pillar 4: Volatility Fit (max 10).
-       Two independent factors, combined multiplicatively:
-       Factor A (absolute ATR% fit) — since target%/stop% are fixed for the race
-       (3%/2%), the old targetATR/stopATR memberships collapse to a single band
-       on ATR(14)% (ATR14/close×100). Expressed directly in ATR% so it can be
-       tuned to the universe distribution: full marks when ATR% ∈ [absSweetLo,
-       absSweetHi], linear ramps to 0 at absCutoffLo/absCutoffHi.
-       Factor B (per-stock normalcy) — how normal the current volatility is for
-       THIS stock, from its own ATR-percentile rank (0–100). Triangular normal
-       band [relNormalLo, relNormalHi]: 1 inside, ramping to 0 at the cutoffs.
-       Abnormally hot or dead-calm regimes score down.
-       score = pillarMax.volatilityFit × absFit × relFit. This stops the pillar
-       from saturating at 10 for ~83% of a large-cap universe (the old target/
-       stop memberships resolved to an absolute ATR% window of [1.33, 2.86]%
-       which covered almost every NIFTY-200 name). */
-    volatilityFit: {
-      absSweetLo: 1.8,
-      absSweetHi: 3.2,
-      absCutoffLo: 1.2,
-      absCutoffHi: 4.2,
-      relNormalLo: 30,
-      relNormalHi: 75,
-      relCutoffLo: 10,
-      relCutoffHi: 90,
+    /* Pillar 4: Breakout Continuation (max 22 @2026-09-12; R4 lock, re-confirmed
+       by the mod16 pass) — the
+       breakout-side mirror of Swing Potential, added after the setup-split
+       harness exposed the budget asymmetry (pullback-gated stocks drew from
+       pullback path ≤25 + Swing Potential; breakout-gated stocks only from the
+       10-pt breakout sub-path). Zero unless detectBreakoutState gates true:
+       fresh (≤breakoutFreshMaxBars bars) close above the prior-bar Donchian
+       upper, extension ≤ breakoutExtensionCapATR ATRs, and NOT in a pullback
+       (mutually exclusive with Swing Potential, same as the old max(pathPull,
+       pathBk) gate).
+       Probability = empirical CONTINUATION rate over the stock's own history —
+       fraction of similar fresh-breakout windows that reached +targetPct%
+       within horizonDays, the same entry-relative win condition the reversal
+       rate uses — falling back to a momentum-drift lognormal barrier touch.
+       Built and must be re-derived like SWING_CAL: p0: 0.65 is the shared
+       measured universe break-even; k: 38.1 is re-derived from the breakout
+       per-stock rate distribution (p10–p90 logit spread 1.31, wider than
+       pullback's 1.0) — both LOCKED @2026-09-12, run R4.
+       ProbScore = clamp(display,0,100)/100 × continuationProbability, capped
+       at pillarMax.breakoutContinuation. No turn-confirm counterpart (breakouts
+       confirm via the structure itself), so the prob weight IS the full budget.
+       Run R4 scored the pillar to a 24-pt study ceiling and swept budgets
+       0..24: the predictive mass sits in scores (16,24] (WR 64% vs 61% base);
+       budgets 0–16 are flat-to-flat, so the budget was LOCKED at 22 (ER 0.40%,
+       PF 1.17). This reverses the pre-pass V14 cut (22 → 8) — that decision
+       predates this pass and was based on the old 4y/175k per-cap base WR.
+       The old 10-pt breakout sub-path in pullbackQuality was SHRUNK to a 4-pt
+       structural-confirm bonus (fresh-cross confirm + volume) — its confirm/
+       volume/closeStrength/freshness/base gates moved into detectBreakoutState. */
+    breakoutContinuation: {
+      continuationProbability: 22, /* prob weight IS the full budget — must equal
+                                     pillarMax.breakoutContinuation (LOCKED 22
+                                     @2026-09-12, run R4). */
     },
-    /* Pillar 5: Market/RS Alignment (max 10) — stock-level alignment with the
+    /* Pillar 5: Market/RS Alignment (max 4 @2026-09-12, mod16 pass) — stock-level
+       alignment with the
        market. Replaces the old index-only Regime Alignment pillar, which scored
        every stock identically on a given day and had no forward edge. Weighted
        via a 2y/42k-outcome sweep over 100 NIFTY 200 stocks:
@@ -2953,28 +3024,49 @@ window.TechIndicators = (function () {
       relMomentum: 0,
       relMomBars: 21,
     },
-    /* Modifiers */
+    /* Modifiers — magnitudes tempered @2026-09-12 by a 5y NIFTY 200
+       all-bars measurement (110,237 scored bars at target 3.5%/15d):
+       the old flat values were too liberal vs the calibrated pillars —
+       stability (−15) fired on 52.7% of all bars, mtfAlign (+10) on 53.1%,
+       spikes were double-punished (the −10 co-fired with the hard cap on
+       100% of capped bars), and the modifier net correlated 0.65 with the
+       pillar raw (double-counting pillar strength). Tempered accordingly:
+       stability is now severity-graduated, spike carries no points by
+       default (the hard cap is the single enforcement), the MTF bonus is
+       smaller and needs both frames ≥ mtfAlignFloor. */
     modifiers: {
       lowBetaThreshold: 0.5,
       lowATRPercentile: 25,
-      lowExpansionPenalty: -10,
-      spikePenalty: -10,
+      lowExpansionPenalty: -6,
+      spikePenalty: 0, /* points-only; default 0 because the spike suppression
+                          lives in the hard cap (classification.watchlist - 1).
+                          Set a negative/positive value to re-add a points
+                          adjustment on spike days on top of the gate. */
       spikeGapThreshold: 3,
       stabilityThreshold: 0.3,
-      stabilityPenalty: -15,
-      mtfAlignBonus: 10,
-      mtfAlignThreshold: 65,
-      mtfAlignFloor: 50,
+      stabilityPenalty: -6, /* graduated by severity: effective = penalty ×
+                               (threshold − stability20) / threshold, so a
+                               stability20 of 0 burns the full −6 and the
+                               penalty ramps to ~0 at the threshold. (Old flat
+                               −15 hit 53% of the universe — population base
+                               rate, not a discriminator.) */
+      mtfAlignBonus: 6,
+      mtfAlignThreshold: 72,
+      mtfAlignFloor: 60,
       highVolATRPercentile: 80,
       highVolERThreshold: 0.5,
       highVolBonus: 5,
     },
-    /* Classification thresholds */
+    /* Classification thresholds — LOCKED @2026-09-12 by the mod16 pass at the
+       recommended pillarMax caps {28,28,12,22,4}: STRONG_BUY 62, BUY 60,
+       WATCHLIST 58, NEUTRAL 34 (elbows on the entry-score running-WR lift
+       curve, maxLift 16.8pt at the new scale). The run-R4 values (66/64/62/34)
+       and pre-pass values (64/58/48/35) predate this pass. */
     classification: {
-      strongBuy: 80,
-      buy: 70,
-      watchlist: 50,
-      neutral: 35,
+      strongBuy: 62,
+      buy: 60,
+      watchlist: 58,
+      neutral: 34,
     },
 
     /* Batch backtest Pass-2 re-scoring mix:
@@ -2986,10 +3078,17 @@ window.TechIndicators = (function () {
 
   var SCORE_CONFIG_DEFAULTS = JSON.parse(JSON.stringify(SCORE_CONFIG));
   /* Bump this whenever pillarMax or any pillar's sub-score weights change.
-     Used to auto-discard stale localStorage configs. */
-  var SCORE_CONFIG_VERSION = 10;
+     Used to auto-discard stale localStorage configs. Bumped 14→15 at the
+     2026-09-12 lock-in pass (pillarMax/classification/forwardSim/CAL all
+     re-derived by calibration run R4). Bumped 15→16 at the modifier-tempering
+     pass (2026-09-12, 5y measurement): stability graduated −6, mtfAlign
+     6/72/60, spike points folded into the hard cap, lowExpansion −6.
+     Bumped 16→17 at the mod16 lock-in pass (2026-09-12): pillarMax
+     {28,28,12,22,4}, classification {62,60,58,34} re-derived under the V16
+     tempered modifiers and OOS-validated. */
+  var SCORE_CONFIG_VERSION = 17;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
-  function getTargetPctDisplay() { return (SCORE_CONFIG.prob4 && SCORE_CONFIG.prob4.targetPct != null) ? Math.round(SCORE_CONFIG.prob4.targetPct * 1000) / 10 : 3; }
+  function getTargetPctDisplay() { return (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? Math.round(SCORE_CONFIG.forwardSim.targetPct * 1000) / 10 : 4; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
   function getDefaultScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG_DEFAULTS)); }
   function setScoreConfig(patch) {
@@ -3008,7 +3107,7 @@ window.TechIndicators = (function () {
     if (window.TechIndicators) window.TechIndicators._scoreConfigClassification = null;
   }
 
-  /* Pillar 1: Trend Health (max 25).
+  /* Pillar 1: Trend Health (max 28).
      Volatility-normalized: ADX threshold stays at 25 (already normalized),
      Mansfield RS threshold tightened to > 0 for cleaner signal. */
   function calcTrendHealthScore(sn) {
@@ -3026,12 +3125,15 @@ window.TechIndicators = (function () {
     return Math.min(s, SCORE_CONFIG.pillarMax.trendHealth);
   }
 
-   /* Pillar 2: Pullback / Setup Quality (max 25).
+   /* Pillar 2: Pullback / Setup Quality (max 28).
      Volatility-normalized: distance to buyRef measured in ATR terms instead of
      fixed percentage. For large cap (1.5% ATR), 1.0 ATR ~ 1.5%. For mid cap
      (3% ATR), 1.0 ATR ~ 3%. This naturally adapts to the stock's volatility.
-     Also absorbs Swing Potential's turn-confirmation (higher low, hammer,
-     RSI upturn) — that pillar was removed and its signal folded in here. */
+     Turn confirmation (higher low, hammer, RSI upturn) is NOT scored here —
+     it lives in the reinstated Swing Potential pillar (calcSwingPotentialScore).
+     The breakout alternate path was SHRUNK to a 4-pt structural-confirm bonus;
+     the core breakout probability now lives in the standalone Breakout
+     Continuation pillar (calcBreakoutContinuationScore). */
   function calcPullbackScore(sn, volRegime, candles) {
     var c = SCORE_CONFIG.pullbackQuality;
     /* Shared structure gate: is the stock in a mean-reversion pullback right
@@ -3053,30 +3155,6 @@ window.TechIndicators = (function () {
     if (sn.pullbackDepth != null && sn.pullbackDepth >= c.pullbackDepthLo && sn.pullbackDepth <= c.pullbackDepthHi) s += c.pullbackDepthIdeal;
     if (sn.nearSupportCount != null && sn.nearSupportCount >= c.supportConfluenceThreshold) s += c.supportConfluence;
 
-    /* Folded Swing Potential turn-confirmation — only scrutinized when the
-       stock is structurally in a pullback right now (same gate the old
-       swing pillar used, so it stays strictly a reversal judgment). */
-    if (candles && inPullback && sn.barsSinceHigh20 != null && sn.barsSinceHigh20 >= 2 && sn.barsSinceHigh20 <= 15) {
-      var turnScore = 0;
-      var cl = closes(candles), hi = highs(candles), lo = lows(candles), op = opens(candles), L = cl.length;
-      var priorLow = Infinity;
-      for (var i = Math.max(0, L - sn.barsSinceHigh20 - 5); i < L - 1; i++) { if (lo[i] < priorLow) priorLow = lo[i]; }
-      if (priorLow !== Infinity && lo[L - 1] > priorLow) turnScore += c.higherLow;
-
-      var body = Math.abs(cl[L - 1] - op[L - 1]);
-      var lowerWick = Math.min(cl[L - 1], op[L - 1]) - lo[L - 1];
-      var upperWick = hi[L - 1] - Math.max(cl[L - 1], op[L - 1]);
-      var range = hi[L - 1] - lo[L - 1];
-      if (range > 0 && lowerWick > 2 * body && upperWick < body &&
-          (Math.max(cl[L - 1], op[L - 1]) - lo[L - 1]) / range > 0.6) {
-        turnScore += c.reversalCandle;
-      }
-
-      var r3 = lastVals(calcRSI(candles, 14), 3);
-      if (r3.length === 3 && r3[0] != null && r3[2] != null && r3[0] < 40 && r3[2] > r3[0]) turnScore += c.rsiUpturn;
-
-      s += Math.min(turnScore, c.turnConfirm);
-    }
     var sPull = s;
 
     /* Breakout alternate structure — evaluated ONLY when the pullback gate is
@@ -3094,50 +3172,41 @@ window.TechIndicators = (function () {
       var extATR = (sn.c - sn.dcUpperPrior) / sn.atr14;
       var extCap = c.breakoutExtensionCapATR != null ? c.breakoutExtensionCapATR : 1.5;
       if (extATR <= extCap) {
-        /* Confirmed breakout: close crossed above the prior-bar Donchian upper
-           on THIS bar — barsSinceBreakout == 1 means the prior close was still
-           at/below its own level, so today is the actual crossing bar. */
+        /* Shrunk structural-confirm bonus (was the 10-pt breakout path).
+           The standalone Breakout Continuation pillar now carries the core
+           breakout probability via its empirical continuation rate; this
+           retains the two signals that model does NOT use — a fresh same-bar
+           confirmed cross and volume confirmation. The old closeStrength /
+           freshness / baseTightness points moved into detectBreakoutState's
+           gating. */
         var freshCross = sn.barsSinceBreakout != null && sn.barsSinceBreakout === 1;
         if (freshCross) sBreak += c.breakoutConfirm;
 
-        /* Volume confirmation — reuses volRatio + volRatioThreshold (no new
-           threshold invented). */
         if (sn.volRatio != null && sn.volRatio > c.volRatioThreshold) sBreak += c.breakoutVolume;
-
-        /* Close strength: close in the top 30% of its own bar's range =
-           conviction, not a faded breakout. */
-        var brng = (sn.h != null && sn.l != null) ? sn.h - sn.l : 0;
-        var rangePos = brng > 0 ? (sn.c - sn.l) / brng : 0;
-        if (rangePos > 0.7) sBreak += c.breakoutCloseStrength;
-
-        /* Freshness: penalize chasing — full marks only within a few bars of
-           the first close above the level. */
-        var freshCap = c.breakoutFreshMaxBars != null ? c.breakoutFreshMaxBars : 2;
-        if (sn.barsSinceBreakout != null && sn.barsSinceBreakout <= freshCap) sBreak += c.breakoutFreshness;
-
-        /* Base tightness: breakout from a contracting base (BB width narrowing
-           over the last 5 bars) beats a breakout from an already-extended run. */
-        if (sn.bbWidth != null && sn.bbWidthPrev5 != null && sn.bbWidth < sn.bbWidthPrev5) sBreak += c.breakoutBaseTightness;
       }
     }
 
-    /* Pillar = max(pullbackPath, breakoutPath), capped at the 25-pt pillar max. */
+    /* Pillar = max(pullbackPath, breakoutPath), capped at the 30-pt pillar max. */
     return Math.min(Math.max(sPull, sBreak), SCORE_CONFIG.pillarMax.pullbackQuality);
   }
 
-   /* ── Pillar 3: Barrier Race (max 30) ──────────────────────────
-      P(WIN barrier hit first, within the holding window, before LOSS) — a
-      double-barrier first-passage race, not a single-barrier touch prob.
-
-      Primary estimate is empirical: slide the window backward over the
-      stock's own history, count which barrier (target vs stop, each per-window
-      ATR-normalized to "similar setups") is crossed first within the horizon.
-      Thin sample (< minSample) falls back to a lognormal approximation.
-
-      Calibration: display = 50 + (logit(p) − logit(calP0)) × calK, with
-      calP0/calK anchored so p = calP0 (~0.40, the 3%/2% break-even) maps to
-      a neutral 50 — the same break-even anchoring used by the confidence
-      model's break-even win-rate analysis. */
+   /* ── Pillar 3: Swing Potential (max 24) ───────────────────────
+      Reversal-from-pullback probability (archived 4.3.10 implementation).
+      Zero unless the stock is structurally in a pullback right now
+      (detectPullbackState). Probability = empirical reversal rate over the
+      stock's own history — the fraction of similar pullback windows that
+      RECOVERED TO THE +targetPct SINGLE-BARRIER TOUCH within the horizon
+      (entry-relative, matching the forward-sim win condition; FIXED from the
+      old ≥0.98×swing-high recovery which graded a depth-dependent, larger
+      event), falling back to a mean-reversion-adjusted lognormal barrier touch
+      (lognormalReversalProb). Calibrated via
+      display = 50 + (logit(p) − logit(p0)) × k, SWING_CAL {p0: 0.65, k: 49.8} —
+      p0 = measured universe single-barrier touch break-even (0.65 pooled,
+      @2026-09-12 run R4; pre-pass 56.99% citation superseded), re-derived
+      since the win definition changed; k re-derived from the pullback
+      per-stock distribution. probScore = (display/100) × reversalProbability;
+      turn confirmation adds up to turnConfirm. Daily-only judgment like
+      Market-RS. */
 
   /* Triangular membership: 0 outside [lo, hi], ramping 0→1 on [lo, peakLo],
      1 on [peakLo, peakHi], 1→0 on [peakHi, hi]. */
@@ -3152,174 +3221,268 @@ window.TechIndicators = (function () {
     return 0;
   }
 
-  /* Empirical double-barrier race over the stock's own history. Each window
-     starts at bar i with its OWN ATR-normalized barriers: target = entry×(1+tp),
-     stop = entry×(1−sp). First barrier crossed inside the horizon wins/loses;
-     neither → timeout. Tries pullback-shaped windows first (similar setups);
-     if that sample is too thin, scans all windows. */
-  function empiricalBarrierRace(candles, sn, config) {
-    var targetPct = config.targetPct, stopPct = config.stopPct;
-    var horizon = config.horizonDays != null ? config.horizonDays : (SCORE_CONFIG.horizonDays || 10);
-    var minSample = config.minSample != null ? config.minSample : 10;
-    var lookback = config.lookback != null ? config.lookback : 300;
-    var cl = closes(candles), hi = highs(candles), lo = lows(candles), L = cl.length;
-    if (L < 100) return null;
-    var atrArr = calcATR(candles, 14);
-
-    function scan(gated) {
-      var wins = 0, losses = 0, timeouts = 0;
-      var startIdx = Math.max(25, L - lookback);
-      var maxIdx = L - 1 - horizon;
-      /* Build the gate-filtered candidate index list first, then sample it
-         evenly across the whole lookback (including the most recent bars).
-         Scanning only the first minSample windows biased the estimate to the
-         earliest — and stale — regime (e.g. p4≈0 on a strongly up-trending
-         series whose early bars churned sideways). */
-      var cands = [];
-      for (var i = startIdx; i <= maxIdx; i++) {
-        if (cl[i] == null || cl[i] <= 0 || atrArr[i] == null || atrArr[i] <= 0) continue;
-        if (gated) {
-          var swHi = -Infinity, hIdx = i;
-          for (var j = Math.max(0, i - 19); j <= i; j++) { if (hi[j] > swHi) { swHi = hi[j]; hIdx = j; } }
-          var depth = swHi > 0 ? (swHi - cl[i]) / swHi : null;
-          var barsSince = i - hIdx;
-          if (depth == null || depth < 0.04 || depth > 0.25 || barsSince < 2 || barsSince > 15) continue;
-        }
-        cands.push(i);
-      }
-      if (cands.length === 0) return null;
-      var stride = Math.max(1, Math.floor(cands.length / minSample));
-      for (var q = 0; q < cands.length; q += stride) {
-        var i2 = cands[q];
-        var entry = cl[i2];
-        var upBar = entry * (1 + targetPct);
-        var dnBar = entry * (1 - stopPct);
-        var hit = 0;
-        for (var k = i2 + 1; k <= i2 + horizon && k < L; k++) {
-          if (hi[k] >= upBar) { hit = 1; break; }
-          if (lo[k] <= dnBar) { hit = -1; break; }
-        }
-        if (hit === 1) wins++;
-        else if (hit === -1) losses++;
-        else timeouts++;
-      }
-      var n = wins + losses + timeouts;
-      return n >= minSample ? { win: wins / n, n: n, gated: gated } : null;
-    }
-
-    var res = null;
-    if (config.similarSetups !== false) res = scan(true);
-    if (!res) res = scan(false);
-    return res;
+  /* Gate only — no scoring here. Uses sn.pullbackDepth / sn.swingHigh20 /
+     sn.barsSinceHigh20, all computed once in buildEntrySnapshot. */
+  function detectPullbackState(sn) {
+    if (sn.pullbackDepth == null || sn.barsSinceHigh20 == null || sn.swingHigh20 == null) return null;
+    var inPullback = sn.pullbackDepth >= 0.04 && sn.pullbackDepth <= 0.25 &&
+                      sn.barsSinceHigh20 >= 2 && sn.barsSinceHigh20 <= 15;
+    return { inPullback: inPullback, barsSinceHigh: sn.barsSinceHigh20, swingHigh20: sn.swingHigh20 };
   }
 
-  /* Lognormal double-barrier approximation (thin-sample fallback).
-     Long-horizon race win probability (gambler's-ruin on geometric Brownian
-     motion with drift μ and daily vol σ; a,b = log distances to stop/target):
-       p_inf = (1 − e^{λb}) / (e^{−λa} − e^{λb}),  λ = 2μ/σ²,  μ=0 → b/(a+b).
-     Scaled by P(any barrier touched within the horizon) — union bound of the
-     two single-barrier reflection probabilities, saturating at 1. */
-  function lognormalBarrierRaceProb(candles, sn, config) {
-    var horizon = config.horizonDays != null ? config.horizonDays : (SCORE_CONFIG.horizonDays || 10);
-    var cl = closes(candles), L = cl.length;
-    if (L < 60 || sn.c == null || sn.c <= 0 || sn.atr14 == null || sn.atr14 <= 0) return null;
-    var atrPct = sn.atr14 / sn.c * 100;
-    var sigma = calcBlendedDailySigma(candles, atrPct);
-    if (!sigma || sigma <= 0) return null;
+  /* Empirical reversal rate: fraction of similar pullback windows (4–25% depth,
+     2–15 bars past the 20d high) over the stock's own history that reached the
+     ENTRY-RELATIVE +targetPct single-barrier touch within horizonDays (target =
+     cl[i] × (1 + targetPct)). Win condition matches the forward-sim grading —
+     FIXED from the old maxFwd >= swHi × 0.98 recovery, which was swing-high-
+     relative: for a 5–25% depth pullback a recovery to 98% of the high is a
+     bigger move than the actual +targetPct being tested, systematically
+     under-scoring good target setups. Needs >= 8 samples before it reports. */
+  function empiricalReversalRate(candles, horizonDays, targetPct) {
+    var cl = closes(candles), hi = highs(candles), L = cl.length;
+    if (L < 80) return null;
+    var hits = 0, total = 0;
+    for (var i = 25; i < L - horizonDays; i++) {
+      var swHi = -Infinity, hIdx = i;
+      for (var j = Math.max(0, i - 19); j <= i; j++) { if (hi[j] > swHi) { swHi = hi[j]; hIdx = j; } }
+      var depth = swHi > 0 ? (swHi - cl[i]) / swHi : null;
+      var barsSince = i - hIdx;
+      if (depth == null || depth < 0.04 || depth > 0.25 || barsSince < 2 || barsSince > 15) continue;
+      var target = cl[i] * (1 + targetPct);
+      var maxFwd = -Infinity;
+      for (var k = i + 1; k <= i + horizonDays && k < L; k++) { if (hi[k] > maxFwd) maxFwd = hi[k]; }
+      total++;
+      if (maxFwd >= target) hits++;
+    }
+    return total >= 8 ? { rate: hits / total, n: total } : null;
+  }
 
-    /* Robust directional drift: median log-return over the horizon window,
-       clamped to ±driftCap so a single regime can't dominate. */
-    var count = Math.max(30, Math.min(horizon * 3, 90));
+  /* Mean-reversion-adjusted GBM barrier touch — same closed-form reflection
+     formula as computeHorizonConfidence's logProbTouch, with reversion drift
+     instead of trend drift and a recovery barrier instead of the +target.
+     Sigma comes from the shared calcBlendedDailySigma helper. */
+  function lognormalReversalProb(candles, sn, pbState, horizonDays) {
+    var cl = closes(candles), L = cl.length;
+    if (L < 60) return null;
+    var sma20 = calcSMA(candles, 20);
+    var rets = [], dev = [];
+    for (var i = L - 60; i < L - 1; i++) {
+      if (cl[i] > 0 && cl[i + 1] > 0 && sma20[i] != null && sma20[i] > 0) {
+        rets.push(Math.log(cl[i + 1] / cl[i]));
+        dev.push(Math.log(cl[i] / sma20[i]));
+      }
+    }
+    if (rets.length < 30) return null;
+    var n = rets.length, sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (var i = 0; i < n; i++) { sx += dev[i]; sy += rets[i]; sxx += dev[i] * dev[i]; sxy += dev[i] * rets[i]; }
+    var denom = n * sxx - sx * sx;
+    if (denom === 0) return null;
+    var theta = (n * sxy - sx * sy) / denom;
+    var alpha = (sy - theta * sx) / n;
+    var atrPct = (sn.atr14 != null && sn.c > 0) ? sn.atr14 / sn.c * 100 : null;
+    var sigmaDaily = calcBlendedDailySigma(candles, atrPct);
+    if (!sigmaDaily || sigmaDaily <= 0) return null;
+
+    var curDev = Math.log(cl[L - 1] / sma20[L - 1]);
+    var muDaily = alpha + theta * curDev;
+    var muLog = muDaily - 0.5 * sigmaDaily * sigmaDaily;
+    var b = Math.log(pbState.swingHigh20 / cl[L - 1]);
+    if (b <= 0) return { prob: 0.95 };
+    var sdN = sigmaDaily * Math.sqrt(horizonDays);
+    var muT = muLog * horizonDays;
+    var p = normCdf((muT - b) / sdN) + Math.exp(2 * muLog * b / (sigmaDaily * sigmaDaily)) * normCdf((-muT - b) / sdN);
+    return { prob: Math.max(1e-6, Math.min(1 - 1e-6, p)) };
+  }
+
+  /* Calibration: p0 = measured universe single-barrier touch break-even
+     (0.65 pooled @2026-09-12 run R4; pre-pass citations of 56.99% at +3%/10d
+     and k≈41 from the old spread 1.209 are superseded). k = re-derived from
+     the pullback per-stock rate distribution (logit p10–p90 range 1.0 →
+     k = 49.8 spans the display band). The old {0.30, 34} was calibrated
+     against the 98%-swing-high recovery definition, which graded a different
+     — and, for deep pullbacks, much larger — event than the +targetPct
+     being tested. */
+  var SWING_CAL = { p0: 0.65, k: 49.8 }; /* LOCKED @2026-09-12 (run R4): p0 = pooled universe single-barrier touch rate 0.65 re-derived from 5y NIFTY 200 forward outcomes; k = 50 / logit(p10-p90) over per-stock pullback rates (per-stock logit spread 1.0). */
+
+  function calcSwingPotentialScore(candles, sn) {
+    try {
+      var c = SCORE_CONFIG.swingPotential;
+      var horizonDays = SCORE_CONFIG.horizonDays || 15;
+      var targetPct = (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? SCORE_CONFIG.forwardSim.targetPct : 0.035;
+      var pbState = detectPullbackState(sn);
+      if (!pbState || !pbState.inPullback) return 0;
+
+      var emp = empiricalReversalRate(candles, horizonDays, targetPct);
+      var logM = lognormalReversalProb(candles, sn, pbState, horizonDays);
+      var p = emp ? emp.rate : (logM ? logM.prob : null);
+      if (p == null) return 0;
+
+      var display = 50 + (Math.log(p / (1 - p)) - Math.log(SWING_CAL.p0 / (1 - SWING_CAL.p0))) * SWING_CAL.k;
+      var probScore = (clamp(display, 0, 100) / 100) * c.reversalProbability;
+
+      var cl = closes(candles), hi = highs(candles), lo = lows(candles), op = opens(candles), L = cl.length;
+
+      var priorLow = Infinity;
+      for (var i = Math.max(0, L - pbState.barsSinceHigh - 5); i < L - 1; i++) { if (lo[i] < priorLow) priorLow = lo[i]; }
+      var turnScore = 0;
+      if (lo[L - 1] > priorLow) turnScore += c.higherLow;
+
+      /* Pure hammer shape — body near top of range, long lower wick, short
+         upper wick. No close>open requirement (FIX-3). */
+      var body = Math.abs(cl[L - 1] - op[L - 1]);
+      var lowerWick = Math.min(cl[L - 1], op[L - 1]) - lo[L - 1];
+      var upperWick = hi[L - 1] - Math.max(cl[L - 1], op[L - 1]);
+      var range = hi[L - 1] - lo[L - 1];
+      if (range > 0 && lowerWick > 2 * body && upperWick < body &&
+          (Math.max(cl[L - 1], op[L - 1]) - lo[L - 1]) / range > 0.6) {
+        turnScore += c.reversalCandle;
+      }
+
+      var r3 = lastVals(calcRSI(candles, 14), 3);
+      if (r3.length === 3 && r3[0] != null && r3[2] != null && r3[0] < 40 && r3[2] > r3[0]) turnScore += c.rsiUpturn;
+
+      turnScore = Math.min(turnScore, c.turnConfirm);
+
+      return Math.min(SCORE_CONFIG.pillarMax.swingPotential, probScore + turnScore);
+    } catch (e) { return 0; }
+  }
+
+   /* ── Pillar 4: Breakout Continuation (max 22 @2026-09-12, run R4) ───────
+      The breakout-side mirror of Swing Potential. Zero unless the stock is in
+      a fresh, confirmed breakout right now (detectBreakoutState: close above
+      the prior-bar 20d Donchian upper within breakoutFreshMaxBars, extension ≤
+      breakoutExtensionCapATR ATRs, mutually exclusive with the pullback gate).
+      Probability = empirical CONTINUATION rate over the stock's own history —
+      the fraction of similar fresh-breakout windows that reached the
+      ENTRY-RELATIVE +targetPct single-barrier touch within horizonDays (matching
+      the reversal win condition and the forward-sim grading), falling back to a
+      momentum-drift lognormal barrier touch. Calibrated via
+      display = 50 + (logit(p) − logit(p0)) × k, BREAKOUT_CAL {p0: 0.65, k: 38.1} —
+      p0 is the shared measured universe single-barrier break-even (0.65 pooled);
+      k is re-derived from the breakout per-stock rate distribution (a wider
+      p10–p90 logit spread than pullback's → 38.1). probScore =
+      (display/100) × continuationProbability, capped at
+      pillarMax.breakoutContinuation. Run R4 swept budgets 0..24 (see VERSION
+      banner): top-band evidence (16,24] locked the budget at 22, reversing the
+      pre-pass V14 cut to 8 (which predates this pass). Daily-only like Swing. */
+
+  /* Gate only — no scoring here. Uses sn.c / sn.dcUpperPrior / sn.atr14 /
+     sn.barsSinceBreakout / sn.pullbackDepth already computed in buildEntrySnapshot.
+     Mutually exclusive with detectPullbackState (a stock at its highs is not a
+     pullback setup), mirroring the old max(pathPull, pathBk) gate. */
+  function detectBreakoutState(sn) {
+    if (sn.c == null || sn.dcUpperPrior == null || sn.atr14 == null || sn.atr14 <= 0) return null;
+    var pbState = detectPullbackState(sn);
+    if (pbState && pbState.inPullback) return null;
+    if (!(sn.c > sn.dcUpperPrior)) return null;
+    var extATR = (sn.c - sn.dcUpperPrior) / sn.atr14;
+    var cap = (SCORE_CONFIG.pullbackQuality && SCORE_CONFIG.pullbackQuality.breakoutExtensionCapATR != null)
+      ? SCORE_CONFIG.pullbackQuality.breakoutExtensionCapATR : 1.5;
+    if (extATR > cap) return null;
+    var freshMax = (SCORE_CONFIG.pullbackQuality && SCORE_CONFIG.pullbackQuality.breakoutFreshMaxBars != null)
+      ? SCORE_CONFIG.pullbackQuality.breakoutFreshMaxBars : 2;
+    if (sn.barsSinceBreakout == null || sn.barsSinceBreakout > freshMax) return null;
+    return { extATR: extATR, barsSinceBreakout: sn.barsSinceBreakout };
+  }
+
+  /* Empirical continuation rate: fraction of fresh-breakout windows (close above
+     the prior-bar Donchian upper within breakoutFreshMaxBars, extension ≤ cap)
+     over the stock's own history that reached the entry-relative +targetPct
+     single-barrier touch within horizonDays — the continuation mirror of
+     empiricalReversalRate. Needs >= 8 samples before it reports. */
+  function empiricalContinuationRate(candles, horizonDays, targetPct) {
+    var cl = closes(candles), hi = highs(candles), L = cl.length;
+    if (L < 80) return null;
+    var dnPeriod = (SCORE_CONFIG.pullbackQuality && SCORE_CONFIG.pullbackQuality.breakoutDonchianPeriod != null)
+      ? SCORE_CONFIG.pullbackQuality.breakoutDonchianPeriod : 20;
+    var dcUpper = [];
+    try { var _dc = calcDonchianChannels(candles, dnPeriod); dcUpper = (_dc && _dc.upper) ? _dc.upper : []; } catch (e) {}
+    var atrArr = calcATR(candles, 14);
+    var cap = (SCORE_CONFIG.pullbackQuality && SCORE_CONFIG.pullbackQuality.breakoutExtensionCapATR != null)
+      ? SCORE_CONFIG.pullbackQuality.breakoutExtensionCapATR : 1.5;
+    var freshMax = (SCORE_CONFIG.pullbackQuality && SCORE_CONFIG.pullbackQuality.breakoutFreshMaxBars != null)
+      ? SCORE_CONFIG.pullbackQuality.breakoutFreshMaxBars : 2;
+    var hits = 0, total = 0;
+    for (var i = 25; i < L - horizonDays; i++) {
+      if (cl[i] == null || dcUpper[i - 1] == null || dcUpper[i - 1] <= 0 || atrArr[i] == null || atrArr[i] <= 0) continue;
+      if (cl[i] <= dcUpper[i - 1]) continue;
+      var extATR = (cl[i] - dcUpper[i - 1]) / atrArr[i];
+      if (extATR > cap) continue;
+      var bsb = null;
+      for (var b = i; b >= 1; b--) {
+        if (cl[b] != null && dcUpper[b - 1] != null && cl[b] <= dcUpper[b - 1]) { bsb = i - b; break; }
+      }
+      if (bsb == null || bsb > freshMax) continue;
+      var target = cl[i] * (1 + targetPct);
+      var maxFwd = -Infinity;
+      for (var k = i + 1; k <= i + horizonDays && k < L; k++) { if (hi[k] > maxFwd) maxFwd = hi[k]; }
+      total++;
+      if (maxFwd >= target) hits++;
+    }
+    return total >= 8 ? { rate: hits / total, n: total } : null;
+  }
+
+  /* Momentum-drift lognormal barrier touch — the breakout mirror of
+     lognormalReversalProb: plain GBM drift toward the +targetPct barrier
+     instead of mean reversion. Uses the stock's own recent log-return mean
+     (momentum) for drift rather than regression-to-SMA20 reversion. Sigma from
+     the shared calcBlendedDailySigma helper. Falls back for breakout windows
+     with too little history. */
+  function lognormalContinuationProb(candles, horizonDays, targetPct) {
+    var cl = closes(candles), L = cl.length;
+    if (L < 60) return null;
+    var atrPct = null, last = cl[L - 1];
+    if (last != null && last > 0) {
+      var atrArr = calcATR(candles, 14);
+      if (atrArr && atrArr[L - 1] != null && atrArr[L - 1] > 0) atrPct = atrArr[L - 1] / last * 100;
+    }
+    var sigmaDaily = calcBlendedDailySigma(candles, atrPct);
+    if (!sigmaDaily || sigmaDaily <= 0) return null;
     var rets = [];
-    for (var i = Math.max(1, L - 1 - count); i < L - 1; i++) {
+    for (var i = L - 60; i < L - 1; i++) {
       if (cl[i] > 0 && cl[i + 1] > 0) rets.push(Math.log(cl[i + 1] / cl[i]));
     }
+    if (rets.length < 30) return null;
     var mu = 0;
-    if (rets.length >= 8) {
-      var rs = rets.slice().sort(function (a, b) { return a - b; });
-      mu = rs[Math.floor(rs.length / 2)];
-    }
-    var driftCap = config.driftCap != null ? config.driftCap : 0.004;
-    mu = Math.max(-driftCap, Math.min(driftCap, mu));
-    var muLog = mu - 0.5 * sigma * sigma;
-
-    var a = Math.log(1 + config.targetPct);              /* distance to target */
-    var b = -Math.log(1 - config.stopPct);               /* distance to stop */
-    if (a <= 0 || b <= 0) return null;
-
-    var sdN = sigma * Math.sqrt(horizon);
-    var muT = muLog * horizon;
-    var lam = (2 * muLog) / (sigma * sigma);
-
-    var pWinInf;
-    if (Math.abs(lam) < 1e-9) {
-      pWinInf = b / (a + b);
-    } else {
-      var num = 1 - Math.exp(lam * b);
-      var den = Math.exp(-lam * a) - Math.exp(lam * b);
-      pWinInf = Math.abs(den) < 1e-12 ? b / (a + b) : num / den;
-    }
-    pWinInf = Math.max(0, Math.min(1, pWinInf));
-
-    /* Union-bound probability EITHER barrier is touched within the horizon. */
-    var pUp = normCdf((muT - a) / sdN) + Math.exp(2 * muLog * a / (sigma * sigma)) * normCdf((-muT - a) / sdN);
-    var pDn = normCdf((muT - b) / sdN) + Math.exp(2 * muLog * b / (sigma * sigma)) * normCdf((-muT - b) / sdN);
-    var pAnyTouch = Math.min(1, Math.max(0, pUp) + Math.max(0, pDn));
-
-    var p = pWinInf * pAnyTouch;
-    return Math.max(1e-6, Math.min(1 - 1e-6, p));
+    for (var i = 0; i < rets.length; i++) mu += rets[i];
+    mu /= rets.length;
+    var muLog = mu - 0.5 * sigmaDaily * sigmaDaily;
+    var b = Math.log(1 + targetPct);
+    if (b <= 0) return { prob: 0.95 };
+    var sdN = sigmaDaily * Math.sqrt(horizonDays);
+    var muT = muLog * horizonDays;
+    var p = normCdf((b - muT) / sdN) + Math.exp(2 * muLog * b / (sigmaDaily * sigmaDaily)) * normCdf((-b - muT) / sdN);
+    return { prob: Math.max(1e-6, Math.min(1 - 1e-6, p)) };
   }
 
-  function calcBarrierRaceScore(candles, sn) {
-    var c = SCORE_CONFIG.prob4;
-    if (!candles || !sn || sn.c == null || sn.c <= 0) return 0;
+  /* Calibration: p0 = shared measured universe single-barrier touch
+     break-even (0.65 pooled @2026-09-12 run R4 — pre-pass 56.99% at +3%/10d
+     superseded). k = re-derived from the breakout per-stock rate
+     distribution (logit p10–p90 range 1.31 → k ≈ 38.1 spans the display band).
+     Never hand-picked — re-run the R4 recalibration harness (c11/tx-sweep)
+     whenever the target/horizon or gate definitions change. */
+  var BREAKOUT_CAL = { p0: 0.65, k: 38.1 }; /* LOCKED @2026-09-12 (run R4): shared p0 0.65; k = 50/logit(p10-p90) over per-stock breakout continuation rates (per-stock logit spread 1.31 — wider than pullback's). */
 
-    var emp = empiricalBarrierRace(candles, sn, c);
-    var p = emp ? emp.win : lognormalBarrierRaceProb(candles, sn, c);
-    if (p == null) return 0;
-
-    var calP0 = c.calP0 != null ? c.calP0 : 0.40;
-    var calK = c.calK != null ? c.calK : 36.0;
-    if (calP0 <= 0 || calP0 >= 1) calP0 = 0.40;
-    var logit = function (x) { return Math.log(x / (1 - x)); };
-    var display = 50 + (logit(Math.max(1e-6, Math.min(1 - 1e-6, p))) - logit(calP0)) * calK;
-    return (clamp(display, 0, 100) / 100) * SCORE_CONFIG.pillarMax.prob4;
-  }
-
-   /* ── Pillar 4: Volatility Fit (max 10) ────────────────────────────────── */
-  function calcVolatilityFitScore(sn, candles) {
-    var c = SCORE_CONFIG.volatilityFit;
-    if (!sn || sn.c == null || sn.c <= 0 || sn.atr14 == null || sn.atr14 <= 0) return 0;
-
-    /* Factor A — absolute ATR(14)% fit (universe-tuned band). */
-    var atrPct = sn.atr14 / sn.c * 100;
-    var absFit = triangularMembership(atrPct,
-      c.absSweetLo != null ? c.absSweetLo : 1.8,
-      c.absSweetHi != null ? c.absSweetHi : 3.2,
-      c.absCutoffLo != null ? c.absCutoffLo : 1.2,
-      c.absCutoffHi != null ? c.absCutoffHi : 4.2);
-
-    /* Factor B — per-stock volatility normalcy (own ATR-percentile rank).
-       Triangular normal band [relNormalLo, relNormalHi]: 1 inside, ramping
-       to 0 at relCutoffLo/relCutoffHi. Missing/insufficient history → neutral
-       0.75 so it doesn't zero out the pillar. */
-    var relFit = 0.75;
+  function calcBreakoutContinuationScore(candles, sn) {
     try {
-      var atrPctl = calcATRPercentileRank(candles, 14);
-      if (atrPctl != null) {
-        relFit = triangularMembership(atrPctl,
-          c.relNormalLo != null ? c.relNormalLo : 30,
-          c.relNormalHi != null ? c.relNormalHi : 75,
-          c.relCutoffLo != null ? c.relCutoffLo : 10,
-          c.relCutoffHi != null ? c.relCutoffHi : 90);
-      }
-    } catch (e) { /* degenerate to neutral */ }
+      var horizonDays = SCORE_CONFIG.horizonDays || 15;
+      var targetPct = (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? SCORE_CONFIG.forwardSim.targetPct : 0.035;
+      var bkState = detectBreakoutState(sn);
+      if (!bkState) return 0;
 
-    var score = SCORE_CONFIG.pillarMax.volatilityFit * absFit * relFit;
-    return round(Math.max(0, Math.min(SCORE_CONFIG.pillarMax.volatilityFit, score)), 1);
+      var emp = empiricalContinuationRate(candles, horizonDays, targetPct);
+      var cont = emp ? null : lognormalContinuationProb(candles, horizonDays, targetPct);
+      var p = emp ? emp.rate : (cont ? cont.prob : null);
+      if (p == null) return 0;
+
+      var display = 50 + (Math.log(p / (1 - p)) - Math.log(BREAKOUT_CAL.p0 / (1 - BREAKOUT_CAL.p0))) * BREAKOUT_CAL.k;
+      var c = SCORE_CONFIG.breakoutContinuation;
+      var probWeight = (c && c.continuationProbability != null) ? c.continuationProbability : SCORE_CONFIG.pillarMax.breakoutContinuation;
+      return Math.min(SCORE_CONFIG.pillarMax.breakoutContinuation, (clamp(display, 0, 100) / 100) * probWeight);
+    } catch (e) { return 0; }
   }
 
-   /* ── Pillar 5: Market/RS Alignment (max 10) ─────────────────────────────
+   /* ── Pillar 5: Market/RS Alignment (max 6) ───────────────────────────────
        Stock-level alignment with the market (recast from the old index-only
        Regime Alignment gate). Dominated by Mansfield RS(52w) vs NIFTY — the
        only component with a measurable forward slope — plus small trend and
@@ -3390,8 +3553,10 @@ window.TechIndicators = (function () {
     return round(Math.max(0, Math.min(10, score)), 1);
   }
 
-  /* Modifiers (±15 each): low-expansion, spike day, stability, MTF alignment (gradient).
-     Volatility-normalized: use ATR percentile rank instead of fixed ATR%. */
+  /* Modifiers (modest, severity-scaled): low-expansion, spike day (points
+     optional — the hard cap is the primary gate), graduated-stability, MTF
+     alignment (gradient), high-momentum-in-high-vol. Volatility-normalized:
+     use ATR percentile rank instead of fixed ATR%. */
   function buildEntryModifiers(sn, opts) {
     opts = opts || {};
     var items = [];
@@ -3403,10 +3568,15 @@ window.TechIndicators = (function () {
       items.push({ reason: "Low beta + low volatility percentile (no expansion)", amount: mc.lowExpansionPenalty });
     }
 
-    if (opts.spikeDay) items.push({ reason: "Spike detected (gap/abnormal move) — also triggers hard cap ≤49", amount: mc.spikePenalty });
+    if (opts.spikeDay && mc.spikePenalty !== 0) {
+      items.push({ reason: "Spike detected (gap/abnormal move) — hard-capped below WATCHLIST", amount: mc.spikePenalty });
+    }
 
     if (sn && sn.stability20 != null && sn.stability20 < mc.stabilityThreshold) {
-      items.push({ reason: "Unstable price action (stability < " + mc.stabilityThreshold + ")", amount: mc.stabilityPenalty });
+      var stabAmt = Math.round(mc.stabilityPenalty * Math.max(0, Math.min(1, (mc.stabilityThreshold - sn.stability20) / mc.stabilityThreshold)) * 10) / 10;
+      if (stabAmt !== 0) {
+        items.push({ reason: "Unstable price action (stability " + sn.stability20 + ", severity-scaled)", amount: stabAmt });
+      }
     }
 
     if (opts.mtfAlignFactor > 0) {
@@ -3421,13 +3591,11 @@ window.TechIndicators = (function () {
     return items;
   }
 
-   /* Per-timeframe 6-pillar scoring. `tf` is 'H' | 'D' | 'W'. Barrier Race,
-     Volatility Fit and Regime Alignment are daily-only judgments (like the old
-     swing pillar): the double-barrier race, ATR-fit and index-regime gate are
-     inherently daily-scale. Returning null for H/W lets the MTF aggregation's
-     wSum exclusion handle them — no dilution. Swing Potential no longer exists
-     (folded into Pullback Quality); its key is emitted at 0 for legacy
-     consumers. */
+   /* Per-timeframe 5-pillar scoring. `tf` is 'H' | 'D' | 'W'. Swing Potential,
+     Breakout Continuation and Regime Alignment are daily-only judgments (like
+     the old barrier-race pillar): pullback-reversal odds, breakout-continuation
+     odds and the RS regime gate are inherently daily-scale. Returning null for
+     H/W lets the MTF aggregation's wSum exclusion handle them — no dilution. */
   function scoreEntryPillarsForTF(candles, indexCandles, tf) {
     var sn = buildEntrySnapshot(candles, indexCandles, tf);
     if (!sn) return null;
@@ -3435,9 +3603,8 @@ window.TechIndicators = (function () {
     return {
       trendHealth: calcTrendHealthScore(sn),
       pullbackQuality: calcPullbackScore(sn, volRegime, candles),
-      prob4: tf === 'D' ? calcBarrierRaceScore(candles, sn) : null,
-      swingPotential: 0,
-      volatilityFit: tf === 'D' ? calcVolatilityFitScore(sn, candles) : null,
+      swingPotential: tf === 'D' ? calcSwingPotentialScore(candles, sn) : null,
+      breakoutContinuation: tf === 'D' ? calcBreakoutContinuationScore(candles, sn) : null,
       regimeAlignment: tf === 'D' ? calcMarketRsAlignmentScore(sn, candles, indexCandles) : null,
       spike: sn.spikeLast === true ? 5 : 0,
       stability: round(Math.max(0, Math.min(10, (1 - (sn.stability20 != null ? sn.stability20 : 1)) * 10)), 1),
@@ -3446,7 +3613,7 @@ window.TechIndicators = (function () {
     };
   }
 
-   /* Entry Score (single timeframe, daily) — 6-pillar model (100 total). */
+   /* Entry Score (single timeframe, daily) — 5-pillar model (100 total). */
   function computeEntryScore(candles, indexCandles) {
     if (!candles || candles.length < 50) return { entry_score: null, reason: 'insufficient_data', need: 50, got: candles ? candles.length : 0 };
     var sn = buildEntrySnapshot(candles, indexCandles, 'D');
@@ -3455,11 +3622,10 @@ window.TechIndicators = (function () {
     var volRegime = calcVolRegime(sn, candles);
     var trendHealth = calcTrendHealthScore(sn);
     var pullbackQuality = calcPullbackScore(sn, volRegime, candles);
-    var prob4 = calcBarrierRaceScore(candles, sn);
-    var swingPotential = 0;
-    var volatilityFit = calcVolatilityFitScore(sn, candles);
+    var swingPotential = calcSwingPotentialScore(candles, sn);
+    var breakoutContinuation = calcBreakoutContinuationScore(candles, sn);
     var regimeAlignment = calcMarketRsAlignmentScore(sn, candles, indexCandles);
-    var rawTotal = trendHealth + pullbackQuality + prob4 + volatilityFit + regimeAlignment;
+    var rawTotal = trendHealth + pullbackQuality + swingPotential + breakoutContinuation + regimeAlignment;
 
     var spikeDay = sn.spikeLast === true || (sn.gapPct != null && Math.abs(sn.gapPct) > SCORE_CONFIG.modifiers.spikeGapThreshold);
     var modifierItems = buildEntryModifiers(sn, { spikeDay: spikeDay, volRegime: volRegime });
@@ -3470,11 +3636,12 @@ window.TechIndicators = (function () {
     });
     var modifiers = penalties + bonuses;
 
-    var finalScore = Math.max(0, Math.min(100, rawTotal + modifiers));
+    var finalScore = Math.max(0, Math.min(totalPillarMax(), rawTotal + modifiers));
 
-    /* Spike gate (hard override): never score above NEUTRAL on the day of an abnormal print */
+    /* Spike gate (hard override): never grade a buy on the day of an abnormal
+       print — cap below the WATCHLIST threshold. */
     var guard = computeSpikeGuard(candles);
-    if (guard.todaySpike) finalScore = Math.min(finalScore, 49);
+    if (guard.todaySpike) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
 
     var cls = classifyScore(finalScore);
 
@@ -3483,9 +3650,8 @@ window.TechIndicators = (function () {
       raw_score: round(rawTotal, 1),
       trendHealth: round(trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
       pullbackQuality: round(pullbackQuality, 1), pullbackQualityMax: SCORE_CONFIG.pillarMax.pullbackQuality,
-      prob4: round(prob4, 1), prob4Max: SCORE_CONFIG.pillarMax.prob4,
       swingPotential: round(swingPotential, 1), swingPotentialMax: SCORE_CONFIG.pillarMax.swingPotential,
-      volatilityFit: round(volatilityFit, 1), volatilityFitMax: SCORE_CONFIG.pillarMax.volatilityFit,
+      breakoutContinuation: round(breakoutContinuation, 1), breakoutContinuationMax: SCORE_CONFIG.pillarMax.breakoutContinuation,
       regimeAlignment: round(regimeAlignment, 1), regimeAlignmentMax: SCORE_CONFIG.pillarMax.regimeAlignment,
       modifiers: round(modifiers, 1),
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
@@ -3495,22 +3661,23 @@ window.TechIndicators = (function () {
       dominanceRatio: guard.dominanceRatio, efficiencyRatio10: guard.efficiencyRatio10,
       volRegime: volRegime,
       details: {
-        trendHealth: round(trendHealth, 2), pullbackQuality: round(pullbackQuality, 2), prob4: round(prob4, 2), swingPotential: round(swingPotential, 2),
-        volatilityFit: round(volatilityFit, 2), regimeAlignment: round(regimeAlignment, 2),
+        trendHealth: round(trendHealth, 2), pullbackQuality: round(pullbackQuality, 2), swingPotential: round(swingPotential, 2),
+        breakoutContinuation: round(breakoutContinuation, 2),
+        regimeAlignment: round(regimeAlignment, 2),
         spike: sn.spikeLast === true ? 5 : 0,
         stability: round(Math.max(0, Math.min(10, (1 - (sn.stability20 != null ? sn.stability20 : 1)) * 10)), 1)
       }
     };
   }
 
-   /* Multi-timeframe Entry Score — 6-pillar model: trend/pullback/prob4 are
+   /* Multi-timeframe Entry Score — 5-pillar model: trend/pullback/swing are
       aggregated across timeframes as D*0.55 + H*0.30 + W*0.15 (renormalized
       over available timeframes via wSum division) and capped at their pillar
-      max (25 / 25 / 30) at the combined level; Barrier Race, Volatility Fit
-      and Regime Alignment are daily-only and aggregate over whatever timeframe
-      carries a value (normally just D). Swing Potential is 0 everywhere.
+      max (30) at the combined level; Swing, Breakout Continuation and Regime
+      Alignment (daily-only gates) aggregate over whatever timeframe carries a
+      value (normally just D).
       Modifiers run once on the Daily snapshot only (the primary decision
-      frame); the MTF +10 needs weekly+daily ≥ 65 (as % of the 80-pt base). */
+      frame); the MTF +10 needs weekly+daily ≥ 65 (as % of the MTF base). */
   function computeMultiTFEntryScore(tfResults, indexCandles, indexWeeklyCandles) {
     if (!tfResults || tfResults.length === 0) return { multiTF_score: null, reason: 'no_timeframes' };
 
@@ -3540,9 +3707,8 @@ window.TechIndicators = (function () {
     var PILLARS = [
       { key: 'trendHealth', max: SCORE_CONFIG.pillarMax.trendHealth },
       { key: 'pullbackQuality', max: SCORE_CONFIG.pillarMax.pullbackQuality },
-      { key: 'prob4', max: SCORE_CONFIG.pillarMax.prob4 },
       { key: 'swingPotential', max: SCORE_CONFIG.pillarMax.swingPotential },
-      { key: 'volatilityFit', max: SCORE_CONFIG.pillarMax.volatilityFit },
+      { key: 'breakoutContinuation', max: SCORE_CONFIG.pillarMax.breakoutContinuation },
       { key: 'regimeAlignment', max: SCORE_CONFIG.pillarMax.regimeAlignment }
     ];
     var agg = {};
@@ -3554,9 +3720,10 @@ window.TechIndicators = (function () {
       });
       agg[pillar.key] = wSum > 0 ? Math.min(pillar.max, acc / wSum) : 0;
     });
-    /* Raw total is exactly the new 100-pt architecture: the three MTF pillars
-       (max 80) + the two daily-only pillars (max 10 each). */
-    var rawTotal = agg.trendHealth + agg.pullbackQuality + agg.prob4 + agg.volatilityFit + agg.regimeAlignment;
+    /* Raw total: the three primary pillars aggregated across MTF (max 24 each)
+       + the daily-only Breakout Continuation (max 22) + Regime Alignment
+       (max 6) — sums to 100. */
+    var rawTotal = agg.trendHealth + agg.pullbackQuality + agg.swingPotential + agg.breakoutContinuation + agg.regimeAlignment;
 
     var baseSn = null;
     if (dTF && dTF.candles && dTF.candles.length >= 50) {
@@ -3569,13 +3736,14 @@ window.TechIndicators = (function () {
     }
 
     /* Alignment check: "is the core trend aligned daily-vs-weekly?"
-       Barrier Race is daily-only, so each frame's base is the max of whatever
-       of the three MTF pillars it actually carried, normalized to a 0-100 %
-       scale. The 50/65 floor+threshold therefore keep their % semantics. */
+       Swing/reversal-type judgments are daily-only, so each frame's base
+       is the max of whatever the MTF pillars it actually carried, normalized
+       to a 0-100 % scale. The 50/65 floor+threshold therefore keep their %
+       semantics. */
     function baseRaw(p) {
       var sum = 0, max = 0;
       if (p) {
-        ['trendHealth', 'pullbackQuality', 'prob4'].forEach(function (k) {
+        ['trendHealth', 'pullbackQuality', 'swingPotential'].forEach(function (k) {
           if (p[k] != null) { sum += p[k]; max += SCORE_CONFIG.pillarMax[k]; }
         });
       }
@@ -3604,10 +3772,11 @@ window.TechIndicators = (function () {
     });
     var modifiers = penalties + bonuses;
 
-    var finalScore = Math.max(0, Math.min(100, rawTotal + modifiers));
+    var finalScore = Math.max(0, Math.min(totalPillarMax(), rawTotal + modifiers));
 
-    /* Spike gate (hard override): never score above NEUTRAL on the day of an abnormal print */
-    if (spikeDay) finalScore = Math.min(finalScore, 49);
+    /* Spike gate (hard override): never grade a buy on the day of an abnormal
+       print — cap below the WATCHLIST threshold. */
+    if (spikeDay) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
 
     var cls = classifyScore(finalScore);
 
@@ -3616,7 +3785,7 @@ window.TechIndicators = (function () {
       var tf = findTF(label);
       var p = perTF[label];
       if (tf && p) {
-        var tRaw = (p.trendHealth || 0) + (p.pullbackQuality || 0) + (p.prob4 || 0) + (p.volatilityFit || 0) + (p.regimeAlignment || 0) + (p.swingPotential || 0);
+        var tRaw = (p.trendHealth || 0) + (p.pullbackQuality || 0) + (p.swingPotential || 0) + (p.breakoutContinuation || 0) + (p.regimeAlignment || 0);
         var tCls = classifyScore(tRaw);
         tfDetails.push({
           timeframe: tf.timeframe,
@@ -3624,9 +3793,8 @@ window.TechIndicators = (function () {
           entryScore: round(tRaw, 1),
           trendHealth: round(p.trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
           pullbackQuality: round(p.pullbackQuality, 1), pullbackQualityMax: SCORE_CONFIG.pillarMax.pullbackQuality,
-          prob4: round(p.prob4, 1), prob4Max: SCORE_CONFIG.pillarMax.prob4,
           swingPotential: round(p.swingPotential, 1), swingPotentialMax: SCORE_CONFIG.pillarMax.swingPotential,
-          volatilityFit: round(p.volatilityFit, 1), volatilityFitMax: SCORE_CONFIG.pillarMax.volatilityFit,
+          breakoutContinuation: round(p.breakoutContinuation, 1), breakoutContinuationMax: SCORE_CONFIG.pillarMax.breakoutContinuation,
           regimeAlignment: round(p.regimeAlignment, 1), regimeAlignmentMax: SCORE_CONFIG.pillarMax.regimeAlignment,
           modifiers: 0,
           penalties: 0, bonuses: 0,
@@ -3645,9 +3813,8 @@ window.TechIndicators = (function () {
       raw_score: round(rawTotal, 1),
       trendHealth: round(agg.trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
       pullbackQuality: round(agg.pullbackQuality, 1), pullbackQualityMax: SCORE_CONFIG.pillarMax.pullbackQuality,
-      prob4: round(agg.prob4, 1), prob4Max: SCORE_CONFIG.pillarMax.prob4,
       swingPotential: round(agg.swingPotential, 1), swingPotentialMax: SCORE_CONFIG.pillarMax.swingPotential,
-      volatilityFit: round(agg.volatilityFit, 1), volatilityFitMax: SCORE_CONFIG.pillarMax.volatilityFit,
+      breakoutContinuation: round(agg.breakoutContinuation, 1), breakoutContinuationMax: SCORE_CONFIG.pillarMax.breakoutContinuation,
       regimeAlignment: round(agg.regimeAlignment, 1), regimeAlignmentMax: SCORE_CONFIG.pillarMax.regimeAlignment,
       modifiers: round(modifiers, 1),
       penalties: round(penalties, 1), bonuses: round(bonuses, 1),
@@ -3712,7 +3879,7 @@ window.TechIndicators = (function () {
     var finalScore = Math.max(0, Math.min(100, rawTotal + penalties + bonuses));
 
     /* ── Spike gate (hard override): never score above NEUTRAL on the day of an abnormal print ── */
-    if (guard.todaySpike) finalScore = Math.min(finalScore, 49);
+    if (guard.todaySpike) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
 
     /* ── classification ── */
     var cls = classifyScore(finalScore);
@@ -3739,7 +3906,7 @@ window.TechIndicators = (function () {
   /* ══════════════════════════════════════════════════════════════════════════
      LEGACY Multi-timeframe Entry Score — old 12-sub-score model (7.1-10.3).
      Kept only for regression/back-compat harnesses. Production entry scoring
-     uses the new 6-pillar computeMultiTFEntryScore above.
+     uses the new 4-pillar computeMultiTFEntryScore above.
      ══════════════════════════════════════════════════════════════════════════ */
   function computeMultiTFEntryScoreLegacy(tfResults, indexCandles, indexWeeklyCandles) {
     if (!tfResults || tfResults.length === 0) return { multiTF_score: null, reason: 'no_timeframes' };
@@ -3856,7 +4023,7 @@ window.TechIndicators = (function () {
     var finalScore = Math.max(0, Math.min(100, rawTotal + penalties + bonuses));
 
     /* ── Spike gate (hard override): never score above NEUTRAL on the day of an abnormal print ── */
-    if (guard.todaySpike) finalScore = Math.min(finalScore, 49);
+    if (guard.todaySpike) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
 
     var cls = classifyScore(finalScore);
 
@@ -4028,14 +4195,12 @@ window.TechIndicators = (function () {
 
     var exitResult = computeExitScore(currentData, { entry_price: ep, holding_days: days, entry_score: es }, indexCandles);
     var exitScore = exitResult && exitResult.exit_score != null ? exitResult.exit_score : 0;
-    var stopLoss = (ep != null && atr != null) ? ep - (atr * 1.5) : null;
-    var target = ep != null ? ep * (1 + (SCORE_CONFIG.prob4.targetPct != null ? SCORE_CONFIG.prob4.targetPct : 0.03)) : null;
+    var target = ep != null ? ep * (1 + (SCORE_CONFIG.forwardSim.targetPct != null ? SCORE_CONFIG.forwardSim.targetPct : 0.035)) : null;
 
-    /* Layer 1: Hard Rules */
+    /* Layer 1: Hard Rules (target + time only — no stop loss) */
     if (ep != null && cp != null) {
       if (target != null && cp >= target) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Target hit (+' + getTargetPctDisplay() + '%)', action: 'Full exit', exit_score: exitScore });
-      if (stopLoss != null && cp <= stopLoss) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Stop loss triggered', action: 'Full exit', exit_score: exitScore });
-      if (days >= 15 && cp < ep * 1.02) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Time stop (15 days, <2%)', action: 'Full exit', exit_score: exitScore });
+      if (days >= (SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 15) && cp < ep * 1.02) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Time stop (' + (SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 15) + ' days, <2%)', action: 'Full exit', exit_score: exitScore });
     }
 
     /* Layer 2: Exit Score */
@@ -4043,9 +4208,8 @@ window.TechIndicators = (function () {
       if (exitScore >= 85) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
       if (exitScore >= 70) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
       if (exitScore >= 55) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
-      if (exitScore >= 40 && cp != null && atr != null) {
-        var newStop = (stopLoss != null) ? Math.max(stopLoss, cp - atr * 1.5) : cp - atr * 1.5;
-        return Object.assign({}, exitResult, { reason: 'Move to ' + round(newStop, 2), action: 'Move stop to ' + round(newStop, 2) });
+      if (exitScore >= 40) {
+        return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
       }
     }
 
@@ -4056,13 +4220,7 @@ window.TechIndicators = (function () {
       return Object.assign({}, exitResult || {}, { signal: 'EXIT', reason: 'Entry score collapsed', action: 'Full exit at current price or next bar open', exit_score: exitScore });
     }
 
-    /* Layer 4: Trailing Stop after +2% */
-    if (ep != null && cp != null && atr != null && prevClose != null && cp >= ep * 1.02) {
-      var trailStop = cp - (atr * 2);
-      if (prevClose <= trailStop) return Object.assign({}, exitResult || {}, { signal: 'EXIT', reason: 'Trailing stop after +2%', action: 'Full exit', exit_score: exitScore });
-    }
-
-    /* Layer 5: Partial Profit-Lock */
+    /* Layer 4: Partial Profit-Lock */
     if (ep != null && cp != null && cp >= ep * 1.02 && days >= 3 && exitScore >= 30) {
       return Object.assign({}, exitResult || {}, { signal: 'PARTIAL_EXIT', reason: 'Lock gains', action: 'Exit 50%', exit_score: exitScore });
     }
@@ -4397,7 +4555,7 @@ window.TechIndicators = (function () {
       if (!intradayCandles || intradayCandles.length < 10) return base;
       position = position || {};
       var entry = position.entry_price || position.entry || 0;
-      var targetPct = position.target_pct != null ? position.target_pct : (SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3);
+      var targetPct = position.target_pct != null ? position.target_pct : (SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5);
       if (entry <= 0) { base.reason = 'no_entry_price'; return base; }
 
       /* isolate today's session bars (same IST date as the last bar) */
@@ -4673,9 +4831,9 @@ window.TechIndicators = (function () {
      Returns { confidence, reason, components, flags }. */
   function computeHorizonConfidence(hourlyCandles, dailyCandles, cfg) {
     cfg = cfg || {};
-    var horizonDays = cfg.horizonDays != null ? cfg.horizonDays : (SCORE_CONFIG.horizonDays || 10);
+    var horizonDays = cfg.horizonDays != null ? cfg.horizonDays : (SCORE_CONFIG.horizonDays || 15);
     var windowSessions = cfg.windowSessions != null ? cfg.windowSessions : 40;
-    var targetPct = cfg.target_pct != null ? cfg.target_pct : (cfg.targetPct != null ? cfg.targetPct : (SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3));
+    var targetPct = cfg.target_pct != null ? cfg.target_pct : (cfg.targetPct != null ? cfg.targetPct : (SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5));
     var holdingDays = cfg.holding_days != null ? cfg.holding_days : (cfg.holdingDays != null ? cfg.holdingDays : 0);
     var ctx = cfg.entryScoreContext || {};
     var base = {
@@ -4923,7 +5081,7 @@ window.TechIndicators = (function () {
           base.components.entryScore = ctx.entryScore;
           base.components.trendHealth = ctx.trendHealth;
           base.components.pullbackQuality = ctx.pullbackQuality;
-          base.components.prob4 = ctx.prob4;
+          base.components.prob4 = (ctx.prob4 != null ? ctx.prob4 : (ctx.swingPotential != null ? ctx.swingPotential : null));
         } else {
           finalScoreLog = displayScoreLog;
           finalScoreEmp = displayScoreEmp;
@@ -4989,7 +5147,7 @@ window.TechIndicators = (function () {
     return computeHorizonConfidence(hourlyCandles, dailyCandles, {
       horizonDays: 5, windowSessions: 20,
       entry_price: entry,
-      targetPct: position.target_pct != null ? position.target_pct : (position.targetPct != null ? position.targetPct : (SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3)),
+      targetPct: position.target_pct != null ? position.target_pct : (position.targetPct != null ? position.targetPct : (SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5)),
       holdingDays: position.holding_days != null ? position.holding_days : (position.holdingDays != null ? position.holdingDays : null),
       indexCandles: position.indexCandles || null
     });
@@ -5000,7 +5158,7 @@ window.TechIndicators = (function () {
      daily ^NSEI candles for RS-vs-Nifty / regime context. */
   function computeTenDayForwardConfidence(hourlyCandles, dailyCandles, indexCandles, entryScoreResult) {
     var entryScoreContext = entryScoreResult || null;
-    var _hd = SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10;
+    var _hd = SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 15;
     if (!hourlyCandles || hourlyCandles.length === 0) {
       return computeHorizonConfidence(hourlyCandles, dailyCandles, { horizonDays: _hd, windowSessions: 40, entry_price: 0, indexCandles: indexCandles, entryScoreContext: entryScoreContext });
     }
@@ -5008,7 +5166,7 @@ window.TechIndicators = (function () {
     return computeHorizonConfidence(hourlyCandles, dailyCandles, {
       horizonDays: _hd, windowSessions: 40,
       entry_price: cur.c,
-targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3,
+targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5,
       holdingDays: null,
       indexCandles: indexCandles,
       entryScoreContext: entryScoreContext
@@ -5225,7 +5383,7 @@ targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3,
 
       /* ── 4. 10-day horizon context from current price ─────────────────── */
       var ctx = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-        horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: c, targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3,
+        horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 15, windowSessions: 40, entry_price: c, targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5,
         holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
       });
       if (ctx.reason !== 'ok' || ctx.confidence == null) { base.reason = ctx.reason || base.reason; return base; }
@@ -5336,7 +5494,7 @@ targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3,
         var P = prices[p2];
         var fp = fillProb(P);
         var res = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-          horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10, windowSessions: 40, entry_price: P, targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3,
+          horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 15, windowSessions: 40, entry_price: P, targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5,
           holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
         });
         var isAggressive = P < floorP;
@@ -5561,7 +5719,7 @@ targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3,
    * @param {Number} entryScore - the entry score (0-100)
    * @param {String} symbol - for cap-tier lookup
    * @param {Object} indexFeatures - pre-computed { bull_bear, volatility_regime, market_momentum } (portfolio-level)
-   * @param {Object} pillarScores - optional { trendHealth, pullbackQuality, prob4, volatilityFit, regimeAlignment }
+   * @param {Object} pillarScores - optional { trendHealth, pullbackQuality, swingPotential, breakoutContinuation, regimeAlignment }
    *        (raw pillar scores, 0..pillarMax). The pillar architecture is un-collapsed
    *        into the ML feature vector; callers with the pillar scores available pass
    *        them here so train/infer see the same real values.
@@ -5571,7 +5729,7 @@ targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3,
     var out = {
       rsi: 50, atr_pct: 0, bb_position: 0.5, volume_ratio: 1,
       macd_hist: 0, ema_slope: 0, adx: 20, entry_score: entryScore || 0,
-      trendHealth: 0, pullbackQuality: 0, prob4: 0, volatilityFit: 0, regimeAlignment: 0,
+      trendHealth: 0, pullbackQuality: 0, swingPotential: 0, breakoutContinuation: 0, regimeAlignment: 0,
       trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0,
       volatility_regime: 0, mfi: 50, vol_price_trend: 0,
       bull_bear: 0, market_momentum: 0, cap_tier: -1, rsi_regime: 0
@@ -5582,8 +5740,8 @@ targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3,
     if (pillarScores) {
       out.trendHealth = pillarScores.trendHealth != null ? pillarScores.trendHealth : 0;
       out.pullbackQuality = pillarScores.pullbackQuality != null ? pillarScores.pullbackQuality : 0;
-      out.prob4 = pillarScores.prob4 != null ? pillarScores.prob4 : 0;
-      out.volatilityFit = pillarScores.volatilityFit != null ? pillarScores.volatilityFit : 0;
+      out.swingPotential = pillarScores.swingPotential != null ? pillarScores.swingPotential : 0;
+      out.breakoutContinuation = pillarScores.breakoutContinuation != null ? pillarScores.breakoutContinuation : 0;
       out.regimeAlignment = pillarScores.regimeAlignment != null ? pillarScores.regimeAlignment : 0;
     }
     try {
@@ -5725,6 +5883,10 @@ targetPct: SCORE_CONFIG.prob4.targetPct != null ? getTargetPctDisplay() : 3,
     getScoreConfig: getScoreConfig,
     getTargetPctDisplay: getTargetPctDisplay,
     getScoreConfigVersion: getScoreConfigVersion,
+    getSWINGCAL: function() { return SWING_CAL; },
+    getBREAKOUTCAL: function() { return BREAKOUT_CAL; },
+    setSWINGCAL: function(c) { if (c && typeof c.p0 === 'number' && typeof c.k === 'number') { SWING_CAL = { p0: c.p0, k: c.k }; if (window.TechIndicators) window.TechIndicators._scoreConfigClassification = null; } },
+    setBREAKOUTCAL: function(c) { if (c && typeof c.p0 === 'number' && typeof c.k === 'number') { BREAKOUT_CAL = { p0: c.p0, k: c.k }; if (window.TechIndicators) window.TechIndicators._scoreConfigClassification = null; } },
     getDefaultScoreConfig: getDefaultScoreConfig,
     setScoreConfig: setScoreConfig,
     computeMarketRegimeFeatures: computeMarketRegimeFeatures,

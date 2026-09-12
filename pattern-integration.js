@@ -136,8 +136,8 @@
     var pillarScores = {
       trendHealth: compatResult.aggTrendHealth != null ? compatResult.aggTrendHealth : 0,
       pullbackQuality: compatResult.aggPullbackQuality != null ? compatResult.aggPullbackQuality : 0,
-      prob4: compatResult.aggProb4 != null ? compatResult.aggProb4 : 0,
-      volatilityFit: compatResult.aggVolatilityFit != null ? compatResult.aggVolatilityFit : 0,
+      swingPotential: compatResult.aggSwingPotential != null ? compatResult.aggSwingPotential : 0,
+      breakoutContinuation: compatResult.aggBreakoutContinuation != null ? compatResult.aggBreakoutContinuation : 0,
       regimeAlignment: compatResult.aggRegimeAlignment != null ? compatResult.aggRegimeAlignment : 0
     };
     if (dailyCandles && dailyCandles.length >= 30 && window.TechIndicators) {
@@ -148,10 +148,10 @@
         // Guard: ensure every FEATURE_KEYS key is present with a neutral default,
         // regardless of which code path produced the object.
         var keys = ["rsi", "atr_pct", "bb_position", "volume_ratio", "macd_hist", "ema_slope", "adx", "entry_score",
-          "trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment",
+          "trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment",
           "trend_structure", "price_vs_sma200", "ema20_50_cross", "volatility_regime", "mfi", "vol_price_trend",
           "bull_bear", "market_momentum", "cap_tier", "rsi_regime"];
-        var defaults = { rsi: 50, atr_pct: 0, bb_position: 0.5, volume_ratio: 1, macd_hist: 0, ema_slope: 0, adx: 20, entry_score: compatResult.finalScore || 0, trendHealth: pillarScores.trendHealth, pullbackQuality: pillarScores.pullbackQuality, prob4: pillarScores.prob4, volatilityFit: pillarScores.volatilityFit, regimeAlignment: pillarScores.regimeAlignment, trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0, volatility_regime: 0, mfi: 50, vol_price_trend: 0, bull_bear: 0, market_momentum: 0, cap_tier: -1, rsi_regime: 0 };
+        var defaults = { rsi: 50, atr_pct: 0, bb_position: 0.5, volume_ratio: 1, macd_hist: 0, ema_slope: 0, adx: 20, entry_score: compatResult.finalScore || 0, trendHealth: pillarScores.trendHealth, pullbackQuality: pillarScores.pullbackQuality, swingPotential: pillarScores.swingPotential, breakoutContinuation: pillarScores.breakoutContinuation, regimeAlignment: pillarScores.regimeAlignment, trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0, volatility_regime: 0, mfi: 50, vol_price_trend: 0, bull_bear: 0, market_momentum: 0, cap_tier: -1, rsi_regime: 0 };
         var out = {};
         for (var i = 0; i < keys.length; i++) {
           var k = keys[i];
@@ -166,7 +166,8 @@
       rsi: 50, macd_hist: 0, bb_position: 0.5, atr_pct: 0,
       adx: 20, ema_slope: 0, volume_ratio: 1,
       trendHealth: pillarScores.trendHealth, pullbackQuality: pillarScores.pullbackQuality,
-      prob4: pillarScores.prob4, volatilityFit: pillarScores.volatilityFit,
+      swingPotential: pillarScores.swingPotential,
+      breakoutContinuation: pillarScores.breakoutContinuation,
       regimeAlignment: pillarScores.regimeAlignment,
       trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0,
       volatility_regime: 0, mfi: 50, vol_price_trend: 0,
@@ -184,7 +185,7 @@
   /**
    * Effective weights for a pattern: manual overrides (Pattern Lab →
    * Pattern Settings) take precedence; otherwise resolved (repaired from
-   * powers if the stored weights are uniform) and blended toward equal 16.7%
+   * powers if the stored weights are uniform) and blended toward equal 25%
    * per the global Learned-weight blend setting. Falls back to stored
    * weights if PatternScoring is unavailable.
    */
@@ -224,13 +225,12 @@
     var pillars = {
       trendHealth: compatResult.aggTrendHealth != null ? compatResult.aggTrendHealth : 0,
       pullbackQuality: compatResult.aggPullbackQuality != null ? compatResult.aggPullbackQuality : 0,
-      prob4: compatResult.aggProb4 != null ? compatResult.aggProb4 : 0,
       swingPotential: compatResult.aggSwingPotential != null ? compatResult.aggSwingPotential : 0,
-      volatilityFit: compatResult.aggVolatilityFit != null ? compatResult.aggVolatilityFit : 0,
+      breakoutContinuation: compatResult.aggBreakoutContinuation != null ? compatResult.aggBreakoutContinuation : 0,
       regimeAlignment: compatResult.aggRegimeAlignment != null ? compatResult.aggRegimeAlignment : 0
     };
 
-    var pillarMax = { trendHealth: 25, pullbackQuality: 25, prob4: 30, swingPotential: 0, volatilityFit: 10, regimeAlignment: 10 };
+    var pillarMax = { trendHealth: 28, pullbackQuality: 28, swingPotential: 12, breakoutContinuation: 22, regimeAlignment: 4 };
     if (window.TechIndicators && window.TechIndicators.getScoreConfig) {
       var sc = window.TechIndicators.getScoreConfig();
       if (sc && sc.pillarMax) pillarMax = sc.pillarMax;
@@ -239,11 +239,11 @@
     // Uniform weights == no re-weighting: the pattern stage is an identity,
     // i.e. equal pillars keep the base score exactly (P±Δ = 0). Without this,
     // the normalized-average scale (0-100) diverges from the base raw-sum
-    // scale (25/25/30/10/10 maxes + modifiers) and fabricates a delta.
+    // scale (28/28/24/8/6 maxes + modifiers) and fabricates a delta.
     var firstW = null;
     var uniformW = true;
     if (_cachedScoringConfig.usePatternWeights) {
-      ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (p) {
+      ["trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"].forEach(function (p) {
         var w = weights[p] != null ? weights[p] : 0.20;
         if (firstW == null) firstW = w;
         else if (Math.abs(w - firstW) > 0.001) uniformW = false;
@@ -258,9 +258,9 @@
     if (uniformW) {
       // Keep the base score; skip the recompute and power bonus entirely.
     } else {
-      ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (p) {
+      ["trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"].forEach(function (p) {
         var w = weights[p] != null ? weights[p] : 0.20;
-        var max = pillarMax[p] || 25;
+        var max = pillarMax[p] || 24;
         var normalizedPillar = clamp(pillars[p] / max, 0, 1);
         var weighted = normalizedPillar * w;
         totalWeighted += weighted;
@@ -658,8 +658,8 @@
     var stocks = symbols || (window.NIFTY_200 && window.NIFTY_200.map ? window.NIFTY_200.map(function(s) { return s.t; }) : null) || getDefaultStocks();
     var _sc = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
     var runner = window.BatchBacktest.create({
-      targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 4,
-      holdingPeriodDays: _sc.horizonDays || 14,
+      targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5,
+      holdingPeriodDays: _sc.horizonDays || 15,
       threshold: 65,
       sampleEvery: 2
     });
@@ -690,8 +690,8 @@
 
     var _sc2 = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
     var runner = window.BatchBacktest.create({
-      targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 4,
-      holdingPeriodDays: _sc2.horizonDays || 14,
+      targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5,
+      holdingPeriodDays: _sc2.horizonDays || 15,
       threshold: 65,
       sampleEvery: 2
     });

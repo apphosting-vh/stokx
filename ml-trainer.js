@@ -320,17 +320,19 @@ window.MLTrainer = (function () {
 
   /* ── Feature Keys ──────────────────────────────────────────────────── */
   /* NOTE (audit 2026-09): the five pillar scores (trendHealth, pullbackQuality,
-     prob4, volatilityFit, regimeAlignment) are now fed SEPARATELY rather than
-     collapsed into "entry_score". Every feature producer passes the real pillar
-     values (raw score at the bar, 0..pillarMax) — see computeExpandedFeatures
-     (indicators.js) and the batch/live feature builders. entry_score is kept as
-     the aggregate summary. Any model saved under the old 18-key layout is
-     rejected by the load-time input-size check and must be retrained. */
+     swingPotential, breakoutContinuation, regimeAlignment) are now fed
+     SEPARATELY rather than collapsed into "entry_score". Every feature producer
+     passes the real pillar values (raw score at the bar, 0..pillarMax) — see
+     computeExpandedFeatures (indicators.js) and the batch/live feature
+     builders. entry_score is kept as the aggregate summary. breakoutContinuation
+     was added with the Pillar 5 (Breakout Continuation) engine change — any
+     model saved under the older key layouts is rejected by the load-time input-
+     size check and must be retrained. */
   var FEATURE_KEYS = [
     "rsi", "atr_pct", "bb_position", "volume_ratio",
     "macd_hist", "ema_slope", "adx", "entry_score",
     // Pillar architecture (un-collapsed, May 2026): raw per-pillar scores
-    "trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment",
+    "trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment",
     // Expanded (Phase 3): trend structure, volatility regime, volume/flow,
     // market regime, cap tier
     "trend_structure", "price_vs_sma200", "ema20_50_cross",

@@ -29,10 +29,10 @@ window.BacktestEngine = (function () {
       t = window.TechIndicators.getScoreConfig().classification;
       window.TechIndicators._scoreConfigClassification = t;
     }
-    var sb = (t && t.strongBuy != null) ? t.strongBuy : 80;
-    var b  = (t && t.buy != null)       ? t.buy       : 70;
-    var wl = (t && t.watchlist != null) ? t.watchlist : 50;
-    var n  = (t && t.neutral != null)    ? t.neutral   : 35;
+    var sb = (t && t.strongBuy != null) ? t.strongBuy : 62; /* fallbacks mirror SCORE_CONFIG lock-in @2026-09-12 (mod16 pass) */
+    var b  = (t && t.buy != null)       ? t.buy       : 60;
+    var wl = (t && t.watchlist != null) ? t.watchlist : 58;
+    var n  = (t && t.neutral != null)    ? t.neutral   : 34;
     if (s >= sb) return "STRONG_BUY";
     if (s >= b) return "BUY";
     if (s >= wl) return "WATCHLIST";
@@ -165,7 +165,7 @@ window.BacktestEngine = (function () {
   /* Annualized portfolio Sharpe from pooled trade returns assuming ~252/avgHold
      round-trips per year. Mean/std of per-trade returns, scaled by sqrt(N/yr). */
   function portfolioSharpe(trades, holdingDays) {
-    var hd = holdingDays || 10;
+    var hd = holdingDays || 15;
     if (!trades || trades.length < 5) return null;
     var rets = trades.map(function (t) { return t.finalReturnPct || 0; });
     var mean = rets.reduce(function (s, r) { return s + r; }, 0) / rets.length;
@@ -185,7 +185,7 @@ window.BacktestEngine = (function () {
     ctx = ctx || {};
     var symbol = opts.symbol || "";
     var warmupN = opts.warmup != null ? opts.warmup : 60;
-    var holdDays = opts.holdingPeriodDays != null ? opts.holdingPeriodDays : 10;
+    var holdDays = opts.holdingPeriodDays != null ? opts.holdingPeriodDays : 20;
     var collect = opts.collect != null ? opts.collect : null;
     if (!collect) return null;
     var holdoutBars = opts.holdoutBars != null ? opts.holdoutBars : Math.max(60, Math.floor((candles.length || 0) * 0.25));
@@ -415,9 +415,9 @@ window.BacktestEngine = (function () {
   function create(cfg) {
     cfg = cfg || {};
     var scoreFn = cfg.scoreFn || null;
-    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.0);
-    var stopLossPct = cfg.stopLossPct != null ? cfg.stopLossPct : 2.0;
-    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 10);
+    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5);
+    var stopLossPct = cfg.stopLossPct != null ? cfg.stopLossPct : null;
+    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 15);
     var threshold = cfg.threshold != null ? cfg.threshold : 65;
     var warmup = cfg.warmup != null ? cfg.warmup : 60;
     var multiTFMap = cfg.multiTFMap || null;
@@ -426,7 +426,7 @@ window.BacktestEngine = (function () {
     // New config options
     var realisticEntry = cfg.realisticEntry !== undefined ? cfg.realisticEntry : true;
     var realisticExit = cfg.realisticExit !== undefined ? cfg.realisticExit : true;
-    var useStopLoss = cfg.useStopLoss !== false;
+    var useStopLoss = cfg.useStopLoss === true;
     var slippagePct = cfg.slippagePct != null ? cfg.slippagePct : 0.1;       // 0.1% default
     var brokeragePct = cfg.brokeragePct != null ? cfg.brokeragePct : 0.05;    // 0.05% default
     var maxCacheSize = cfg.maxCacheSize != null ? cfg.maxCacheSize : 5;
@@ -497,9 +497,7 @@ window.BacktestEngine = (function () {
       var slip = opts.slippagePct != null ? opts.slippagePct : slippagePct;
       var broker = opts.brokeragePct != null ? opts.brokeragePct : brokeragePct;
       var tradeTargetPct = opts.targetProfitPct != null ? opts.targetProfitPct : targetProfitPct;
-      var tradeStopLossPct = opts.stopLossPct != null ? opts.stopLossPct : stopLossPct;
       var tradeHoldingPeriod = opts.holdingPeriodDays != null ? opts.holdingPeriodDays : holdingPeriodDays;
-      var tradeUseStopLoss = opts.useStopLoss !== undefined ? opts.useStopLoss : useStopLoss;
       var lookAheadNeeded = useRealisticEntry ? 2 : 1;
       if (entryIdx + lookAheadNeeded > candles.length) return null;
 
@@ -515,7 +513,6 @@ window.BacktestEngine = (function () {
       var entryPriceAdj = entryPrice * (1 + slip / 100) * (1 + broker / 100);
       var exitCostFactor = (1 - slip / 100) * (1 - broker / 100);
       var targetPrice = entryPriceAdj * (1 + tradeTargetPct / 100) / exitCostFactor;
-      var stopLossPrice = tradeUseStopLoss ? (entryPriceAdj * (1 - tradeStopLossPct / 100) / exitCostFactor) : null;
 
       var entryDate = String(candles[entryDateIdx].t).slice(0, 10);
       var hitTarget = false, daysToTarget = null, exitPrice = entryPriceAdj, exitDate = entryDate;
@@ -528,24 +525,6 @@ window.BacktestEngine = (function () {
         var prevClose = candles[entryDateIdx + j - 1].c;
 
         if (useRealisticExit) {
-          if (tradeUseStopLoss) {
-            // Gap open below stop-loss: exit at open
-            if (cur.o <= stopLossPrice) {
-              daysToTarget = j;
-              exitDate = String(cur.t).slice(0, 10);
-              exitPrice = cur.o * (1 - slip / 100) * (1 - broker / 100);
-              barrier = "LOSS";
-              break;
-            }
-            // Intraday stop-loss hit (check low before high — stop takes priority)
-            if (cur.l <= stopLossPrice) {
-              daysToTarget = j;
-              exitDate = String(cur.t).slice(0, 10);
-              exitPrice = stopLossPrice * (1 - slip / 100) * (1 - broker / 100);
-              barrier = "LOSS";
-              break;
-            }
-          }
           // Gap open above target: exit at open
           if (cur.o >= targetPrice) {
             hitTarget = true;
@@ -565,17 +544,7 @@ window.BacktestEngine = (function () {
             break;
           }
         } else {
-          // Optimistic mode: no exit costs on stop-loss
-          if (tradeUseStopLoss) {
-            var stopLossRaw = entryPriceAdj * (1 - tradeStopLossPct / 100);
-            if (cur.l <= stopLossRaw) {
-              daysToTarget = j;
-              exitDate = String(cur.t).slice(0, 10);
-              exitPrice = stopLossRaw;
-              barrier = "LOSS";
-              break;
-            }
-          }
+          // Optimistic mode: no exit costs on target
           var targetPriceRaw = entryPriceAdj * (1 + tradeTargetPct / 100);
           if (cur.h >= targetPriceRaw) {
             hitTarget = true;
@@ -611,7 +580,7 @@ window.BacktestEngine = (function () {
         entryScore: ROUND2(score.entryScore),
         signal: score.classification || classifyScore(score.entryScore),
         targetPrice: ROUND2(targetPrice),
-        stopLossPrice: stopLossPrice != null ? ROUND2(stopLossPrice) : null,
+        stopLossPrice: null,
         hitTarget: hitTarget,
         barrier: barrier,
         daysToTarget: daysToTarget,
@@ -620,9 +589,8 @@ window.BacktestEngine = (function () {
         maxLossPct: ROUND2(maxLossPct),
         trendScore: score.trendHealth != null ? ROUND2(score.trendHealth) : null,
         pullbackScore: score.pullbackQuality != null ? ROUND2(score.pullbackQuality) : null,
-        probabilityScore: score.prob4 != null ? ROUND2(score.prob4) : null,
         swingScore: score.swingPotential != null ? ROUND2(score.swingPotential) : null,
-        volatilityFitScore: score.volatilityFit != null ? ROUND2(score.volatilityFit) : null,
+        breakoutContinuationScore: score.breakoutContinuation != null ? ROUND2(score.breakoutContinuation) : null,
         regimeAlignmentScore: score.regimeAlignment != null ? ROUND2(score.regimeAlignment) : null,
         modifiers: score.modifiers != null ? ROUND2(score.modifiers) : null
       };
@@ -659,7 +627,7 @@ window.BacktestEngine = (function () {
       }
       try {
         var scoreObj = scoreAt(candles, idx, symbol);
-        var entryScoreCtx = scoreObj ? { trendHealth: scoreObj.trendHealth, pullbackQuality: scoreObj.pullbackQuality, prob4: scoreObj.prob4, swingPotential: scoreObj.swingPotential, volatilityFit: scoreObj.volatilityFit, regimeAlignment: scoreObj.regimeAlignment, entryScore: scoreObj.entryScore } : null;
+        var entryScoreCtx = scoreObj ? { trendHealth: scoreObj.trendHealth, pullbackQuality: scoreObj.pullbackQuality, prob4: scoreObj.swingPotential != null ? scoreObj.swingPotential : null, swingPotential: scoreObj.swingPotential, breakoutContinuation: scoreObj.breakoutContinuation, regimeAlignment: scoreObj.regimeAlignment, entryScore: scoreObj.entryScore } : null;
         /* Cost-adjusted target: the actual % gain the model should estimate,
            matching what simulateTrade treats as hitTarget. Without this,
            calibration regresses against a harder bar (raw 4%) than the
@@ -686,8 +654,8 @@ window.BacktestEngine = (function () {
       var symbol = opts.symbol || candles._symbol || '';
       var minTH = opts.minTrendHealth != null ? opts.minTrendHealth : -Infinity;
       var minPQ = opts.minPullbackQuality != null ? opts.minPullbackQuality : -Infinity;
-      var minP4 = opts.minProb4 != null ? opts.minProb4 : -Infinity;
       var minSW = opts.minSwingPotential != null ? opts.minSwingPotential : -Infinity;
+      var minBK = opts.minBreakoutContinuation != null ? opts.minBreakoutContinuation : -Infinity;
       var minRaw = opts.minRawScore != null ? opts.minRawScore : -Infinity;
       for (var i = startIdx; i <= endIdx; i++) {
         if (skip[i]) { if (onBar) onBar(i - startIdx + 1, endIdx - startIdx + 1); continue; }
@@ -698,8 +666,8 @@ window.BacktestEngine = (function () {
           if (r.entryScore >= threshold
               && (r.trendHealth == null || r.trendHealth >= minTH)
               && (r.pullbackQuality == null || r.pullbackQuality >= minPQ)
-              && (r.prob4 == null || r.prob4 >= minP4)
               && (r.swingPotential == null || r.swingPotential >= minSW)
+              && (r.breakoutContinuation == null || r.breakoutContinuation >= minBK)
               && (r.raw_score == null || r.raw_score >= minRaw)) {
             var trade = simulateTrade(candles, i, r, opts);
             if (!trade) continue;
@@ -880,14 +848,14 @@ window.BacktestEngine = (function () {
       var trades = [], scored = [], allScoredBars = [];
       var minTH = opts.minTrendHealth != null ? opts.minTrendHealth : -Infinity;
       var minPQ = opts.minPullbackQuality != null ? opts.minPullbackQuality : -Infinity;
-      var minP4 = opts.minProb4 != null ? opts.minProb4 : -Infinity;
       var minSW = opts.minSwingPotential != null ? opts.minSwingPotential : -Infinity;
+      var minBK = opts.minBreakoutContinuation != null ? opts.minBreakoutContinuation : -Infinity;
       var minRaw = opts.minRawScore != null ? opts.minRawScore : -Infinity;
       for (var i = startIdx; i <= endIdx; i++) {
         if ((i - startIdx) % step === 0) {
           var r = scoreAt(candles, i, symbol);
           if (r && r.entryScore != null) {
-            allScoredBars.push({ idx: i, entryScore: ROUND2(r.entryScore), trendHealth: ROUND2(r.trendHealth), pullbackQuality: ROUND2(r.pullbackQuality), prob4: ROUND2(r.prob4), swingPotential: ROUND2(r.swingPotential), raw_score: ROUND2(r.raw_score), modifiers: ROUND2(r.modifiers) });
+            allScoredBars.push({ idx: i, entryScore: ROUND2(r.entryScore), trendHealth: ROUND2(r.trendHealth), pullbackQuality: ROUND2(r.pullbackQuality), swingPotential: ROUND2(r.swingPotential), breakoutContinuation: ROUND2(r.breakoutContinuation), raw_score: ROUND2(r.raw_score), modifiers: ROUND2(r.modifiers) });
             var rc = Object.assign({}, r);
             var fwd = simulateTrade(candles, i, r, opts);
             if (!fwd) { if (hooks.onBar && (i - startIdx) % 25 === 0) { hooks.onBar(i - startIdx + 1, totalBars); await yieldToUI(); } continue; }
@@ -899,8 +867,8 @@ window.BacktestEngine = (function () {
             if (rc.entryScore >= threshold
                 && (rc.trendHealth == null || rc.trendHealth >= minTH)
                 && (rc.pullbackQuality == null || rc.pullbackQuality >= minPQ)
-                && (rc.prob4 == null || rc.prob4 >= minP4)
                 && (rc.swingPotential == null || rc.swingPotential >= minSW)
+                && (rc.breakoutContinuation == null || rc.breakoutContinuation >= minBK)
                 && (rc.raw_score == null || rc.raw_score >= minRaw)) {
               fwd.symbol = symbol;
               var c10 = conf10dAt(candles, i, symbol);
@@ -923,7 +891,7 @@ window.BacktestEngine = (function () {
       var currentScore = null;
       if (L >= warmup) {
         var cur = scoreAt(candles, L - 1, symbol);
-        if (cur) currentScore = { entryScore: ROUND2(cur.entryScore), classification: cur.classification || classifyScore(cur.entryScore), rawScore: cur.raw_score != null ? ROUND2(cur.raw_score) : null, trendHealth: cur.trendHealth != null ? ROUND2(cur.trendHealth) : null, pullbackQuality: cur.pullbackQuality != null ? ROUND2(cur.pullbackQuality) : null, prob4: cur.prob4 != null ? ROUND2(cur.prob4) : null, swingPotential: cur.swingPotential != null ? ROUND2(cur.swingPotential) : null, modifiers: cur.modifiers != null ? ROUND2(cur.modifiers) : null };
+        if (cur) currentScore = { entryScore: ROUND2(cur.entryScore), classification: cur.classification || classifyScore(cur.entryScore), rawScore: cur.raw_score != null ? ROUND2(cur.raw_score) : null, trendHealth: cur.trendHealth != null ? ROUND2(cur.trendHealth) : null, pullbackQuality: cur.pullbackQuality != null ? ROUND2(cur.pullbackQuality) : null, swingPotential: cur.swingPotential != null ? ROUND2(cur.swingPotential) : null, breakoutContinuation: cur.breakoutContinuation != null ? ROUND2(cur.breakoutContinuation) : null, modifiers: cur.modifiers != null ? ROUND2(cur.modifiers) : null };
       }
       return {
         symbol: symbol,
@@ -1106,15 +1074,14 @@ window.BacktestEngine = (function () {
             if (single.error) results.push({ symbol: sym, error: single.error });
             else {
               var trades = single.stats.trades || [];
-              var avgTrend = null, avgPullback = null, avgProb4 = null, avgSwing = null, avgVolFit = null, avgRegime = null, avgHoldDays = null, avgConfLog = null, avgConfEmp = null, avgEntryScore = null;
+              var avgTrend = null, avgPullback = null, avgSwing = null, avgBreakout = null, avgRegime = null, avgHoldDays = null, avgConfLog = null, avgConfEmp = null, avgEntryScore = null;
               if (trades.length > 0) {
-                var tSum = 0, pSum = 0, prSum = 0, swSum = 0, vfSum = 0, rgSum = 0, tN = 0, pN = 0, prN = 0, swN = 0, vfN = 0, rgN = 0, hSum = 0, hN = 0, clSum = 0, ceSum = 0, clN = 0, ceN = 0, esSum = 0, esN = 0;
+                var tSum = 0, pSum = 0, prSum = 0, swSum = 0, bkSum = 0, rgSum = 0, tN = 0, pN = 0, prN = 0, swN = 0, bkN = 0, rgN = 0, hSum = 0, hN = 0, clSum = 0, ceSum = 0, clN = 0, ceN = 0, esSum = 0, esN = 0;
                 for (var ti = 0; ti < trades.length; ti++) {
                   if (trades[ti].trendScore != null) { tSum += trades[ti].trendScore; tN++; }
                   if (trades[ti].pullbackScore != null) { pSum += trades[ti].pullbackScore; pN++; }
-                  if (trades[ti].probabilityScore != null) { prSum += trades[ti].probabilityScore; prN++; }
                   if (trades[ti].swingScore != null) { swSum += trades[ti].swingScore; swN++; }
-                  if (trades[ti].volatilityFitScore != null) { vfSum += trades[ti].volatilityFitScore; vfN++; }
+                  if (trades[ti].breakoutContinuationScore != null) { bkSum += trades[ti].breakoutContinuationScore; bkN++; }
                   if (trades[ti].regimeAlignmentScore != null) { rgSum += trades[ti].regimeAlignmentScore; rgN++; }
                   var hd = trades[ti].daysToTarget != null ? trades[ti].daysToTarget : holdingPeriodDays;
                   hSum += hd; hN++;
@@ -1124,16 +1091,15 @@ window.BacktestEngine = (function () {
                 }
                 avgTrend = tN > 0 ? Math.round(tSum / tN * 10) / 10 : null;
                 avgPullback = pN > 0 ? Math.round(pSum / pN * 10) / 10 : null;
-                avgProb4 = prN > 0 ? Math.round(prSum / prN * 10) / 10 : null;
                 avgSwing = swN > 0 ? Math.round(swSum / swN * 10) / 10 : null;
-                avgVolFit = vfN > 0 ? Math.round(vfSum / vfN * 10) / 10 : null;
+                avgBreakout = bkN > 0 ? Math.round(bkSum / bkN * 10) / 10 : null;
                 avgRegime = rgN > 0 ? Math.round(rgSum / rgN * 10) / 10 : null;
                 avgHoldDays = hN > 0 ? Math.round(hSum / hN * 10) / 10 : null;
                 avgConfLog = clN > 0 ? Math.round(clSum / clN * 10) / 10 : null;
                 avgConfEmp = ceN > 0 ? Math.round(ceSum / ceN * 10) / 10 : null;
                 avgEntryScore = esN > 0 ? Math.round(esSum / esN * 10) / 10 : null;
               }
-              results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, expectancyPct: single.stats.totalSignals ? single.stats.expectancyPct : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, timeoutTrades: single.stats.totalSignals ? single.stats.timeoutTrades : 0, barrierBreakdown: single.stats.totalSignals ? single.stats.barrierBreakdown : null, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, avgWinPct: single.stats.totalSignals ? single.stats.avgWinPct : null, avgLossPct: single.stats.totalSignals ? single.stats.avgLossPct : null, avgTimeoutPct: single.stats.totalSignals ? single.stats.avgTimeoutPct : null, avgTrend: avgTrend, avgPullback: avgPullback, avgProb4: avgProb4, avgSwing: avgSwing, avgVolFit: avgVolFit, avgRegime: avgRegime, avgHoldDays: avgHoldDays, avgConfLog: avgConfLog, avgConfEmp: avgConfEmp, avgEntryScore: avgEntryScore, detail: single });
+              results.push({ symbol: sym, totalSignals: single.stats.totalSignals, winRate: single.stats.totalSignals ? single.stats.winRate : null, expectancyPct: single.stats.totalSignals ? single.stats.expectancyPct : null, avgReturnPct: single.stats.totalSignals ? single.stats.avgReturnPct : null, profitFactor: single.stats.totalSignals ? single.stats.profitFactor : null, winningTrades: single.stats.totalSignals ? single.stats.winningTrades : 0, losingTrades: single.stats.totalSignals ? single.stats.losingTrades : 0, timeoutTrades: single.stats.totalSignals ? single.stats.timeoutTrades : 0, barrierBreakdown: single.stats.totalSignals ? single.stats.barrierBreakdown : null, scoreBrackets: single.stats.totalSignals ? single.stats.scoreBrackets : null, avgWinPct: single.stats.totalSignals ? single.stats.avgWinPct : null, avgLossPct: single.stats.totalSignals ? single.stats.avgLossPct : null, avgTimeoutPct: single.stats.totalSignals ? single.stats.avgTimeoutPct : null, avgTrend: avgTrend, avgPullback: avgPullback, avgSwing: avgSwing, avgRegime: avgRegime, avgBreakout: avgBreakout, avgHoldDays: avgHoldDays, avgConfLog: avgConfLog, avgConfEmp: avgConfEmp, avgEntryScore: avgEntryScore, detail: single });
             }
           } catch (e) {
             results.push({ symbol: sym, error: (e && e.message) || String(e) });
@@ -1218,9 +1184,9 @@ breakEvenWinRate: breakEvenWinRate,
 
     function exportSingleCSV(res) {
       var st = res.stats;
-      var headers = ["Symbol", "Entry Date", "Exit Date", "Entry Price", "Exit Price", "Entry Score", "10DLN", "10DEM", "Signal", "Target", "Stop Loss", "Barrier", "Hit Target", "Days", "Return %", "Max Fav %", "Max Adv %", "Trend", "Pullback", "Prob4", "Swing", "Modifiers"];
+      var headers = ["Symbol", "Entry Date", "Exit Date", "Entry Price", "Exit Price", "Entry Score", "10DLN", "10DEM", "Signal", "Target", "Stop Loss", "Barrier", "Hit Target", "Days", "Return %", "Max Fav %", "Max Adv %", "Trend", "Pullback", "Swing", "Modifiers"];
       var rows = (st && st.trades ? st.trades : []).map(function (t) {
-        return [res.symbol, t.entryDate, t.exitDate, t.entryPrice, t.exitPrice, t.entryScore, t.confLog != null ? Math.round(t.confLog * 1000) / 10 : null, t.confEmp != null ? Math.round(t.confEmp * 1000) / 10 : null, t.signal, t.targetPrice, t.stopLossPrice || "", t.barrier || "", t.hitTarget ? "YES" : "NO", t.daysToTarget || "", t.finalReturnPct, t.maxProfitPct, t.maxLossPct, t.trendScore, t.pullbackScore, t.probabilityScore, t.swingScore, t.modifiers];
+        return [res.symbol, t.entryDate, t.exitDate, t.entryPrice, t.exitPrice, t.entryScore, t.confLog != null ? Math.round(t.confLog * 1000) / 10 : null, t.confEmp != null ? Math.round(t.confEmp * 1000) / 10 : null, t.signal, t.targetPrice, t.stopLossPrice || "", t.barrier || "", t.hitTarget ? "YES" : "NO", t.daysToTarget || "", t.finalReturnPct, t.maxProfitPct, t.maxLossPct, t.trendScore, t.pullbackScore, t.swingScore, t.modifiers];
       });
       return csvRows(headers, rows);
     }
@@ -1259,7 +1225,7 @@ breakEvenWinRate: breakEvenWinRate,
      * opts:
      *   dataMap       : { symbol: candles[] }
      *   scoreThresholds : number[] (default [40, 50, 55, 60, 65, 70, 75, 80])
-     *   pillarSweep   : { trendHealth?: number[], pullbackQuality?: number[], prob4?: number[], volatilityFit?: number[], regimeAlignment?: number[] }
+     *   pillarSweep   : { trendHealth?: number[], pullbackQuality?: number[], swingPotential?: number[], breakoutContinuation?: number[], regimeAlignment?: number[] }
      *                   If set, for each threshold in scoreThresholds, also sweeps
      *                   each pillar independently while holding others at -Infinity.
      *   symbols       : string[] subset of dataMap keys
@@ -1282,11 +1248,11 @@ breakEvenWinRate: breakEvenWinRate,
 
       // ── 1. Total score threshold sweep ──
       var totalPillarSteps = pillarSweep
-        ? (pillarSweep.trendHealth || [0, 5, 10, 15, 20, 25]).length
-          + (pillarSweep.pullbackQuality || [0, 5, 10, 15, 20, 25]).length
-          + (pillarSweep.prob4 || [0, 5, 10, 15, 20, 25, 30]).length
-          + (pillarSweep.volatilityFit || [0, 2, 4, 6, 8, 10]).length
-          + (pillarSweep.regimeAlignment || [0, 2, 4, 6, 8, 10]).length
+        ? (pillarSweep.trendHealth || [0, 4, 8, 12, 16, 20, 24, 28]).length
+          + (pillarSweep.pullbackQuality || [0, 4, 8, 12, 16, 20, 24, 28]).length
+          + (pillarSweep.swingPotential || [0, 4, 8, 12, 16, 20, 24]).length
+          + (pillarSweep.breakoutContinuation || [0, 2, 4, 6, 8]).length
+          + (pillarSweep.regimeAlignment || [0, 1, 2, 3, 4, 6]).length
         : 0;
       var totalSteps = thRange.length + totalPillarSteps;
       var thResults = [];
@@ -1313,11 +1279,11 @@ breakEvenWinRate: breakEvenWinRate,
         var pillarSweepCfg = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig().pillarMax : null;
         if (!pillarSweepCfg && window.TechIndicators && window.TechIndicators.getDefaultScoreConfig) pillarSweepCfg = window.TechIndicators.getDefaultScoreConfig().pillarMax;
         var pillars = [
-          { key: 'trendHealth', optKey: 'minTrendHealth', label: 'Trend Health', max: pillarSweepCfg ? pillarSweepCfg.trendHealth : 25, values: pillarSweep.trendHealth || [0, 5, 10, 15, 20, 25] },
-          { key: 'pullbackQuality', optKey: 'minPullbackQuality', label: 'Pullback Quality', max: pillarSweepCfg ? pillarSweepCfg.pullbackQuality : 25, values: pillarSweep.pullbackQuality || [0, 5, 10, 15, 20, 25] },
-          { key: 'prob4', optKey: 'minProb4', label: 'Barrier Race', max: pillarSweepCfg ? pillarSweepCfg.prob4 : 30, values: pillarSweep.prob4 || [0, 5, 10, 15, 20, 25, 30] },
-          { key: 'volatilityFit', optKey: 'minVolatilityFit', label: 'Volatility Fit', max: pillarSweepCfg ? pillarSweepCfg.volatilityFit : 10, values: pillarSweep.volatilityFit || [0, 2, 4, 6, 8, 10] },
-          { key: 'regimeAlignment', optKey: 'minRegimeAlignment', label: 'Market/RS Alignment', max: pillarSweepCfg ? pillarSweepCfg.regimeAlignment : 10, values: pillarSweep.regimeAlignment || [0, 2, 4, 6, 8, 10] }
+          { key: 'trendHealth', optKey: 'minTrendHealth', label: 'Trend Health', max: pillarSweepCfg ? pillarSweepCfg.trendHealth : 28, values: pillarSweep.trendHealth || [0, 4, 8, 12, 16, 20, 24, 28] },
+          { key: 'pullbackQuality', optKey: 'minPullbackQuality', label: 'Pullback Quality', max: pillarSweepCfg ? pillarSweepCfg.pullbackQuality : 28, values: pillarSweep.pullbackQuality || [0, 4, 8, 12, 16, 20, 24, 28] },
+          { key: 'swingPotential', optKey: 'minSwingPotential', label: 'Swing Potential', max: pillarSweepCfg ? pillarSweepCfg.swingPotential : 24, values: pillarSweep.swingPotential || [0, 4, 8, 12, 16, 20, 24] },
+          { key: 'breakoutContinuation', optKey: 'minBreakoutContinuation', label: 'Breakout Continuation', max: pillarSweepCfg ? pillarSweepCfg.breakoutContinuation : 8, values: pillarSweep.breakoutContinuation || [0, 2, 4, 6, 8] },
+          { key: 'regimeAlignment', optKey: 'minRegimeAlignment', label: 'Market/RS Alignment', max: pillarSweepCfg ? pillarSweepCfg.regimeAlignment : 6, values: pillarSweep.regimeAlignment || [0, 1, 2, 3, 4, 6] }
         ];
         // Single engine with threshold=0 — scores are cached and reused across all pillar values
         var pillarEng = create({ scoreFn: cfg.scoreFn, targetProfitPct: targetProfitPct, stopLossPct: stopLossPct, holdingPeriodDays: holdingPeriodDays, threshold: 0, multiTFMap: cfg.multiTFMap, indexCandles: cfg.indexCandles, realisticEntry: cfg.realisticEntry, realisticExit: cfg.realisticExit, slippagePct: cfg.slippagePct, brokeragePct: cfg.brokeragePct });
@@ -1361,7 +1327,7 @@ breakEvenWinRate: breakEvenWinRate,
      * dataMap: { symbol: candles[] }
      * opts: { symbols, sampleEvery }
      *
-     * Returns for each component (trendHealth, pullbackQuality, prob4):
+     * Returns for each component (trendHealth, pullbackQuality, swingPotential):
      *   { correlation, bucketWinRates: [{min, max, signals, winRate, avgReturn}], infoValue }
      */
     async function analyzeComponentPower(dataMap, opts, hooks) {
@@ -1390,9 +1356,8 @@ breakEvenWinRate: breakEvenWinRate,
               entryScore: r.entryScore,
               trendHealth: r.trendHealth != null ? r.trendHealth : null,
               pullbackQuality: r.pullbackQuality != null ? r.pullbackQuality : null,
-              prob4: r.prob4 != null ? r.prob4 : null,
               swingPotential: r.swingPotential != null ? r.swingPotential : null,
-              volatilityFit: r.volatilityFit != null ? r.volatilityFit : null,
+              breakoutContinuation: r.breakoutContinuation != null ? r.breakoutContinuation : null,
               regimeAlignment: r.regimeAlignment != null ? r.regimeAlignment : null,
               hit: fwd.hitTarget,
               fwdReturn: fwd.finalReturnPct
@@ -1405,7 +1370,7 @@ breakEvenWinRate: breakEvenWinRate,
         }
       }
 
-      var components = ['trendHealth', 'pullbackQuality', 'prob4', 'volatilityFit', 'regimeAlignment', 'entryScore'];
+      var components = ['trendHealth', 'pullbackQuality', 'swingPotential', 'breakoutContinuation', 'regimeAlignment', 'entryScore'];
       var result = {};
 
       components.forEach(function (comp) {
@@ -1465,7 +1430,7 @@ breakEvenWinRate: breakEvenWinRate,
       });
 
       /* Compute pillar consumption stats */
-      var pillars = ['trendHealth', 'pullbackQuality', 'prob4', 'volatilityFit', 'regimeAlignment'];
+      var pillars = ['trendHealth', 'pullbackQuality', 'swingPotential', 'breakoutContinuation', 'regimeAlignment'];
       var _sc = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
       var pillarMax = _sc.pillarMax || (window.TechIndicators && window.TechIndicators.getDefaultScoreConfig ? window.TechIndicators.getDefaultScoreConfig().pillarMax : {});
       var pillarConsumption = {};
@@ -1494,13 +1459,13 @@ breakEvenWinRate: breakEvenWinRate,
 
     /**
      * sweepParameters — Multi-dimensional parameter sweep.
-     * Sweeps targetProfitPct × stopLossPct × entry-score threshold and reports
+     * Sweeps targetProfitPct × entry-score threshold and reports
      * expectancy, win rate, timeout rate, profit factor and annualized return so
-     * the best stop/target/score combination can be selected.
+     * the best target/score combination can be selected.
      *
      * opts:
      *   targetPcts    : number[]   (default [2.5, 3.0, 3.5, 4.0])
-     *   stopPcts      : number[]   (default [1.5, 2.0, 2.5])
+     *   stopPcts      : number[]   (reserved; no stop loss, default [0])
      *   scoreThresholds : number[] (default [55, 60, 65, 70])
      *   symbols       : string[] subset of dataMap keys
      *   sampleEvery   : number     (default 2)
@@ -1513,7 +1478,7 @@ breakEvenWinRate: breakEvenWinRate,
       hooks = hooks || {};
       var symbols = opts.symbols || Object.keys(dataMap || {});
       var targetPcts = opts.targetPcts || [2.5, 3.0, 3.5, 4.0];
-      var stopPcts = opts.stopPcts || [1.5, 2.0, 2.5];
+      var stopPcts = opts.stopPcts || [0];
       var thRange = opts.scoreThresholds || [55, 60, 65, 70];
       var holdingDays = opts.holdingPeriodDays != null ? opts.holdingPeriodDays : holdingPeriodDays;
       var minSignals = opts.minSignals != null ? opts.minSignals : 20;

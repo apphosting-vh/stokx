@@ -71,11 +71,11 @@ window.PatternDashboard = (function () {
      extractPattern()/calculateStats() already computed and stored per stock.
      Nothing here re-runs a backtest. ─────────────────────────────────────── */
 
-  var INS_PILLARS = [
+var INS_PILLARS = [
     ["trendHealth", "Trend Health"],
     ["pullbackQuality", "Pullback Quality"],
-    ["prob4", "Barrier Race"],
-    ["volatilityFit", "Volatility Fit"],
+    ["swingPotential", "Swing Potential"],
+    ["breakoutContinuation", "Breakout Continuation"],
     ["regimeAlignment", "Market/RS Alignment"]
   ];
   var INS_BRACKETS = ["STRONG_BUY", "BUY", "WATCHLIST", "NEUTRAL", "AVOID"];
@@ -593,7 +593,7 @@ window.PatternDashboard = (function () {
     // Run Batch tab state (must be at component top-level — Rules of Hooks)
     var _btConfig = useState(function () {
       var _scDef = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
-      var defaults = { targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3, holdingPeriodDays: _scDef.horizonDays || 10, threshold: 65, sampleEvery: 2, usePatternWeights: true, useMLBlend: true };
+      var defaults = { targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5, holdingPeriodDays: _scDef.horizonDays || 15, threshold: 65, sampleEvery: 2, usePatternWeights: true, useMLBlend: true };
       try {
         var saved = localStorage.getItem("stox_best_bt_config");
         if (saved) {
@@ -693,7 +693,7 @@ window.PatternDashboard = (function () {
     var resetAllConfirm = _rsAll[0], setResetAllConfirm = _rsAll[1];
     var _bulkSel = useState({});
     var bulkSel = _bulkSel[0], setBulkSel = _bulkSel[1];
-    var _bulkDeltas = useState({ trendHealth: 0, pullbackQuality: 0, prob4: 0, volatilityFit: 0, regimeAlignment: 0 });
+    var _bulkDeltas = useState({ trendHealth: 0, pullbackQuality: 0, swingPotential: 0, breakoutContinuation: 0, regimeAlignment: 0 });
     var bulkDeltas = _bulkDeltas[0], setBulkDeltas = _bulkDeltas[1];
     var _bulkConfirm = useState(false);
     var bulkConfirm = _bulkConfirm[0], setBulkConfirm = _bulkConfirm[1];
@@ -739,7 +739,7 @@ window.PatternDashboard = (function () {
             }
             var o = ov[sym] || null;
             var base = function (k) { return (lw && lw[k] != null) ? lw[k] : 0.20; };
-            var learnedRaw = { trendHealth: base("trendHealth"), pullbackQuality: base("pullbackQuality"), prob4: base("prob4"), volatilityFit: base("volatilityFit"), regimeAlignment: base("regimeAlignment") };
+            var learnedRaw = { trendHealth: base("trendHealth"), pullbackQuality: base("pullbackQuality"), swingPotential: base("swingPotential"), breakoutContinuation: base("breakoutContinuation"), regimeAlignment: base("regimeAlignment") };
             return {
               symbol: sym,
               hasPattern: !!p,
@@ -751,10 +751,10 @@ window.PatternDashboard = (function () {
               draft: o ? {
                 trendHealth: o.trendHealth != null ? o.trendHealth : learnedRaw.trendHealth,
                 pullbackQuality: o.pullbackQuality != null ? o.pullbackQuality : learnedRaw.pullbackQuality,
-                prob4: o.prob4 != null ? o.prob4 : learnedRaw.prob4,
-                volatilityFit: o.volatilityFit != null ? o.volatilityFit : learnedRaw.volatilityFit,
+                swingPotential: o.swingPotential != null ? o.swingPotential : learnedRaw.swingPotential,
+                breakoutContinuation: o.breakoutContinuation != null ? o.breakoutContinuation : learnedRaw.breakoutContinuation,
                 regimeAlignment: o.regimeAlignment != null ? o.regimeAlignment : learnedRaw.regimeAlignment
-              } : { trendHealth: learnedRaw.trendHealth, pullbackQuality: learnedRaw.pullbackQuality, prob4: learnedRaw.prob4, volatilityFit: learnedRaw.volatilityFit, regimeAlignment: learnedRaw.regimeAlignment }
+              } : { trendHealth: learnedRaw.trendHealth, pullbackQuality: learnedRaw.pullbackQuality, swingPotential: learnedRaw.swingPotential, breakoutContinuation: learnedRaw.breakoutContinuation, regimeAlignment: learnedRaw.regimeAlignment }
             };
           });
           if (!cancelled) setPatternSettings(rows);
@@ -1214,8 +1214,8 @@ window.PatternDashboard = (function () {
         React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Backtest Configuration"),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 8 } },
-            configField("Target Profit %", btConfig.targetProfitPct, function (v) { var _def = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3; setBtConfig(Object.assign({}, btConfig, { targetProfitPct: parseFloat(v) || _def })); }),
-            configField("Holding Period (days)", btConfig.holdingPeriodDays, function (v) { var _defH = (window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 10; setBtConfig(Object.assign({}, btConfig, { holdingPeriodDays: parseInt(v) || _defH })); }),
+            configField("Target Profit %", btConfig.targetProfitPct, function (v) { var _def = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5; setBtConfig(Object.assign({}, btConfig, { targetProfitPct: parseFloat(v) || _def })); }),
+            configField("Holding Period (days)", btConfig.holdingPeriodDays, function (v) { var _defH = (window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 15; setBtConfig(Object.assign({}, btConfig, { holdingPeriodDays: parseInt(v) || _defH })); }),
             configField("Threshold Score", btConfig.threshold, function (v) { setBtConfig(Object.assign({}, btConfig, { threshold: parseInt(v) || 65 })); }),
             configField("Sample Every N bars", btConfig.sampleEvery, function (v) { setBtConfig(Object.assign({}, btConfig, { sampleEvery: parseInt(v) || 2 })); })
           ),
@@ -1539,7 +1539,7 @@ window.PatternDashboard = (function () {
         );
       }
       var cal = data.cal;
-      var _tgtDef = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3;
+      var _tgtDef = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5;
       var target = (btConfig && btConfig.targetProfitPct) || _tgtDef;
       return React.createElement("div", { style: cardStyle },
         React.createElement("div", { style: labelStyle }, "1 · Calibration Reliability Curve — is your confidence honest?"),
@@ -2210,8 +2210,7 @@ window.PatternDashboard = (function () {
           await window.PatternStore.setWeightOverride(symbol, {
             trendHealth: row.draft.trendHealth,
             pullbackQuality: row.draft.pullbackQuality,
-            prob4: row.draft.prob4,
-            volatilityFit: row.draft.volatilityFit,
+            swingPotential: row.draft.swingPotential,
             regimeAlignment: row.draft.regimeAlignment
           });
           setError("Saved manual weights for " + symbol);
@@ -2235,7 +2234,7 @@ window.PatternDashboard = (function () {
             var lw = r.learned;
             return Object.assign({}, r, {
               enabled: false,
-              draft: { trendHealth: lw.trendHealth, pullbackQuality: lw.pullbackQuality, prob4: lw.prob4, volatilityFit: lw.volatilityFit, regimeAlignment: lw.regimeAlignment }
+              draft: { trendHealth: lw.trendHealth, pullbackQuality: lw.pullbackQuality, swingPotential: lw.swingPotential, breakoutContinuation: lw.breakoutContinuation, regimeAlignment: lw.regimeAlignment }
             });
           });
         });
@@ -2270,7 +2269,7 @@ window.PatternDashboard = (function () {
             var lw = r.learned;
             return Object.assign({}, r, {
               enabled: false,
-              draft: { trendHealth: lw.trendHealth, pullbackQuality: lw.pullbackQuality, prob4: lw.prob4, volatilityFit: lw.volatilityFit, regimeAlignment: lw.regimeAlignment }
+              draft: { trendHealth: lw.trendHealth, pullbackQuality: lw.pullbackQuality, swingPotential: lw.swingPotential, breakoutContinuation: lw.breakoutContinuation, regimeAlignment: lw.regimeAlignment }
             });
           });
         });
@@ -2284,7 +2283,7 @@ window.PatternDashboard = (function () {
     /* ── Bulk adjust: apply uniform pillar deltas to selected stocks ────── */
 
     function blendW(lw, b) {
-      var P = ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"];
+      var P = ["trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"];
       var out = {};
       P.forEach(function (k) { out[k] = Math.round((b * (lw[k] != null ? lw[k] : 0.20) + (1 - b) * 0.20) * 1000) / 1000; });
       return out;
@@ -2334,7 +2333,7 @@ window.PatternDashboard = (function () {
         setTimeout(function () { setError(null); }, 3000);
         return;
       }
-      var P = ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"];
+      var P = ["trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"];
       var hasAny = P.some(function (k) { return (bulkDeltas[k] || 0) !== 0; });
       if (!hasAny) {
         setError("Set at least one pillar delta (%) before applying");
@@ -2402,10 +2401,9 @@ window.PatternDashboard = (function () {
       }
       var pillars = [
         ["trendHealth", "Trend Health"],
-        ["pullbackQuality", "Pullback"],
-        ["prob4", "Barrier Race"],
-        ["volatilityFit", "Volatility Fit"],
-        ["regimeAlignment", "Mkt/RS"]
+            ["pullbackQuality", "Pullback"],
+            ["swingPotential", "Swing Potential"],
+            ["regimeAlignment", "Mkt/RS"]
       ];
       var query = patternSearch.trim().toUpperCase();
       var rows = patternSettings.filter(function (r) {
@@ -2415,7 +2413,7 @@ window.PatternDashboard = (function () {
         React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Pattern Settings"),
           React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 } },
-            "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Overrides always win over the blend and start from the raw learned profile (not the blended values). Bulk adjust: tick checkboxes, set per-pillar Δ% (e.g. +10 Trend, -10 Barrier), Apply to Selected — deltas are clamped 5-95% and renormalized to 100%. The Learned-weight blend slider mixes learned weights with calculated 16.7% for non-overridden stocks only. Overrides apply to all pattern-adjusted scoring and travel with backups."
+            "Per-stock pillar weights drive the pattern bonus/penalty on entry scores. \"Learned\" = from each stock's batch backtest (component power). Toggle Override, slide the weights (0-100%), Save. Overrides always win over the blend and start from the raw learned profile (not the blended values). Bulk adjust: tick checkboxes, set per-pillar Δ% (e.g. +10 Trend, -10 Swing), Apply to Selected — deltas are clamped 5-95% and renormalized to 100%. The Learned-weight blend slider mixes learned weights with calculated 25% for non-overridden stocks only. Overrides apply to all pattern-adjusted scoring and travel with backups."
           ),
           React.createElement("div", { style: { marginTop: 10 } },
             React.createElement("div", { style: { display: "flex", gap: 16, marginBottom: 10, padding: "8px 12px", background: "var(--bg2)", borderRadius: 6, border: "1px solid var(--border)" } },
@@ -2458,7 +2456,7 @@ window.PatternDashboard = (function () {
               style: { padding: "4px 10px", borderRadius: 5, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: Object.keys(bulkSel).length === 0 ? "not-allowed" : "pointer", fontSize: 11, opacity: Object.keys(bulkSel).length === 0 ? 0.5 : 1 }
             }, "Clear"),
             React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } }, "Δ%:"),
-            [["trendHealth", "Trend"], ["pullbackQuality", "Pullback"], ["prob4", "Barrier"], ["volatilityFit", "VolFit"], ["regimeAlignment", "Mkt/RS"]].map(function (bk) {
+            [["trendHealth", "Trend"], ["pullbackQuality", "Pullback"], ["swingPotential", "Swing"], ["breakoutContinuation", "Brkout"], ["regimeAlignment", "Mkt/RS"]].map(function (bk) {
               return React.createElement("label", { key: bk[0], style: { fontSize: 11, display: "flex", alignItems: "center", gap: 4, color: "var(--text3)" } },
                 bk[1],
                 React.createElement("input", {
@@ -2495,7 +2493,7 @@ window.PatternDashboard = (function () {
               style: { padding: "4px 10px", borderRadius: 5, background: "var(--bg3, #f3f4f6)", border: "1px solid var(--border)", cursor: "pointer", fontSize: 11 }
             }, "50/50"),
             React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } },
-              "Left = every pillar counted equally (16.7% each); right = each stock's backtest-learned profile. Overrides are unaffected."
+              "Left = every pillar counted equally (25% each); right = each stock's backtest-learned profile. Overrides are unaffected."
             )
           )
         ),
@@ -2516,13 +2514,13 @@ window.PatternDashboard = (function () {
                     }),
                     React.createElement("span", { style: { fontWeight: 700, fontSize: 13 } }, r.symbol),
                     React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } },
-                      r.hasPattern ? ("WR " + wr + " · " + r.trades + " trades · " + age) : "no pattern yet — default 16.7% each"
+                      r.hasPattern ? ("WR " + wr + " · " + r.trades + " trades · " + age) : "no pattern yet — default 20% each"
                     ),
                     React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontFamily: "monospace" } },
                       (function () {
-                        var P = ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"];
+                        var P = ["trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"];
                         // Always show the RAW learned profile so a low blend can
-                        // never mask it (blend 0% previously rendered 16.7% for
+                        // never mask it (blend 0% previously rendered 20% for
                         // every pillar and looked like learned was lost).
                         var raw = P.map(function (k) { return Math.round((r.learned[k] != null ? r.learned[k] : 0.20) * 100); }).join("/") + "%";
                         if (patternBlend >= 1) return "learned: " + raw;
@@ -3165,7 +3163,7 @@ window.PatternDashboard = (function () {
                 ema_slope: 0,
                 adx: ip.trendHealth && ip.trendHealth.correlation != null ? 20 + ip.trendHealth.correlation * 30 : 25,
                 entry_score: ruleScore != null ? ruleScore : 0.5,
-                trendHealth: 0, pullbackQuality: 0, prob4: 0, volatilityFit: 0, regimeAlignment: 0
+                trendHealth: 0, pullbackQuality: 0, swingPotential: 0, regimeAlignment: 0
               };
               var pred = window.MLTrainer.predictSync(features, mlCachedModel);
               if (pred && pred.winProbability != null) mlProb = pred.winProbability;

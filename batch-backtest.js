@@ -14,7 +14,7 @@
      await PatternStore.init();
 
      // Option A: Run using offline data (automatic)
-     var runner = BatchBacktest.create({ targetProfitPct: 3, holdingPeriodDays: 10 });
+     var runner = BatchBacktest.create({ targetProfitPct: 3.5, holdingPeriodDays: 15 });
      var result = await runner.runBatch(symbols, {
        onProgress: (current, total, symbol, phase) => { ... }
      });
@@ -91,7 +91,7 @@ window.BatchBacktest = (function () {
           try {
             var mtf = TI.computeMultiTFEntryScore(tfResults, idxSlice, null);
             if (mtf && mtf.multiTF_score != null) {
-              return { entryScore: mtf.multiTF_score, raw_score: mtf.raw_score, classification: mtf.classification, trendHealth: mtf.trendHealth, pullbackQuality: mtf.pullbackQuality, prob4: mtf.prob4, swingPotential: mtf.swingPotential, volatilityFit: mtf.volatilityFit, regimeAlignment: mtf.regimeAlignment, modifiers: mtf.modifiers };
+              return { entryScore: mtf.multiTF_score, raw_score: mtf.raw_score, classification: mtf.classification, trendHealth: mtf.trendHealth, pullbackQuality: mtf.pullbackQuality, swingPotential: mtf.swingPotential, breakoutContinuation: mtf.breakoutContinuation, regimeAlignment: mtf.regimeAlignment, modifiers: mtf.modifiers };
             }
           } catch (e) { console.warn("Multi-TF scoring failed:", e.message); }
         }
@@ -101,7 +101,7 @@ window.BatchBacktest = (function () {
       var res;
       try { res = TI.computeEntryScore(candles.slice(0, idx + 1), idxSlice && idxSlice.length ? idxSlice : null); } catch (e) { return null; }
       if (!res || res.entry_score == null) return null;
-      return { entryScore: res.entry_score, raw_score: res.raw_score, classification: res.classification, trendHealth: res.trendHealth, pullbackQuality: res.pullbackQuality, prob4: res.prob4, swingPotential: res.swingPotential, volatilityFit: res.volatilityFit, regimeAlignment: res.regimeAlignment, modifiers: res.modifiers };
+      return { entryScore: res.entry_score, raw_score: res.raw_score, classification: res.classification, trendHealth: res.trendHealth, pullbackQuality: res.pullbackQuality, swingPotential: res.swingPotential, breakoutContinuation: res.breakoutContinuation, regimeAlignment: res.regimeAlignment, modifiers: res.modifiers };
     };
   }
 
@@ -248,9 +248,8 @@ window.BatchBacktest = (function () {
           entryScore: sb.adjustedScore,
           trendHealth: sb.trendHealth,
           pullbackQuality: sb.pullbackQuality,
-          prob4: sb.prob4,
           swingPotential: sb.swingPotential,
-          volatilityFit: sb.volatilityFit,
+          breakoutContinuation: sb.breakoutContinuation,
           regimeAlignment: sb.regimeAlignment,
           raw_score: sb.raw_score,
           modifiers: sb.modifiers,
@@ -337,11 +336,14 @@ window.BatchBacktest = (function () {
       var smallSample = !(pattern.tradeStats && pattern.tradeStats.totalTrades >= MIN_SAMPLE_TRADES);
 
       var weights = pattern.indicatorWeights || null;
-      var pillarMax = { trendHealth: 25, pullbackQuality: 25, prob4: 30, swingPotential: 0, volatilityFit: 10, regimeAlignment: 10 };
+      var pillarMax = { trendHealth: 28, pullbackQuality: 28, swingPotential: 12, breakoutContinuation: 22, regimeAlignment: 4 }; /* fallback mirrors mod16 lock-in @2026-09-12 */
       if (window.TechIndicators && window.TechIndicators.getScoreConfig) {
         var sc = window.TechIndicators.getScoreConfig();
         if (sc && sc.pillarMax) pillarMax = sc.pillarMax;
       }
+      var totalScoreScale = 0;
+      ["trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"].forEach(function (p) { totalScoreScale += pillarMax[p] || 0; });
+      if (!(totalScoreScale > 0)) totalScoreScale = 100;
       /* Snapshot the normalization scale actually used for this run; warn
          when it drifted from the scale recorded by earlier runs (a silent
          rescale here changes which historical bars clear any threshold). */
@@ -355,8 +357,8 @@ window.BatchBacktest = (function () {
       var uniformW = true;
       if (weights && usePatternWeights) {
         var _firstW = null;
-        ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (p) {
-          var w = weights[p] != null ? weights[p] : 0.20;
+        ["trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"].forEach(function (p) {
+          var w = weights[p] != null ? weights[p] : 0.25;
           if (_firstW == null) _firstW = w;
           else if (Math.abs(w - _firstW) > 0.001) uniformW = false;
         });
@@ -385,9 +387,8 @@ window.BatchBacktest = (function () {
         var pillars = {
           trendHealth: bar.trendHealth || 0,
           pullbackQuality: bar.pullbackQuality || 0,
-          prob4: bar.prob4 || 0,
           swingPotential: bar.swingPotential || 0,
-          volatilityFit: bar.volatilityFit || 0,
+          breakoutContinuation: bar.breakoutContinuation || 0,
           regimeAlignment: bar.regimeAlignment || 0
         };
 
@@ -400,16 +401,16 @@ window.BatchBacktest = (function () {
 
         if (applyReweight) {
           var totalWeighted = 0, totalWeight = 0;
-          ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (p) {
-            var w = weights[p] != null ? weights[p] : 0.20;
-            var max = pillarMax[p] || 25;
-            var normalizedPillar = _clamp(pillars[p] / max, 0, 1);
+          ["trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"].forEach(function (p) {
+            var w = weights[p] != null ? weights[p] : 0.25;
+            var max = pillarMax[p] || 24;
+            var normalizedPillar = _clamp((pillars[p] || 0) / max, 0, 1);
             totalWeighted += normalizedPillar * w;
             totalWeight += w;
           });
           if (totalWeight > 0) {
-            var reweighted = _clamp(round2((totalWeighted / totalWeight) * 100), 0, 100);
-            patternScore = _clamp(round2(BLEND_ALPHA * bar.entryScore + (1 - BLEND_ALPHA) * reweighted), 0, 100);
+            var reweighted = _clamp(round2((totalWeighted / totalWeight) * totalScoreScale), 0, totalScoreScale);
+            patternScore = _clamp(round2(BLEND_ALPHA * bar.entryScore + (1 - BLEND_ALPHA) * reweighted), 0, totalScoreScale);
           }
         }
 
@@ -418,9 +419,8 @@ window.BatchBacktest = (function () {
           rawScore: bar.entryScore,
           trendHealth: bar.trendHealth,
           pullbackQuality: bar.pullbackQuality,
-          prob4: bar.prob4,
           swingPotential: bar.swingPotential,
-          volatilityFit: bar.volatilityFit,
+          breakoutContinuation: bar.breakoutContinuation,
           regimeAlignment: bar.regimeAlignment,
           raw_score: bar.raw_score,
           modifiers: bar.modifiers
@@ -440,8 +440,8 @@ window.BatchBacktest = (function () {
           var barScores = {
             trendHealth: bar.trendHealth != null ? bar.trendHealth : 0,
             pullbackQuality: bar.pullbackQuality != null ? bar.pullbackQuality : 0,
-            prob4: bar.prob4 != null ? bar.prob4 : 0,
-            volatilityFit: bar.volatilityFit != null ? bar.volatilityFit : 0,
+            swingPotential: bar.swingPotential != null ? bar.swingPotential : 0,
+            breakoutContinuation: bar.breakoutContinuation != null ? bar.breakoutContinuation : 0,
             regimeAlignment: bar.regimeAlignment != null ? bar.regimeAlignment : 0
           };
           var features = mlFeaturesAtBar(candles[bar.idx], bar.idx, mlCache, patternScore, { candles: candles, symbol: pattern.symbol, indexCandles: cfg.indexCandles }, barScores);
@@ -480,8 +480,8 @@ window.BatchBacktest = (function () {
   function create(cfg) {
     cfg = cfg || {};
 
-    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.0);
-    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 10);
+    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5);
+    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 15);
     var threshold = cfg.threshold != null ? cfg.threshold : 65;
     var slippagePct = cfg.slippagePct != null ? cfg.slippagePct : 0.1;
     var brokeragePct = cfg.brokeragePct != null ? cfg.brokeragePct : 0.05;
@@ -1025,13 +1025,13 @@ window.BatchBacktest = (function () {
       var stats = btResult.stats || {};
 
       // ── 1. Indicator Weights from component power ──
-      var indicatorWeights = { trendHealth: 0.20, pullbackQuality: 0.20, prob4: 0.20, volatilityFit: 0.20, regimeAlignment: 0.20 };
+      var indicatorWeights = { trendHealth: 0.20, pullbackQuality: 0.20, swingPotential: 0.20, breakoutContinuation: 0.20, regimeAlignment: 0.20 };
       var indicatorPowers = {};
 
       if (powerResult && powerResult.components) {
         var comps = powerResult.components;
         var ivs = [];
-        ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (c) {
+        ["trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"].forEach(function (c) {
           if (comps[c] && !comps[c].error) {
             var iv = Math.abs(comps[c].infoValue || 0);
             indicatorPowers[c] = {
@@ -1044,7 +1044,7 @@ window.BatchBacktest = (function () {
         });
 
         // Relative min-max spread on infoValue (NOT a floor on raw magnitude —
-        // a floor of 0.1 collapsed typical sub-0.1 infoValues to equal 16.7%).
+        // a floor of 0.1 collapsed typical sub-0.1 infoValues to equal 25%).
         // Valid components get 0.1-0.9 of the budget, errored ones a fair share.
         if (ivs.length > 0) {
           var minIV = Math.min.apply(null, ivs.map(function (x) { return x.iv; }));
@@ -1058,7 +1058,7 @@ window.BatchBacktest = (function () {
           var validScale = validSum > 0 ? validBudget / validSum : 0;
           var validKeys = {};
           valid.forEach(function (x) { validKeys[x.c] = true; indicatorWeights[x.c] = round3(x.w * validScale); });
-          ["trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment"].forEach(function (c) {
+          ["trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"].forEach(function (c) {
             // Errored pillars: overwrite the 0.20 default with their 0.1 fair
             // share so the total always sums to 1.0 (the pre-initialized
             // default would otherwise leave errored pillars at 0.20, pushing
@@ -1213,7 +1213,7 @@ window.BatchBacktest = (function () {
       return {
         symbol: symbol,
         backtestDate: Date.now(),
-        backtestVersion: window.__STOX_APP_VERSION || "4.2.0",
+        backtestVersion: window.__STOX_APP_VERSION || "4.5.14",
         indicatorWeights: indicatorWeights,
         indicatorPowers: indicatorPowers,
         calibration: calibration,
@@ -1300,8 +1300,8 @@ window.BatchBacktest = (function () {
           var tradePillars = {
             trendHealth: trade.trendScore != null ? trade.trendScore : 0,
             pullbackQuality: trade.pullbackScore != null ? trade.pullbackScore : 0,
-            prob4: trade.probabilityScore != null ? trade.probabilityScore : 0,
-            volatilityFit: trade.volatilityFitScore != null ? trade.volatilityFitScore : 0,
+            swingPotential: trade.swingScore != null ? trade.swingScore : 0,
+            breakoutContinuation: trade.breakoutContinuationScore != null ? trade.breakoutContinuationScore : 0,
             regimeAlignment: trade.regimeAlignmentScore != null ? trade.regimeAlignmentScore : 0
           };
 
@@ -1317,7 +1317,7 @@ window.BatchBacktest = (function () {
           var finalFeats = Object.assign({}, baseFeats, expanded);
           // Ensure all FEATURE_KEYS present with defaults if null
           var ALL_KEYS = ["rsi", "atr_pct", "bb_position", "volume_ratio", "macd_hist", "ema_slope", "adx", "entry_score",
-            "trendHealth", "pullbackQuality", "prob4", "volatilityFit", "regimeAlignment",
+            "trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment",
             "trend_structure", "price_vs_sma200", "ema20_50_cross", "volatility_regime", "mfi", "vol_price_trend",
             "bull_bear", "market_momentum", "cap_tier", "rsi_regime", "obv_trend", "supertrend_dir"];
           ALL_KEYS.forEach(function (k) { if (finalFeats[k] == null) finalFeats[k] = (k === "entry_score") ? (trade.entryScore || 0) : 0; });
