@@ -9702,8 +9702,8 @@ function StockScreener(props) {
     return sortDir === "desc" ? React.createElement("span", { style: { display: "inline-flex", verticalAlign: "middle" } }, Ico.triangleDown(10, "var(--accent)")) : React.createElement("span", { style: { display: "inline-flex", verticalAlign: "middle" } }, Ico.triangleUp(10, "var(--accent)"));
   };
 
-  var thStyle = { padding: "8px 10px", fontSize: 10, fontWeight: 700, color: "var(--text5)", textAlign: "left", borderBottom: "2px solid var(--border)", cursor: "pointer", whiteSpace: "nowrap", userSelect: "none" };
-  var tdStyle = { padding: "7px 10px", fontSize: 11, borderBottom: "1px solid var(--border)" };
+  var thStyle = { padding: "7px 5px", fontSize: 9, fontWeight: 700, color: "var(--text5)", textAlign: "left", borderBottom: "2px solid var(--border)", cursor: "pointer", whiteSpace: "nowrap", userSelect: "none" };
+  var tdStyle = { padding: "6px 5px", fontSize: 10.5, borderBottom: "1px solid var(--border)" };
 
   return React.createElement("div", { style: { marginTop: 4 } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 } },
@@ -9862,7 +9862,7 @@ function StockScreener(props) {
         })
       ),
       React.createElement("div", { style: { overflowX: "auto", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg3)" } },
-        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1640 } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1420 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
               ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "yearChg", "avgTrend", "avgPullback", "avgSwing", "avgBreakout", "avgRegimeAlignment", "modifiers", "finalScore", "weekly", "daily", "hourly", "conf10dLog", "conf10dEmp", "actions"].map(function(k) {
@@ -9885,37 +9885,37 @@ function StockScreener(props) {
                   React.createElement("input", { type: "checkbox", checked: !!selected[r.s.t], onChange: function() { toggleSelect(r.s.t); }, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle) },
-                  React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4 } },
+                  React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 2 } },
                     React.createElement("button", {
                       onClick: function(e) { e.stopPropagation(); toggleBookmark(r.s.t); },
                       title: bookmarks[r.s.t] ? "Remove bookmark" : "Bookmark this stock",
                       style: {
-                        width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center",
                         border: "none", background: "transparent", cursor: "pointer", padding: 0, flexShrink: 0,
                         color: bookmarks[r.s.t] ? "#fbbf24" : "var(--text6)", opacity: bookmarks[r.s.t] ? 1 : 0.35,
                         transition: "all .15s"
                       }
-                    }, Icons.star(14, !!bookmarks[r.s.t])),
+                    }, Icons.star(12, !!bookmarks[r.s.t])),
                     React.createElement("button", {
                       onClick: function(e) { e.stopPropagation(); toggleUnicorn(r.s.t); },
                       title: unicorns[r.s.t] ? "Remove unicorn" : "Mark as unicorn stock",
                       style: {
-                        width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        width: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center",
                         border: "none", background: "transparent", cursor: "pointer", padding: 0, flexShrink: 0,
                         color: unicorns[r.s.t] ? "#166534" : "var(--text6)", opacity: unicorns[r.s.t] ? 1 : 0.35,
                         transition: "all .15s"
                       }
-                    }, Icons.unicorn(14, !!unicorns[r.s.t])),
+                    }, Icons.unicorn(12, !!unicorns[r.s.t])),
                     React.createElement("button", {
                       onClick: function(e) { e.stopPropagation(); if (onOpenStock) onOpenStock(r.s.t.replace(".NS", "")); },
                       title: "Open in Single Stock Analysis",
-                      style: { border: "none", background: "transparent", cursor: "pointer", padding: 0, fontWeight: 700, fontSize: 11, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap", textAlign: "left" }
+                      style: { border: "none", background: "transparent", cursor: "pointer", padding: 0, fontWeight: 700, fontSize: 10, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap", textAlign: "left" }
                     }, r.s.t.replace(".NS", ""))
                   )
                 ),
-                React.createElement("td", { style: Object.assign({}, tdStyle, { color: "var(--text4)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }, r.s.n),
+                React.createElement("td", { style: Object.assign({}, tdStyle, { color: "var(--text4)", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10 }) }, r.s.n),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontSize: 10 }) },
-                  r.s.cap ? React.createElement("span", { style: { padding: "2px 7px", borderRadius: 4, background: r.s.cap === "L" ? "rgba(59,130,246,.12)" : "rgba(168,85,247,.12)", color: r.s.cap === "L" ? "#3b82f6" : "#a855f7", border: "1px solid " + (r.s.cap === "L" ? "rgba(59,130,246,.25)" : "rgba(168,85,247,.25)"), fontWeight: 700, letterSpacing: 0.3 } }, r.s.cap === "L" ? "Large" : "Mid") : "\u2014"
+                  r.s.cap ? React.createElement("span", { style: { padding: "1px 4px", borderRadius: 3, background: r.s.cap === "L" ? "rgba(59,130,246,.12)" : "rgba(168,85,247,.12)", color: r.s.cap === "L" ? "#3b82f6" : "#a855f7", border: "1px solid " + (r.s.cap === "L" ? "rgba(59,130,246,.25)" : "rgba(168,85,247,.25)"), fontWeight: 700, fontSize: 9, letterSpacing: 0.3 } }, r.s.cap === "L" ? "Large" : "Mid") : "\u2014"
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, color: "var(--text3)", fontFamily: "var(--font-heading)" }) }, "\u20b9" + Number(Math.round(r.lc)).toLocaleString("en-IN")),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.todayChg != null ? (r.todayChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.todayChg != null ? (r.todayChg >= 0 ? "+" : "") + Number(r.todayChg).toFixed(2) + "%" : "--"),
@@ -9950,9 +9950,9 @@ function StockScreener(props) {
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) }, renderModifierCell(r.result)),
                 React.createElement("td", { style: tdStyle },
-                  React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 6 } },
-                    React.createElement("span", { style: { fontSize: 13, fontWeight: 900, color: d.color, fontFamily: "var(--font-heading)" } }, r.result.finalScore),
-                    React.createElement("span", { style: { fontSize: 9, fontWeight: 700, color: d.color, padding: "2px 6px", borderRadius: 4, background: d.color + "18" } }, d.label),
+                  React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 4 } },
+                    React.createElement("span", { style: { fontSize: 12, fontWeight: 900, color: d.color, fontFamily: "var(--font-heading)" } }, r.result.finalScore),
+                    React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: d.color, padding: "1px 4px", borderRadius: 3, background: d.color + "18" } }, d.label),
                     r.patMeta && r.patMeta.applied
                       ? React.createElement("span", {
                           title: patMetaTooltip(r.patMeta),
@@ -9967,21 +9967,21 @@ function StockScreener(props) {
                 React.createElement("td", { style: tdStyle }, r.result.hourly ? React.createElement("span", { style: { fontWeight: 700, color: r.result.hourly.decision.color } }, r.result.hourly.total) : "\u2014"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
                    r.conf10dLog != null
-                    ? React.createElement("span", { title: ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + "-Day Confidence \u2014 Lognormal (" + Number(r.conf10dLog).toFixed(1) + "/100)", style: { fontWeight: 700, fontFamily: "var(--font-mono)", color: r.conf10dLog >= 70 ? "#16a34a" : r.conf10dLog >= 40 ? "#d97706" : "#dc2626", fontSize: 11 } }, Number(r.conf10dLog).toFixed(0))
+                    ? React.createElement("span", { title: ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + "-Day Confidence \u2014 Lognormal (" + Number(r.conf10dLog).toFixed(1) + "/100)", style: { fontWeight: 700, fontFamily: "var(--font-mono)", color: r.conf10dLog >= 70 ? "#16a34a" : r.conf10dLog >= 40 ? "#d97706" : "#dc2626", fontSize: 10 } }, Number(r.conf10dLog).toFixed(0))
                     : React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "\u2014")
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
                    r.conf10dEmp != null
-                    ? React.createElement("span", { title: ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + "-Day Confidence \u2014 Empirical (" + Number(r.conf10dEmp).toFixed(1) + "/100)", style: { fontWeight: 700, fontFamily: "var(--font-mono)", color: r.conf10dEmp >= 70 ? "#16a34a" : r.conf10dEmp >= 40 ? "#d97706" : "#dc2626", fontSize: 11 } }, Number(r.conf10dEmp).toFixed(0))
+                    ? React.createElement("span", { title: ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + "-Day Confidence \u2014 Empirical (" + Number(r.conf10dEmp).toFixed(1) + "/100)", style: { fontWeight: 700, fontFamily: "var(--font-mono)", color: r.conf10dEmp >= 70 ? "#16a34a" : r.conf10dEmp >= 40 ? "#d97706" : "#dc2626", fontSize: 10 } }, Number(r.conf10dEmp).toFixed(0))
                     : React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "\u2014")
                 ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { whiteSpace: "nowrap" }) },
-                  React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+                  React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 4 } },
                     React.createElement("button", {
                       onClick: function() { refreshStock(r.s); }, disabled: !!refreshingMap[r.s.t],
-                      style: { width: 24, height: 24, borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg4)", cursor: refreshingMap[r.s.t] ? "wait" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, padding: 0, color: "var(--text5)", flexShrink: 0 }
-                    }, refreshingMap[r.s.t] ? React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, Ico.refresh(14)) : Ico.refresh(14)),
-                    React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, timestamps[r.s.t] ? new Date(timestamps[r.s.t]).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "\u2014")
+                      style: { width: 22, height: 22, borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg4)", cursor: refreshingMap[r.s.t] ? "wait" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, padding: 0, color: "var(--text5)", flexShrink: 0 }
+                    }, refreshingMap[r.s.t] ? React.createElement("span", { style: { display: "inline-block", animation: "screener-spin .8s linear infinite" } }, Ico.refresh(12)) : Ico.refresh(12)),
+                    React.createElement("span", { style: { fontSize: 9, color: "var(--text6)" } }, timestamps[r.s.t] ? new Date(timestamps[r.s.t]).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "\u2014")
                   )
                 )
               );
