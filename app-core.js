@@ -5741,8 +5741,8 @@ const ConfidenceTracker = () => {
             var currentPrice = prices[tr.ticker] || 0;
             var pctChange = rowPct(tr);
             var pctColor = pctChange === null ? "var(--text6)" : pctChange >= 0 ? "#22c55e" : "#ef4444";
-            var esColor = "var(--text6)";
-            if (tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision]) esColor = SCREENER_DECISION_MAP[tr.entryDecision].color;
+            var _rl = tr.entryScore != null ? relabelDecision(tr.entryScore, tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision] ? { label: tr.entryDecision, color: SCREENER_DECISION_MAP[tr.entryDecision].color } : null) : null;
+            var esColor = _rl ? _rl.color : "var(--text6)";
             var rowBg = "rgba(220, 170, 190, 0.10)";
             return React.createElement("tr", { key: tr.id, style: { borderBottom: "1px solid var(--border)", background: selected[tr.id] ? "rgba(6,182,212,.12)" : rowBg } },
               React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", width: 36 }) },
@@ -5756,15 +5756,16 @@ const ConfidenceTracker = () => {
                 tr.entryScore != null
                   ? React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 4 } },
                       React.createElement("span", { style: { fontSize: 12, fontWeight: 900, color: esColor, fontFamily: "var(--font-heading)" } }, tr.entryScore),
-                      tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision]
-                        ? React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: esColor, padding: "1px 5px", borderRadius: 3, background: esColor + "18" } }, tr.entryDecision.replace("_", " "))
+                      _rl
+                        ? React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: esColor, padding: "1px 5px", borderRadius: 3, background: esColor + "18" } }, _rl.label.replace("_", " "))
                         : null,
                       tr.patMeta && tr.patMeta.applied
                         ? React.createElement("span", {
                             title: patMetaTooltip(tr.patMeta),
                             style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: tr.patMeta.delta > 0 ? "#16a34a22" : tr.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: tr.patMeta.delta > 0 ? "#16a34a" : tr.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (tr.patMeta.delta > 0 ? "#16a34a44" : tr.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
                           }, "P" + (tr.patMeta.delta > 0 ? "+" + tr.patMeta.delta : tr.patMeta.delta < 0 ? tr.patMeta.delta : ""))
-                        : null
+                        : null,
+                      mlBadge(tr.patMeta)
                     )
                   : "\u2014"
               ),
@@ -6166,8 +6167,8 @@ const WatchlistTracker = () => {
             var currentPrice = prices[tr.ticker] || 0;
             var pctChange = rowPct(tr);
             var pctColor = pctChange === null ? "var(--text6)" : pctChange >= 0 ? "#22c55e" : "#ef4444";
-            var esColor = "var(--text6)";
-            if (tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision]) esColor = SCREENER_DECISION_MAP[tr.entryDecision].color;
+            var _rl = tr.entryScore != null ? relabelDecision(tr.entryScore, tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision] ? { label: tr.entryDecision, color: SCREENER_DECISION_MAP[tr.entryDecision].color } : null) : null;
+            var esColor = _rl ? _rl.color : "var(--text6)";
             var rowBg = "rgba(251, 191, 36, 0.06)";
             return React.createElement("tr", { key: tr.id, style: { borderBottom: "1px solid var(--border)", background: selected[tr.id] ? "rgba(251,191,36,.12)" : rowBg } },
               React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", width: 36 }) },
@@ -6179,15 +6180,16 @@ const WatchlistTracker = () => {
                 tr.entryScore != null
                   ? React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 4 } },
                       React.createElement("span", { style: { fontSize: 12, fontWeight: 900, color: esColor, fontFamily: "var(--font-heading)" } }, tr.entryScore),
-                      tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision]
-                        ? React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: esColor, padding: "1px 5px", borderRadius: 3, background: esColor + "18" } }, tr.entryDecision.replace("_", " "))
+                      _rl
+                        ? React.createElement("span", { style: { fontSize: 8, fontWeight: 700, color: esColor, padding: "1px 5px", borderRadius: 3, background: esColor + "18" } }, _rl.label.replace("_", " "))
                         : null,
                       tr.patMeta && tr.patMeta.applied
                         ? React.createElement("span", {
                             title: patMetaTooltip(tr.patMeta),
                             style: { fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: tr.patMeta.delta > 0 ? "#16a34a22" : tr.patMeta.delta < 0 ? "#dc262622" : "#6b728022", color: tr.patMeta.delta > 0 ? "#16a34a" : tr.patMeta.delta < 0 ? "#dc2626" : "#6b7280", border: "1px solid " + (tr.patMeta.delta > 0 ? "#16a34a44" : tr.patMeta.delta < 0 ? "#dc262644" : "#6b728044") }
                           }, "P" + (tr.patMeta.delta > 0 ? "+" + tr.patMeta.delta : tr.patMeta.delta < 0 ? tr.patMeta.delta : ""))
-                        : null
+                        : null,
+                      mlBadge(tr.patMeta)
                     )
                   : "\u2014"
               ),
@@ -9535,7 +9537,7 @@ function StockScreener(props) {
           conf10dLog: sr.conf10dLog != null ? sr.conf10dLog : null,
           conf10dEmp: sr.conf10dEmp != null ? sr.conf10dEmp : null,
           entryScore: sr.result && sr.result.finalScore != null ? sr.result.finalScore : null,
-          entryDecision: sr.result && sr.result.decision ? sr.result.decision.label : null,
+          entryDecision: sr.result && sr.result.finalScore != null ? relabelDecision(sr.result.finalScore, sr.result.decision).label : null,
           patMeta: sr.patMeta || null,
           currentPrice: sr.lc || 0
         });
@@ -9567,7 +9569,7 @@ function StockScreener(props) {
         entries.unshift({
           id: Date.now() + i, ticker: tk, addedAt: new Date().toISOString(),
           entryScore: sr.result && sr.result.finalScore != null ? sr.result.finalScore : null,
-          entryDecision: sr.result && sr.result.decision ? sr.result.decision.label : null,
+          entryDecision: sr.result && sr.result.finalScore != null ? relabelDecision(sr.result.finalScore, sr.result.decision).label : null,
           patMeta: sr.patMeta || null,
           conf10dLog: sr.conf10dLog != null ? sr.conf10dLog : null,
           conf10dEmp: sr.conf10dEmp != null ? sr.conf10dEmp : null,
