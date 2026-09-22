@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.5.14";
+window.__STOX_APP_VERSION = "4.5.15";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -5813,6 +5813,8 @@ const WatchlistTracker = () => {
   const [selected, setSelected] = useState({});
   const [sortKey, setSortKey] = useState("addedAt");
   const [sortDir, setSortDir] = useState("desc");
+  const [expandedWl, setExpandedWl] = useState(null);
+  const [movement, setMovement] = useState({});
 
   useEffect(() => {
     (async () => {
@@ -5900,6 +5902,7 @@ const WatchlistTracker = () => {
       } catch (e) {}
     }
     savePrices(p);
+    setMovement({});
     try { if (window.__fsa && window.__fsa.writeNow) await window.__fsa.writeNow(); } catch (e) {}
     setRefreshing(false);
     const changes = [];
@@ -6053,6 +6056,84 @@ const WatchlistTracker = () => {
     var currentPrice = prices[tr.ticker] || 0;
     return priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100) : null;
   };
+
+  var buildMovementRows = function (tr, addDate, closes) {
+    var base = tr.priceOnAdd > 0 ? tr.priceOnAdd : 0;
+    var filtered = (closes || []).filter(function (p) { return p && p.close > 0; });
+    if (!base) {
+      var onAdd = null;
+      for (var _f = 0; _f < filtered.length; _f++) { if (filtered[_f].date === addDate) { onAdd = filtered[_f]; break; } }
+      base = onAdd ? onAdd.close : (filtered.length ? filtered[0].close : 0);
+    }
+    if (!(base > 0)) return { rows: [], base: 0 };
+    var pts = [{ date: addDate, close: base }];
+    for (var _i = 0; _i < filtered.length; _i++) {
+      var p = filtered[_i];
+      if (p.date < addDate) continue;
+      if (p.date === addDate && Math.abs(p.close - base) < 0.005) continue;
+      pts.push(p);
+    }
+    var rows = [];
+    for (var _j = 1; _j < pts.length; _j++) {
+      var prev = pts[_j - 1].close;
+      var cur = pts[_j].close;
+      if (!(prev > 0) || !(cur > 0)) continue;
+      rows.push({ day: rows.length + 1, date: pts[_j].date, close: pts[_j].close, pct: (cur - prev) / prev * 100 });
+    }
+    return { rows: rows, base: base };
+  };
+
+  var loadMovement = async function (tr, force) {
+    var cached = movement[tr.id];
+    if (!force && cached && cached.done && !cached.err && !cached.loading) return;
+    setMovement(function (prev) {
+      var next = Object.assign({}, prev);
+      next[tr.id] = { loading: true, err: null, rows: [], base: 0, live: 0, done: false };
+      return next;
+    });
+    try {
+      var d = new Date(tr.addedAt);
+      var addDate = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+      var live = prices[tr.ticker] || 0;
+      if (!live) { try { var qq = await fetchTickerPrice(tr.ticker); if (qq && qq.price > 0) live = qq.price; } catch (e) {} }
+      var closes = await fetchHistoricalPrices(tr.ticker, addDate);
+      if (!closes || !closes.length) {
+        setMovement(function (prev) {
+          var next = Object.assign({}, prev);
+          next[tr.id] = { loading: false, err: "Could not fetch price history for " + tr.ticker, rows: [], base: (tr.priceOnAdd || 0), live: live, done: true };
+          return next;
+        });
+        return;
+      }
+      var built = buildMovementRows(tr, addDate, closes);
+      built.loading = false; built.err = null; built.done = true; built.live = live;
+      setMovement(function (prev) {
+        var next = Object.assign({}, prev);
+        next[tr.id] = built;
+        return next;
+      });
+    } catch (e) {
+      setMovement(function (prev) {
+        var next = Object.assign({}, prev);
+        next[tr.id] = { loading: false, err: (e && e.message) || "Failed to load movement", rows: [], base: (tr.priceOnAdd || 0), live: (prices[tr.ticker] || 0), done: true };
+        return next;
+      });
+    }
+  };
+
+  var toggleMovement = function (tr) {
+    if (expandedWl === tr.id) { setExpandedWl(null); return; }
+    setExpandedWl(tr.id);
+    var cached = movement[tr.id];
+    if (!cached || !cached.done || cached.err) loadMovement(tr, false);
+  };
+
+  var fmtMoveDate = function (dateStr) {
+    var p = dateStr.split("-");
+    if (p.length !== 3) return dateStr;
+    var dt = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    return dt.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
   var sorted = tracked.slice().sort(function (a, b) {
     var dir = sortDir === "desc" ? -1 : 1;
     var av, bv;
@@ -6082,7 +6163,7 @@ const WatchlistTracker = () => {
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Watchlist Tracker"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } },
-          "Entry Score, Price, 10DLN & 10DEM frozen at add \u00b7 Days increments on trading days \u00b7 Current Price & % Change refresh on click"
+          "Entry Score, Price, 10DLN & 10DEM frozen at add \u00b7 Days increments on trading days \u00b7 Current Price & % Change refresh on click \u00b7 Click a stock symbol for day-wise % movement"
         )
       ),
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
@@ -6170,11 +6251,22 @@ const WatchlistTracker = () => {
             var _rl = tr.entryScore != null ? relabelDecision(tr.entryScore, tr.entryDecision && SCREENER_DECISION_MAP[tr.entryDecision] ? { label: tr.entryDecision, color: SCREENER_DECISION_MAP[tr.entryDecision].color } : null) : null;
             var esColor = _rl ? _rl.color : "var(--text6)";
             var rowBg = "rgba(251, 191, 36, 0.06)";
-            return React.createElement("tr", { key: tr.id, style: { borderBottom: "1px solid var(--border)", background: selected[tr.id] ? "rgba(251,191,36,.12)" : rowBg } },
+            var mv = expandedWl === tr.id ? movement[tr.id] : null;
+            var mvBase = mv ? mv.base : (tr.priceOnAdd || 0);
+            var mvLive = prices[tr.ticker] || (mv && mv.live) || 0;
+            var netPct = mvBase > 0 && mvLive > 0 ? (mvLive - mvBase) / mvBase * 100 : null;
+            var mainTr = React.createElement("tr", { key: tr.id, style: { borderBottom: "1px solid var(--border)", background: selected[tr.id] ? "rgba(251,191,36,.12)" : rowBg } },
               React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", width: 36 }) },
                 React.createElement("input", { type: "checkbox", checked: !!selected[tr.id], onChange: function() { toggleSelect(tr.id); }, style: { accentColor: "var(--accent)", cursor: "pointer", width: 13, height: 13 } })
               ),
-              React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap" }) }, tr.ticker),
+              React.createElement("td", {
+                style: Object.assign({}, tdStyle, { fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }),
+                onClick: function () { toggleMovement(tr); },
+                title: "View day-wise % movement since add"
+              }, React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 4 } },
+                expandedWl === tr.id ? Ico.chevronUp(10, "var(--accent)") : Ico.chevronDown(10, "var(--accent)"),
+                tr.ticker
+              )),
               React.createElement("td", { style: Object.assign({}, tdStyle, { color: "var(--text3)", whiteSpace: "nowrap" }) }, addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })),
               React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
                 tr.entryScore != null
@@ -6207,6 +6299,82 @@ const WatchlistTracker = () => {
                 }, Icons.trash(13))
               )
             );
+            var detailTr = null;
+            if (expandedWl === tr.id) {
+              var mvStyle = { padding: "6px 10px", fontSize: 11, borderBottom: "1px solid var(--border)" };
+              var mvTh = { padding: "6px 10px", textAlign: "left", fontWeight: 700, fontSize: 9, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--text5)", borderBottom: "1px solid var(--border)", background: "var(--bg3)" };
+              var mvRowCells = null;
+              var mvBody = null;
+              if (mv && mv.loading) {
+                mvBody = React.createElement("tr", null,
+                  React.createElement("td", { colSpan: 4, style: { padding: "10px 2px", fontSize: 11, color: "var(--text5)" } }, "Loading day-wise movement for " + tr.ticker + "...")
+                );
+              } else if (mv && mv.err) {
+                mvBody = React.createElement("tr", null,
+                  React.createElement("td", { colSpan: 4, style: { padding: "10px 2px", fontSize: 11, color: "#ef4444" } },
+                    React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 10 } },
+                      mv.err,
+                      React.createElement("button", {
+                        onClick: function () { loadMovement(tr, true); },
+                        className: "stx-btn",
+                        style: { fontSize: 10, padding: "4px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--accent)", cursor: "pointer" }
+                      }, "Retry")
+                    )
+                  )
+                );
+              } else if (mv && mv.rows && mv.rows.length) {
+                mvRowCells = mv.rows.map(function (mr) {
+                  var c = mr.pct >= 0 ? "#22c55e" : "#ef4444";
+                  return React.createElement("tr", { key: mr.date },
+                    React.createElement("td", { style: Object.assign({}, mvStyle, { textAlign: "center", fontWeight: 700, color: "var(--text4)" }) }, "Day " + mr.day),
+                    React.createElement("td", { style: Object.assign({}, mvStyle, { color: "var(--text3)", whiteSpace: "nowrap" }) }, fmtMoveDate(mr.date)),
+                    React.createElement("td", { style: Object.assign({}, mvStyle, { textAlign: "right", fontWeight: 700, color: c, fontFamily: "var(--font-mono)" }) }, (mr.pct >= 0 ? "+" : "") + mr.pct.toFixed(2) + "%"),
+                    React.createElement("td", { style: Object.assign({}, mvStyle, { textAlign: "right", color: "var(--text2)", fontFamily: "var(--font-mono)" }) }, INR(mr.close))
+                  );
+                });
+                mvBody = mvRowCells.length
+                  ? mvRowCells
+                  : React.createElement("tr", null,
+                      React.createElement("td", { colSpan: 4, style: { padding: "10px 2px", fontSize: 11, color: "var(--text5)" } }, "No completed trading sessions since add yet.")
+                    );
+              } else if (mv && mv.done) {
+                mvBody = React.createElement("tr", null,
+                  React.createElement("td", { colSpan: 4, style: { padding: "10px 2px", fontSize: 11, color: "var(--text5)" } }, "No price data available yet.")
+                );
+              }
+              var netColor = netPct === null ? "var(--text6)" : netPct >= 0 ? "#16a34a" : "#dc2626";
+              var netLabel = mvLive > 0 ? "Net % Change (live " + INR(mvLive) + ")" : "Net % Change";
+              detailTr = React.createElement("tr", { key: tr.id + "_mv", style: { background: "var(--bg2)" } },
+                React.createElement("td", { colSpan: 11, style: { padding: "10px 16px 14px", borderBottom: "2px solid var(--border)" } },
+                  React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 } },
+                    React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-heading)", letterSpacing: 0.5 } },
+                      tr.ticker + " \u00b7 Day-wise % Movement Since Add"
+                    ),
+                    mv && mv.done && !mv.err && React.createElement("span", { style: { fontSize: 9, color: "var(--text5)" } }, "Close-to-close daily moves \u00b7 Net uses live price")
+                  ),
+                  React.createElement("div", { style: { overflowX: "auto", maxWidth: 430 } },
+                    React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } },
+                      React.createElement("thead", null,
+                        React.createElement("tr", null,
+                          React.createElement("th", { style: mvTh }, "Days"),
+                          React.createElement("th", { style: mvTh }, "Date"),
+                          React.createElement("th", { style: Object.assign({}, mvTh, { textAlign: "right" }) }, "% Change"),
+                          React.createElement("th", { style: Object.assign({}, mvTh, { textAlign: "right" }) }, "Price")
+                        )
+                      ),
+                      React.createElement("tbody", null,
+                        mvBody,
+                        React.createElement("tr", { style: { background: "rgba(251,191,36,.08)", borderTop: "2px solid var(--border)" } },
+                          React.createElement("td", { colSpan: 2, style: Object.assign({}, mvStyle, { fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)", whiteSpace: "nowrap" }) }, netLabel),
+                          React.createElement("td", { style: Object.assign({}, mvStyle, { textAlign: "right", fontWeight: 900, color: netColor, fontFamily: "var(--font-heading)" }) }, netPct !== null ? (netPct >= 0 ? "+" : "") + netPct.toFixed(2) + "%" : "\u2014")
+                        )
+                      )
+                    )
+                  )
+                )
+              );
+            }
+            return [mainTr, detailTr];
           })
         )
       )
@@ -9101,7 +9269,7 @@ function StockScreener(props) {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "4.5.14",
+      appVersion: window.__STOX_APP_VERSION || "4.5.15",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -11539,7 +11707,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "4.5.14"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "4.5.15"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -11907,7 +12075,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "4.5.14"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "4.5.15"),
         React.createElement("p", { style: { marginTop: 4, color: "var(--text5)" } }, (function() { var _pm = __pm(); var _th = _pm.trendHealth; var _pb = _pm.pullbackQuality; var _p3 = _pm.swingPotential; var _p4 = _pm.breakoutContinuation; var _rg = _pm.regimeAlignment; var _wl = __cls().watchlist; return "Latest: Entry score rebuilt on five pillars \u2014 Trend Health(" + _th + ") + Pullback Quality(" + _pb + ") + Swing Potential(" + _p3 + ") + Breakout Continuation(" + _p4 + ") + Market/RS Alignment(" + _rg + ") \u2014 with spike/stability/reversal modifiers and the todaySpike hard gate (cap " + (_wl - 1) + ", watchlist " + _wl + "+). Blow-off/stability-collapse urgency bonuses remain on exit. No double-counted penalties."; })()),
         React.createElement("p", null, "Data: Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
