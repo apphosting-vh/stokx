@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.5.15";
+window.__STOX_APP_VERSION = "4.6.0";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -5797,6 +5797,48 @@ const ConfidenceTracker = () => {
 const LS_WL_TRACKER = "stox_watchlist_tracker";
 const LS_WL_PRICES = "stox_watchlist_tracker_prices";
 
+/* ── Watchlist target-hit tracking ──────────────────────────────────────────
+   The target is the same +N% net-change goal the Score Tuner drives
+   (forwardSim.targetPct, default 3.5%). A tracked row counts as "hit" on the
+   first session whose CLOSE put net change since Price on Add at or above the
+   target; if no close has done it but the live price has, the hit is stamped
+   with today's date. Days are the session index from Date Added, so they line
+   up with the "Day N" counter in the day-wise movement table. */
+function wlTargetPct() {
+  try {
+    var v = window.TechIndicators && window.TechIndicators.getTargetPctDisplay ? window.TechIndicators.getTargetPctDisplay() : 3.5;
+    return typeof v === "number" && isFinite(v) && v > 0 ? v : 3.5;
+  } catch (e) { return 3.5; }
+}
+function wlTodayStr() {
+  var d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function wlTargetHit(built, live, targetPct) {
+  var base = built && built.base > 0 ? built.base : 0;
+  if (!(base > 0) || !(targetPct > 0)) return null;
+  var rows = (built && built.rows) || [];
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (!(r && r.close > 0)) continue;
+    var cum = (r.close - base) / base * 100;
+    if (cum >= targetPct) return { date: r.date, days: r.day, pct: Math.round(cum * 100) / 100 };
+  }
+  var lastDate = rows.length ? rows[rows.length - 1].date : "";
+  var today = wlTodayStr();
+  if (live > 0 && (!lastDate || lastDate < today)) {
+    var livePct = (live - base) / base * 100;
+    if (livePct >= targetPct) return { date: today, days: Math.max(1, rows.length + 1), pct: Math.round(livePct * 100) / 100, live: true };
+  }
+  return null;
+}
+
+/* Secondary milestone marker in the day-wise movement table: the first session
+   whose net change since add reached ~3%. Rendered in amber so a run that
+   stalled just short of the target is still easy to spot. The target row
+   (green) always wins when both land on the same day. */
+const WL_MILESTONE_PCT = 3;
+
 const WatchlistTracker = () => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
@@ -5815,6 +5857,11 @@ const WatchlistTracker = () => {
   const [sortDir, setSortDir] = useState("desc");
   const [expandedWl, setExpandedWl] = useState(null);
   const [movement, setMovement] = useState({});
+  const targetScanRef = useRef(false);
+  const trackedRef = useRef(tracked);
+  const targetAliveRef = useRef(true);
+  trackedRef.current = tracked;
+  useEffect(() => () => { targetAliveRef.current = false; targetScanRef.current = false; }, []);
 
   useEffect(() => {
     (async () => {
@@ -6015,7 +6062,7 @@ const WatchlistTracker = () => {
   };
 
   const exportWTCsv = () => {
-    var rows = [["Stock", "Date Added", "Entry Score", "10DLN", "10DEM", "Price on Add", "Days", "Current Price", "% Change"]];
+    var rows = [["Stock", "Date Added", "Entry Score", "10DLN", "10DEM", "Price on Add", "Days", "Current Price", "% Change", "Target Hit Date", "Target Hit in Days"]];
     var now = new Date();
     tracked.forEach(function (tr) {
       var addedDate = new Date(tr.addedAt);
@@ -6027,7 +6074,9 @@ const WatchlistTracker = () => {
       var pct = tr.priceOnAdd > 0 && current > 0 ? ((current - tr.priceOnAdd) / tr.priceOnAdd * 100).toFixed(2) : "";
       var dateStr = addedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       function esc(v) { var s = String(v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
-      rows.push([esc(tr.ticker), esc(dateStr), tr.entryScore != null ? tr.entryScore : "", tr.conf10dLog != null ? tr.conf10dLog : "", tr.conf10dEmp != null ? tr.conf10dEmp : "", tr.priceOnAdd || "", days, current, pct].join(","));
+      var hitDateStr = tr.targetHitDate ? fmtMoveDate(tr.targetHitDate) : "";
+      if (tr.targetHitDate && tr.targetHitLive) hitDateStr += " (live)";
+      rows.push([esc(tr.ticker), esc(dateStr), tr.entryScore != null ? tr.entryScore : "", tr.conf10dLog != null ? tr.conf10dLog : "", tr.conf10dEmp != null ? tr.conf10dEmp : "", tr.priceOnAdd || "", days, current, pct, esc(hitDateStr), tr.targetHitDays != null ? tr.targetHitDays : ""].join(","));
     });
     var csv = rows.join("\r\n");
     var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
@@ -6043,6 +6092,7 @@ const WatchlistTracker = () => {
   };
 
   var now = new Date();
+  var targetPct = wlTargetPct();
   var tradingDays = function (addedAt) {
     var addedDate = new Date(addedAt);
     var _startMs = Date.UTC(addedDate.getFullYear(), addedDate.getMonth(), addedDate.getDate());
@@ -6083,6 +6133,18 @@ const WatchlistTracker = () => {
     return { rows: rows, base: base };
   };
 
+  var fetchMovementData = async function (tr) {
+    var d = new Date(tr.addedAt);
+    var addDate = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    var live = prices[tr.ticker] || 0;
+    if (!live) { try { var qq = await fetchTickerPrice(tr.ticker); if (qq && qq.price > 0) live = qq.price; } catch (e) {} }
+    var closes = await fetchHistoricalPrices(tr.ticker, addDate);
+    if (!closes || !closes.length) return { loading: false, err: "Could not fetch price history for " + tr.ticker, rows: [], base: (tr.priceOnAdd || 0), live: live, done: true };
+    var built = buildMovementRows(tr, addDate, closes);
+    built.loading = false; built.err = null; built.done = true; built.live = live;
+    return built;
+  };
+
   var loadMovement = async function (tr, force) {
     var cached = movement[tr.id];
     if (!force && cached && cached.done && !cached.err && !cached.loading) return;
@@ -6092,21 +6154,7 @@ const WatchlistTracker = () => {
       return next;
     });
     try {
-      var d = new Date(tr.addedAt);
-      var addDate = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-      var live = prices[tr.ticker] || 0;
-      if (!live) { try { var qq = await fetchTickerPrice(tr.ticker); if (qq && qq.price > 0) live = qq.price; } catch (e) {} }
-      var closes = await fetchHistoricalPrices(tr.ticker, addDate);
-      if (!closes || !closes.length) {
-        setMovement(function (prev) {
-          var next = Object.assign({}, prev);
-          next[tr.id] = { loading: false, err: "Could not fetch price history for " + tr.ticker, rows: [], base: (tr.priceOnAdd || 0), live: live, done: true };
-          return next;
-        });
-        return;
-      }
-      var built = buildMovementRows(tr, addDate, closes);
-      built.loading = false; built.err = null; built.done = true; built.live = live;
+      var built = await fetchMovementData(tr);
       setMovement(function (prev) {
         var next = Object.assign({}, prev);
         next[tr.id] = built;
@@ -6120,6 +6168,62 @@ const WatchlistTracker = () => {
       });
     }
   };
+
+  /* Rescan conditions: never scanned today, target changed in the Score Tuner,
+     or a live-price hit whose live price has since moved. Failures still stamp
+     targetScanDay so a bad fetch is retried tomorrow instead of in a loop. */
+  var needsTargetScan = function (r, tp, today) {
+    if (!r || r.id == null) return false;
+    if (r.targetScanDay !== today) return true;
+    if (r.targetPct !== tp) return true;
+    if (r.targetHitLive && r.targetLivePx != null) {
+      var cur = prices[r.ticker] || 0;
+      if (cur > 0 && Math.abs(cur - r.targetLivePx) > 0.005) return true;
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if (!loaded || refreshing || !tracked.length || targetScanRef.current) return;
+    var tp = wlTargetPct();
+    var today = wlTodayStr();
+    var queue = tracked.filter(function (r) { return needsTargetScan(r, tp, today); });
+    if (!queue.length) return;
+    targetScanRef.current = true;
+    (async function () {
+      for (var i = 0; i < queue.length; i++) {
+        if (!targetAliveRef.current) return;
+        var r = queue[i];
+        var stamp = { targetScanDay: today, targetPct: tp, targetHitDate: null, targetHitDays: null, targetHitPct: null, targetHitLive: false, targetLivePx: null };
+        try {
+          var built = await fetchMovementData(r);
+          var hit = wlTargetHit(built, built.live || prices[r.ticker] || 0, tp);
+          if (hit) {
+            stamp.targetHitDate = hit.date;
+            stamp.targetHitDays = hit.days;
+            stamp.targetHitPct = hit.pct;
+            stamp.targetHitLive = !!hit.live;
+            stamp.targetLivePx = hit.live ? (built.live || prices[r.ticker] || 0) : null;
+          }
+          var rid = r.id, mBuilt = built;
+          setMovement(function (prev) {
+            var next = Object.assign({}, prev);
+            next[rid] = mBuilt;
+            return next;
+          });
+        } catch (e) {}
+        var curArr = trackedRef.current;
+        var idx = -1;
+        for (var j = 0; j < curArr.length; j++) { if (curArr[j].id === r.id) { idx = j; break; } }
+        if (idx < 0) continue;
+        var arr = curArr.slice();
+        arr[idx] = Object.assign({}, arr[idx], stamp);
+        setTracked(arr);
+        dbSetSetting(LS_WL_TRACKER, arr);
+      }
+      targetScanRef.current = false;
+    })();
+  }, [loaded, tracked, prices, refreshing]);
 
   var toggleMovement = function (tr) {
     if (expandedWl === tr.id) { setExpandedWl(null); return; }
@@ -6145,6 +6249,8 @@ const WatchlistTracker = () => {
     else if (sortKey === "days") { av = tradingDays(a.addedAt); bv = tradingDays(b.addedAt); }
     else if (sortKey === "currentPrice") { av = prices[a.ticker] || 0; bv = prices[b.ticker] || 0; }
     else if (sortKey === "pct") { av = rowPct(a); bv = rowPct(b); av = av == null ? -999 : av; bv = bv == null ? -999 : bv; }
+    else if (sortKey === "targetHitDate") { av = a.targetHitDate ? new Date(a.targetHitDate + "T00:00:00").getTime() : -1e12; bv = b.targetHitDate ? new Date(b.targetHitDate + "T00:00:00").getTime() : -1e12; }
+    else if (sortKey === "targetHitDays") { av = a.targetHitDays != null ? a.targetHitDays : 1e9; bv = b.targetHitDays != null ? b.targetHitDays : 1e9; }
     else { av = 0; bv = 0; }
     return dir * (av - bv);
   });
@@ -6163,7 +6269,7 @@ const WatchlistTracker = () => {
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Watchlist Tracker"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 2 } },
-          "Entry Score, Price, 10DLN & 10DEM frozen at add \u00b7 Days increments on trading days \u00b7 Current Price & % Change refresh on click \u00b7 Click a stock symbol for day-wise % movement"
+          "Entry Score, Price, 10DLN & 10DEM frozen at add \u00b7 Days increments on trading days \u00b7 Current Price & % Change refresh on click \u00b7 Click a stock symbol for day-wise % movement \u00b7 Target Hit Date/Days show when the +" + targetPct + "% net change target was reached"
         )
       ),
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
@@ -6237,6 +6343,8 @@ const WatchlistTracker = () => {
             React.createElement("th", { style: thRight, title: "Sort by days held", onClick: function() { toggleSort("days"); } }, ["Days", arrow("days")]),
             React.createElement("th", { style: thRight, title: "Sort by current price", onClick: function() { toggleSort("currentPrice"); } }, ["Current Price", arrow("currentPrice")]),
             React.createElement("th", { style: thRight, title: "Sort by % change", onClick: function() { toggleSort("pct"); } }, ["% Change", arrow("pct")]),
+            React.createElement("th", { style: thRight, title: "First date the net change since add reached +" + targetPct + "%", onClick: function() { toggleSort("targetHitDate"); } }, ["Target Hit Date", arrow("targetHitDate")]),
+            React.createElement("th", { style: thRight, title: "Trading days from Date Added until the +" + targetPct + "% target was reached", onClick: function() { toggleSort("targetHitDays"); } }, ["Target Hit in Days", arrow("targetHitDays")]),
             React.createElement("th", { style: Object.assign({}, thStyle, { width: 40 }) })
           )
         ),
@@ -6255,6 +6363,11 @@ const WatchlistTracker = () => {
             var mvBase = mv ? mv.base : (tr.priceOnAdd || 0);
             var mvLive = prices[tr.ticker] || (mv && mv.live) || 0;
             var netPct = mvBase > 0 && mvLive > 0 ? (mvLive - mvBase) / mvBase * 100 : null;
+            var hitScanned = tr.targetScanDay != null;
+            var hitDays = tr.targetHitDays != null ? tr.targetHitDays : null;
+            var hitTitle = tr.targetHitDate
+              ? "Net change since add reached +" + targetPct + "% on " + fmtMoveDate(tr.targetHitDate) + " (" + hitDays + " trading day" + (hitDays === 1 ? "" : "s") + " after add" + (tr.targetHitLive ? ", reached on the live price today" : "") + ")"
+              : (hitScanned ? "Net change has not reached +" + targetPct + "% yet" : "Checking target hit\u2026");
             var mainTr = React.createElement("tr", { key: tr.id, style: { borderBottom: "1px solid var(--border)", background: selected[tr.id] ? "rgba(251,191,36,.12)" : rowBg } },
               React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center", width: 36 }) },
                 React.createElement("input", { type: "checkbox", checked: !!selected[tr.id], onChange: function() { toggleSelect(tr.id); }, style: { accentColor: "var(--accent)", cursor: "pointer", width: 13, height: 13 } })
@@ -6291,6 +6404,17 @@ const WatchlistTracker = () => {
               React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text4)" }) }, daysElapsed),
               React.createElement("td", { style: Object.assign({}, tdRight, { color: "var(--text2)", fontFamily: "var(--font-mono)" }) }, currentPrice > 0 ? INR(currentPrice) : (refreshing ? "..." : "\u2014")),
               React.createElement("td", { style: Object.assign({}, tdRight, { fontWeight: 700, color: pctColor, fontFamily: "var(--font-mono)" }) }, pctChange !== null ? (pctChange >= 0 ? "+" : "") + pctChange.toFixed(2) + "%" : "\u2014"),
+              React.createElement("td", { style: Object.assign({}, tdRight, { whiteSpace: "nowrap", color: tr.targetHitDate ? "#16a34a" : "var(--text6)" }), title: hitTitle },
+                tr.targetHitDate
+                  ? React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 4 } },
+                      fmtMoveDate(tr.targetHitDate),
+                      tr.targetHitLive ? React.createElement("span", { style: { fontSize: 8, fontWeight: 700, letterSpacing: 0.3, padding: "1px 4px", borderRadius: 3, background: "#16a34a22", color: "#16a34a", border: "1px solid #16a34a44" } }, "LIVE") : null
+                    )
+                  : (hitScanned ? "\u2014" : "\u2026")
+              ),
+              React.createElement("td", { style: Object.assign({}, tdRight, { fontWeight: 700, fontFamily: "var(--font-mono)", color: hitDays != null ? "#16a34a" : "var(--text6)" }), title: hitTitle },
+                hitDays != null ? hitDays : (hitScanned ? "\u2014" : "\u2026")
+              ),
               React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
                 React.createElement("button", {
                   onClick: () => deleteTracked(tr.id),
@@ -6305,6 +6429,18 @@ const WatchlistTracker = () => {
               var mvTh = { padding: "6px 10px", textAlign: "left", fontWeight: 700, fontSize: 9, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--text5)", borderBottom: "1px solid var(--border)", background: "var(--bg3)" };
               var mvRowCells = null;
               var mvBody = null;
+              var mvHitRow = null;
+              var mvMsRow = null;
+              if (mv && mv.rows && mv.rows.length && mvBase > 0) {
+                for (var _h = 0; _h < mv.rows.length; _h++) {
+                  var _cum = (mv.rows[_h].close - mvBase) / mvBase * 100;
+                  if (!mvHitRow && _cum >= targetPct) mvHitRow = mv.rows[_h];
+                  if (!mvMsRow && _cum >= WL_MILESTONE_PCT) mvMsRow = mv.rows[_h];
+                }
+              }
+              var mvBadge = function (accent) {
+                return { display: "inline-block", marginLeft: 5, fontSize: 8, fontWeight: 800, letterSpacing: 0.3, padding: "1px 4px", borderRadius: 3, background: accent + "22", color: accent, border: "1px solid " + accent + "44" };
+              };
               if (mv && mv.loading) {
                 mvBody = React.createElement("tr", null,
                   React.createElement("td", { colSpan: 4, style: { padding: "10px 2px", fontSize: 11, color: "var(--text5)" } }, "Loading day-wise movement for " + tr.ticker + "...")
@@ -6325,9 +6461,17 @@ const WatchlistTracker = () => {
               } else if (mv && mv.rows && mv.rows.length) {
                 mvRowCells = mv.rows.map(function (mr) {
                   var c = mr.pct >= 0 ? "#22c55e" : "#ef4444";
-                  return React.createElement("tr", { key: mr.date },
-                    React.createElement("td", { style: Object.assign({}, mvStyle, { textAlign: "center", fontWeight: 700, color: "var(--text4)" }) }, "Day " + mr.day),
-                    React.createElement("td", { style: Object.assign({}, mvStyle, { color: "var(--text3)", whiteSpace: "nowrap" }) }, fmtMoveDate(mr.date)),
+                  var isHit = !!(mvHitRow && mvHitRow.date === mr.date);
+                  var isMs = !!(mvMsRow && mvMsRow.date === mr.date);
+                  var isMarked = isHit || isMs;
+                  var accent = isHit ? "#16a34a" : "#eab308";
+                  return React.createElement("tr", { key: mr.date, style: isMarked ? { background: isHit ? "rgba(22,163,74,.14)" : "rgba(234,179,8,.14)", boxShadow: "inset 3px 0 0 " + accent } : null },
+                    React.createElement("td", { style: Object.assign({}, mvStyle, { textAlign: "center", fontWeight: 700, color: isMarked ? accent : "var(--text4)" }) },
+                      React.createElement("span", null, "Day " + mr.day),
+                      isHit ? React.createElement("span", { title: "First day net change since add reached +" + targetPct + "%", style: mvBadge("#16a34a") }, "TARGET") : null,
+                      (!isHit && isMs) ? React.createElement("span", { title: "First day net change since add reached +" + WL_MILESTONE_PCT + "%", style: mvBadge("#eab308") }, "+" + WL_MILESTONE_PCT + "%") : null
+                    ),
+                    React.createElement("td", { style: Object.assign({}, mvStyle, { color: isMarked ? accent : "var(--text3)", whiteSpace: "nowrap", fontWeight: isMarked ? 700 : 400 }) }, fmtMoveDate(mr.date)),
                     React.createElement("td", { style: Object.assign({}, mvStyle, { textAlign: "right", fontWeight: 700, color: c, fontFamily: "var(--font-mono)" }) }, (mr.pct >= 0 ? "+" : "") + mr.pct.toFixed(2) + "%"),
                     React.createElement("td", { style: Object.assign({}, mvStyle, { textAlign: "right", color: "var(--text2)", fontFamily: "var(--font-mono)" }) }, INR(mr.close))
                   );
@@ -6345,12 +6489,16 @@ const WatchlistTracker = () => {
               var netColor = netPct === null ? "var(--text6)" : netPct >= 0 ? "#16a34a" : "#dc2626";
               var netLabel = mvLive > 0 ? "Net % Change (live " + INR(mvLive) + ")" : "Net % Change";
               detailTr = React.createElement("tr", { key: tr.id + "_mv", style: { background: "var(--bg2)" } },
-                React.createElement("td", { colSpan: 11, style: { padding: "10px 16px 14px", borderBottom: "2px solid var(--border)" } },
+                React.createElement("td", { colSpan: 13, style: { padding: "10px 16px 14px", borderBottom: "2px solid var(--border)" } },
                   React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 } },
                     React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-heading)", letterSpacing: 0.5 } },
                       tr.ticker + " \u00b7 Day-wise % Movement Since Add"
                     ),
-                    mv && mv.done && !mv.err && React.createElement("span", { style: { fontSize: 9, color: "var(--text5)" } }, "Close-to-close daily moves \u00b7 Net uses live price")
+                    mv && mv.done && !mv.err && React.createElement("span", { style: { fontSize: 9, color: "var(--text5)" } },
+                      "Close-to-close daily moves \u00b7 Net uses live price \u00b7 Target +" + targetPct + "%",
+                      mvMsRow ? " \u00b7 +" + WL_MILESTONE_PCT + "% on " + fmtMoveDate(mvMsRow.date) + " (Day " + mvMsRow.day + ")" : " \u00b7 +" + WL_MILESTONE_PCT + "% not reached",
+                      mvHitRow ? " \u00b7 Target hit " + fmtMoveDate(mvHitRow.date) + " (Day " + mvHitRow.day + ")" : " \u00b7 Target not hit yet"
+                    )
                   ),
                   React.createElement("div", { style: { overflowX: "auto", maxWidth: 430 } },
                     React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } },
@@ -9269,7 +9417,7 @@ function StockScreener(props) {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "4.5.15",
+      appVersion: window.__STOX_APP_VERSION || "4.6.0",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -11707,7 +11855,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "4.5.15"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "4.6.0"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -12075,7 +12223,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "4.5.15"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "4.6.0"),
         React.createElement("p", { style: { marginTop: 4, color: "var(--text5)" } }, (function() { var _pm = __pm(); var _th = _pm.trendHealth; var _pb = _pm.pullbackQuality; var _p3 = _pm.swingPotential; var _p4 = _pm.breakoutContinuation; var _rg = _pm.regimeAlignment; var _wl = __cls().watchlist; return "Latest: Entry score rebuilt on five pillars \u2014 Trend Health(" + _th + ") + Pullback Quality(" + _pb + ") + Swing Potential(" + _p3 + ") + Breakout Continuation(" + _p4 + ") + Market/RS Alignment(" + _rg + ") \u2014 with spike/stability/reversal modifiers and the todaySpike hard gate (cap " + (_wl - 1) + ", watchlist " + _wl + "+). Blow-off/stability-collapse urgency bonuses remain on exit. No double-counted penalties."; })()),
         React.createElement("p", null, "Data: Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
