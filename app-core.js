@@ -1,8 +1,8 @@
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
-   ══════════════════════════════════════════════════════════════════════════ */
-window.__STOX_APP_VERSION = "4.6.0";
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+window.__STOX_APP_VERSION = "4.7.0";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -37,9 +37,9 @@ function __mod() { return __liveScoreConfig().modifiers || {}; }
 
 const { useState, useReducer, useRef, useEffect, useCallback, useMemo } = React;
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SVG ICON SYSTEM \u2014 Modern minimal icons
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const _ico = (size, color, paths, extra) => {
   const props = Object.assign({ width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: color || "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }, extra || {});
   return React.createElement("svg", props, paths.map((d, i) => {
@@ -156,9 +156,9 @@ const Ico = {
 };
 window.Ico = Ico;
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    UTILITIES
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const _inrFmt = {
   0: new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 0, maximumFractionDigits: 0 }),
   2: new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }),
@@ -170,7 +170,7 @@ const pct = (v, b) => b ? (((v - b) / b) * 100) : 0;
 const pctStr = (v, b) => b ? (((v - b) / b) * 100).toFixed(2) : "0.00";
 const round2 = (v) => Math.round((v || 0) * 100) / 100;
 
-/* ── Offline OHLCV Storage (IndexedDB) ── */
+/* â”€â”€ Offline OHLCV Storage (IndexedDB) â”€â”€ */
 const OfflineOHLCV = {
   DB_NAME: "stox_ohlcv_offline",
   STORE: "candles",
@@ -292,7 +292,7 @@ const isTradingWeekday = () => {
   return !NSE_HOLIDAYS.has(istDate.toISOString().split("T")[0]);
 };
 
-/* ── XIRR for single-buy holdings (Newton\u2013Raphson) ── */
+/* â”€â”€ XIRR for single-buy holdings (Newton\u2013Raphson) â”€â”€ */
 function xirrSingleBuy(costBasis, currentVal, buyDateStr) {
   if (!buyDateStr || costBasis <= 0 || currentVal <= 0) return null;
   const buyD = new Date(buyDateStr + "T12:00:00");
@@ -306,7 +306,7 @@ function xirrSingleBuy(costBasis, currentVal, buyDateStr) {
   return isFinite(rate) ? rate * 100 : null;
 }
 
-/* ── XIRR for multi-cashflow (Newton\u2013Raphson) ── */
+/* â”€â”€ XIRR for multi-cashflow (Newton\u2013Raphson) â”€â”€ */
 const computeXIRR = (cashflows, dates, guess = 0.1) => {
   if (!cashflows || cashflows.length < 2) return null;
   if (dates[0] === dates[dates.length - 1]) return null;
@@ -327,7 +327,7 @@ const computeXIRR = (cashflows, dates, guess = 0.1) => {
   return Math.round(r * 10000) / 100;
 };
 
-/* ── Capital gains classification (Indian tax rules) ── */
+/* â”€â”€ Capital gains classification (Indian tax rules) â”€â”€ */
 function capitalGainsInfo(buyDateStr) {
   if (!buyDateStr) return null;
   const buyD = new Date(buyDateStr + "T12:00:00");
@@ -341,7 +341,7 @@ function capitalGainsInfo(buyDateStr) {
   return { daysHeld, isLT, cgType, taxRate, daysToLT };
 }
 
-/* ── Day change calc (placeholder \u2014 uses prevClose from prices) ── */
+/* â”€â”€ Day change calc (placeholder \u2014 uses prevClose from prices) â”€â”€ */
 function dayChangeInfo(currentPrice, prevClose) {
   if (!prevClose || !currentPrice || prevClose <= 0) return null;
   const abs = currentPrice - prevClose;
@@ -349,7 +349,7 @@ function dayChangeInfo(currentPrice, prevClose) {
   return { abs, pct: pctVal };
 }
 
-/* ── Indian Financial Year key (April\u2013March) ── */
+/* â”€â”€ Indian Financial Year key (April\u2013March) â”€â”€ */
 function getFYKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00");
   const yr = d.getFullYear();
@@ -358,7 +358,7 @@ function getFYKey(dateStr) {
   return "FY" + fyStart + "-" + String(fyStart + 1).slice(-2);
 }
 
-/* ── Persist snapshots to IDB settings store ── */
+/* â”€â”€ Persist snapshots to IDB settings store â”€â”€ */
 async function persistSnapshots(soldShareSnapshots) {
   await dbPut("settings", { key: "soldShareSnapshots", value: soldShareSnapshots });
 }
@@ -380,9 +380,9 @@ async function loadSnapshots() {
   } catch { return {}; }
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    DATA LAYER \u2014 LocalStorage / IndexedDB persistence
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const DB_NAME = "stox_db";
 const DB_VER = 1;
 
@@ -461,9 +461,9 @@ async function dbDeleteSetting(key) {
   });
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PRICE FETCHER \u2014 Yahoo Finance + Stooq for Indian stocks
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const _fetchX = (url, opts = {}, ms = 5000) => {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), ms);
@@ -516,7 +516,7 @@ async function fetchMultiplePrices(tickers) {
   return results;
 }
 
-/* ── Historical daily prices fetcher (buyDate \u2192 today) ── */
+/* â”€â”€ Historical daily prices fetcher (buyDate \u2192 today) â”€â”€ */
 const fetchHistoricalPrices = async (rawTicker, fromDate) => {
   const ticker = (rawTicker || "").trim().toUpperCase();
   if (!ticker || !fromDate) return null;
@@ -567,9 +567,9 @@ const fetchHistoricalPrices = async (rawTicker, fromDate) => {
   return Promise.race([_fetch(), capTimer]);
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    MARKET INDICES FETCHER \u2014 NSE India + Stooq commodities
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const MARKET_INDEX_MAP = [
   { nseKey: "NIFTY 50", name: "Nifty 50", group: "Broad" },
   { nseKey: "NIFTY 100", name: "Nifty 100", group: "Broad" },
@@ -596,7 +596,7 @@ async function fetchMarketIndices() {
   const overallCap = new Promise(r => setTimeout(() => r(null), 18000));
 
   const _fetch = async () => {
-    /* ── NSE India API for all Indian indexes ── */
+    /* â”€â”€ NSE India API for all Indian indexes â”€â”€ */
     const nseUrl = "https://www.nseindia.com/api/allIndices";
     const nseProxies = [
       "https://young-unit-81fc.lenovotabpro99.workers.dev/?url=" + encodeURIComponent(nseUrl),
@@ -636,7 +636,7 @@ async function fetchMarketIndices() {
       }
     }
 
-    /* ── Commodities via Stooq ── */
+    /* â”€â”€ Commodities via Stooq â”€â”€ */
     const fetchStooq = async (item) => {
       const stooqUrl = "https://stooq.com/q/l/?s=" + encodeURIComponent(item.stooq) + "&f=sd2t2ohlcv&h&e=csv";
       const proxies = [
@@ -678,9 +678,9 @@ async function fetchMarketIndices() {
   return Promise.race([_fetch(), overallCap]).then(r => r || []);
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    OHLCV DATA FETCHER \u2014 for technical analysis
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const Y_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
 
 async function fetchOHLCV(ticker, timeframe) {
@@ -735,10 +735,10 @@ async function fetchOHLCV(ticker, timeframe) {
   return null;
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    TECHNICAL INDICATORS ENGINE
-   ══════════════════════════════════════════════════════════════════════════ */
-/* ── Global indicator definitions (available to all components) ── */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* â”€â”€ Global indicator definitions (available to all components) â”€â”€ */
 var ALL_INDS = [
   { name: "SMA (20)", key: "sma_20", cat: "Trend", type: "line" },
   { name: "SMA (50)", key: "sma_50", cat: "Trend", type: "line" },
@@ -812,9 +812,9 @@ window.STOX_CATEGORIES = ALL_CATS;
 
 const TechIndicators = window.TechIndicators;
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    NIFTY 50 / SENSEX REFERENCE DATA
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const INDICES = [
   { name: "NIFTY 50", ticker: "^NSEI", exchange: "NSE" },
   { name: "SENSEX", ticker: "^BSESN", exchange: "BSE" },
@@ -856,9 +856,9 @@ const SECTORS = [
   "Metal & Mining", "Real Estate", "Media", "Chemicals", "Textiles"
 ];
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    ICONS \u2014 SVG icon helpers
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const Icons = {
   home: (s = 20) => React.createElement("svg", { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" },
     React.createElement("path", { d: "M4 10.5L12 3l8 7.5V20a1 1 0 0 1-1 1h-4v-5a1 1 0 0 0-1-1h-2a1 1 0 0 0-1 1v5H5a1 1 0 0 1-1-1V10.5z" })
@@ -974,9 +974,9 @@ const Icons = {
   ),
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    TOAST SYSTEM
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 let _toastId = 0;
 let _toasts = [];
 let _setToasts = null;
@@ -1008,9 +1008,9 @@ window.addEventListener('fsa:permission-needed', function() {
   }
 });
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    THEMES & FONTS
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const THEMES = [
   { id: "violet",      name: "Violet Light",  desc: "Rich purple-violet",   dark: false, preview: ["#f8f6ff","#7c3aed","#ddd8f5","#6d28d9"] },
   { id: "indigo",      name: "Indigo Light",  desc: "Deep indigo-blue",     dark: false, preview: ["#eef2ff","#4f46e5","#c8d4f8","#4338ca"] },
@@ -1094,9 +1094,9 @@ function ToastHost() {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    COMPONENT: StatCard
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function StatCard({ label, value, sub, icon, color, className }) {
   return React.createElement("div", {
     className: "stx-card stx-statcard " + (className || ""),
@@ -1111,9 +1111,9 @@ function StatCard({ label, value, sub, icon, color, className }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    COMPONENT: SignalBadge
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const SIGNAL_COLORS = {
   bullish: { bg: "var(--profitbg)", border: "var(--profitborder)", text: "var(--profit)", label: "Bullish" },
   bearish: { bg: "var(--lossbg)", border: "var(--lossborder)", text: "var(--loss)", label: "Bearish" },
@@ -1132,9 +1132,9 @@ function SignalBadge(signal) {
   }, s.label);
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    COMPONENT: MiniSparkline
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function MiniSparkline({ data, width = 100, height = 32, color }) {
   if (!data || data.length < 2) return null;
   const min = Math.min(...data), max = Math.max(...data);
@@ -1151,9 +1151,9 @@ function MiniSparkline({ data, width = 100, height = 32, color }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    MarketTicker \u2014 live scrolling ticker for Indian indices + commodities
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const MarketTicker = React.memo(function MarketTicker() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1277,9 +1277,9 @@ const MarketTicker = React.memo(function MarketTicker() {
   );
 });
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    MARKET NEWS PANEL \u2014 RSS Feeds (ET, Moneycontrol, HinduBL)
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const RSS_FEEDS = [
   { name: "Economic Times", url: "https://economictimes.indiatimes.com/rssfeeds/13357109.cms" },
   { name: "Moneycontrol", url: "https://www.moneycontrol.com/rss/MCtopnews.xml" },
@@ -1443,9 +1443,9 @@ function MarketNewsPanel({ holdings }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Dashboard
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
   const [loading, setLoading] = useState(false);
   const [testStatus, setTestStatus] = useState(null); // null | "testing" | { ok, msg }
@@ -1528,9 +1528,9 @@ function Dashboard({ holdings, watchlist, prices, navigate, refreshPrices }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Stock Analysis
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
   const [ticker, setTicker] = useState(initialTicker || "");
 
@@ -2153,9 +2153,9 @@ function EntryScoreAnalysis({ entry, onBack }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    HOLDING VALUE HISTORY CHART
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const HoldingValueChart = ({ pts, qty, buyPrice, color, gradId }) => {
   const [hoverIdx, setHoverIdx] = React.useState(null);
   const svgRef = React.useRef(null);
@@ -2506,11 +2506,11 @@ const ExitScoreTrend = ({ ticker, buyPrice, buyDate, entryScore }) => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SESSION CONFIDENCE PANEL
    "Will this position reach the target within today's session?" 0\u2013100,
    driven by the stock's own intraday 15m tape + session mechanics.
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const SessionConfidencePanel = ({ ticker, buyPrice, buyDate, entryScore }) => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
@@ -2599,13 +2599,13 @@ const SessionConfidencePanel = ({ ticker, buyPrice, buyDate, entryScore }) => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    FORWARD CONFIDENCE PANEL (NEXT 5 DAYS)
    "Will this stock rise from its CURRENT price within the next 5 trading
    days?" 0\u2013100, stock-level (no entry position needed). Same model as the
    10-day panel \u2014 40-session hourly tape + regime drift + BS probability \u2014
    with a 5-day horizon and tighter decay on hourly momentum.
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const ForwardConfidencePanel = ({ ticker }) => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
@@ -2692,12 +2692,12 @@ const ForwardConfidencePanel = ({ ticker }) => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PREMATURE EXIT ANALYSIS PANEL
    Evaluates whether a stock that has hit +4% target still has technical
    momentum to continue higher. Shows trend strength, momentum headroom,
    volume confirmation, resistance room, and multi-TF alignment.
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const PrematureExitPanel = ({ ticker, buyPrice }) => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
@@ -2821,13 +2821,13 @@ const PrematureExitPanel = ({ ticker, buyPrice }) => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PATTERN MINING PANEL
    Scans the selected timeframe's candle data for well-established
    bullish and bearish candlestick patterns. Displays each detected
    pattern as a chip with type, name, and description.
    Rendered in Single Stock Analysis (Pulse tab).
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const PatternMiningPanel = ({ candles, timeframe }) => {
   const TI = window.TechIndicators;
 
@@ -2884,13 +2884,13 @@ const PatternMiningPanel = ({ candles, timeframe }) => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    TEN-DAY FORWARD CONFIDENCE PANEL (NEXT 10 DAYS)
    "Will THIS stock rise +4% from its CURRENT price within the next 10 trading
    days?" 0\u2013100, stock-level (no entry position needed). Driven by the stock's
    own HOURLY tape over the last ~15 sessions plus how far +4% is vs the
    stock's typical 10-day range. Rendered in Single Stock Analysis (Pulse tab).
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const TenDayConfidencePanel = ({ ticker }) => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
@@ -2994,14 +2994,14 @@ const TenDayConfidencePanel = ({ ticker }) => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    OPTIMUM ENTRY PRICE PANEL
    "At what price should I enter so that the target within the next horizon
    sessions is realistic?" Scores the stock's own 15-session entry levels
    (current, VWAP, EMA21, typical dip, swing support) and recommends the
    highest-priced limit that keeps strong odds \u2014 no chasing the day's high.
    Rendered in Single Stock Analysis (Pulse tab).
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
@@ -3133,13 +3133,13 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
 };
 
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SINGLE STOCK ANALYSIS \u2014 SNAPSHOT SUPPORT
    Captures the current chart (Daily + Hourly candles), Overall Signal,
    Entry Score, "Confidence Score \u2014 Next 10 Days", Optimum Entry Price and a
    compact daily-indicator panel into a snapshot persisted in IndexedDB and
    browsable grouped by year \u2192 month \u2192 day.
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const SS_SNAP_KEY = "stox_single_stock_snapshots";
 const SS_DAILY_BARS = 60;
 const SS_HOURLY_BARS = 120;
@@ -3214,10 +3214,10 @@ const renderMiniCandles = (data, opts) => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    HOLDING HISTORY PANEL
    Fetches daily closing prices from buyDate \u2192 today, renders chart
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const HoldingHistoryPanel = ({ h, prices }) => {
   const [histLoading, setHistLoading] = React.useState(false);
   const [histPts, setHistPts] = React.useState(null);
@@ -3304,9 +3304,9 @@ const HoldingHistoryPanel = ({ h, prices }) => {
   return null;
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SNAPSHOT CHART PANEL (for Trade History \u2014 uses saved chartPts or fetches)
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const SnapshotChartPanel = ({ sn, dispatch }) => {
   const hasChart = sn.chartPts && sn.chartPts.length >= 2;
   const canLoad = !hasChart && sn.ticker && sn.buyDate && sn.savedAt;
@@ -3355,9 +3355,9 @@ const SnapshotChartPanel = ({ sn, dispatch }) => {
   return null;
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Portfolio Management
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, refreshPrices, setSoldShareSnapshots, fetchSinglePrice }) {
   const DF = window.OHLCVFetcher;
   const TI = window.TechIndicators;
@@ -3373,9 +3373,9 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
   });
   const [exitInfo, setExitInfo] = useState({});
 
-  /* ── Golden exit + Session Confidence detector: per holding, run the exit guard
+  /* â”€â”€ Golden exit + Session Confidence detector: per holding, run the exit guard
         on daily data (surfacing the E1 up-spike bonus) and the intraday Confidence
-        Score on 15m data (how confident we are of tagging the 4% target today). ── */
+        Score on 15m data (how confident we are of tagging the 4% target today). â”€â”€ */
   useEffect(() => {
     if (!holdings || holdings.length === 0) { setExitInfo({}); return; }
     if (!DF) return;
@@ -3428,7 +3428,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
     const qty = parseFloat(form.qty);
     const buyPrice = parseFloat(form.buyPrice);
 
-    /* ── Past trade mode: log directly to Trade History snapshots, not holdings ── */
+    /* â”€â”€ Past trade mode: log directly to Trade History snapshots, not holdings â”€â”€ */
     if (mode === "past") {
       if (!form.sellDate) { showToast("Please fill date of selling"); return; }
       const sellPrice = parseFloat(form.sellPrice) || buyPrice;
@@ -3530,7 +3530,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
   const f = form; /* shorthand */
 
   return React.createElement("div", null,
-    /* ── Inline analysis view ── */
+    /* â”€â”€ Inline analysis view â”€â”€ */
     analyzingTicker && React.createElement(StockAnalysis, {
       ticker: analyzingTicker,
       prices,
@@ -3538,10 +3538,10 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       onBack: () => setAnalyzingTicker(null)
     }),
 
-    /* ── Portfolio view (hidden when analyzing) ── */
+    /* â”€â”€ Portfolio view (hidden when analyzing) â”€â”€ */
     !analyzingTicker && React.createElement(React.Fragment, null,
 
-    /* ── Header ── */
+    /* â”€â”€ Header â”€â”€ */
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "var(--accent)", letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 4 } }, "PORTFOLIO"),
@@ -3559,7 +3559,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       )
     ),
 
-    /* ── Summary stats row ── */
+    /* â”€â”€ Summary stats row â”€â”€ */
     holdings.length > 0 && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12, marginBottom: 20 } },
       React.createElement(StatCard, {
         label: "Total Invested",
@@ -3597,7 +3597,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       })
     ),
 
-    /* ── Add Share Modal ── */
+    /* â”€â”€ Add Share Modal â”€â”€ */
     showAdd && React.createElement("div", { className: "modal-bd", onClick: (e) => { if (e.target === e.currentTarget) { setShowAdd(false); resetForm(); } } },
       React.createElement("div", { className: "stx-card stx-fu", style: { maxWidth: 520, margin: "40px auto", width: "92vw" } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
@@ -3605,7 +3605,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           React.createElement("button", { onClick: () => { setShowAdd(false); resetForm(); }, style: { background: "transparent", border: "none", color: "var(--text5)", cursor: "pointer", display: "inline-flex" } }, Ico.x(20))
         ),
 
-        /* ── Mode toggle: Active holding vs Past trade ── */
+        /* â”€â”€ Mode toggle: Active holding vs Past trade â”€â”€ */
         React.createElement("div", { style: { display: "flex", borderRadius: 9, overflow: "hidden", border: "1px solid var(--border2)", marginBottom: 16 } },
           React.createElement("button", {
             onClick: () => setMode("active"),
@@ -3617,7 +3617,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           }, Icons.clock(12), " Past Trade (Sold)")
         ),
 
-        /* ── Common fields ── */
+        /* â”€â”€ Common fields â”€â”€ */
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
           React.createElement("div", null,
             React.createElement("label", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", textTransform: "uppercase", display: "block", marginBottom: 4 } }, "Company Name"),
@@ -3637,7 +3637,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           )
         ),
 
-        /* ── Active holding: Acquisition date + current price ── */
+        /* â”€â”€ Active holding: Acquisition date + current price â”€â”€ */
         mode === "active" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 } },
           React.createElement("div", null,
             React.createElement("label", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", textTransform: "uppercase", display: "block", marginBottom: 4 } }, "Date of Acquisition"),
@@ -3649,7 +3649,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           )
         ),
 
-        /* ── Past trade: sell date + sell price ── */
+        /* â”€â”€ Past trade: sell date + sell price â”€â”€ */
         mode === "past" && React.createElement(React.Fragment, null,
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 } },
             React.createElement("div", null,
@@ -3680,7 +3680,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           })()
         ),
 
-        /* ── Extra fields ── */
+        /* â”€â”€ Extra fields â”€â”€ */
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 } },
           React.createElement("div", null,
             React.createElement("label", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", textTransform: "uppercase", display: "block", marginBottom: 4 } }, "Sector"),
@@ -3702,7 +3702,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
           )
         ),
 
-        /* ── Action buttons ── */
+        /* â”€â”€ Action buttons â”€â”€ */
         React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 16 } },
           React.createElement("button", { className: "stx-btn stx-btn-primary", style: { flex: 1 }, onClick: handleAdd }, mode === "active" ? "Add Share" : "Save to Previous Trades"),
           React.createElement("button", { className: "stx-btn stx-btn-ghost", onClick: () => { setShowAdd(false); resetForm(); } }, "Cancel")
@@ -3710,7 +3710,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       )
     ),
 
-    /* ── Edit Share Modal ── */
+    /* â”€â”€ Edit Share Modal â”€â”€ */
     editShare && React.createElement("div", { className: "modal-bd", onClick: (e) => { if (e.target === e.currentTarget) setEditShare(null); } },
       React.createElement("div", { className: "stx-card stx-fu", style: { maxWidth: 520, margin: "40px auto", width: "92vw" } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
@@ -3773,7 +3773,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
       )
     ),
 
-    /* ── Holdings card grid ── */
+    /* â”€â”€ Holdings card grid â”€â”€ */
     holdings.length > 0
       ? React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))", gap: 16 } },
           holdings.map((h) => {
@@ -3791,7 +3791,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
 
             return React.createElement("div", { key: h.id, className: "stx-card", style: { animation: "stxFadeIn .35s ease both" } },
 
-              /* ── Header: company + ticker + market value ── */
+              /* â”€â”€ Header: company + ticker + market value â”€â”€ */
               React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 } },
                 React.createElement("div", null,
                   React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--text)", marginBottom: 4, lineHeight: 1.3 } }, h.company || h.ticker),
@@ -3807,7 +3807,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 )
               ),
 
-              /* ── Buy price vs Current price ── */
+              /* â”€â”€ Buy price vs Current price â”€â”€ */
               React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, borderRadius: 9, overflow: "hidden", marginBottom: 10, border: "1px solid var(--border)" } },
                 React.createElement("div", { style: { padding: "9px 12px", background: "var(--bg5)" } },
                   React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 } }, "Buy Price"),
@@ -3819,7 +3819,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 )
               ),
 
-              /* ── P&L box ── */
+              /* â”€â”€ P&L box â”€â”€ */
               React.createElement("div", { style: {
                 padding: "10px 13px", borderRadius: 9, marginBottom: 10,
                 background: isGain ? "var(--profitbg)" : "var(--lossbg)",
@@ -3842,7 +3842,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 )
               ),
 
-              /* ── Capital Gains classification ── */
+              /* â”€â”€ Capital Gains classification â”€â”€ */
               cg && React.createElement("div", { style: {
                 display: "flex", alignItems: "center", justifyContent: "space-between",
                 padding: "6px 10px", borderRadius: 7, marginBottom: 8,
@@ -3857,13 +3857,13 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 cg.isLT && pnl > 0 && React.createElement("span", { style: { fontSize: 10, color: "var(--profit)", fontWeight: 600 } }, "LTCG: " + INR(Math.round(pnl)))
               ),
 
-              /* ── Entry score badge ── */
+              /* â”€â”€ Entry score badge â”€â”€ */
               h.entryScore != null && h.entryScore > 0 && React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 8 } },
                 React.createElement("span", { style: { fontSize: 10, color: "var(--text5)", fontWeight: 600 } }, "Entry Score:"),
                 React.createElement("span", { style: { fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: h.entryScore >= 70 ? "var(--profitbg)" : h.entryScore >= 40 ? "var(--warnbg)" : "var(--lossbg)", color: h.entryScore >= 70 ? "var(--profit)" : h.entryScore >= 40 ? "var(--warn)" : "var(--loss)", border: "1px solid " + (h.entryScore >= 70 ? "var(--profitborder)" : h.entryScore >= 40 ? "var(--warnborder)" : "var(--lossborder)") } }, h.entryScore + "/100")
               ),
 
-              /* ── Golden exit callout (E1 up-spike near 4% target) ── */
+              /* â”€â”€ Golden exit callout (E1 up-spike near 4% target) â”€â”€ */
               exitInfo[h.id] && exitInfo[h.id].golden && React.createElement("div", { style: {
                 display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
                 padding: "8px 12px", borderRadius: 8,
@@ -3882,7 +3882,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 exitInfo[h.id].golden.exit_score != null && React.createElement("span", { style: { fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 6, background: "rgba(251,191,36,.18)", color: "#d97706", border: "1px solid rgba(251,191,36,.4)", whiteSpace: "nowrap" } }, "EXIT " + exitInfo[h.id].golden.exit_score)
               ),
 
-              /* ── Session Confidence Score (reach target today) ── */
+              /* â”€â”€ Session Confidence Score (reach target today) â”€â”€ */
               (function () {
                 const ci = exitInfo[h.id] && exitInfo[h.id].conf;
                 if (!ci || ci.confidence == null || !ci.flags || !ci.flags.inTargetBand) return null;
@@ -3899,10 +3899,10 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 );
               })(),
 
-              /* ── Notes preview ── */
+              /* â”€â”€ Notes preview â”€â”€ */
               h.notes && React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8, fontStyle: "italic" } }, h.notes),
 
-              /* ── Action buttons ── */
+              /* â”€â”€ Action buttons â”€â”€ */
               React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" } },
                 React.createElement("button", {
                   onClick: () => setEditShare({ ...h, qty: String(h.qty || ""), buyPrice: String(h.buyPrice || h.avgPrice || ""), currentPrice: String(h.currentPrice || ""), brokerage: String(h.brokerage || 0) }),
@@ -3982,9 +3982,9 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Trade History
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapshot, setSoldShareSnapshots }) {
   const fyKeys = Object.keys(soldShareSnapshots).sort().reverse();
   const [expanded, setExpanded] = useState({});
@@ -4108,7 +4108,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
   }
 
   return React.createElement("div", null,
-    /* ── Header ── */
+    /* â”€â”€ Header â”€â”€ */
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, flexWrap: "wrap", gap: 12 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: "#6d28d9", letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 4 } }, "TRADE HISTORY"),
@@ -4123,7 +4123,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
       )
     ),
 
-    /* ── FY groups ── */
+    /* â”€â”€ FY groups â”€â”€ */
     fyKeys.map((fy) => {
       const snaps = soldShareSnapshots[fy] || [];
       if (!snaps.length) return null;
@@ -4132,7 +4132,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
       const totalCost = snaps.reduce((s, sn) => s + sn.costBasis, 0);
 
       return React.createElement("div", { key: fy, style: { marginBottom: 24 } },
-        /* ── FY header row ── */
+        /* â”€â”€ FY header row â”€â”€ */
         React.createElement("div", {
           onClick: () => toggleFY(fy),
           style: {
@@ -4147,7 +4147,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
           totalCost > 0 && React.createElement("span", { style: { fontSize: 12, fontWeight: 700, padding: "2px 10px", borderRadius: 8, background: totalPnl >= 0 ? "var(--profitbg)" : "var(--lossbg)", color: totalPnl >= 0 ? "var(--profit)" : "var(--loss)", border: "1px solid " + (totalPnl >= 0 ? "var(--profitborder)" : "var(--lossborder)") } }, "Net P&L: " + (totalPnl >= 0 ? "+" : "") + INR(totalPnl))
         ),
 
-        /* ── Month groups ── */
+        /* â”€â”€ Month groups â”€â”€ */
         !isCollapsedFY && (() => {
           const monthGroups = {};
           snaps.forEach((sn) => {
@@ -4169,7 +4169,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
             const mPnl = mg.snaps.reduce((s, sn) => s + sn.pnl, 0);
 
             return React.createElement("div", { key: mk, style: { marginBottom: 12, marginLeft: 12, borderLeft: "2px solid var(--border2)", paddingLeft: 12 } },
-              /* ── Month header ── */
+              /* â”€â”€ Month header â”€â”€ */
               React.createElement("div", {
                 onClick: () => toggleMonth(mk),
                 style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, marginBottom: mIsCollapsed ? 0 : 8, cursor: "pointer", background: "var(--bg5)", border: "1px solid var(--border)", transition: "all .15s" }
@@ -4180,7 +4180,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
                 React.createElement("span", { style: { fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 7, background: mPnl >= 0 ? "var(--profitbg)" : "var(--lossbg)", color: mPnl >= 0 ? "var(--profit)" : "var(--loss)", border: "1px solid " + (mPnl >= 0 ? "var(--profitborder)" : "var(--lossborder)") } }, (mPnl >= 0 ? "+" : "") + INR(mPnl))
               ),
 
-              /* ── Snapshot cards ── */
+              /* â”€â”€ Snapshot cards â”€â”€ */
               !mIsCollapsed && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 16 } },
                 mg.snaps.map((sn, idx) => {
                   const isGain = sn.pnl >= 0;
@@ -4296,7 +4296,7 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
       );
     }),
 
-    /* ── Edit Snapshot Modal ── */
+    /* â”€â”€ Edit Snapshot Modal â”€â”€ */
     editSnap && React.createElement("div", { className: "modal-bd", onClick: (e) => { if (e.target === e.currentTarget) setEditSnap(null); } },
       React.createElement("div", { className: "stx-card stx-fu", style: { maxWidth: 520, margin: "40px auto", width: "92vw" } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
@@ -4361,9 +4361,9 @@ function TradeHistoryPage({ soldShareSnapshots = {}, deleteSnapshot, editSnapsho
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    Entry Score Panel \u2014 Momentum Trading Entry Scoring Engine
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const LS_ENTRY_SCORES = "mm_entry_scores";
 const LS_ENTRY_SNAPSHOTS = "mm_entry_score_snapshots";
 const LS_ENTRY_PERF_PRICES = "mm_entry_perf_prices";
@@ -5389,13 +5389,13 @@ const EntryScorePanel = ({ shares }) => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    COMPONENT: 10 Days Confidence Score Performance Tracker (Pulse sub-tab)
    Tracks whether the 10-day confidence score actually pays off. Each added
    stock freezes Date Added, Confidence Score (next 10 days), Entry Score and
    Price at add time; Days is computed live from the added date; Current Price
    & % Change update whenever the table is refreshed.
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const LS_CONF_TRACKER = "stox_conf_tracker";
 const LS_CONF_PERF_PRICES = "stox_conf_tracker_prices";
 
@@ -5788,16 +5788,16 @@ const ConfidenceTracker = () => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    COMPONENT: Watchlist Tracker (Pulse sub-tab)
    Tracks selected stocks with frozen Entry Score, Price on Add, Date Added,
    10DLN, 10DEM. Days increments on every trading day. Current Price and
    % Change refresh on button click.
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const LS_WL_TRACKER = "stox_watchlist_tracker";
 const LS_WL_PRICES = "stox_watchlist_tracker_prices";
 
-/* ── Watchlist target-hit tracking ──────────────────────────────────────────
+/* â”€â”€ Watchlist target-hit tracking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    The target is the same +N% net-change goal the Score Tuner drives
    (forwardSim.targetPct, default 3.5%). A tracked row counts as "hit" on the
    first session whose CLOSE put net change since Price on Add at or above the
@@ -5839,6 +5839,60 @@ function wlTargetHit(built, live, targetPct) {
    (green) always wins when both land on the same day. */
 const WL_MILESTONE_PCT = 3;
 
+/* â”€â”€ Benchmark index series for the Watchlist Tracker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   Each benchmark is fetched ONCE per session (not once per row) and the
+   per-row figure is derived by measuring the index from the row's Date Added
+   baseline close through to the latest close. Baseline is the last close on or
+   before the add date, mirroring how Price on Add captures the last known
+   close at the moment of adding.
+
+   NOTE: Yahoo carries no usable daily history for NIFTY MIDCAP 100
+   (NIFTY_MIDCAP_100.NS returns a single data point at every range), so
+   Midcap 150 is used as the mid-cap benchmark. Swap `symbol` here if a symbol
+   with real history becomes available. */
+const WL_BENCHMARKS = [
+  { key: "nifty100", label: "Nifty 100", symbol: "^CNX100" },
+  { key: "midcap150", label: "Nifty Midcap 150", symbol: "NIFTYMIDCAP150" },
+];
+
+/* YYYY-MM-DD in local time \u2014 matches how the movement series dates itself. */
+function wlDateStr(v) {
+  var dt = v instanceof Date ? v : new Date(v);
+  if (isNaN(dt.getTime())) return "";
+  return dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
+}
+
+/* Normalise OHLCV candles to a sorted {date, close} series. */
+function wlSeriesFromCandles(candles) {
+  var out = [];
+  for (var i = 0; i < (candles || []).length; i++) {
+    var c = candles[i];
+    if (!c) continue;
+    var close = Number(c.c);
+    if (!isFinite(close) || close <= 0) continue;
+    var t = String(c.t || "");
+    var date = t.length >= 10 ? t.slice(0, 10) : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    out.push({ date: date, close: close });
+  }
+  out.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+  return out;
+}
+
+/* Index % change from the add-date baseline close through to the latest close. */
+function wlBenchmarkPct(series, addDateStr) {
+  if (!series || !series.length || !addDateStr) return null;
+  var base = 0;
+  for (var i = 0; i < series.length; i++) {
+    if (series[i].date <= addDateStr) base = series[i].close;
+    else break;
+  }
+  if (!(base > 0)) return null;
+  var last = series[series.length - 1];
+  if (!(last.close > 0)) return null;
+  return { pct: (last.close - base) / base * 100, base: base, last: last.close, lastDate: last.date };
+}
+
 const WatchlistTracker = () => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
@@ -5857,7 +5911,10 @@ const WatchlistTracker = () => {
   const [sortDir, setSortDir] = useState("desc");
   const [expandedWl, setExpandedWl] = useState(null);
   const [movement, setMovement] = useState({});
+  const [benchSeries, setBenchSeries] = useState({});
+  const [benchNonce, setBenchNonce] = useState(0);
   const targetScanRef = useRef(false);
+  const benchRef = useRef(false);
   const trackedRef = useRef(tracked);
   const targetAliveRef = useRef(true);
   trackedRef.current = tracked;
@@ -5950,6 +6007,7 @@ const WatchlistTracker = () => {
     }
     savePrices(p);
     setMovement({});
+    setBenchNonce(function (n) { return n + 1; });
     try { if (window.__fsa && window.__fsa.writeNow) await window.__fsa.writeNow(); } catch (e) {}
     setRefreshing(false);
     const changes = [];
@@ -6062,7 +6120,7 @@ const WatchlistTracker = () => {
   };
 
   const exportWTCsv = () => {
-    var rows = [["Stock", "Date Added", "Entry Score", "10DLN", "10DEM", "Price on Add", "Days", "Current Price", "% Change", "Target Hit Date", "Target Hit in Days"]];
+    var rows = [["Stock", "Date Added", "Entry Score", "10DLN", "10DEM", "Price on Add", "Days", "Current Price", "% Change", "Target Hit Date", "Target Hit in Days", "Nifty 100 %", "Nifty Midcap 150 %"]];
     var now = new Date();
     tracked.forEach(function (tr) {
       var addedDate = new Date(tr.addedAt);
@@ -6076,7 +6134,9 @@ const WatchlistTracker = () => {
       function esc(v) { var s = String(v); return s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
       var hitDateStr = tr.targetHitDate ? fmtMoveDate(tr.targetHitDate) : "";
       if (tr.targetHitDate && tr.targetHitLive) hitDateStr += " (live)";
-      rows.push([esc(tr.ticker), esc(dateStr), tr.entryScore != null ? tr.entryScore : "", tr.conf10dLog != null ? tr.conf10dLog : "", tr.conf10dEmp != null ? tr.conf10dEmp : "", tr.priceOnAdd || "", days, current, pct, esc(hitDateStr), tr.targetHitDays != null ? tr.targetHitDays : ""].join(","));
+      var b100v = benchVal(tr, benchSeries.nifty100);
+      var b150v = benchVal(tr, benchSeries.midcap150);
+      rows.push([esc(tr.ticker), esc(dateStr), tr.entryScore != null ? tr.entryScore : "", tr.conf10dLog != null ? tr.conf10dLog : "", tr.conf10dEmp != null ? tr.conf10dEmp : "", tr.priceOnAdd || "", days, current, pct, esc(hitDateStr), tr.targetHitDays != null ? tr.targetHitDays : "", b100v != null ? b100v.toFixed(2) : "", b150v != null ? b150v.toFixed(2) : ""].join(","));
     });
     var csv = rows.join("\r\n");
     var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
@@ -6105,6 +6165,25 @@ const WatchlistTracker = () => {
     var priceOnAdd = tr.priceOnAdd || 0;
     var currentPrice = prices[tr.ticker] || 0;
     return priceOnAdd > 0 && currentPrice > 0 ? ((currentPrice - priceOnAdd) / priceOnAdd * 100) : null;
+  };
+
+  /* Benchmark % for one row. Sentinel keeps rows with no data at the bottom
+     whichever way the column is sorted. */
+  var benchVal = function (tr, series) {
+    var b = wlBenchmarkPct(series, wlDateStr(tr.addedAt));
+    return b ? b.pct : null;
+  };
+  var benchCell = function (series, label, addDateStr) {
+    var dim = Object.assign({}, tdRight, { color: "var(--text6)", fontFamily: "var(--font-mono)" });
+    if (!series) return React.createElement("td", { style: dim, title: "Loading " + label + " history\u2026" }, "\u2026");
+    var b = wlBenchmarkPct(series, addDateStr);
+    if (!b) return React.createElement("td", { style: dim, title: label + ": no history covering " + addDateStr }, "\u2014");
+    var title = label + " from " + addDateStr + " close " + b.base.toFixed(2)
+      + " to " + b.lastDate + " close " + b.last.toFixed(2);
+    return React.createElement("td", {
+      style: Object.assign({}, tdRight, { color: b.pct >= 0 ? "#22c55e" : "#ef4444", fontFamily: "var(--font-mono)" }),
+      title: title,
+    }, (b.pct >= 0 ? "+" : "") + b.pct.toFixed(2) + "%");
   };
 
   var buildMovementRows = function (tr, addDate, closes) {
@@ -6225,6 +6304,33 @@ const WatchlistTracker = () => {
     })();
   }, [loaded, tracked, prices, refreshing]);
 
+  /* Benchmark indices: two fetches total, shared by every row. Cached by
+     OHLCVFetcher (5 min during market hours / 24 h after close), so this is
+     cheap on repeat visits. benchNonce lets Refresh Prices pull a fresher
+     session close without re-fetching per row. */
+  useEffect(() => {
+    if (!loaded || !tracked.length || !DF || benchRef.current) return;
+    benchRef.current = true;
+    (async function () {
+      for (var i = 0; i < WL_BENCHMARKS.length; i++) {
+        if (!targetAliveRef.current) return;
+        var b = WL_BENCHMARKS[i];
+        var s = [];
+        try {
+          var res = await DF.fetchOHLCVCached(b.symbol, "daily");
+          s = wlSeriesFromCandles(res && res.data);
+        } catch (e) {}
+        var bKey = b.key;
+        setBenchSeries(function (prev) {
+          var next = Object.assign({}, prev);
+          next[bKey] = s;
+          return next;
+        });
+      }
+      benchRef.current = false;
+    })();
+  }, [loaded, tracked.length, benchNonce]);
+
   var toggleMovement = function (tr) {
     if (expandedWl === tr.id) { setExpandedWl(null); return; }
     setExpandedWl(tr.id);
@@ -6251,6 +6357,8 @@ const WatchlistTracker = () => {
     else if (sortKey === "pct") { av = rowPct(a); bv = rowPct(b); av = av == null ? -999 : av; bv = bv == null ? -999 : bv; }
     else if (sortKey === "targetHitDate") { av = a.targetHitDate ? new Date(a.targetHitDate + "T00:00:00").getTime() : -1e12; bv = b.targetHitDate ? new Date(b.targetHitDate + "T00:00:00").getTime() : -1e12; }
     else if (sortKey === "targetHitDays") { av = a.targetHitDays != null ? a.targetHitDays : 1e9; bv = b.targetHitDays != null ? b.targetHitDays : 1e9; }
+    else if (sortKey === "nifty100") { av = benchVal(a, benchSeries.nifty100); bv = benchVal(b, benchSeries.nifty100); av = av == null ? -1e9 : av; bv = bv == null ? -1e9 : bv; }
+    else if (sortKey === "midcap150") { av = benchVal(a, benchSeries.midcap150); bv = benchVal(b, benchSeries.midcap150); av = av == null ? -1e9 : av; bv = bv == null ? -1e9 : bv; }
     else { av = 0; bv = 0; }
     return dir * (av - bv);
   });
@@ -6345,6 +6453,8 @@ const WatchlistTracker = () => {
             React.createElement("th", { style: thRight, title: "Sort by % change", onClick: function() { toggleSort("pct"); } }, ["% Change", arrow("pct")]),
             React.createElement("th", { style: thRight, title: "First date the net change since add reached +" + targetPct + "%", onClick: function() { toggleSort("targetHitDate"); } }, ["Target Hit Date", arrow("targetHitDate")]),
             React.createElement("th", { style: thRight, title: "Trading days from Date Added until the +" + targetPct + "% target was reached", onClick: function() { toggleSort("targetHitDays"); } }, ["Target Hit in Days", arrow("targetHitDays")]),
+            React.createElement("th", { style: thRight, title: "Nifty 100 index % change over this stock's holding period \u2014 benchmark comparison", onClick: function() { toggleSort("nifty100"); } }, ["Nifty 100 %", arrow("nifty100")]),
+            React.createElement("th", { style: thRight, title: "Nifty Midcap 150 index % change over this stock's holding period \u2014 mid-cap benchmark comparison", onClick: function() { toggleSort("midcap150"); } }, ["Midcap 150 %", arrow("midcap150")]),
             React.createElement("th", { style: Object.assign({}, thStyle, { width: 40 }) })
           )
         ),
@@ -6364,6 +6474,7 @@ const WatchlistTracker = () => {
             var mvLive = prices[tr.ticker] || (mv && mv.live) || 0;
             var netPct = mvBase > 0 && mvLive > 0 ? (mvLive - mvBase) / mvBase * 100 : null;
             var hitScanned = tr.targetScanDay != null;
+            var addDateStr = wlDateStr(tr.addedAt);
             var hitDays = tr.targetHitDays != null ? tr.targetHitDays : null;
             var hitTitle = tr.targetHitDate
               ? "Net change since add reached +" + targetPct + "% on " + fmtMoveDate(tr.targetHitDate) + " (" + hitDays + " trading day" + (hitDays === 1 ? "" : "s") + " after add" + (tr.targetHitLive ? ", reached on the live price today" : "") + ")"
@@ -6415,6 +6526,8 @@ const WatchlistTracker = () => {
               React.createElement("td", { style: Object.assign({}, tdRight, { fontWeight: 700, fontFamily: "var(--font-mono)", color: hitDays != null ? "#16a34a" : "var(--text6)" }), title: hitTitle },
                 hitDays != null ? hitDays : (hitScanned ? "\u2014" : "\u2026")
               ),
+              benchCell(benchSeries.nifty100, "Nifty 100", addDateStr),
+              benchCell(benchSeries.midcap150, "Nifty Midcap 150", addDateStr),
               React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
                 React.createElement("button", {
                   onClick: () => deleteTracked(tr.id),
@@ -6489,7 +6602,7 @@ const WatchlistTracker = () => {
               var netColor = netPct === null ? "var(--text6)" : netPct >= 0 ? "#16a34a" : "#dc2626";
               var netLabel = mvLive > 0 ? "Net % Change (live " + INR(mvLive) + ")" : "Net % Change";
               detailTr = React.createElement("tr", { key: tr.id + "_mv", style: { background: "var(--bg2)" } },
-                React.createElement("td", { colSpan: 13, style: { padding: "10px 16px 14px", borderBottom: "2px solid var(--border)" } },
+                React.createElement("td", { colSpan: 15, style: { padding: "10px 16px 14px", borderBottom: "2px solid var(--border)" } },
                   React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 } },
                     React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-heading)", letterSpacing: 0.5 } },
                       tr.ticker + " \u00b7 Day-wise % Movement Since Add"
@@ -6530,7 +6643,7 @@ const WatchlistTracker = () => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    COMPONENT: Backtesting (Pulse sub-tab)
    Replays a ticker's last N trading days as-of historical dates. At each past
    date D the daily/hourly/weekly/index series are sliced to end at D (no
@@ -6539,7 +6652,7 @@ const WatchlistTracker = () => {
    The +4% / 10-session target is then graded on candles strictly after D
    (Touch Hit = intraday high reaches +4%; Close Hit = a close reaches +4%).
    Output: score-bucket accuracy tables + correlations + per-date CSV.
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function _btDateStr(c) { return String(c && c.t).slice(0, 10); }
 
@@ -7056,9 +7169,9 @@ const BacktestPanel = () => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    NIFTY_200 TICKER LIST
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 var NIFTY_200 = [
   {t:"360ONE.NS",n:"360 One",cap:"M"},{t:"ABB.NS",n:"ABB India",cap:"L"},{t:"APLAPOLLO.NS",n:"APL Apollo Tubes",cap:"M"},{t:"AUBANK.NS",n:"AU Small Finance Bank",cap:"M"},{t:"ADANIENSOL.NS",n:"Adani Energy Solutions",cap:"L"},
   {t:"ADANIENT.NS",n:"Adani Enterprises",cap:"L"},{t:"ADANIGREEN.NS",n:"Adani Green Energy",cap:"L"},{t:"ADANIPORTS.NS",n:"Adani Ports & SEZ",cap:"L"},{t:"ADANIPOWER.NS",n:"Adani Power",cap:"L"},{t:"ATGL.NS",n:"Adani Total Gas",cap:"M"},
@@ -7104,14 +7217,14 @@ var NIFTY_200 = [
 var _nseen = new Set();
 var NIFTY_200_UNIQUE = NIFTY_200.filter(function(s) { if (_nseen.has(s.t)) return false; _nseen.add(s.t); return true; });
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    BACKTEST SUITE \u2014 StoX Backtesting Engine UI
    Option 1  Single-symbol detailed analysis
    Option 2  Batch backtest across the NIFTY 200 universe
    Option 3  Walk-forward strategy validation
    Engine: backtest-engine.js (window.BacktestEngine), scoring via the same
    production computeEntryScore (Trend 24 / Pullback 24 / Swing 24 / Breakout 22 / Mkt/RS 6).
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 var _bt2LastResult = null;
 var LS_BT2_RESULT = "stox_bt2_result";
 var LS_BT2_INPUT = "stox_bt2_input";
@@ -8195,9 +8308,9 @@ const BacktestSuitePanel = () => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SCORE TUNER \u2014 Entry Score sensitivity & component analysis
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const ScoreTunerPanel = () => {
   const DF = window.OHLCVFetcher;
   const TI = window.TechIndicators;
@@ -8303,12 +8416,12 @@ const ScoreTunerPanel = () => {
     return function() { window.removeEventListener("stox:score-config-restored", h); };
   }, []);
 
-  /* ── Offline data: load metadata on mount ── */
+  /* â”€â”€ Offline data: load metadata on mount â”€â”€ */
   useEffect(function() {
     OfflineOHLCV.getMeta().then(function(meta) { setOfflineMeta(meta); }).catch(function() {});
   }, []);
 
-  /* ── Download all NIFTY 200 daily+hourly+weekly candles to JSON file ── */
+  /* â”€â”€ Download all NIFTY 200 daily+hourly+weekly candles to JSON file â”€â”€ */
   const downloadAllDaily = async () => {
     setDownloading(true); setDownloadProgress({ phase: "Starting...", done: 0, total: 0 }); cancelRef.current = false;
     try {
@@ -8384,7 +8497,7 @@ const ScoreTunerPanel = () => {
     setDownloading(false);
   };
 
-  /* ── Load offline data from JSON file ── */
+  /* â”€â”€ Load offline data from JSON file â”€â”€ */
   const loadOfflineData = async () => {
     try {
       var content = await readFromFileInput(".json");
@@ -8410,7 +8523,7 @@ const ScoreTunerPanel = () => {
     }
   };
 
-  /* ── Clear offline data ── */
+  /* â”€â”€ Clear offline data â”€â”€ */
   const clearOfflineData = async () => {
     await OfflineOHLCV.clear();
     setOfflineMeta(null);
@@ -9417,7 +9530,7 @@ function StockScreener(props) {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "4.6.0",
+      appVersion: window.__STOX_APP_VERSION || "4.7.0",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -10318,9 +10431,9 @@ function StockScreener(props) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SCREENER SNAPSHOTS (expandable Year > Month > Day tree)
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function ScreenerSnapshots(props) {
   var snapshots = props.snapshots;
   var deleteSnapshot = props.deleteSnapshot;
@@ -10460,9 +10573,9 @@ function ScreenerSnapshots(props) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    COMPONENT: Single Stock Analysis (Pulse sub-tab)
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function SingleStockAnalysis({ requestedTicker }) {
   var TI = window.TechIndicators;
   var DF = window.OHLCVFetcher;
@@ -11752,9 +11865,9 @@ function SingleStockAnalysis({ requestedTicker }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Pulse (Watchlist + Entry Score + Stock Screener)
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function PulsePage({ holdings }) {
   const [activeTab, setActiveTab] = useState("screener");
   const [pendingTicker, setPendingTicker] = useState("");
@@ -11821,9 +11934,9 @@ function PulsePage({ holdings }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Info (Changelog & Version History)
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function InfoPage() {
   var TI = window.TechIndicators;
   var _m = React.useState(null), openM = _m[0], setOpenM = _m[1];
@@ -11855,7 +11968,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "4.6.0"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "4.7.0"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -12145,9 +12258,9 @@ function InfoPage() {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Settings
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareSnapshots, watchlist, setWatchlist, themeId, setTheme, fontId, setFont }) {
 
   return React.createElement("div", null,
@@ -12223,7 +12336,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "4.6.0"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "4.7.0"),
         React.createElement("p", { style: { marginTop: 4, color: "var(--text5)" } }, (function() { var _pm = __pm(); var _th = _pm.trendHealth; var _pb = _pm.pullbackQuality; var _p3 = _pm.swingPotential; var _p4 = _pm.breakoutContinuation; var _rg = _pm.regimeAlignment; var _wl = __cls().watchlist; return "Latest: Entry score rebuilt on five pillars \u2014 Trend Health(" + _th + ") + Pullback Quality(" + _pb + ") + Swing Potential(" + _p3 + ") + Breakout Continuation(" + _p4 + ") + Market/RS Alignment(" + _rg + ") \u2014 with spike/stability/reversal modifiers and the todaySpike hard gate (cap " + (_wl - 1) + ", watchlist " + _wl + "+). Blow-off/stability-collapse urgency bonuses remain on exit. No double-counted penalties."; })()),
         React.createElement("p", null, "Data: Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
@@ -12250,9 +12363,9 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    MAIN APP
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function App() {
   const [page, setPage] = useState("dashboard");
   const [pageParam, setPageParam] = useState(null);
@@ -12597,9 +12710,9 @@ function App() {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SCANNING & MONITORING PIPELINE  (Section 19)
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 /* 19.1 Entry Scan \u2014 run daily after market close (15:30 IST) */
 async function scanEntries(universe) {
@@ -12686,8 +12799,8 @@ async function monitorPositions(portfolio) {
   return alerts;
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    MOUNT
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(React.createElement(App));

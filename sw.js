@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stox-v466';
+const CACHE_NAME = 'stox-v467';
 const urlsToCache = [
   './',
   './index.html',
@@ -27,7 +27,7 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
-  /* If precaching fails (offline / CDN hiccup) still activate —
+  /* If precaching fails (offline / CDN hiccup) still activate â€”
      network-first fetch ensures fresh code arrives on the next load anyway. */
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))

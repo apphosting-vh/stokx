@@ -1,11 +1,11 @@
-/* ══════════════════════════════════════════════════════════════════════════
-   Batch Backtest Engine — StoX
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Batch Backtest Engine â€” StoX
    Runs backtests across multiple stocks, extracts per-stock patterns,
    and stores them in PatternStore for live scoring consumption.
 
    Supports two data sources:
-     1. OfflineOHLCV — pre-downloaded JSON data (preferred, instant)
-     2. Yahoo Finance live fetch — fallback when no offline data
+     1. OfflineOHLCV â€” pre-downloaded JSON data (preferred, instant)
+     2. Yahoo Finance live fetch â€” fallback when no offline data
 
    Dependencies: window.BacktestEngine, window.TechIndicators,
                  window.OHLCVFetcher, window.PatternStore, window.OfflineOHLCV
@@ -23,7 +23,7 @@
      var result = await runner.runBatchFromDataMap(dataMap, multiTFMap, indexCandles, {
        onProgress: (current, total, symbol, phase) => { ... }
      });
-   ══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 window.BatchBacktest = (function () {
 
@@ -42,7 +42,7 @@ window.BatchBacktest = (function () {
     });
   }
 
-  /** Longer pause — lets GC run and the user see progress updates */
+  /** Longer pause â€” lets GC run and the user see progress updates */
   function yieldLong() { return yieldToUI(80); }
 
   function round2(v) { return v != null ? Math.round(v * 100) / 100 : null; }
@@ -50,7 +50,7 @@ window.BatchBacktest = (function () {
 
   /**
    * Build the multi-TF score function (same approach as the existing
-   * backtester in app-core.js — tries multi-TF first, falls back to
+   * backtester in app-core.js â€” tries multi-TF first, falls back to
    * single-TF daily scoring).
    */
   function buildScoreFn(idxCandles, multiTFMap) {
@@ -69,7 +69,7 @@ window.BatchBacktest = (function () {
       /* Try multi-TF scoring if data available */
       var tfData = multiTFMap && symbol ? multiTFMap[symbol] : null;
       if (tfData && (tfData.daily || tfData.hourly || tfData.weekly)) {
-        /* Binary search slice (candles ascending) — scoreAt runs per scanned
+        /* Binary search slice (candles ascending) â€” scoreAt runs per scanned
            bar, so a linear findIndex would be O(N*M) over the backtest. */
         function sliceBefore(arr) {
           if (!arr) return null;
@@ -105,7 +105,7 @@ window.BatchBacktest = (function () {
     };
   }
 
-    /* ── ML helpers for Pass 2 (mirrors live path exactly) ─────────────── */
+    /* â”€â”€ ML helpers for Pass 2 (mirrors live path exactly) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
     /**
      * Load the same ml_model_champion meta key that preloadMLModel() uses live.
@@ -123,7 +123,7 @@ window.BatchBacktest = (function () {
         var champ = await window.PatternStore.getMeta("ml_model_champion");
         if (champ && champ.network && champ.normalizer) {
           if (champ.network.inputSize !== expectedInputSize) {
-            console.warn("[BatchBT] ml_model_champion inputSize mismatch: model=" + champ.network.inputSize + " expected=" + expectedInputSize + " — skipping");
+            console.warn("[BatchBT] ml_model_champion inputSize mismatch: model=" + champ.network.inputSize + " expected=" + expectedInputSize + " â€” skipping");
           } else {
             console.log("[BatchBT] ML champion model loaded (ml_model_champion) for adjusted scoring, inputSize=" + champ.network.inputSize);
             return champ;
@@ -133,7 +133,7 @@ window.BatchBacktest = (function () {
         var liveChamp = await window.PatternStore.getMeta("ml_live_champion");
         if (liveChamp && liveChamp.network && liveChamp.normalizer) {
           if (liveChamp.network.inputSize !== expectedInputSize) {
-            console.warn("[BatchBT] ml_live_champion inputSize mismatch: model=" + liveChamp.network.inputSize + " expected=" + expectedInputSize + " — skipping");
+            console.warn("[BatchBT] ml_live_champion inputSize mismatch: model=" + liveChamp.network.inputSize + " expected=" + expectedInputSize + " â€” skipping");
           } else {
             console.log("[BatchBT] ML champion model loaded (ml_live_champion) for adjusted scoring, inputSize=" + liveChamp.network.inputSize);
             return liveChamp;
@@ -145,7 +145,7 @@ window.BatchBacktest = (function () {
     }
 
     /**
-     * Pre-compute all indicator arrays once per symbol (O(N), not O(N×bars)).
+     * Pre-compute all indicator arrays once per symbol (O(N), not O(NÃ—bars)).
      * Returns an object keyed by indicator name, each an array aligned to candles.
      */
     function buildMLIndicatorCache(candles) {
@@ -166,7 +166,7 @@ window.BatchBacktest = (function () {
     }
 
     /**
-     * Compute ML features for a specific bar index — field-for-field identical
+     * Compute ML features for a specific bar index â€” field-for-field identical
      * to computeMLFeaturesFromCompat's real-feature branch (pattern-integration.js).
      * Uses the pre-computed indicator cache (O(1) per bar).
      */
@@ -191,7 +191,7 @@ window.BatchBacktest = (function () {
           volume_ratio: cache.volSma && cache.volSma[n] ? Math.round(cache.volumes[n] / Math.max(1, cache.volSma[n]) * 100) / 100 : 1,
           entry_score: entryScore || 0
         };
-        // Phase 3/4 — merge expanded features so the 23-key model vector is
+        // Phase 3/4 â€” merge expanded features so the 23-key model vector is
         // consistent with training (pillars, cap tier + market regime included).
         var TI = window.TechIndicators;
         if (TI && TI.computeExpandedFeatures && opts && opts.candles) {
@@ -209,7 +209,7 @@ window.BatchBacktest = (function () {
     }
 
     /**
-     * Apply ML blend to the pattern-only score — same gating (entryScoreMin)
+     * Apply ML blend to the pattern-only score â€” same gating (entryScoreMin)
      * and same weight tiers (0.25 / 0.35) as applyPatternToCompatResult.
      * Returns the blended score, or patternOnlyScore if ML is skipped.
      */
@@ -229,11 +229,11 @@ window.BatchBacktest = (function () {
           }
           return Math.min(100, Math.max(0, Math.round((patternOnlyScore * (1 - mlWeight) + mlScore * mlWeight) * 100) / 100));
         }
-      } catch (e) { /* ML prediction failed — use pattern-only score */ }
+      } catch (e) { /* ML prediction failed â€” use pattern-only score */ }
       return patternOnlyScore;
     }
 
-    /* ── Shared trade simulation + measurement ─────────────────────────── */
+    /* â”€â”€ Shared trade simulation + measurement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
     /**
      * From an array of scored bars (each with {idx, adjustedScore}),
@@ -274,7 +274,7 @@ window.BatchBacktest = (function () {
       var avgLoss = losses.length ? losses.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / losses.length : 0;
       var grossProfit = trades.filter(function (t) { return t.finalReturnPct > 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0);
       var grossLoss = Math.abs(trades.filter(function (t) { return t.finalReturnPct < 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0));
-      var profitFactor = grossLoss > 0 ? round2(grossProfit / grossLoss) : (grossProfit > 0 ? "∞" : 0);
+      var profitFactor = grossLoss > 0 ? round2(grossProfit / grossLoss) : (grossProfit > 0 ? "âˆž" : 0);
 
       var calibration = null;
       try { calibration = engine.calibrateConfidence(trades); } catch (e) {}
@@ -298,7 +298,7 @@ window.BatchBacktest = (function () {
       };
     }
 
-    /* ── Pass 2: Two-pass adjusted metrics ─────────────────────────────── */
+    /* â”€â”€ Pass 2: Two-pass adjusted metrics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
     /**
      * Pass 2: Re-score bars using pattern re-weighting + optional ML blend,
@@ -321,7 +321,7 @@ window.BatchBacktest = (function () {
 
       /* Blend factor: the re-weighted pillar average lives on a totally
          different distribution than entryScore, so it is MIXED with the raw
-         score instead of replacing it — absolute thresholds stay comparable.
+         score instead of replacing it â€” absolute thresholds stay comparable.
          User-tunable via Score Configuration ("Pattern Weight Blend"). */
       var BLEND_ALPHA = 0.5;
       if (window.TechIndicators && window.TechIndicators.getScoreConfig) {
@@ -376,7 +376,7 @@ window.BatchBacktest = (function () {
       var patternOnlyScored = [];
       var mlBlendedScored = (mlModel && mlCache && useMLBlend) ? [] : null;
 
-      /* P2: threshold-free comparison — top-decile selection per symbol,
+      /* P2: threshold-free comparison â€” top-decile selection per symbol,
          capped so long histories don't explode simulation cost. */
       var DECILE_FRAC = 0.10, DECILE_MIN = 5, DECILE_MAX = 80;
       var decileN = Math.max(DECILE_MIN, Math.min(DECILE_MAX, Math.round(allScoredBars.length * DECILE_FRAC)));
@@ -395,7 +395,7 @@ window.BatchBacktest = (function () {
         // Pattern re-weighting: 50/50 blend of raw entry score and the
         // weighted-average pillar score. Replacing the raw score outright
         // (old behavior) put an absolute threshold on a different
-        // distribution and selected the overextended tail — the cause of
+        // distribution and selected the overextended tail â€” the cause of
         // the below-coin-flip adjusted win rates.
         var patternScore = bar.entryScore;
 
@@ -500,8 +500,8 @@ window.BatchBacktest = (function () {
     var turnoverWindowDays = cfg.turnoverWindowDays != null ? cfg.turnoverWindowDays : 20;
 
     /**
-     * Compute average daily turnover (price × volume) over a rolling window.
-     * Returns value in ₹ Cr.
+     * Compute average daily turnover (price Ã— volume) over a rolling window.
+     * Returns value in â‚¹ Cr.
      */
     function computeAvgTurnover(candles, endIdx, windowDays) {
       if (!candles || !candles.length) return 0;
@@ -516,21 +516,21 @@ window.BatchBacktest = (function () {
           count++;
         }
       }
-      // Yahoo volumes are in actual shares; turnover in ₹ = price × volume
+      // Yahoo volumes are in actual shares; turnover in â‚¹ = price Ã— volume
       // Convert to Cr (1 Cr = 10^7)
       return count > 0 ? (sum / count) / 1e7 : 0;
     }
 
     /**
      * Compute liquidity-scaled slippage based on average turnover.
-     * Higher turnover → lower slippage; low turnover → higher slippage.
+     * Higher turnover â†’ lower slippage; low turnover â†’ higher slippage.
      * Base slippage is used when turnover >= 10 Cr.
      */
     function computeLiquiditySlippage(avgTurnoverCr, baseSlippagePct) {
       baseSlippagePct = baseSlippagePct != null ? baseSlippagePct : slippagePct;
       if (avgTurnoverCr >= 10) return baseSlippagePct;
       if (avgTurnoverCr <= 0) return baseSlippagePct * 3;
-      // Scale linearly: at 5 Cr → 1.5x, at 1 Cr → 2.5x
+      // Scale linearly: at 5 Cr â†’ 1.5x, at 1 Cr â†’ 2.5x
       var factor = 1 + (1 - Math.min(avgTurnoverCr, 10) / 10) * 2;
       return Math.round(baseSlippagePct * factor * 100) / 100;
     }
@@ -588,7 +588,7 @@ window.BatchBacktest = (function () {
         try { await window.PatternStore.init(); } catch (e) { console.error("PatternStore.init failed:", e); }
       }
 
-      // ── Load data: offline first, live fallback ──
+      // â”€â”€ Load data: offline first, live fallback â”€â”€
       var dataMap = {};
       var multiTFMap = {};
       var indexCandles = null;
@@ -700,7 +700,7 @@ window.BatchBacktest = (function () {
 
       if (opts.onProgress) opts.onProgress(0, validSymbols.length, "", "backtesting");
 
-      // ── Run backtest on all loaded data ──
+      // â”€â”€ Run backtest on all loaded data â”€â”€
       return await runBatchFromDataMap(dataMap, multiTFMap, indexCandles, Object.assign({}, opts, {
         _dataSource: offlineUsed ? "offline" : "live"
       }));
@@ -708,7 +708,7 @@ window.BatchBacktest = (function () {
 
     /**
      * Run batch backtest using pre-built dataMap and multiTFMap.
-     * This is the core processing function — used both by runBatch() and
+     * This is the core processing function â€” used both by runBatch() and
      * can be called directly when data is already loaded (e.g. from the
      * existing backtester's offline loading logic).
      *
@@ -776,7 +776,7 @@ window.BatchBacktest = (function () {
           continue;
         }
 
-        // ── Universe filter ──
+        // â”€â”€ Universe filter â”€â”€
         if (universeFilterEnabled) {
           var ufResult = passesUniverseFilter(symbol, candles);
           if (!ufResult.pass) {
@@ -793,18 +793,18 @@ window.BatchBacktest = (function () {
         }
 
         try {
-          // ── Liquidity-scaled slippage ──
+          // â”€â”€ Liquidity-scaled slippage â”€â”€
           var avgTurnover = (universeFilterEnabled && ufResult && ufResult.metrics && ufResult.metrics.avgTurnoverCr != null) ? ufResult.metrics.avgTurnoverCr : computeAvgTurnover(candles, candles.length - 1, turnoverWindowDays);
           var symbolSlippage = computeLiquiditySlippage(avgTurnover, slippagePct);
 
-          // ── Run single stock backtest (pass hooks so engine yields every 25 bars) ──
+          // â”€â”€ Run single stock backtest (pass hooks so engine yields every 25 bars) â”€â”€
           var btResult = await engine.runSingle(candles, {
             symbol: symbol,
             sampleEvery: step,
             slippagePct: symbolSlippage
           }, {
             onBar: function (d, t) {
-              // Callback fires every 25 bars — gives engine a chance to yield
+              // Callback fires every 25 bars â€” gives engine a chance to yield
             }
           });
 
@@ -831,7 +831,7 @@ window.BatchBacktest = (function () {
             continue;
           }
 
-          // ── Analyze component power ──
+          // â”€â”€ Analyze component power â”€â”€
           var powerResult = null;
           try {
             var singleDataMap = {};
@@ -841,18 +841,18 @@ window.BatchBacktest = (function () {
               sampleEvery: step
             }, {
               onSymbol: function (d, t) {
-                // Callback fires after each symbol — lets engine yield
+                // Callback fires after each symbol â€” lets engine yield
               }
             });
           } catch (e) {
             console.warn("Component power analysis failed for " + symbol + ":", e.message);
           }
 
-          // ── Extract pattern ──
+          // â”€â”€ Extract pattern â”€â”€
           var dailyOhlcv = multiTFMap && multiTFMap[symbol] ? multiTFMap[symbol].daily : null;
           var pattern = extractPattern(symbol, btResult, powerResult, candles, dailyOhlcv);
 
-          // ── Extract features for ML ──
+          // â”€â”€ Extract features for ML â”€â”€
           if (extractFeatures) {
             try {
               var features = extractFeaturesForML(symbol, candles, trades, scoreFn, indexCandles);
@@ -864,7 +864,7 @@ window.BatchBacktest = (function () {
             }
           }
 
-          // ── Store pattern ──
+          // â”€â”€ Store pattern â”€â”€
           if (storePatterns && window.PatternStore) {
             await window.PatternStore.put(symbol, pattern);
           }
@@ -897,13 +897,13 @@ window.BatchBacktest = (function () {
           }, 0) / summary.successCount)
         : 0;
 
-      // ── Pass 2: Adjusted metrics (pattern re-weighting + ML parity) ──
+      // â”€â”€ Pass 2: Adjusted metrics (pattern re-weighting + ML parity) â”€â”€
       // Re-scores bars using pattern weights + optional ML blend, re-grades
       // trades, produces patternOnly and mlBlended metrics for comparison.
       var mlModel = await loadMLModelForBacktest();
       var pass2Symbols = Object.keys(results);
       /* P0: only symbols that actually produced trades contribute to the
-         averages — "no qualifying bars" (winRate 0 / totalSignals 0) used to
+         averages â€” "no qualifying bars" (winRate 0 / totalSignals 0) used to
          be averaged in as a fake 0% and crushed the adjusted win rate. */
       var adjWinRateSum = 0, adjCount = 0, adjSignalTotal = 0;
       var mlWinRateSum = 0, mlCount = 0, mlSignalTotal = 0;
@@ -964,7 +964,7 @@ window.BatchBacktest = (function () {
       };
       summary.mlModelLoaded = mlModel != null;
 
-      // ── Re-save patterns after Pass 2 to persist adjustedMetrics/mlAdjustedMetrics ──
+      // â”€â”€ Re-save patterns after Pass 2 to persist adjustedMetrics/mlAdjustedMetrics â”€â”€
       if (storePatterns && window.PatternStore) {
         for (var ri = 0; ri < pass2Symbols.length; ri++) {
           var rSym = pass2Symbols[ri];
@@ -1018,13 +1018,13 @@ window.BatchBacktest = (function () {
       return result;
     }
 
-    /* ── Pattern Extraction ─────────────────────────────────────────────── */
+    /* â”€â”€ Pattern Extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
     function extractPattern(symbol, btResult, powerResult, candles, dailyCandles, btCfg) {
       var trades = btResult.trades || (btResult.stats && btResult.stats.trades) || [];
       var stats = btResult.stats || {};
 
-      // ── 1. Indicator Weights from component power ──
+      // â”€â”€ 1. Indicator Weights from component power â”€â”€
       var indicatorWeights = { trendHealth: 0.20, pullbackQuality: 0.20, swingPotential: 0.20, breakoutContinuation: 0.20, regimeAlignment: 0.20 };
       var indicatorPowers = {};
 
@@ -1043,7 +1043,7 @@ window.BatchBacktest = (function () {
           }
         });
 
-        // Relative min-max spread on infoValue (NOT a floor on raw magnitude —
+        // Relative min-max spread on infoValue (NOT a floor on raw magnitude â€”
         // a floor of 0.1 collapsed typical sub-0.1 infoValues to equal 25%).
         // Valid components get 0.1-0.9 of the budget, errored ones a fair share.
         if (ivs.length > 0) {
@@ -1068,7 +1068,7 @@ window.BatchBacktest = (function () {
         }
       }
 
-      // ── 2. Calibration from trades ──
+      // â”€â”€ 2. Calibration from trades â”€â”€
       var calibration = { global: null, stratified: null };
       var withPT = trades.filter(function (t) { return t.probTouch != null && !isNaN(t.probTouch); });
       if (withPT.length >= 30) {
@@ -1149,7 +1149,7 @@ window.BatchBacktest = (function () {
         }
       }
 
-      // ── 3. Regime Behavior ──
+      // â”€â”€ 3. Regime Behavior â”€â”€
       var regimeBehavior = {};
       if (candles && candles.length > 60 && window.TechIndicators) {
         try {
@@ -1185,7 +1185,7 @@ window.BatchBacktest = (function () {
         } catch (e) { console.warn("Regime analysis failed for " + symbol + ":", e.message); }
       }
 
-      // ── 4. Score Distribution ──
+      // â”€â”€ 4. Score Distribution â”€â”€
       var scoreDist = { mean: 0, std: 0, median: 0 };
       var allScores = trades.map(function (t) { return t.entryScore; }).filter(function (s) { return s != null; });
       if (allScores.length > 5) {
@@ -1194,8 +1194,8 @@ window.BatchBacktest = (function () {
         scoreDist = { mean: round2(mean), std: round2(Math.sqrt(allScores.reduce(function (s, v) { return s + (v - mean) * (v - mean); }, 0) / (allScores.length - 1))), median: round2(allScores[Math.floor(allScores.length / 2)]) };
       }
 
-      // ── 5. Already-computed engine analytics (calculateStats/equityCurve)
-      //    Persisted verbatim so the Insights tab can render them — no new
+      // â”€â”€ 5. Already-computed engine analytics (calculateStats/equityCurve)
+      //    Persisted verbatim so the Insights tab can render them â€” no new
       //    instrumentation, the values already exist on btResult.stats.
       //    Equity curve points keep only {date, equity} (drop the embedded
       //    trade objects) to keep the store lean.
@@ -1213,7 +1213,7 @@ window.BatchBacktest = (function () {
       return {
         symbol: symbol,
         backtestDate: Date.now(),
-        backtestVersion: window.__STOX_APP_VERSION || "4.6.0",
+        backtestVersion: window.__STOX_APP_VERSION || "4.7.0",
         indicatorWeights: indicatorWeights,
         indicatorPowers: indicatorPowers,
         calibration: calibration,
@@ -1241,7 +1241,7 @@ window.BatchBacktest = (function () {
       };
     }
 
-    /* ── Feature Extraction for ML ──────────────────────────────────────── */
+    /* â”€â”€ Feature Extraction for ML â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
     function extractFeaturesForML(symbol, candles, trades, scoreFn, indexCandles) {
       var features = [];
@@ -1295,7 +1295,7 @@ window.BatchBacktest = (function () {
             entry_score: trade.entryScore || 0
           };
 
-          // Un-collapsed pillar features — raw per-pillar scores captured on the
+          // Un-collapsed pillar features â€” raw per-pillar scores captured on the
           // trade's entry score (0..pillarMax), matching the live feature path.
           var tradePillars = {
             trendHealth: trade.trendScore != null ? trade.trendScore : 0,
@@ -1345,7 +1345,7 @@ window.BatchBacktest = (function () {
       return features;
     }
 
-    /* ── Report Generation ────────────────────────────────────────────────── */
+    /* â”€â”€ Report Generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
     async function generateReport() {
       if (!window.PatternStore) throw new Error("PatternStore required");
@@ -1401,7 +1401,7 @@ window.BatchBacktest = (function () {
     };
   }
 
-  /* ── Check if OfflineOHLCV has data ── */
+  /* â”€â”€ Check if OfflineOHLCV has data â”€â”€ */
   async function checkOfflineAvailable() {
     if (!window.OfflineOHLCV) return false;
     try {
