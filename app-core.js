@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-window.__STOX_APP_VERSION = "4.7.0";
+window.__STOX_APP_VERSION = "4.7.1";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -5893,6 +5893,29 @@ function wlBenchmarkPct(series, addDateStr) {
   return { pct: (last.close - base) / base * 100, base: base, last: last.close, lastDate: last.date };
 }
 
+/* Fetch one benchmark series, tolerating the flakiness of the shared CORS
+   proxies. Only one of the four proxies is reliably up, and the target-hit scan
+   fires dozens of stock fetches at the same time, so an index request can lose
+   the race and come back empty. fetchOHLCVCached memoises a failure for 60s,
+   so a direct uncached fetchOHLCV is used to break out of that, plus a short
+   backoff retry. Returns [] if the index genuinely cannot be reached. */
+async function wlFetchIndexSeries(DF, symbol, attempt) {
+  attempt = attempt || 0;
+  try {
+    var res = await DF.fetchOHLCVCached(symbol, "daily");
+    if (res && res.data && res.data.length) return wlSeriesFromCandles(res.data);
+    /* cached failure (60s TTL) or empty -> bypass the cache entirely */
+    var direct = await DF.fetchOHLCV(symbol, "daily");
+    if (direct && direct.candles && direct.candles.length) return wlSeriesFromCandles(direct.candles);
+  } catch (e) {}
+  if (attempt < 2) {
+    await new Promise(function (r) { setTimeout(r, 900 * (attempt + 1)); });
+    return wlFetchIndexSeries(DF, symbol, attempt + 1);
+  }
+  console.warn("[WT] benchmark fetch failed for " + symbol + " after " + (attempt + 1) + " attempts");
+  return [];
+}
+
 const WatchlistTracker = () => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
@@ -6173,11 +6196,30 @@ const WatchlistTracker = () => {
     var b = wlBenchmarkPct(series, wlDateStr(tr.addedAt));
     return b ? b.pct : null;
   };
+  /* Clears the memoised empty series so the effect refetches, and also drops
+     any cached failure inside OHLCVFetcher so the retry actually goes out. */
+  var retryBench = function () {
+    try { if (DF && DF.clearCache) DF.clearCache(); } catch (e) {}
+    setBenchSeries({});
+    benchRef.current = false;
+    setBenchNonce(function (n) { return n + 1; });
+  };
   var benchCell = function (series, label, addDateStr) {
     var dim = Object.assign({}, tdRight, { color: "var(--text6)", fontFamily: "var(--font-mono)" });
     if (!series) return React.createElement("td", { style: dim, title: "Loading " + label + " history\u2026" }, "\u2026");
     var b = wlBenchmarkPct(series, addDateStr);
-    if (!b) return React.createElement("td", { style: dim, title: label + ": no history covering " + addDateStr }, "\u2014");
+    if (!b) {
+      /* empty series = the index itself could not be fetched, not a date gap */
+      if (!series.length) {
+        return React.createElement("td", { style: dim, title: label + " history could not be loaded \u2014 click to retry" },
+          React.createElement("button", {
+            onClick: retryBench,
+            title: "Retry loading " + label,
+            style: { border: "none", background: "transparent", cursor: "pointer", padding: 0, color: "var(--text5)", fontFamily: "var(--font-mono)", fontSize: 11, textDecoration: "underline" }
+          }, "Retry"));
+      }
+      return React.createElement("td", { style: dim, title: label + ": no history covering " + addDateStr }, "\u2014");
+    }
     var title = label + " from " + addDateStr + " close " + b.base.toFixed(2)
       + " to " + b.lastDate + " close " + b.last.toFixed(2);
     return React.createElement("td", {
@@ -6304,31 +6346,29 @@ const WatchlistTracker = () => {
     })();
   }, [loaded, tracked, prices, refreshing]);
 
-  /* Benchmark indices: two fetches total, shared by every row. Cached by
-     OHLCVFetcher (5 min during market hours / 24 h after close), so this is
-     cheap on repeat visits. benchNonce lets Refresh Prices pull a fresher
-     session close without re-fetching per row. */
+  /* Benchmark indices: two fetches total, shared by every row. Fetched in
+     PARALLEL and independently of the target-hit scan, because they share the
+     same single live CORS proxy and running them sequentially makes one lose
+     the race. OHLCVFetcher caches successes (5 min open / 24 h closed).
+     benchNonce lets Refresh Prices pull a fresher session close. */
   useEffect(() => {
     if (!loaded || !tracked.length || !DF || benchRef.current) return;
     benchRef.current = true;
+    var alive = true;
     (async function () {
-      for (var i = 0; i < WL_BENCHMARKS.length; i++) {
-        if (!targetAliveRef.current) return;
-        var b = WL_BENCHMARKS[i];
-        var s = [];
-        try {
-          var res = await DF.fetchOHLCVCached(b.symbol, "daily");
-          s = wlSeriesFromCandles(res && res.data);
-        } catch (e) {}
+      await Promise.all(WL_BENCHMARKS.map(async function (b) {
+        var s = await wlFetchIndexSeries(DF, b.symbol, 0);
+        if (!alive) return;
         var bKey = b.key;
         setBenchSeries(function (prev) {
           var next = Object.assign({}, prev);
           next[bKey] = s;
           return next;
         });
-      }
-      benchRef.current = false;
+      }));
+      if (alive) benchRef.current = false;
     })();
+    return function () { alive = false; };
   }, [loaded, tracked.length, benchNonce]);
 
   var toggleMovement = function (tr) {
@@ -9530,7 +9570,7 @@ function StockScreener(props) {
   var exportJSON = function() {
     if (!results.length) return;
     var payload = {
-      appVersion: window.__STOX_APP_VERSION || "4.7.0",
+      appVersion: window.__STOX_APP_VERSION || "4.7.1",
       exportDate: new Date().toISOString(),
       scanTime: scanTime,
       results: results,
@@ -11968,7 +12008,7 @@ function InfoPage() {
       React.createElement("div", { style: { flex: 1 } },
         React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
           React.createElement("span", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sto", React.createElement("span", { style: { color: "var(--accent)" } }, "X")),
-          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "4.7.0"))
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, "v" + (window.__STOX_APP_VERSION || "4.7.1"))
         ),
         React.createElement("div", { style: { fontSize: 12, color: "var(--text5)", marginTop: 3 } }, "Stock Analysis & Portfolio Tracking for Indian Equities"),
         React.createElement("div", { style: { fontSize: 11, color: "var(--text6)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" } },
@@ -12336,7 +12376,7 @@ function SettingsPage({ holdings, setHoldings, soldShareSnapshots, setSoldShareS
       React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7 } },
         React.createElement("p", null, "StoX is a stock analysis and portfolio tracking app for Indian equities (NSE/BSE)."),
         React.createElement("p", null, "All data is stored locally. No data is sent to any server."),
-        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "4.7.0"),
+        React.createElement("p", { style: { marginTop: 8 } }, "Version: ", window.__STOX_APP_VERSION || "4.7.1"),
         React.createElement("p", { style: { marginTop: 4, color: "var(--text5)" } }, (function() { var _pm = __pm(); var _th = _pm.trendHealth; var _pb = _pm.pullbackQuality; var _p3 = _pm.swingPotential; var _p4 = _pm.breakoutContinuation; var _rg = _pm.regimeAlignment; var _wl = __cls().watchlist; return "Latest: Entry score rebuilt on five pillars \u2014 Trend Health(" + _th + ") + Pullback Quality(" + _pb + ") + Swing Potential(" + _p3 + ") + Breakout Continuation(" + _p4 + ") + Market/RS Alignment(" + _rg + ") \u2014 with spike/stability/reversal modifiers and the todaySpike hard gate (cap " + (_wl - 1) + ", watchlist " + _wl + "+). Blow-off/stability-collapse urgency bonuses remain on exit. No double-counted penalties."; })()),
         React.createElement("p", null, "Data: Yahoo Finance via CORS proxies. Prices may be delayed.")
       )
