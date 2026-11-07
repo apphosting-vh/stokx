@@ -2920,14 +2920,14 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
   var SCORE_CONFIG = {
     /* Outcome horizon for the win-rate backtest and forward-sim target
        (sessions). Locked 15 @2026-09-12 by calibration run R4. */
-    horizonDays: 15,
+    horizonDays: 10,
     /* Forward outcome simulation constant (target barrier for the win-rate
        backtest). No stop loss: positions are held to the horizon unless the
        +target barrier is touched. LOCKED 3.5%/15d @2026-09-12 (run R4) — the
        combo the current constants trace back to. The 4y harness's 4%/20d pick
        (WR 61.8%, PF 1.23) predates this pass. The stop side remains removed:
        the harness confirmed stop exits added no predictive signal. */
-    forwardSim: { targetPct: 0.035 },
+    forwardSim: { targetPct: 0.05 },
     /* Pillar max scores — five pillars (nominal sum 100). LOCKED @2026-09-12
        by the mod16 pass (see VERSION banner): Trend Health 28 (flat →
        kept) + Pullback Quality 28 (restored to the full cap: under the
@@ -2944,22 +2944,22 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        diagnostics. Joint recommended config evaluates at threshold 65 to
        n=399 / WR 71.2% / ER 0.61% / PF 1.28; test-40% ER 1.16% (overfit
        direction is negative — the config strengthens out of sample). */
-    pillarMax: { trendHealth: 28, pullbackQuality: 28, swingPotential: 12, breakoutContinuation: 22, regimeAlignment: 4 },
+    pillarMax: { trendHealth: 20, pullbackQuality: 40, swingPotential: 12, breakoutContinuation: 22, regimeAlignment: 6 },
     /* MTF weights */
     tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
 
     /* Pillar 1: Trend Health (max 28) */
     trendHealth: {
-      priceAboveSMA50: 5,
-      SMA20AboveSMA50: 5,
-      priceAboveSMA20_or_VWAP: 5,
-      ADX_DI: 5,
+      priceAboveSMA50: 3,
+      SMA20AboveSMA50: 3,
+      priceAboveSMA20_or_VWAP: 3,
+      ADX_DI: 3,
       adxThreshold: 25,
-      mansfieldRS: 5,
+      mansfieldRS: 3,
       mansfieldRSThreshold: 0,
-      macdCross: 5,
-      weeklyHABullish: 2.5,
-      sma20Slope: 2.5,
+      macdCross: 3,
+      weeklyHABullish: 2,
+      sma20Slope: 2,
       sma20SlopeThreshold: 0,
     },
     /* Pillar 2: Pullback Quality (max 28).
@@ -2977,7 +2977,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        extensionCapATR ATRs above the level zeroes the whole breakout sub-score —
        that's chasing, not a fresh entry. */
     pullbackQuality: {
-      distATR_inner: 7,
+      distATR_inner: 12,
       distATR_innerRange: 1.0,
       distATR_outer: 3,
       distATR_outerRange: 1.5,
@@ -2989,7 +2989,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       rsiOversoldHighVol: 35,
       volumeConfirm: 4,
       volRatioThreshold: 1.5,
-      pullbackDepthIdeal: 6,
+      pullbackDepthIdeal: 10,
       pullbackDepthLo: 0.05,
       pullbackDepthHi: 0.15,
       pullbackDepthMax: 0.25,
@@ -3175,7 +3175,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      Bumped 16→17 at the mod16 lock-in pass (2026-09-12): pillarMax
      {28,28,12,22,4}, classification {62,60,58,34} re-derived under the V16
      tempered modifiers and OOS-validated. */
-  var SCORE_CONFIG_VERSION = 17;
+  var SCORE_CONFIG_VERSION = 18;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? Math.round(SCORE_CONFIG.forwardSim.targetPct * 1000) / 10 : 4; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }

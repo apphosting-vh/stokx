@@ -173,7 +173,7 @@ var INS_PILLARS = [
     if (!rows || rows.length < 2) return null;
     var parts = rows.map(function (r) { return r.key + " " + r.winRate + "%"; }).join(" > ");
     for (var i = 1; i < rows.length; i++) {
-      if (rows[i].winRate < rows[i - 1].winRate - 5) {
+      if (rows[i].winRate < rows[i - 1].winRate) {
         return "Monotonicity break: " + parts + ". Higher scores did NOT consistently raise the hit rate — the signal boundary between " + rows[i - 1].key + " and " + rows[i].key + " needs attention.";
       }
     }

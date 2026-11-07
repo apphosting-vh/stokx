@@ -358,6 +358,14 @@ window.MLTrainer = (function () {
     var w = 1 / (1 + 0.5 * r);
     w = Math.min(3, w);
     if (label && label.barrier === "TIMEOUT") w = Math.max(w, 0.7);
+    
+    /* CRITICAL FIX: The dataset is ~67% winners. Without this, the network 
+       collapses to predicting "WIN" for everything (specificity 5%). 
+       We heavily penalize missing a loser to force a real decision boundary. */
+    if (label && label.is_winner === false) {
+      w *= 2.5;
+    }
+    
     return w;
   }
 
@@ -1419,8 +1427,8 @@ window.MLTrainer = (function () {
         calibrated: !!model.calibration,
         recommendation: prob >= 0.80 ? "STRONG_BUY" :
                          prob >= 0.70 ? "BUY" :
-                         prob >= 0.50 ? "WATCHLIST" :
-                         prob >= 0.35 ? "NEUTRAL" : "AVOID",
+                         prob >= 0.55 ? "WATCHLIST" :
+                         prob >= 0.40 ? "NEUTRAL" : "AVOID",
         confidence: prob >= 0.55 || prob <= 0.35 ? "high" :
                     prob >= 0.45 ? "medium" : "low"
       };
@@ -1449,8 +1457,8 @@ window.MLTrainer = (function () {
       calibrated: !!loadedModel.calibration,
       recommendation: prob >= 0.80 ? "STRONG_BUY" :
                        prob >= 0.70 ? "BUY" :
-                       prob >= 0.50 ? "WATCHLIST" :
-                       prob >= 0.35 ? "NEUTRAL" : "AVOID"
+                       prob >= 0.55 ? "WATCHLIST" :
+                       prob >= 0.40 ? "NEUTRAL" : "AVOID"
     };
   }
 
