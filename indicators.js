@@ -3143,6 +3143,26 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        1.0 = ignore learned weights; very low values apply an absolute threshold
        to a foreign score distribution (the old below-coin-flip win-rate bug). */
     patternBlendAlpha: 0.5,
+
+    /* Adaptive classification thresholds — percentile-based cutoffs derived
+       from the rolling distribution of LIVE entry scores. When enabled and
+       scoreHistory has >= 30 samples: STRONG_BUY = 80th percentile (top 20%),
+       BUY = 65th (top 35%), WATCHLIST = 50th (top 50%), NEUTRAL = 25th
+       (top 75%). Preserves selectivity when the market regime shifts the
+       whole score distribution.
+
+       scoreHistory is populated by window.__stoxRecordScore (pattern-
+       integration.js) on every live entry-score evaluation, buffered and
+       flushed to localStorage on a debounce. Capped at historyCap entries
+       (rolling window).
+
+       Backtests use the FIXED thresholds in "classification" above — never
+       this adaptive block — so historical runs are reproducible. */
+    adaptiveThresholds: {
+      enabled: false,
+      scoreHistory: [],
+      historyCap: 500
+    },
   };
 
   var SCORE_CONFIG_DEFAULTS = JSON.parse(JSON.stringify(SCORE_CONFIG));

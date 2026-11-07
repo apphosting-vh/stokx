@@ -20,6 +20,86 @@
   var _cachedMLModel = null;     // Pre-loaded ML model for synchronous prediction
   var _cachedScoringConfig = { usePatternWeights: true, useMLBlend: true };
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     Adaptive-threshold support. Two global helpers:
+       __stoxRecordScore(score)  — buffered, debounced push into
+                                    SCORE_CONFIG.adaptiveThresholds.scoreHistory
+       __stoxClassifyLive(score) — classify using percentile cutoffs when
+                                    enabled + >= 30 samples; fixed otherwise.
+     Both are on window so app-core.js::relabelDecision and pattern-scoring.js
+     can share the same logic — one source of truth for the live path.
+     ═══════════════════════════════════════════════════════════════════════ */
+  var _scoreBuf = [];
+  var _scoreFlushTimer = null;
+
+  function _flushScoreBuf() {
+    if (_scoreBuf.length === 0) return;
+    try {
+      var TI = window.TechIndicators;
+      if (!TI || !TI.getScoreConfig) { _scoreBuf.length = 0; return; }
+      var cfg = TI.getScoreConfig();
+      var at = cfg.adaptiveThresholds;
+      if (!at || !at.enabled) { _scoreBuf.length = 0; return; }
+      var existing = Array.isArray(at.scoreHistory) ? at.scoreHistory : [];
+      var hist = existing.concat(_scoreBuf);
+      var cap = at.historyCap || 500;
+      if (hist.length > cap) hist = hist.slice(-cap);
+      _scoreBuf.length = 0;
+      TI.setScoreConfig({ adaptiveThresholds: { scoreHistory: hist } });
+      try { localStorage.setItem("stox_score_config", JSON.stringify(TI.getScoreConfig())); } catch (e) {}
+    } catch (e) { _scoreBuf.length = 0; }
+  }
+
+  window.__stoxRecordScore = function (score) {
+    if (score == null || isNaN(score)) return;
+    try {
+      var TI = window.TechIndicators;
+      var cfg = TI && TI.getScoreConfig ? TI.getScoreConfig() : null;
+      if (!cfg || !cfg.adaptiveThresholds || !cfg.adaptiveThresholds.enabled) return;
+    } catch (e) { return; }
+    _scoreBuf.push(Math.round(score * 10) / 10);
+    if (_scoreBuf.length >= 20) { clearTimeout(_scoreFlushTimer); _flushScoreBuf(); return; }
+    clearTimeout(_scoreFlushTimer);
+    _scoreFlushTimer = setTimeout(_flushScoreBuf, 5000);
+  };
+
+  try {
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "hidden") _flushScoreBuf();
+    });
+    window.addEventListener("beforeunload", _flushScoreBuf);
+  } catch (e) {}
+
+  window.__stoxClassifyLive = function (score) {
+    if (score == null) return null;
+    try {
+      var TI = window.TechIndicators;
+      if (!TI || !TI.getScoreConfig) return "NEUTRAL";
+      var cfg = TI.getScoreConfig();
+      var t = cfg.classification || {};
+      var at = cfg.adaptiveThresholds;
+      if (at && at.enabled && window.StoxStats) {
+        var hist = Array.isArray(at.scoreHistory) ? at.scoreHistory : [];
+        if (hist.length >= 30) {
+          var sb = window.StoxStats.adaptiveThreshold(hist, t.strongBuy, 80);
+          var b = window.StoxStats.adaptiveThreshold(hist, t.buy, 65);
+          var wl = window.StoxStats.adaptiveThreshold(hist, t.watchlist, 50);
+          var n = window.StoxStats.adaptiveThreshold(hist, t.neutral, 25);
+          if (score >= sb) return "STRONG_BUY";
+          if (score >= b) return "BUY";
+          if (score >= wl) return "WATCHLIST";
+          if (score >= n) return "NEUTRAL";
+          return "AVOID";
+        }
+      }
+      if (score >= (t.strongBuy != null ? t.strongBuy : 62)) return "STRONG_BUY";
+      if (score >= (t.buy != null ? t.buy : 60)) return "BUY";
+      if (score >= (t.watchlist != null ? t.watchlist : 58)) return "WATCHLIST";
+      if (score >= (t.neutral != null ? t.neutral : 34)) return "NEUTRAL";
+      return "AVOID";
+    } catch (e) { return "NEUTRAL"; }
+  };
+
   /**
    * Load all patterns from IndexedDB into memory so the screener can
    * access them synchronously (no async IDB reads per stock).
@@ -315,6 +395,10 @@
     if (window.BacktestEngine && window.BacktestEngine.classifyScore) {
       classification = window.BacktestEngine.classifyScore(adjustedScore);
     }
+    /* Live adaptive classifier — single source of truth for the sync path.
+       Falls through to fixed thresholds when the feature is off or history
+       is < 30 samples, so enabling is a zero-risk switch. */
+    try { if (window.__stoxClassifyLive) classification = window.__stoxClassifyLive(adjustedScore); } catch (_adE) {}
     /* Classification always follows the user's configured thresholds.
        (The old hardcoded "ML rec STRONG_BUY + score>=60 → STRONG_BUY" override
        bypassed Score Configuration and was removed.) */
@@ -505,10 +589,12 @@
           }
         } catch (e) {}
       }
+      var result = compatResult;
       if (pattern) {
-        return applyPatternToCompatResult(compatResult, pattern, dailyCandles);
+        result = applyPatternToCompatResult(compatResult, pattern, dailyCandles);
       }
-      return compatResult;
+      try { if (window.__stoxRecordScore && result && result.finalScore != null) window.__stoxRecordScore(result.finalScore); } catch (e) {}
+      return result;
     };
 
     /**

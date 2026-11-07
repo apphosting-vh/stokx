@@ -8428,6 +8428,25 @@ const ScoreTunerPanel = () => {
     if (TI.setScoreConfig) TI.setScoreConfig(newCfg);
   }
 
+  function toggleAdaptiveEnabled(v) {
+    var newCfg = JSON.parse(JSON.stringify(scoreConfig));
+    newCfg.adaptiveThresholds = newCfg.adaptiveThresholds || { enabled: false, scoreHistory: [], historyCap: 500 };
+    newCfg.adaptiveThresholds.enabled = !!v;
+    newCfg._v = (TI.getScoreConfigVersion) ? TI.getScoreConfigVersion() : undefined;
+    setScoreConfigState(newCfg);
+    try { localStorage.setItem('stox_score_config', JSON.stringify(newCfg)); } catch (e) {}
+    if (TI.setScoreConfig) TI.setScoreConfig(newCfg);
+  }
+
+  function clearAdaptiveHistory() {
+    var newCfg = JSON.parse(JSON.stringify(scoreConfig));
+    if (newCfg.adaptiveThresholds) newCfg.adaptiveThresholds.scoreHistory = [];
+    newCfg._v = (TI.getScoreConfigVersion) ? TI.getScoreConfigVersion() : undefined;
+    setScoreConfigState(newCfg);
+    try { localStorage.setItem('stox_score_config', JSON.stringify(newCfg)); } catch (e) {}
+    if (TI.setScoreConfig) TI.setScoreConfig(newCfg);
+  }
+
   function resetScoreConfig() {
     var def = TI.getDefaultScoreConfig ? TI.getDefaultScoreConfig() : (TI.getScoreConfig ? TI.getScoreConfig() : {});
     setScoreConfigState(def);
@@ -9205,6 +9224,51 @@ const ScoreTunerPanel = () => {
             )
           )
         ),
+        /* Adaptive Thresholds — percentile-based cutoffs that track the live
+           score distribution so selectivity stays constant across regimes. */
+        (function () {
+          var at = scoreConfig.adaptiveThresholds || { enabled: false, scoreHistory: [], historyCap: 500 };
+          var liveCfg = (TI && TI.getScoreConfig) ? TI.getScoreConfig() : null;
+          var liveHist = (liveCfg && liveCfg.adaptiveThresholds && Array.isArray(liveCfg.adaptiveThresholds.scoreHistory))
+            ? liveCfg.adaptiveThresholds.scoreHistory : [];
+          var n = liveHist.length;
+          var ready = at.enabled && n >= 30;
+          var eff = null;
+          if (ready && window.StoxStats) {
+            eff = {
+              sb: window.StoxStats.adaptiveThreshold(liveHist, scoreConfig.classification.strongBuy, 80),
+              b: window.StoxStats.adaptiveThreshold(liveHist, scoreConfig.classification.buy, 65),
+              wl: window.StoxStats.adaptiveThreshold(liveHist, scoreConfig.classification.watchlist, 50),
+              nn: window.StoxStats.adaptiveThreshold(liveHist, scoreConfig.classification.neutral, 25)
+            };
+          }
+          var noteStyle = { fontSize: 11, color: 'var(--text5)', lineHeight: 1.55, marginBottom: 10 };
+          var rowStyle = { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' };
+          var badge = function (label, value, col) {
+            return React.createElement('div', { style: { padding: '6px 10px', borderRadius: 8, background: 'var(--bg4)', border: '1px solid var(--border)', minWidth: 90 } },
+              React.createElement('div', { style: { fontSize: 9, color: 'var(--text6)', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 700 } }, label),
+              React.createElement('div', { style: { fontSize: 15, fontWeight: 800, fontFamily: 'var(--font-heading)', color: col || 'var(--text)', marginTop: 2 } }, value));
+          };
+          return React.createElement('div', { style: { marginBottom: 18 } },
+            React.createElement('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--accent)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 } }, 'Adaptive Thresholds'),
+            React.createElement('div', { style: noteStyle },
+              'When enabled, classification cutoffs track the live score distribution — STRONG_BUY = top 20% of recent scores, BUY = top 35%, WATCHLIST = top 50%, NEUTRAL = top 75%. Preserves selectivity when the market regime shifts the whole score distribution. Requires ≥ 30 live score samples; falls back to the fixed thresholds below until then. Backtests always use the fixed thresholds (reproducibility).'),
+            React.createElement('div', { style: rowStyle },
+              React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 } },
+                React.createElement('input', { type: 'checkbox', checked: !!at.enabled, onChange: function (e) { toggleAdaptiveEnabled(e.target.checked); }, style: { accentColor: 'var(--accent)', cursor: 'pointer', width: 15, height: 15 } }),
+                'Enable adaptive thresholds'),
+              React.createElement('span', { style: { fontSize: 11, color: ready ? '#16a34a' : n >= 30 ? '#d97706' : 'var(--text5)', fontWeight: 600 } },
+                ready ? '● Active (' + n + ' samples)' : n >= 30 ? '○ Waiting for enable' : '○ Collecting samples (' + n + '/30)')),
+            eff && React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 } },
+              badge('STRONG_BUY ≥', eff.sb.toFixed(1), '#16a34a'),
+              badge('BUY ≥', eff.b.toFixed(1), '#22c55e'),
+              badge('WATCHLIST ≥', eff.wl.toFixed(1), '#f59e0b'),
+              badge('NEUTRAL ≥', eff.nn.toFixed(1), '#a855f7')),
+            React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+              React.createElement('button', { onClick: clearAdaptiveHistory, disabled: n === 0, className: 'stx-btn', style: { fontSize: 10, padding: '4px 10px', border: '1px solid var(--border)', background: 'var(--bg4)', color: n === 0 ? 'var(--text6)' : '#ef4444', cursor: n === 0 ? 'not-allowed' : 'pointer', opacity: n === 0 ? 0.5 : 1 } }, 'Clear history (' + n + ')'),
+              React.createElement('span', { style: { fontSize: 10, color: 'var(--text6)' } }, 'History persists across reloads, capped at ' + (at.historyCap || 500) + ' entries.'))
+          );
+        })(),
         /* Classification Thresholds */
         React.createElement("div", null,
           React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Classification Thresholds"),
@@ -9242,6 +9306,14 @@ var SCREENER_DECISION_MAP = {
 function relabelDecision(score, storedDecision) {
   if (score == null) return storedDecision;
   try {
+    /* Prefer the live classifier — respects adaptive thresholds when enabled */
+    if (window.__stoxClassifyLive) {
+      var liveCls = window.__stoxClassifyLive(score);
+      if (liveCls) {
+        return SCREENER_DECISION_MAP[liveCls] || storedDecision || { label: liveCls, color: "var(--text6)" };
+      }
+    }
+    /* Fallback: fixed thresholds from Score Config */
     var TI = window.TechIndicators;
     var c = (TI && TI.getScoreConfig ? TI.getScoreConfig().classification : null) || {};
     var sb = c.strongBuy != null ? c.strongBuy : 62; /* fallback mirrors SCORE_CONFIG lock-in @2026-09-12 (mod16 pass) */
