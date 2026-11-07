@@ -556,7 +556,7 @@ const fetchHistoricalPrices = async (rawTicker, fromDate) => {
               const istDate = new Date(istMs).toISOString().split("T")[0];
               pts.push({ date: istDate, close: Math.round(c * 100) / 100 });
             }
-            if (pts.length >= 2) { _resolve(pts); return pts; }
+            if (pts.length >= 2) { var _clean = window.YahooValidation ? window.YahooValidation.sanitize(pts).candles : pts; if (_clean.length >= 2) { _resolve(_clean); return _clean; } }
           } catch {}
         }
       }
@@ -727,7 +727,15 @@ async function fetchOHLCV(ticker, timeframe) {
               v: v || 0
             });
           }
-          if (candles.length >= 10) return candles;
+          if (candles.length >= 10) {
+            if (window.YahooValidation) {
+              var _san = window.YahooValidation.sanitize(candles);
+              window.YahooValidation.logIfProblematic(symbols[s], _san.report);
+              if (_san.candles.length >= 10) return _san.candles;
+              continue;
+            }
+            return candles;
+          }
         } catch { continue; }
       }
     }

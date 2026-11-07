@@ -324,33 +324,79 @@ window.TechIndicators = (function () {
      penalizes when combined with ATR% > 3.0, so high-beta names are not penalized
      unconditionally. */
   function calcBeta(stockCandles, indexCandles, n) {
-    n = n || 60;
-    if (!stockCandles || !indexCandles || stockCandles.length < n || indexCandles.length < n) return null;
-    var sMap = {};
-    for (var i = 0; i < stockCandles.length; i++) sMap[stockCandles[i].t] = stockCandles[i].c;
-    var pairs = [];
-    for (var i = 1; i < indexCandles.length; i++) {
-      var sv = sMap[indexCandles[i].t], svPrev = sMap[indexCandles[i - 1].t];
-      if (sv != null && svPrev != null && svPrev > 0 && indexCandles[i - 1].c > 0) {
-        pairs.push({ s: (sv - svPrev) / svPrev, idx: (indexCandles[i].c - indexCandles[i - 1].c) / indexCandles[i - 1].c });
-      }
-    }
-    if (pairs.length < n) return null;
-    var out = [];
-    for (var i = 0; i < pairs.length; i++) {
-      if (i < n - 1) { out.push(null); continue; }
-      var sMean = 0, iMean = 0, c = 0;
-      for (var k = i - n + 1; k <= i; k++) { sMean += pairs[k].s; iMean += pairs[k].idx; c++; }
-      sMean /= c; iMean /= c;
-      var cov = 0, iVar = 0;
-      for (var k = i - n + 1; k <= i; k++) {
-        cov += (pairs[k].s - sMean) * (pairs[k].idx - iMean);
-        iVar += (pairs[k].idx - iMean) * (pairs[k].idx - iMean);
-      }
-      out.push(iVar > 0 ? round(cov / iVar, 4) : null);
-    }
-    return out;
+  n = n || 60;
+  if (!stockCandles || !indexCandles || stockCandles.length < n || indexCandles.length < n) return null;
+  var sMap = {}, sPrevDate = {}, stockDates = [];
+  for (var i = 0; i < stockCandles.length; i++) {
+    var ct = stockCandles[i].t; if (ct == null) continue;
+    var dk = String(ct).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    sMap[dk] = stockCandles[i].c;
+    if (stockDates.length > 0) sPrevDate[dk] = stockDates[stockDates.length - 1];
+    stockDates.push(dk);
   }
+  var pairs = [];
+  for (var i = 1; i < indexCandles.length; i++) {
+    var dNow = String(indexCandles[i].t).slice(0, 10);
+    var dPrev = String(indexCandles[i - 1].t).slice(0, 10);
+    var svNow = sMap[dNow], svPrev = sMap[dPrev];
+    if (svNow == null || svPrev == null) continue;
+    if (sPrevDate[dNow] !== dPrev) continue;
+    if (!(svPrev > 0) || !(indexCandles[i - 1].c > 0)) continue;
+    pairs.push({ s: (svNow - svPrev) / svPrev, idx: (indexCandles[i].c - indexCandles[i - 1].c) / indexCandles[i - 1].c });
+  }
+  if (pairs.length < n) return null;
+  var out = [];
+  for (var i = 0; i < pairs.length; i++) {
+    if (i < n - 1) { out.push(null); continue; }
+    var sM = 0, iM = 0, c = 0;
+    for (var k = i - n + 1; k <= i; k++) { sM += pairs[k].s; iM += pairs[k].idx; c++; }
+    sM /= c; iM /= c;
+    var cov = 0, iV = 0;
+    for (var k = i - n + 1; k <= i; k++) { cov += (pairs[k].s - sM) * (pairs[k].idx - iM); iV += (pairs[k].idx - iM) * (pairs[k].idx - iM); }
+    var b = iV > 0 ? cov / iV : null;
+    if (b != null) b = Math.max(0.1, Math.min(3.0, b));
+    out.push(b != null ? round(b, 4) : null);
+  }
+  return out;
+}
+function calcBetaLagged(stockCandles, indexCandles, n) {
+  n = n || 60;
+  if (!stockCandles || !indexCandles || stockCandles.length < n + 1 || indexCandles.length < n + 1) return null;
+  var sMap = {}, sPrevDate = {}, stockDates = [];
+  for (var i = 0; i < stockCandles.length; i++) {
+    var ct = stockCandles[i].t; if (ct == null) continue;
+    var dk = String(ct).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    sMap[dk] = stockCandles[i].c;
+    if (stockDates.length > 0) sPrevDate[dk] = stockDates[stockDates.length - 1];
+    stockDates.push(dk);
+  }
+  var pairs = [];
+  for (var i = 2; i < indexCandles.length; i++) {
+    var dNow = String(indexCandles[i].t).slice(0, 10);
+    var dPrev = String(indexCandles[i - 1].t).slice(0, 10);
+    var svNow = sMap[dNow], svPrev = sMap[dPrev];
+    if (svNow == null || svPrev == null) continue;
+    if (sPrevDate[dNow] !== dPrev) continue;
+    if (!(svPrev > 0) || !(indexCandles[i - 2].c > 0)) continue;
+    pairs.push({ s: (svNow - svPrev) / svPrev, idxLagged: (indexCandles[i - 1].c - indexCandles[i - 2].c) / indexCandles[i - 2].c });
+  }
+  if (pairs.length < n) return null;
+  var out = [];
+  for (var i = 0; i < pairs.length; i++) {
+    if (i < n - 1) { out.push(null); continue; }
+    var sM = 0, iM = 0, c = 0;
+    for (var k = i - n + 1; k <= i; k++) { sM += pairs[k].s; iM += pairs[k].idxLagged; c++; }
+    sM /= c; iM /= c;
+    var cov = 0, iV = 0;
+    for (var k = i - n + 1; k <= i; k++) { cov += (pairs[k].s - sM) * (pairs[k].idxLagged - iM); iV += (pairs[k].idxLagged - iM) * (pairs[k].idxLagged - iM); }
+    var b = iV > 0 ? cov / iV : null;
+    if (b != null) b = Math.max(0.1, Math.min(3.0, b));
+    out.push(b != null ? round(b, 4) : null);
+  }
+  return out;
+}
   /* --------------------------------------------------------------------------
      Section 4.2 � Trend Direction & Strength
      -------------------------------------------------------------------------- */
@@ -878,48 +924,73 @@ window.TechIndicators = (function () {
      VAH/VAL = bounds of the 70% value area: bins sorted by volume are added until
      cumulative volume reaches 70% of total volume. */
   function calcVolumeProfile(candles, numBins, lookback) {
-    numBins = numBins || 24;
-    lookback = lookback || 60;
-    if (!candles || candles.length < 2) return null;
-    var start = Math.max(0, candles.length - lookback);
-    var hi = -Infinity, lo = Infinity;
-    var hiArr = highs(candles), loArr = lows(candles);
-    for (var i = start; i < candles.length; i++) { if (hiArr[i] != null && hiArr[i] > hi) hi = hiArr[i]; if (loArr[i] != null && loArr[i] < lo) lo = loArr[i]; }
-    if (hi === lo) return null;
-    var binSize = (hi - lo) / numBins;
-    var bins = [];
-    for (var b = 0; b < numBins; b++) {
-      bins.push({ priceFrom: round(lo + b * binSize, 2), priceTo: round(lo + (b + 1) * binSize, 2), volume: 0 });
+  numBins = numBins || 24;
+  if (lookback == null) {
+    lookback = 60;
+    if (candles && candles.length > 6) {
+      var gaps = [];
+      for (var gi = 1; gi <= 5; gi++) {
+        var ga = candles[gi - 1].t, gb = candles[gi].t;
+        if (ga == null || gb == null) continue;
+        var ta = new Date(String(ga).replace(" ", "T")).getTime();
+        var tb = new Date(String(gb).replace(" ", "T")).getTime();
+        if (!isNaN(ta) && !isNaN(tb) && tb > ta) gaps.push((tb - ta) / 60000);
+      }
+      if (gaps.length) {
+        gaps.sort(function (a, b) { return a - b; });
+        var mg = gaps[Math.floor(gaps.length / 2)];
+        if (mg < 120) lookback = 240; else if (mg < 1500) lookback = 120; else lookback = 60;
+      }
     }
-    for (var i = start; i < candles.length; i++) {
-      var barLo = loArr[i] != null ? loArr[i] : candles[i].c;
-      var barHi = hiArr[i] != null ? hiArr[i] : candles[i].c;
-      var lowBin = Math.min(numBins - 1, Math.max(0, Math.floor((barLo - lo) / binSize)));
-      var highBin = Math.min(numBins - 1, Math.max(0, Math.floor((barHi - lo) / binSize)));
-      var numBinsTouched = highBin - lowBin + 1;
-      var volPerBin = numBinsTouched > 0 ? candles[i].v / numBinsTouched : candles[i].v;
-      for (var b = lowBin; b <= highBin; b++) { bins[b].volume += volPerBin; }
-    }
-    var maxVol = 0;
-    for (var b = 0; b < bins.length; b++) { if (bins[b].volume > maxVol) maxVol = bins[b].volume; }
-    for (var b = 0; b < bins.length; b++) { bins[b].pctOfMax = maxVol > 0 ? round(bins[b].volume / maxVol * 100, 1) : 0; }
-    var pocBin = bins[0];
-    for (var b = 1; b < bins.length; b++) { if (bins[b].volume > pocBin.volume) pocBin = bins[b]; }
-    var poc = round((pocBin.priceFrom + pocBin.priceTo) / 2, 2);
-    var totalVol = 0;
-    for (var b = 0; b < bins.length; b++) totalVol += bins[b].volume;
-    var order = [];
-    for (var b = 0; b < bins.length; b++) order.push(b);
-    order.sort(function (a, b) { return bins[b].volume - bins[a].volume; });
-    var cum = 0, included = [];
-    for (var k = 0; k < order.length; k++) {
-      cum += bins[order[k]].volume; included.push(order[k]);
-      if (cum >= 0.70 * totalVol) break;
-    }
-    var vah = round(bins[Math.max.apply(null, included)].priceTo, 2);
-    var val = round(bins[Math.min.apply(null, included)].priceFrom, 2);
-    return { bins: bins, poc: poc, pocVolume: pocBin.volume, vah: vah, val: val, valueAreaHigh: vah, valueAreaLow: val };
   }
+  if (!candles || candles.length < 2) return null;
+  var start = Math.max(0, candles.length - lookback);
+  var hi = -Infinity, lo = Infinity;
+  var hiArr = highs(candles), loArr = lows(candles);
+  for (var i = start; i < candles.length; i++) {
+    if (hiArr[i] != null && isFinite(hiArr[i]) && hiArr[i] > hi) hi = hiArr[i];
+    if (loArr[i] != null && isFinite(loArr[i]) && loArr[i] < lo) lo = loArr[i];
+  }
+  if (!(hi > lo)) return null;
+  var bs = (hi - lo) / numBins, bins = [];
+  for (var b = 0; b < numBins; b++) bins.push({ priceFrom: round(lo + b * bs, 2), priceTo: round(lo + (b + 1) * bs, 2), volume: 0 });
+  for (var i = start; i < candles.length; i++) {
+    var bLo = loArr[i] != null && isFinite(loArr[i]) ? loArr[i] : candles[i].c;
+    var bHi = hiArr[i] != null && isFinite(hiArr[i]) ? hiArr[i] : candles[i].c;
+    var bV = candles[i].v; if (bV == null || !isFinite(bV) || bV < 0) bV = 0;
+    if (bV === 0) continue;
+    var lowBin = Math.min(numBins - 1, Math.max(0, Math.floor((bLo - lo) / bs)));
+    var highBin = Math.min(numBins - 1, Math.max(0, Math.floor((bHi - lo) / bs)));
+    var nb = highBin - lowBin + 1, vpb = bV / nb;
+    for (var b = lowBin; b <= highBin; b++) bins[b].volume += vpb;
+  }
+  var mv = 0;
+  for (var b = 0; b < bins.length; b++) if (bins[b].volume > mv) mv = bins[b].volume;
+  if (mv <= 0) return null;
+  for (var b = 0; b < bins.length; b++) bins[b].pctOfMax = round(bins[b].volume / mv * 100, 1);
+  var pbi = 0;
+  for (var b = 1; b < bins.length; b++) if (bins[b].volume > bins[pbi].volume) pbi = b;
+  var plo = bins[pbi].priceFrom, phi = bins[pbi].priceTo, wS = 0, wV = 0;
+  for (var i = start; i < candles.length; i++) {
+    var hh = hiArr[i] != null && isFinite(hiArr[i]) ? hiArr[i] : candles[i].c;
+    var ll = loArr[i] != null && isFinite(loArr[i]) ? loArr[i] : candles[i].c;
+    var vv = candles[i].v; if (vv == null || !isFinite(vv) || vv < 0) vv = 0;
+    if (vv === 0) continue;
+    var mid = (hh + ll + candles[i].c) / 3;
+    if (mid >= plo && mid <= phi) { wS += mid * vv; wV += vv; }
+  }
+  var poc = wV > 0 ? round(wS / wV, 2) : round((plo + phi) / 2, 2);
+  var pocV = bins[pbi].volume;
+  var tv = 0;
+  for (var b = 0; b < bins.length; b++) tv += bins[b].volume;
+  var ord = [], inc = [], cum = 0;
+  for (var b = 0; b < bins.length; b++) ord.push(b);
+  ord.sort(function (a, b) { return bins[b].volume - bins[a].volume; });
+  for (var k = 0; k < ord.length; k++) { cum += bins[ord[k]].volume; inc.push(ord[k]); if (cum >= 0.7 * tv) break; }
+  var vah = round(bins[Math.max.apply(null, inc)].priceTo, 2);
+  var val = round(bins[Math.min.apply(null, inc)].priceFrom, 2);
+  return { bins: bins, poc: poc, pocVolume: pocV, vah: vah, val: val, valueAreaHigh: vah, valueAreaLow: val, lookback: lookback };
+}
 
   function calcTTMSqueeze(candles, bbPeriod, bbMult, kcMult) {
     bbPeriod = bbPeriod || 20; bbMult = bbMult || 2; kcMult = kcMult || 1.5;
@@ -1289,30 +1360,28 @@ window.TechIndicators = (function () {
   }
 
   function calcStabilityScore(candles, lookback) {
-    lookback = lookback || 10;
-    var cl = closes(candles);
-    if (cl.length < lookback + 1) return 0;
-    var rets = [];
-    for (var i = cl.length - lookback; i < cl.length; i++) {
-      if (cl[i - 1] === 0) return 0;
-      rets.push(cl[i] / cl[i - 1] - 1);
-    }
-    var meanRet = 0;
-    for (var i = 0; i < rets.length; i++) meanRet += rets[i];
-    meanRet /= rets.length;
-    var stdRet = 0;
-    for (var i = 0; i < rets.length; i++) stdRet += Math.pow(rets[i] - meanRet, 2);
-    stdRet = Math.sqrt(stdRet / (rets.length - 1));
-    if (stdRet === 0) return 1;
-    if (meanRet <= 0) return 0;
-    var posFrac = 0;
-    for (var i = 0; i < rets.length; i++) if (rets[i] > 0) posFrac++;
-    posFrac /= rets.length;
-    var cv = stdRet / meanRet;
-    var cvScore = Math.max(0, 1 - cv / 2);
-    var score = 0.6 * posFrac + 0.4 * cvScore;
-    return round(Math.max(0, Math.min(1, score)), 2);
+  lookback = lookback || 10;
+  var cl = closes(candles);
+  if (cl.length < lookback + 1) return 0;
+  var rets = [];
+  for (var i = cl.length - lookback; i < cl.length; i++) {
+    if (cl[i - 1] === 0) return 0;
+    rets.push(cl[i] / cl[i - 1] - 1);
   }
+  var mr = 0;
+  for (var i = 0; i < rets.length; i++) mr += rets[i];
+  mr /= rets.length;
+  var sr = 0;
+  for (var i = 0; i < rets.length; i++) sr += Math.pow(rets[i] - mr, 2);
+  sr = Math.sqrt(sr / (rets.length - 1));
+  var meanComp = mr <= 0 ? 0 : Math.min(1, mr / 0.005);
+  var cv = Math.abs(mr) > 0 ? sr / Math.abs(mr) : 0;
+  var volComp = cv <= 0.5 ? 1 : cv >= 3 ? 0 : 1 - (cv - 0.5) / 2.5;
+  var posFrac = 0;
+  for (var i = 0; i < rets.length; i++) if (rets[i] > 0) posFrac++;
+  posFrac /= rets.length;
+  return round(Math.max(0, Math.min(1, 0.4 * meanComp + 0.3 * volComp + 0.3 * posFrac)), 2);
+}
 
   /* ── Spike/Stability Guard (hybrid of our volatility-adaptive detection + spec 11.1) ──
      Daily-only, once per session. todaySpike = our latest-bar spike (2.5x rolling-std
@@ -5683,32 +5752,50 @@ targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3
    * Used as portfolio-level features joined to all symbols per date.
    * @returns {Object} { bull_bear, volatility_regime, market_momentum, breadth_unknown }
    */
-  function computeMarketRegimeFeatures(indexCandles) {
-    if (!indexCandles || indexCandles.length < 100) {
-      return { bull_bear: 0, volatility_regime: 0, market_momentum: 0 };
-    }
-    var closesArr = indexCandles.map(function (c) { return c.c; });
-    var n = closesArr.length - 1;
-    var ma50 = sma(closesArr, 50);
-    var ma200 = sma(closesArr, 200);
-    var bullBear = 0;
-    if (n >= 200 && ma50[n] != null && ma200[n] != null) {
-      bullBear = ma50[n] > ma200[n] ? 1 : -1;
-    } else if (n >= 50 && ma50[n] != null) {
-      // Not enough for MA200 — use MA50 vs MA20 as proxy
-      var ma20 = sma(closesArr, 20);
-      bullBear = ma20[n] > ma50[n] ? 1 : -1;
-    }
-    // Volatility regime via ATR%
-    var atrVals = calcATR(indexCandles, 14);
-    var atrPct = atrVals[n] != null && closesArr[n] > 0 ? atrVals[n] / closesArr[n] : 0;
-    var volRegime = 0;
-    if (atrPct <= 0.01) volRegime = -1;       // low vol
-    else if (atrPct >= 0.03) volRegime = 1;   // high vol
-    // Market momentum: 10-day index return
-    var mom10 = n >= 10 && closesArr[n - 10] > 0 ? (closesArr[n] - closesArr[n - 10]) / closesArr[n - 10] : 0;
-    return { bull_bear: bullBear, volatility_regime: volRegime, market_momentum: Math.round(mom10 * 1000) / 1000 };
+  function computeMarketRegimeSeries(indexCandles) {
+  if (!indexCandles || indexCandles.length < 100) {
+    return { bull_bear: [], volatility_regime: [], market_momentum: [] };
   }
+  var closesArr = indexCandles.map(function (c) { return c.c; });
+  var ma50 = sma(closesArr, 50), ma200 = sma(closesArr, 200), ma20 = sma(closesArr, 20);
+  var atrArr = calcATR(indexCandles, 14);
+  var bb = [], vr = [], mm = [];
+  for (var n = 0; n < indexCandles.length; n++) {
+    var bbVal = 0;
+    if (n >= 200 && ma50[n] != null && ma200[n] != null) bbVal = ma50[n] > ma200[n] ? 1 : -1;
+    else if (n >= 50 && ma50[n] != null && ma20[n] != null) bbVal = ma20[n] > ma50[n] ? 1 : -1;
+    bb.push(bbVal);
+    var atrPct = (atrArr[n] != null && closesArr[n] > 0) ? atrArr[n] / closesArr[n] : 0;
+    vr.push(atrPct <= 0.01 ? -1 : atrPct >= 0.03 ? 1 : 0);
+    var mom = (n >= 10 && closesArr[n - 10] > 0) ? (closesArr[n] - closesArr[n - 10]) / closesArr[n - 10] : 0;
+    mm.push(Math.round(mom * 1000) / 1000);
+  }
+  return { bull_bear: bb, volatility_regime: vr, market_momentum: mm };
+}
+function _derivFeatures(key, arr, n, out) {
+  if (!arr || arr[n] == null) { out[key + "_d1"] = 0; out[key + "_d5"] = 0; out[key + "_ma5"] = 0; return; }
+  var cur = arr[n];
+  var d1 = n >= 1 && arr[n - 1] != null ? cur - arr[n - 1] : 0;
+  var d5 = n >= 5 && arr[n - 5] != null ? cur - arr[n - 5] : 0;
+  var ma5 = 0, cnt = 0;
+  for (var k = Math.max(0, n - 4); k <= n; k++) if (arr[k] != null) { ma5 += arr[k]; cnt++; }
+  ma5 = cnt > 0 ? ma5 / cnt : 0;
+  out[key + "_d1"] = round(d1, 3);
+  out[key + "_d5"] = round(d5, 3);
+  out[key + "_ma5"] = round(ma5, 3);
+}
+function computeMarketRegimeFeatures(indexCandles, atBar, precomputedSeries) {
+  if (!indexCandles || indexCandles.length < 100) {
+    return { bull_bear: 0, volatility_regime: 0, market_momentum: 0 };
+  }
+  var series = precomputedSeries || computeMarketRegimeSeries(indexCandles);
+  var n = (atBar == null) ? indexCandles.length - 1 : Math.max(0, Math.min(indexCandles.length - 1, atBar));
+  return {
+    bull_bear: series.bull_bear[n] != null ? series.bull_bear[n] : 0,
+    volatility_regime: series.volatility_regime[n] != null ? series.volatility_regime[n] : 0,
+    market_momentum: series.market_momentum[n] != null ? series.market_momentum[n] : 0
+  };
+}
 
   /**
    * Compute expanded per-stock features for ML training.
@@ -5801,9 +5888,17 @@ targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3
       out.volatility_regime = 0;
       if (atrPct <= 1.0) out.volatility_regime = -1;
       else if (atrPct >= 3.5) out.volatility_regime = 1;
-      if (indexFeatures && indexFeatures.volatility_regime != null) {
-        // Blend per-stock with market; keep it 0/±1
-        out.volatility_regime = indexFeatures.volatility_regime !== 0 ? indexFeatures.volatility_regime : out.volatility_regime;
+      var _idxFx = indexFeatures;
+      if (indexFeatures && indexFeatures.series && indexFeatures.atBar != null) {
+        var _s = indexFeatures.series, _n = indexFeatures.atBar;
+        _idxFx = {
+          bull_bear: _s.bull_bear && _s.bull_bear[_n] != null ? _s.bull_bear[_n] : 0,
+          volatility_regime: _s.volatility_regime && _s.volatility_regime[_n] != null ? _s.volatility_regime[_n] : 0,
+          market_momentum: _s.market_momentum && _s.market_momentum[_n] != null ? _s.market_momentum[_n] : 0
+        };
+      }
+      if (_idxFx && _idxFx.volatility_regime != null) {
+        out.volatility_regime = _idxFx.volatility_regime !== 0 ? _idxFx.volatility_regime : out.volatility_regime;
       }
 
       // Volume/flow
@@ -5821,14 +5916,40 @@ targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3
         var tier = window.StoxUniverse.getCapTier(symbol);
         out.cap_tier = tier === "large" ? 1 : (tier === "mid" ? 0 : -1);
       }
-      out.bull_bear = indexFeatures && indexFeatures.bull_bear != null ? indexFeatures.bull_bear : 0;
-      out.market_momentum = indexFeatures && indexFeatures.market_momentum != null ? indexFeatures.market_momentum : 0;
+      out.bull_bear = _idxFx && _idxFx.bull_bear != null ? _idxFx.bull_bear : 0;
+      out.market_momentum = _idxFx && _idxFx.market_momentum != null ? _idxFx.market_momentum : 0;
 
       // RSI/ATR interaction
       out.rsi_regime = 0;
       if (rsiNow > 70) out.rsi_regime = 1;
       else if (rsiNow < 30) out.rsi_regime = -1;
     } catch (e) { /* fall back to defaults */ }
+
+    /* Phase 3 derivatives — 6 features × 3 derivatives. */
+    try {
+      if (rsiV) _derivFeatures("rsi", rsiV, n, out);
+      if (adxV && adxV.adx) _derivFeatures("adx", adxV.adx, n, out);
+      if (macdV && macdV.histogram) _derivFeatures("macd_hist", macdV.histogram, n, out);
+      if (atrV) {
+        var _atrP = [];
+        for (var _i = 0; _i <= n; _i++) _atrP.push(atrV[_i] != null && isFinite(atrV[_i]) && candles[_i].c > 0 ? (atrV[_i] / candles[_i].c) * 100 : null);
+        _derivFeatures("atr_pct", _atrP, n, out);
+      }
+      if (bbV && bbV.upper && bbV.lower) {
+        var _bbP = [];
+        for (var _j = 0; _j <= n; _j++) {
+          var _bu = bbV.upper[_j], _bl = bbV.lower[_j];
+          _bbP.push(_bu != null && _bl != null && isFinite(_bu) && isFinite(_bl) && candles[_j].c > 0 ? (candles[_j].c - _bl) / Math.max(0.01, _bu - _bl) : null);
+        }
+        _derivFeatures("bb_position", _bbP, n, out);
+      }
+      if (volSmaV) {
+        var _vrP = [];
+        for (var _k = 0; _k <= n; _k++) _vrP.push(volSmaV[_k] ? candles[_k].v / Math.max(1, volSmaV[_k]) : null);
+        _derivFeatures("volume_ratio", _vrP, n, out);
+      }
+    } catch (_eD) {}
+
     return out;
   }
 
@@ -5841,6 +5962,7 @@ targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3
 
   return {
     closes: closes, highs: highs, lows: lows, volumes: volumes,
+    computeMarketRegimeSeries: computeMarketRegimeSeries, betaLagged: calcBetaLagged,
     sma: cl_sma, smaSeries: calcSMA, ema: cl_ema, emaSeries: calcEMA, wma: calcWMA, hma: calcHMA, kama: calcKAMA,
     rollingVWAP: calcRollingVWAP, vwap: calcVWAP,
     pctFrom126dHigh: calcPctFrom126dHigh, pctFrom126dLow: calcPctFrom126dLow,

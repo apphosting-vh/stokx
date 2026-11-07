@@ -170,6 +170,19 @@ window.BatchBacktest = (function () {
      * to computeMLFeaturesFromCompat's real-feature branch (pattern-integration.js).
      * Uses the pre-computed indicator cache (O(1) per bar).
      */
+    function buildRegimeMap(indexCandles) {
+      var TI = window.TechIndicators;
+      if (!TI || !TI.computeMarketRegimeSeries || !indexCandles || indexCandles.length < 100) return null;
+      var series = TI.computeMarketRegimeSeries(indexCandles);
+      if (!series || !series.bull_bear) return null;
+      var dateToIdx = {};
+      for (var i = 0; i < indexCandles.length; i++) {
+        var d = String(indexCandles[i].t).slice(0, 10);
+        if (d) dateToIdx[d] = i;
+      }
+      return { series: series, dateToIdx: dateToIdx };
+    }
+
     function mlFeaturesAtBar(bar, idx, cache, entryScore, opts, pillarScores) {
       if (!cache || idx == null) return null;
       var close = bar.c || 0;
@@ -197,7 +210,16 @@ window.BatchBacktest = (function () {
         if (TI && TI.computeExpandedFeatures && opts && opts.candles) {
           try {
             var idxFx = null;
-            if (TI.computeMarketRegimeFeatures) {
+            if (opts.regimeMap) {
+              var _barDate = String(bar.t).slice(0, 10);
+              var _rIdx = opts.regimeMap.dateToIdx[_barDate];
+              if (_rIdx != null) {
+                var _s = opts.regimeMap.series;
+                idxFx = { bull_bear: _s.bull_bear[_rIdx] != null ? _s.bull_bear[_rIdx] : 0,
+                  volatility_regime: _s.volatility_regime[_rIdx] != null ? _s.volatility_regime[_rIdx] : 0,
+                  market_momentum: _s.market_momentum[_rIdx] != null ? _s.market_momentum[_rIdx] : 0 };
+              }
+            } else if (TI.computeMarketRegimeFeatures) {
               try { idxFx = TI.computeMarketRegimeFeatures(opts.indexCandles || null); } catch (_e3) {}
             }
             var exp = TI.computeExpandedFeatures(opts.candles, idx, entryScore || 0, opts.symbol || null, idxFx, pillarScores);
@@ -367,6 +389,7 @@ window.BatchBacktest = (function () {
 
       // Pre-compute ML indicator cache once for this symbol (O(N))
       var mlCache = (mlModel && useMLBlend) ? buildMLIndicatorCache(candles) : null;
+      var regimeMap = (mlModel && useMLBlend && cfg.indexCandles) ? buildRegimeMap(cfg.indexCandles) : null;
 
       if (useMLBlend) {
         console.log("[BatchBT] ML pipeline: mlModel=" + !!mlModel + " mlCache=" + !!mlCache + " useMLBlend=" + useMLBlend + " candles=" + (candles ? candles.length : 0));
@@ -444,8 +467,15 @@ window.BatchBacktest = (function () {
             breakoutContinuation: bar.breakoutContinuation != null ? bar.breakoutContinuation : 0,
             regimeAlignment: bar.regimeAlignment != null ? bar.regimeAlignment : 0
           };
-          var features = mlFeaturesAtBar(candles[bar.idx], bar.idx, mlCache, patternScore, { candles: candles, symbol: pattern.symbol, indexCandles: cfg.indexCandles }, barScores);
-          if (features) {
+          var features = mlFeaturesAtBar(candles[bar.idx], bar.idx, mlCache, patternScore, { candles: candles, symbol: pattern.symbol, indexCandles: cfg.indexCandles, regimeMap: regimeMap }, barScores);
+          if (features && mlModel && mlModel.trainingDataEndDate) {
+            var _bd = String(candles[bar.idx].t).slice(0, 10);
+            if (_bd <= mlModel.trainingDataEndDate) {
+              mlScore = patternScore;
+            } else {
+              mlScore = applyMLBlendAtBar(patternScore, features, mlModel);
+            }
+          } else if (features) {
             mlScore = applyMLBlendAtBar(patternScore, features, mlModel);
           }
           if (mlScore >= threshold) {
@@ -765,6 +795,12 @@ window.BatchBacktest = (function () {
 
       var step = sampleEvery || opts.sampleEvery || 2;
       var universeFilterLog = [];
+      var existingPatterns = [];
+      try {
+        if (storePatterns && window.PatternStore && window.PatternStore.getAll) {
+          existingPatterns = await window.PatternStore.getAll();
+        }
+      } catch (_epE) {}
 
       for (var si = 0; si < symbols.length; si++) {
         if (_cancelled) break;
@@ -850,7 +886,7 @@ window.BatchBacktest = (function () {
 
           // â”€â”€ Extract pattern â”€â”€
           var dailyOhlcv = multiTFMap && multiTFMap[symbol] ? multiTFMap[symbol].daily : null;
-          var pattern = extractPattern(symbol, btResult, powerResult, candles, dailyOhlcv);
+          var pattern = extractPattern(symbol, btResult, powerResult, candles, dailyOhlcv, null, existingPatterns);
 
           // â”€â”€ Extract features for ML â”€â”€
           if (extractFeatures) {
@@ -1020,7 +1056,7 @@ window.BatchBacktest = (function () {
 
     /* â”€â”€ Pattern Extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-    function extractPattern(symbol, btResult, powerResult, candles, dailyCandles, btCfg) {
+    function extractPattern(symbol, btResult, powerResult, candles, dailyCandles, btCfg, existingPatterns) {
       var trades = btResult.trades || (btResult.stats && btResult.stats.trades) || [];
       var stats = btResult.stats || {};
 
@@ -1069,87 +1105,82 @@ window.BatchBacktest = (function () {
       }
 
       // â”€â”€ 2. Calibration from trades â”€â”€
-      var calibration = { global: null, stratified: null };
-      var withPT = trades.filter(function (t) { return t.probTouch != null && !isNaN(t.probTouch); });
-      if (withPT.length >= 30) {
+      function computeCalibration(sampleSet) {
+        var withPT = sampleSet.filter(function (t) { return t.probTouch != null && !isNaN(t.probTouch); });
+        if (withPT.length < 50) return null;
         var sorted = withPT.slice().sort(function (a, b) { return a.probTouch - b.probTouch; });
         var numBuckets = Math.max(3, Math.min(10, Math.floor(sorted.length / 10)));
-        var bucketSize = Math.floor(sorted.length / numBuckets);
+        var bSize = Math.floor(sorted.length / numBuckets);
         var buckets = [];
         for (var bi = 0; bi < numBuckets; bi++) {
-          var bStart = bi * bucketSize;
-          var bEnd = bi === numBuckets - 1 ? sorted.length : bStart + bucketSize;
-          var group = sorted.slice(bStart, bEnd);
-          if (group.length < 5) continue;
-          var hits = group.filter(function (t) { return t.hitTarget; }).length;
+          var bS = bi * bSize, bE = bi === numBuckets - 1 ? sorted.length : bS + bSize;
+          var g = sorted.slice(bS, bE); if (g.length < 5) continue;
+          var hits = g.filter(function (t) { return t.hitTarget; }).length;
           buckets.push({
-            probTouchRange: [round3(group[0].probTouch), round3(group[group.length - 1].probTouch)],
-            avgProbTouch: round3(group.reduce(function (s, t) { return s + t.probTouch; }, 0) / group.length),
-            hitRate: round2((hits / group.length) * 100),
-            n: group.length
+            probTouchRange: [round3(g[0].probTouch), round3(g[g.length - 1].probTouch)],
+            avgProbTouch: round3(g.reduce(function (s, t) { return s + t.probTouch; }, 0) / g.length),
+            hitRate: round2((hits / g.length) * 100), n: g.length
           });
         }
+        if (buckets.length < 3) return null;
         var calP0 = 0.38;
         for (var j = 1; j < buckets.length; j++) {
           if (buckets[j - 1].hitRate < 50 && buckets[j].hitRate >= 50) {
-            var prev = buckets[j - 1], curr = buckets[j];
-            var denom = curr.hitRate - prev.hitRate;
-            if (Math.abs(denom) > 0.001) {
-              calP0 = round3(prev.avgProbTouch + ((50 - prev.hitRate) / denom) * (curr.avgProbTouch - prev.avgProbTouch));
-            }
+            var pv = buckets[j - 1], cv = buckets[j], dn = cv.hitRate - pv.hitRate;
+            if (Math.abs(dn) > 0.001) calP0 = round3(pv.avgProbTouch + ((50 - pv.hitRate) / dn) * (cv.avgProbTouch - pv.avgProbTouch));
             break;
           }
         }
-
-        // Compute calK from logit-logit slope (same formula as backtest-engine.js)
         var calK = 38;
-        var logitPts = buckets.filter(function (b) {
-          return b.hitRate > 1 && b.hitRate < 99 && b.avgProbTouch > 0.01 && b.avgProbTouch < 0.99;
-        }).map(function (b) {
-          var lx = Math.log(b.avgProbTouch / (1 - b.avgProbTouch));
-          var ly = Math.log(b.hitRate / 100 / (1 - b.hitRate / 100));
-          return { x: lx, y: ly };
+        var lp = buckets.filter(function (b) { return b.hitRate > 1 && b.hitRate < 99 && b.avgProbTouch > 0.01 && b.avgProbTouch < 0.99; })
+          .map(function (b) { return { x: Math.log(b.avgProbTouch / (1 - b.avgProbTouch)), y: Math.log(b.hitRate / 100 / (1 - b.hitRate / 100)) }; });
+        if (lp.length >= 3) {
+          var sx = 0, sy = 0, sxy = 0, sx2 = 0;
+          for (var k = 0; k < lp.length; k++) { sx += lp[k].x; sy += lp[k].y; sxy += lp[k].x * lp[k].y; sx2 += lp[k].x * lp[k].x; }
+          var dn2 = lp.length * sx2 - sx * sx;
+          if (Math.abs(dn2) > 1e-10) {
+            var sl = (lp.length * sxy - sx * sy) / dn2;
+            calK = Math.max(5, Math.min(100, Math.round(sl * 100) / 100));
+          }
+        }
+        var ci = null;
+        if (window.StoxStats && withPT.length >= 20) {
+          var wrs = withPT.map(function (t) { return t.hitTarget ? 1 : 0; });
+          ci = window.StoxStats.blockBootstrapCI(wrs, Math.max(5, holdingPeriodDays), function (arr) {
+            var s = 0; for (var q = 0; q < arr.length; q++) s += arr[q];
+            return arr.length > 0 ? s / arr.length : 0;
+          }, 300, 0.05);
+        }
+        return { calP0: calP0, calK: calK, buckets: buckets, n: withPT.length, calCI: ci };
+      }
+      function computeStratified(sampleSet) {
+        var withDS = sampleSet.filter(function (t) { return t.driftScore != null && !isNaN(t.driftScore); });
+        if (withDS.length < 90) return null;
+        var ds = withDS.slice().sort(function (a, b) { return a.driftScore - b.driftScore; });
+        var ts = Math.floor(ds.length / 3); if (ts < 10) return null;
+        var out = [];
+        ["LOW_DRIFT", "MID_DRIFT", "HIGH_DRIFT"].forEach(function (label, ti) {
+          var tS = ti * ts, tE = ti === 2 ? ds.length : tS + ts;
+          var g = ds.slice(tS, tE);
+          var hits = g.filter(function (t) { return t.hitTarget; }).length;
+          out.push({ label: label, driftRange: [round3(g[0].driftScore), round3(g[g.length - 1].driftScore)],
+            avgProbTouch: round3(g.reduce(function (s, t) { return s + (t.probTouch != null && !isNaN(t.probTouch) ? t.probTouch : 0); }, 0) / g.length),
+            hitRate: round2((hits / g.length) * 100), n: g.length });
         });
-        if (logitPts.length >= 3) {
-          var lsx = 0, lsy = 0, lsxy = 0, lsx2 = 0;
-          for (var lk = 0; lk < logitPts.length; lk++) {
-            lsx += logitPts[lk].x; lsy += logitPts[lk].y;
-            lsxy += logitPts[lk].x * logitPts[lk].y; lsx2 += logitPts[lk].x * logitPts[lk].x;
-          }
-          var lDenom = logitPts.length * lsx2 - lsx * lsx;
-          if (Math.abs(lDenom) > 1e-10) {
-            var logitSlope = (logitPts.length * lsxy - lsx * lsy) / lDenom;
-            calK = Math.max(5, Math.min(100, Math.round(logitSlope * 100) / 100));
-          }
-        }
-
-        calibration.global = { calP0: calP0, calK: calK, buckets: buckets };
+        return out;
       }
-
-      // Stratified by drift tercile
-      var withDS = trades.filter(function (t) { return t.driftScore != null && !isNaN(t.driftScore); });
-      if (withDS.length >= 30) {
-        var dsSorted = withDS.slice().sort(function (a, b) { return a.driftScore - b.driftScore; });
-        var tercileSize = Math.floor(dsSorted.length / 3);
-        if (tercileSize >= 10) {
-          calibration.stratified = [];
-          ["LOW_DRIFT", "MID_DRIFT", "HIGH_DRIFT"].forEach(function (label, ti) {
-            var tStart = ti * tercileSize;
-            var tEnd = ti === 2 ? dsSorted.length : tStart + tercileSize;
-            var tGroup = dsSorted.slice(tStart, tEnd);
-            var tHits = tGroup.filter(function (t) { return t.hitTarget; }).length;
-            calibration.stratified.push({
-              label: label,
-              driftRange: [round3(tGroup[0].driftScore), round3(tGroup[tGroup.length - 1].driftScore)],
-              avgProbTouch: round3(tGroup.reduce(function (s, t) { return s + (t.probTouch != null && !isNaN(t.probTouch) ? t.probTouch : 0); }, 0) / tGroup.length),
-              hitRate: round2((tHits / tGroup.length) * 100),
-              n: tGroup.length
-            });
-          });
+      var pooledTrades = trades.slice();
+      if (existingPatterns && existingPatterns.length) {
+        for (var _pi = 0; _pi < existingPatterns.length; _pi++) {
+          var _p = existingPatterns[_pi];
+          if (_p && _p.tradeStats && _p.tradeStats.probTouchSamples) pooledTrades = pooledTrades.concat(_p.tradeStats.probTouchSamples);
         }
       }
-
-      // â”€â”€ 3. Regime Behavior â”€â”€
+      var perSym = computeCalibration(trades);
+      var pooled = pooledTrades.length > trades.length ? computeCalibration(pooledTrades) : null;
+      var calibration = { global: null, stratified: null };
+      calibration.global = (perSym && perSym.n >= 200) ? perSym : (pooled || perSym);
+      calibration.stratified = computeStratified(trades) || computeStratified(pooledTrades);
       var regimeBehavior = {};
       if (candles && candles.length > 60 && window.TechIndicators) {
         try {
@@ -1233,11 +1264,33 @@ window.BatchBacktest = (function () {
           maxConsecLosses: stats.maxConsecutiveLosses || 0,
           avgDaysToTarget: stats.avgDaysToTarget || 0,
           maxDrawdown: stats.maxDrawdown || 0,
-          sharpeApprox: stats.sharpeApprox || 0
+          sharpeApprox: stats.sharpeApprox || 0,
+          probTouchSamples: (function () {
+            return trades.filter(function (t) { return t.probTouch != null && !isNaN(t.probTouch); })
+              .slice(0, 500).map(function (t) { return { probTouch: t.probTouch, hitTarget: !!t.hitTarget, driftScore: t.driftScore }; });
+          })()
         },
         pillarConsumption: powerResult && powerResult.pillarConsumption ? powerResult.pillarConsumption : {},
         backtestConfig: { targetProfitPct: targetProfitPct, holdingPeriodDays: holdingPeriodDays, threshold: threshold, slippagePct: slippagePct, brokeragePct: brokeragePct },
-        dataQuality: { candleCount: candles ? candles.length : 0, dateRange: candles && candles.length > 1 && candles[0].t != null && candles[candles.length - 1].t != null ? candles[0].t + " to " + candles[candles.length - 1].t : null, timeframe: "daily" }
+        dataQuality: { candleCount: candles ? candles.length : 0, dateRange: candles && candles.length > 1 && candles[0].t != null && candles[candles.length - 1].t != null ? candles[0].t + " to " + candles[candles.length - 1].t : null, timeframe: "daily" },
+        evidence: (function () {
+          var n = stats.totalSignals != null ? stats.totalSignals : trades.length;
+          var wr = stats.winRate || 0;
+          var bw = null;
+          if (window.StoxStats && dailyCandles && dailyCandles.length > holdingPeriodDays + 2) {
+            var bhr = window.StoxStats.baselineHitRate(dailyCandles, targetProfitPct, holdingPeriodDays);
+            bw = bhr != null ? Math.round(bhr * 1000) / 10 : null;
+          }
+          var ex = bw != null ? Math.round((wr - bw) * 10) / 10 : null;
+          var pv = (window.StoxStats && n > 0) ? window.StoxStats.permutationP(Math.round(wr * n / 100), n, 300) : null;
+          var ev = window.StoxStats ? window.StoxStats.evidenceScore({ n: n, excessWR: ex || 0, pValue: pv, numTests: 40 }) : null;
+          return { n: n, winRate: wr, baselineWR: bw, excessWR: ex, pValue: pv,
+            pAdjusted: ev ? ev.pAdj : null,
+            calN: calibration.global ? calibration.global.n : 0,
+            calCI: calibration.global && calibration.global.calCI ? calibration.global.calCI : null,
+            evidenceLevel: ev ? ev.evidenceLevel : "weak" };
+        })(),
+        _cachedLastClose: dailyCandles && dailyCandles.length > 0 ? dailyCandles[dailyCandles.length - 1].c : null
       };
     }
 

@@ -1075,7 +1075,8 @@ var INS_PILLARS = [
         React.createElement("button", { style: tabStyle(tab === "insights"), onClick: function () { setTab("insights"); } }, "Insights"),
         React.createElement("button", { style: tabStyle(tab === "settings"), onClick: function () { setTab("settings"); } }, "Pattern Settings"),
         React.createElement("button", { style: tabStyle(tab === "ml"), onClick: function () { setTab("ml"); } }, "ML Engine"),
-        React.createElement("button", { style: tabStyle(tab === "live"), onClick: function () { setTab("live"); } }, "Live Expert")
+        React.createElement("button", { style: tabStyle(tab === "live"), onClick: function () { setTab("live"); } }, "Live Expert"),
+        React.createElement("button", { style: tabStyle(tab === "sanity"), onClick: function () { setTab("sanity"); } }, "Sanity")
       ),
 
       // Error
@@ -1088,8 +1089,52 @@ var INS_PILLARS = [
       tab === "insights" && renderInsights(),
       tab === "settings" && renderPatternSettings(),
       tab === "ml" && renderMLEngine(),
-      tab === "live" && renderLiveExpert()
+      tab === "live" && renderLiveExpert(),
+      tab === "sanity" && renderSanity()
     );
+
+    function renderSanity() {
+      if (!patterns || !patterns.length) return React.createElement("div", { style: cardStyle }, React.createElement("p", { style: { color: "var(--text2)", textAlign: "center" } }, "No patterns to check."));
+      var withEv = patterns.filter(function (p) { return p.evidence; });
+      if (!withEv.length) return React.createElement("div", { style: cardStyle }, React.createElement("p", { style: { color: "var(--text3)", textAlign: "center" } }, "No evidence data. Re-run a batch backtest to populate."));
+      var counts = { strong: 0, moderate: 0, weak: 0, reject: 0 };
+      withEv.forEach(function (p) { if (counts[p.evidence.evidenceLevel] != null) counts[p.evidence.evidenceLevel]++; });
+      var ex = withEv.map(function (p) { return p.evidence.excessWR; }).filter(function (v) { return v != null; }).sort(function (a, b) { return a - b; });
+      var medEx = ex.length ? ex[Math.floor(ex.length / 2)] : null;
+      var box = function (l, v, s, c) { return React.createElement("div", { style: { flex: 1, minWidth: 120, padding: "12px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)" } },
+        React.createElement("div", { style: { fontSize: 9, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text6)", fontWeight: 700 } }, l),
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 800, fontFamily: "var(--font-heading)", color: c || "var(--text)", marginTop: 3 } }, v),
+        s ? React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", marginTop: 2 } }, s) : null); };
+      return React.createElement("div", null,
+        React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } },
+          box("Evidence", "Strong " + counts.strong + " \u00b7 Mod " + counts.moderate, "Weak " + counts.weak + " \u00b7 Reject " + counts.reject),
+          box("Median Excess WR", medEx != null ? (medEx > 0 ? "+" : "") + medEx + "%" : "\u2014", "vs random-entry baseline", medEx > 0 ? "#16a34a" : "#dc2626")),
+        React.createElement("div", { style: cardStyle },
+          React.createElement("div", { style: labelStyle }, "Per-Stock Evidence"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginBottom: 10, lineHeight: 1.5 } },
+            "Excess WR = win rate \u2212 random-entry baseline. pAdj = Bonferroni-corrected across ~40 hypotheses. CalN = samples behind the calibration curve."),
+          React.createElement("div", { style: { maxHeight: 460, overflowY: "auto" } },
+            React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+              React.createElement("thead", null, React.createElement("tr", null,
+                ["Stock", "N", "WR", "Excess", "pAdj", "CalN", "CalCI", "Level"].map(function (h) {
+                  return React.createElement("th", { key: h, style: { padding: "6px 8px", fontSize: 10, textAlign: h === "Stock" ? "left" : "right", fontWeight: 700, color: "var(--text5)", borderBottom: "1px solid var(--border)", textTransform: "uppercase" } }, h);
+                }))),
+              React.createElement("tbody", null,
+                withEv.slice().sort(function (a, b) { return (b.evidence.excessWR || -999) - (a.evidence.excessWR || -999); }).map(function (p) {
+                  var ev = p.evidence;
+                  var lc = ev.evidenceLevel === "strong" ? "#16a34a" : ev.evidenceLevel === "moderate" ? "#d97706" : ev.evidenceLevel === "reject" ? "#dc2626" : "#6b7280";
+                  return React.createElement("tr", { key: p.symbol },
+                    React.createElement("td", { style: { padding: "5px 8px", fontSize: 11, fontWeight: 700 } }, p.symbol),
+                    React.createElement("td", { style: { padding: "5px 8px", fontSize: 11, textAlign: "right" } }, ev.n),
+                    React.createElement("td", { style: { padding: "5px 8px", fontSize: 11, textAlign: "right", fontWeight: 600 } }, ev.winRate + "%"),
+                    React.createElement("td", { style: { padding: "5px 8px", fontSize: 11, textAlign: "right", fontWeight: 700, color: ev.excessWR >= 3 ? "#16a34a" : ev.excessWR < 0 ? "#dc2626" : "var(--text3)" } }, ev.excessWR != null ? (ev.excessWR > 0 ? "+" : "") + ev.excessWR + "%" : "\u2014"),
+                    React.createElement("td", { style: { padding: "5px 8px", fontSize: 11, textAlign: "right", color: ev.pAdjusted != null && ev.pAdjusted < 0.1 ? "#16a34a" : "var(--text5)" } }, ev.pAdjusted != null ? ev.pAdjusted.toFixed(3) : "\u2014"),
+                    React.createElement("td", { style: { padding: "5px 8px", fontSize: 11, textAlign: "right" } }, ev.calN || "\u2014"),
+                    React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, textAlign: "right", color: "var(--text5)" } }, ev.calCI && ev.calCI[0] != null ? Math.round(ev.calCI[0] * 100) + "\u2013" + Math.round(ev.calCI[1] * 100) + "%" : "\u2014"),
+                    React.createElement("td", { style: { padding: "5px 8px", fontSize: 10, textAlign: "right", color: lc, fontWeight: 800 } }, (ev.evidenceLevel || "\u2014").toUpperCase()));
+                })))))
+      );
+    }
 
     function renderOverview() {
       if (!stats) return React.createElement("div", { style: cardStyle },
@@ -1376,6 +1421,10 @@ var INS_PILLARS = [
           Object.keys(lw2).forEach(function (k) { if (lw2[k] > bestV) { bestV = lw2[k]; best = k; } });
           return best;
         }
+        if (key === "excessWR") { var _ev = p.evidence; return _ev && _ev.excessWR != null ? _ev.excessWR : -999; }
+        if (key === "pAdj") { var _ev2 = p.evidence; return _ev2 && _ev2.pAdjusted != null ? _ev2.pAdjusted : 999; }
+        if (key === "calN") { var _ev3 = p.evidence; return _ev3 && _ev3.calN != null ? _ev3.calN : 0; }
+        if (key === "evidenceLevel") { var _lvl = p.evidence && p.evidence.evidenceLevel; return _lvl === "strong" ? 4 : _lvl === "moderate" ? 3 : _lvl === "weak" ? 2 : _lvl === "reject" ? 1 : 0; }
         if (key === "age") return p.backtestDate ? -(Date.now() - p.backtestDate) : 0;
         return 0;
       }
@@ -1413,6 +1462,10 @@ var INS_PILLARS = [
                 col("symbol", "Symbol", false),
                 col("trades", "Trades", true),
                 col("winRate", "WR%", true),
+                col("excessWR", "\u0394 WR", true),
+                col("pAdj", "pAdj", true),
+                col("evidenceLevel", "Evidence", false),
+                col("calN", "CalN", true),
                 col("adjWR", "Pat WR", true),
                 col("mlWR", "ML WR", true),
                 col("sharpe", "Sharpe", true),
@@ -1436,11 +1489,22 @@ var INS_PILLARS = [
                 var maxDD = p.tradeStats ? p.tradeStats.maxDrawdown || 0 : 0;
                 var age = p.backtestDate ? Math.round((Date.now() - p.backtestDate) / (24 * 60 * 60 * 1000)) : null;
                 var topPillar = numVal(p, "topPillar");
+                var _evp = p.evidence || null;
+                var evExcess = _evp && _evp.excessWR != null ? _evp.excessWR : null;
+                var evPAdj = _evp && _evp.pAdjusted != null ? _evp.pAdjusted : null;
+                var evLevel = _evp ? _evp.evidenceLevel : null;
+                var evCalN = _evp && _evp.calN != null ? _evp.calN : null;
 
                 return React.createElement("tr", { key: p.symbol, style: { cursor: "default" } },
                   React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 600 }) }, p.symbol),
                   React.createElement("td", { style: tdr }, trades),
                   React.createElement("td", { style: Object.assign({}, tdr, { fontWeight: 700, color: wrColor }) }, wr + "%"),
+                  React.createElement("td", { style: Object.assign({}, tdr, { fontWeight: 700, color: evExcess != null && evExcess >= 3 ? "#16a34a" : evExcess != null && evExcess < 0 ? "#dc2626" : "var(--text4)" }) }, evExcess != null ? (evExcess > 0 ? "+" : "") + evExcess + "%" : "\u2014"),
+                  React.createElement("td", { style: Object.assign({}, tdr, { color: evPAdj != null && evPAdj < 0.05 ? "#16a34a" : evPAdj != null && evPAdj < 0.1 ? "#f59e0b" : "var(--text4)", fontWeight: 600 }) }, evPAdj != null ? evPAdj.toFixed(3) : "\u2014"),
+                  React.createElement("td", { style: Object.assign({}, tdc, { fontWeight: 700, fontSize: 9 }) },
+                    evLevel ? React.createElement("span", { style: { padding: "2px 6px", borderRadius: 3, background: evLevel === "strong" ? "rgba(22,163,74,.12)" : evLevel === "moderate" ? "rgba(234,179,8,.12)" : evLevel === "reject" ? "rgba(239,68,68,.12)" : "rgba(107,114,128,.12)", color: evLevel === "strong" ? "#16a34a" : evLevel === "moderate" ? "#d97706" : evLevel === "reject" ? "#dc2626" : "#6b7280" } }, evLevel.toUpperCase()) : "\u2014"
+                  ),
+                  React.createElement("td", { style: Object.assign({}, tdr, { color: evCalN >= 100 ? "var(--text2)" : "var(--text6)" }) }, evCalN != null ? evCalN : "\u2014"),
                   React.createElement("td", { style: Object.assign({}, tdr, { color: adjWR != null ? "#06b6d4" : "var(--text4)" }) }, adjWR != null ? adjWR + "%" : "\u2014"),
                   React.createElement("td", { style: Object.assign({}, tdr, { color: mlWR != null ? "#a78bfa" : "var(--text4)" }) }, mlWR != null ? mlWR + "%" : "\u2014"),
                   React.createElement("td", { style: tdr }, sharpe),

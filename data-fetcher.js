@@ -111,7 +111,15 @@ window.OHLCVFetcher = (function () {
                 v: v || 0
               });
             }
-            if (candles.length > 0) return candles;
+            if (candles.length > 0) {
+              if (window.YahooValidation) {
+                var _san = window.YahooValidation.sanitize(candles);
+                window.YahooValidation.logIfProblematic(symbols[s], _san.report);
+                if (_san.candles.length > 0) return _san.candles;
+                continue;
+              }
+              return candles;
+            }
           } catch (e) {
             continue;
           }
@@ -159,7 +167,7 @@ window.OHLCVFetcher = (function () {
                     : json.contents)
                 : json;
               var result = payload2 && payload2.quoteResponse && payload2.quoteResponse.result && payload2.quoteResponse.result[0];
-              if (!result || result.regularMarketPrice == null) continue;
+              if (!result || result.regularMarketPrice == null || !isFinite(result.regularMarketPrice) || result.regularMarketPrice <= 0) continue;
               return {
                 price: result.regularMarketPrice,
                 change: result.regularMarketChange != null ? result.regularMarketChange : null,

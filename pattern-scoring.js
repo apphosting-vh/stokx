@@ -363,6 +363,15 @@ window.PatternScoring = (function () {
 
     var adjustedScore = clamp(round2(baseWeightedScore + powerBonusTotal), 0, 100);
 
+    /* Split-adjustment staleness guard */
+    if (pattern._cachedLastClose != null && pattern._cachedLastClose > 0 && candles && candles.length > 0 && window.YahooValidation) {
+      var _live = candles[candles.length - 1].c;
+      if (_live > 0 && window.YahooValidation.isStaleForSplit(pattern._cachedLastClose, _live)) {
+        console.warn("[PatternScoring] " + pattern.symbol + ": cached close " + pattern._cachedLastClose + " vs live " + _live + " — likely split. Using raw score.");
+        return { entryScore: baseResult.entryScore || baseResult.entry_score, classification: baseResult.classification, breakdown: null, adjustments: null, staleForSplit: true };
+      }
+    }
+
     // Compute adjustments summary
     var adjustments = {
       method: "pattern_weighted",
@@ -376,6 +385,23 @@ window.PatternScoring = (function () {
     if (window.BacktestEngine && window.BacktestEngine.classifyScore) {
       classification = window.BacktestEngine.classifyScore(adjustedScore);
     }
+    try {
+      var _sc2 = window.TechIndicators && window.TechIndicators.getScoreConfig ? window.TechIndicators.getScoreConfig() : null;
+      if (_sc2 && _sc2.adaptiveThresholds && _sc2.adaptiveThresholds.enabled && window.StoxStats) {
+        var _h = _sc2.adaptiveThresholds.scoreHistory || [];
+        if (_h.length >= 30) {
+          var _sb = window.StoxStats.adaptiveThreshold(_h, _sc2.classification.strongBuy, 80);
+          var _b = window.StoxStats.adaptiveThreshold(_h, _sc2.classification.buy, 65);
+          var _wl = window.StoxStats.adaptiveThreshold(_h, _sc2.classification.watchlist, 50);
+          var _nn = window.StoxStats.adaptiveThreshold(_h, _sc2.classification.neutral, 25);
+          if (adjustedScore >= _sb) classification = "STRONG_BUY";
+          else if (adjustedScore >= _b) classification = "BUY";
+          else if (adjustedScore >= _wl) classification = "WATCHLIST";
+          else if (adjustedScore >= _nn) classification = "NEUTRAL";
+          else classification = "AVOID";
+        }
+      }
+    } catch (_adE) {}
 
     return {
       entryScore: adjustedScore,

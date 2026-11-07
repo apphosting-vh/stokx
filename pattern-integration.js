@@ -150,8 +150,11 @@
         var keys = ["rsi", "atr_pct", "bb_position", "volume_ratio", "macd_hist", "ema_slope", "adx", "entry_score",
           "trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment",
           "trend_structure", "price_vs_sma200", "ema20_50_cross", "volatility_regime", "mfi", "vol_price_trend",
-          "bull_bear", "market_momentum", "cap_tier", "rsi_regime"];
-        var defaults = { rsi: 50, atr_pct: 0, bb_position: 0.5, volume_ratio: 1, macd_hist: 0, ema_slope: 0, adx: 20, entry_score: compatResult.finalScore || 0, trendHealth: pillarScores.trendHealth, pullbackQuality: pillarScores.pullbackQuality, swingPotential: pillarScores.swingPotential, breakoutContinuation: pillarScores.breakoutContinuation, regimeAlignment: pillarScores.regimeAlignment, trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0, volatility_regime: 0, mfi: 50, vol_price_trend: 0, bull_bear: 0, market_momentum: 0, cap_tier: -1, rsi_regime: 0 };
+          "bull_bear", "market_momentum", "cap_tier", "rsi_regime",
+          "rsi_d1", "rsi_d5", "rsi_ma5", "adx_d1", "adx_d5", "adx_ma5",
+          "macd_hist_d1", "macd_hist_d5", "macd_hist_ma5", "atr_pct_d1", "atr_pct_d5", "atr_pct_ma5",
+          "bb_position_d1", "bb_position_d5", "bb_position_ma5", "volume_ratio_d1", "volume_ratio_d5", "volume_ratio_ma5"];
+        var defaults = { rsi: 50, atr_pct: 0, bb_position: 0.5, volume_ratio: 1, macd_hist: 0, ema_slope: 0, adx: 20, entry_score: compatResult.finalScore || 0, trendHealth: pillarScores.trendHealth, pullbackQuality: pillarScores.pullbackQuality, swingPotential: pillarScores.swingPotential, breakoutContinuation: pillarScores.breakoutContinuation, regimeAlignment: pillarScores.regimeAlignment, trend_structure: 0, price_vs_sma200: -1, ema20_50_cross: 0, volatility_regime: 0, mfi: 50, vol_price_trend: 0, bull_bear: 0, market_momentum: 0, cap_tier: -1, rsi_regime: 0, rsi_d1: 0, rsi_d5: 0, rsi_ma5: 50, adx_d1: 0, adx_d5: 0, adx_ma5: 20, macd_hist_d1: 0, macd_hist_d5: 0, macd_hist_ma5: 0, atr_pct_d1: 0, atr_pct_d5: 0, atr_pct_ma5: 0, bb_position_d1: 0, bb_position_d5: 0, bb_position_ma5: 0.5, volume_ratio_d1: 0, volume_ratio_d5: 0, volume_ratio_ma5: 1 };
         var out = {};
         for (var i = 0; i < keys.length; i++) {
           var k = keys[i];

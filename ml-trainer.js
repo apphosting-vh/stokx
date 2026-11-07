@@ -337,7 +337,13 @@ window.MLTrainer = (function () {
     // market regime, cap tier
     "trend_structure", "price_vs_sma200", "ema20_50_cross",
     "volatility_regime", "mfi", "vol_price_trend",
-    "bull_bear", "market_momentum", "cap_tier", "rsi_regime"
+    "bull_bear", "market_momentum", "cap_tier", "rsi_regime",
+    "rsi_d1", "rsi_d5", "rsi_ma5",
+    "adx_d1", "adx_d5", "adx_ma5",
+    "macd_hist_d1", "macd_hist_d5", "macd_hist_ma5",
+    "atr_pct_d1", "atr_pct_d5", "atr_pct_ma5",
+    "bb_position_d1", "bb_position_d5", "bb_position_ma5",
+    "volume_ratio_d1", "volume_ratio_d5", "volume_ratio_ma5"
   ];
 
   /* ════════════════════════════════════════════════════════════════════════
@@ -349,8 +355,9 @@ window.MLTrainer = (function () {
      impactful outcomes. Expiry exits (return near 0) get a mild floor weight. */
   function computeSampleWeight(label) {
     var r = label && label.return_10d != null ? Math.abs(label.return_10d) : 0;
-    var w = 1 + r;
-    if (label && label.barrier === "TIMEOUT") w = Math.max(w, 0.6);
+    var w = 1 / (1 + 0.5 * r);
+    w = Math.min(3, w);
+    if (label && label.barrier === "TIMEOUT") w = Math.max(w, 0.7);
     return w;
   }
 
@@ -959,6 +966,8 @@ window.MLTrainer = (function () {
 
       // Feature importance
       var importance = computePermutationImportance(fullNN, fullNormalizer, validSamples.slice(0, Math.min(200, validSamples.length)));
+      var _trainDates = fullTrainSamples.map(function (s) { return s.entryDate; }).filter(Boolean).sort();
+      var _trainingDataEndDate = _trainDates.length > 0 ? _trainDates[_trainDates.length - 1] : null;
 
       // Phase 4 — Platt calibration fit on the held-out tail (after bestFoldIdx)
       // so probabilities are honest for real-time prediction.
@@ -983,6 +992,8 @@ window.MLTrainer = (function () {
       resultSummary.calibrationApplied = !!calibration;
       resultSummary.labelMode = "3class_soft";
       resultSummary.championKey = null; // will be set after promotion
+      resultSummary.trainingDataEndDate = _trainingDataEndDate;
+      resultSummary.calibratedUpTo = _trainingDataEndDate;
 
       // Save as candidate
       var versionMeta = Object.assign({}, resultSummary, {
