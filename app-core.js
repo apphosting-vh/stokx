@@ -12267,7 +12267,7 @@ function PulsePage({ holdings }) {
     { key: "backtest", label: "Backtesting", icon: Icons.clock },
     { key: "scoretuner", label: "Score Tuner", icon: Icons.settings },
     { key: "sectorrotation", label: "Sector Rotation", icon: Icons.chart },
-    { key: "equityanalytics", label: "Equity Analytics", icon: Icons.activity },
+    { key: "equityanalytics", label: "Equity Analytics", icon: Icons.trendingUp },
     { key: "patternlab", label: "Pattern Lab", icon: Icons.flask },
   ];
 
