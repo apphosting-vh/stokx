@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-window.__STOX_APP_VERSION = "5.0.0";
+window.__STOX_APP_VERSION = "5.0.1";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -2433,7 +2433,7 @@ const ExitScoreTrend = ({ ticker, buyPrice, buyDate, entryScore }) => {
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
         React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text)" } }, "Exit Score Trend"),
         React.createElement("div", { style: { display: "flex", gap: 6, fontSize: 9 } },
-          series.map(s => React.createElement("span", { key: s.key, style: { display: "flex", alignItems: "center", gap: 3, color: s.color, fontWeight: 600 } },
+          series.map(s => React.createElement("span", { key: s.key, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "4px 6px", margin: "0 -6px", borderRadius: 4, background: hovered === s.key ? "var(--bg5)" : "transparent", cursor: "pointer", transition: "background 0.2s" }, onMouseEnter: function () { setHovered(s.key); }, onMouseLeave: function () { setHovered(null); } },
             React.createElement("span", { style: { width: 8, height: 2, borderRadius: 1, background: s.color, display: "inline-block" } }), s.label
           ))
         )
@@ -11993,6 +11993,7 @@ const SectorRotationPanel = React.memo(function () {
   var _s = useState(function () { return window.SectorRRG ? window.SectorRRG.getState() : null; });
   var state = _s[0], setState = _s[1];
   var _b = useState(false); var busy = _b[0], setBusy = _b[1];
+  var _h = useState(null); var hovered = _h[0], setHovered = _h[1];
   var doLoad = useCallback(function (f) {
     setBusy(true);
     window.SectorRRG.load({ force: !!f }).then(setState).catch(function () {}).finally(function () { setBusy(false); });
@@ -12039,13 +12040,42 @@ const SectorRotationPanel = React.memo(function () {
           React.createElement("text", { x: 14, y: CY, textAnchor: "middle", fontSize: 10, fontWeight: 600, fill: "var(--text6)", transform: "rotate(-90,14," + CY + ")" }, "RS-Momentum"),
           secs.map(function (sec) {
             var c = sec.current;
-            return React.createElement("g", { key: sec.key },
-              sec.tail.length > 1 && React.createElement("polyline", { points: sec.tail.map(function (p) { return X(p.rsRatio).toFixed(1) + "," + Y(p.rsMomentum).toFixed(1); }).join(" "), fill: "none", stroke: sec.color, strokeWidth: 1.5, opacity: 0.35, strokeLinejoin: "round" }),
+            var isHovered = hovered === sec.key;
+            var isFaded = hovered !== null && !isHovered;
+            var baseOpacity = isFaded ? 0.1 : 1;
+            
+            return React.createElement("g", { 
+              key: sec.key, 
+              opacity: baseOpacity, 
+              style: { transition: "opacity 0.2s" },
+              onMouseEnter: function () { setHovered(sec.key); },
+              onMouseLeave: function () { setHovered(null); }
+            },
+              // 1. Fading tail (line segments)
               sec.tail.map(function (p, i) {
-                var isHead = i === sec.tail.length - 1;
-                return React.createElement("circle", { key: i, cx: X(p.rsRatio), cy: Y(p.rsMomentum), r: isHead ? 5 : 2, fill: sec.color, opacity: isHead ? 1 : 0.45, stroke: isHead ? "var(--bg)" : "none", strokeWidth: isHead ? 1.5 : 0 });
+                if (i === 0) return null;
+                var prev = sec.tail[i - 1];
+                var tailOpacity = isHovered ? 1 : 0.2 + (i / sec.tail.length) * 0.6;
+                return React.createElement("line", {
+                  key: "tail" + i,
+                  x1: X(prev.rsRatio), y1: Y(prev.rsMomentum),
+                  x2: X(p.rsRatio), y2: Y(p.rsMomentum),
+                  stroke: sec.color, strokeWidth: isHovered ? 3 : 2, opacity: tailOpacity, strokeLinecap: "round"
+                });
               }),
-              React.createElement("text", { x: X(c.rsRatio) + 8, y: Y(c.rsMomentum) + 3, fontSize: 10, fontWeight: 800, fill: "var(--text)", fontFamily: "var(--font-heading)" }, sec.name));
+              // 2. Tail nodes
+              sec.tail.slice(0, -1).map(function (p, i) {
+                return React.createElement("circle", { key: "node" + i, cx: X(p.rsRatio), cy: Y(p.rsMomentum), r: isHovered ? 3 : 2, fill: sec.color });
+              }),
+              // 3. The Head (Current Day)
+              React.createElement("circle", { cx: X(c.rsRatio), cy: Y(c.rsMomentum), r: isHovered ? 8 : 6, fill: sec.color, stroke: isHovered ? "var(--text)" : "var(--bg)", strokeWidth: 2 }),
+              
+              // 4. Invisible Hitbox for easy hovering
+              React.createElement("circle", { cx: X(c.rsRatio), cy: Y(c.rsMomentum), r: 15, fill: "transparent", style: { cursor: "pointer" } }),
+              
+              // 5. Label (Only show if hovered to prevent clutter)
+              isHovered && React.createElement("text", { x: X(c.rsRatio), y: Y(c.rsMomentum) - 12, textAnchor: "middle", fontSize: 12, fontWeight: 800, fill: sec.color, fontFamily: "var(--font-heading)", style: { paintOrder: "stroke", stroke: "var(--bg)", strokeWidth: 4 } }, sec.name)
+            );
           })
         ),
     lead.length > 0 && React.createElement("div", { style: { marginTop: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.25)", fontSize: 11, color: "var(--text3)", lineHeight: 1.6 } },
