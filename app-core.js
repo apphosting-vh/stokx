@@ -12123,7 +12123,20 @@ const RegimeMapPanel = React.memo(function () {
           // Normalize ATR% to 0-100 scale (ATR > 4% is considered extremely high)
           var volScore = Math.min(100, Math.max(0, (atrPct / 4) * 100));
           
-          results.push({ key: sec.key, name: sec.name, color: sec.color, trend: trendScore, vol: volScore, adx: adx, atrPct: atrPct });
+          var roc = c.length >= 21 ? ((close / c[c.length-21].c) - 1) * 100 : 0;
+          var momScore = Math.min(100, Math.max(0, (roc + 5) / 15 * 100));
+          
+          var sum5 = 0, sum20 = 0;
+          var limit5 = Math.max(0, c.length - 5);
+          var limit20 = Math.max(0, c.length - 20);
+          for (var v = limit5; v < c.length; v++) sum5 += (c[v].v || 0);
+          for (var v = limit20; v < c.length; v++) sum20 += (c[v].v || 0);
+          var avg5 = sum5 / (c.length - limit5 || 1);
+          var avg20 = sum20 / (c.length - limit20 || 1);
+          var volRatio = avg20 > 0 ? avg5 / avg20 : 1;
+          var flowScore = Math.min(100, Math.max(0, (volRatio - 0.5) / 1.5 * 100));
+          
+          results.push({ key: sec.key, name: sec.name, color: sec.color, trend: trendScore, vol: volScore, adx: adx, atrPct: atrPct, momentum: momScore, flow: flowScore, volRatio: volRatio, roc: roc });
         } catch (e) {}
         await new Promise(function(res) { setTimeout(res, 100); });
       }
@@ -12160,8 +12173,23 @@ const RegimeMapPanel = React.memo(function () {
     );
   });
 
-  return React.createElement("div", { className: "stx-card", style: { padding: 20, maxWidth: 600, margin: "0 auto" } },
-    React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Regime Map"),
+  var flowNodes = data.map(function (d) {
+    var sx = X(d.momentum);
+    var sy = Y(d.flow);
+    var isHover = hovered === d.key;
+    return React.createElement("g", { key: d.key,
+        onMouseEnter: function () { setHovered(d.key); }, 
+        onMouseLeave: function () { setHovered(null); },
+        style: { cursor: "pointer" }
+      },
+      React.createElement("circle", { cx: sx, cy: sy, r: isHover ? 8 : 6, fill: d.color, stroke: isHover ? "var(--text)" : "var(--bg)", strokeWidth: 2 }),
+      isHover && React.createElement("text", { x: sx, y: sy - 12, textAnchor: "middle", fontSize: 11, fill: "var(--text)", fontWeight: 800, style: { paintOrder: "stroke", stroke: "var(--bg)", strokeWidth: 4 } }, d.name)
+    );
+  });
+
+  return React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, maxWidth: 1000, margin: "0 auto" } },
+    React.createElement("div", { className: "stx-card", style: { padding: 20 } },
+      React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Regime Map"),
     React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 16 } }, "X: Trend Strength (ADX) | Y: Volatility (ATR%)"),
     React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
       QUADS.map(function (q, i) {
@@ -12176,6 +12204,28 @@ const RegimeMapPanel = React.memo(function () {
       React.createElement("text", { x: CX, y: H - 10, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600 }, "Trend Strength (ADX) ->"),
       React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Volatility (ATR%) ->"),
       nodes
+    )
+    ),
+    React.createElement("div", { className: "stx-card", style: { padding: 20 } },
+      React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Capital Flow Map"),
+      React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 16 } }, "X: Momentum (20d ROC) | Y: Volume Surge (5d vs 20d Avg)"),
+      React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
+        QUADS.map(function (q, i) {
+          // Customize quad text for Capital Flow
+          var titles = ["HIGH MOMENTUM + HIGH VOLUME", "LOW MOMENTUM + HIGH VOLUME", "HIGH MOMENTUM + LOW VOLUME", "LOW MOMENTUM + LOW VOLUME"];
+          var descs = ["Institutional Feeding Frenzy", "Churning / Fakeout", "Quiet Grind", "Dead Money"];
+          return React.createElement("g", { key: i },
+            React.createElement("rect", { x: q.x, y: q.y, width: q.w, height: q.h, fill: q.f }),
+            React.createElement("text", { x: q.x + q.w / 2, y: q.y + 20, textAnchor: "middle", fontSize: 9, fontWeight: 800, fill: q.c, letterSpacing: 1, opacity: 0.8 }, titles[i]),
+            React.createElement("text", { x: q.x + q.w / 2, y: q.y + 34, textAnchor: "middle", fontSize: 9, fill: "var(--text5)" }, descs[i])
+          );
+        }),
+        React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P + PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+        React.createElement("line", { x1: P, y1: CY, x2: P + PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+        React.createElement("text", { x: CX, y: H - 10, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600 }, "Momentum (ROC%) ->"),
+        React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Volume Surge (Ratio) ->"),
+        flowNodes
+      )
     )
   );
 });
