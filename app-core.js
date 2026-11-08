@@ -12140,6 +12140,27 @@ const RegimeMapPanel = React.memo(function () {
         } catch (e) {}
         await new Promise(function(res) { setTimeout(res, 100); });
       }
+      // Aggregate Screener scores per sector
+      var cachedScreener = null;
+      try { cachedScreener = await dbGetSetting("stox_screener_data"); } catch (e) {}
+      var sectorScoreMap = {};
+      if (cachedScreener && cachedScreener.results && window.SectorRRG) {
+        cachedScreener.results.forEach(function(r) {
+          var sym = r.s.t.replace(".NS", "");
+          var secKey = window.SectorRRG.STOCK_SECTOR[sym];
+          if (secKey) {
+            if (!sectorScoreMap[secKey]) sectorScoreMap[secKey] = { total: 0, count: 0 };
+            sectorScoreMap[secKey].total += (r.result ? r.result.finalScore : 0);
+            sectorScoreMap[secKey].count++;
+          }
+        });
+      }
+
+      results.forEach(function(d) {
+        var agg = sectorScoreMap[d.key];
+        d.avgScore = (agg && agg.count > 0) ? (agg.total / agg.count) : 0;
+      });
+
       setData(results);
       setLoading(false);
     })();
@@ -12187,8 +12208,8 @@ const RegimeMapPanel = React.memo(function () {
     );
   });
 
-  return React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, maxWidth: 1000, margin: "0 auto" } },
-    React.createElement("div", { className: "stx-card", style: { padding: 20 } },
+  return React.createElement("div", { style: { display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 20, maxWidth: 1400, margin: "0 auto" } },
+    React.createElement("div", { className: "stx-card", style: { padding: 20, flex: "1 1 400px", maxWidth: 600 } },
       React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Regime Map"),
     React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 16 } }, "X: Trend Strength (ADX) | Y: Volatility (ATR%)"),
     React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
@@ -12205,6 +12226,37 @@ const RegimeMapPanel = React.memo(function () {
       React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Volatility (ATR%) ->"),
       nodes
     )
+    ),
+    React.createElement("div", { className: "stx-card", style: { padding: 20 } },
+      React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Setup Map"),
+      React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 16 } }, "X: Sector Momentum (ROC) | Y: Avg Entry Score (Screener)"),
+      React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
+        React.createElement("rect", { x: CX, y: P, width: PW / 2, height: PH / 2, fill: "rgba(34,197,94,0.08)" }),
+        React.createElement("rect", { x: P, y: P, width: PW / 2, height: PH / 2, fill: "rgba(234,179,8,0.08)" }),
+        React.createElement("rect", { x: CX, y: CY, width: PW / 2, height: PH / 2, fill: "rgba(239,68,68,0.08)" }),
+        React.createElement("rect", { x: P, y: CY, width: PW / 2, height: PH / 2, fill: "rgba(59,130,246,0.08)" }),
+        React.createElement("text", { x: CX + PW/4, y: P + 20, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#16a34a", letterSpacing: 1, opacity: 0.8 }, "PRIME SETUPS"),
+        React.createElement("text", { x: P + PW/4, y: P + 20, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#ca8a04", letterSpacing: 1, opacity: 0.8 }, "WEAK SETUPS"),
+        React.createElement("text", { x: CX + PW/4, y: CY + PH/2 - 10, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#dc2626", letterSpacing: 1, opacity: 0.8 }, "NO SETUPS"),
+        React.createElement("text", { x: P + PW/4, y: CY + PH/2 - 10, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#2563eb", letterSpacing: 1, opacity: 0.8 }, "WAITING"),
+        React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P + PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+        React.createElement("line", { x1: P, y1: CY, x2: P + PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+        React.createElement("text", { x: CX, y: H - 10, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600 }, "Momentum (ROC%) ->"),
+        React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Avg Entry Score ->"),
+        data.map(function (d) {
+          var sx = X(d.momentum);
+          var sy = Y((d.avgScore / 100) * 100); // normalize 0-100
+          var isHover = hovered === d.key;
+          return React.createElement("g", { key: d.key,
+              onMouseEnter: function () { setHovered(d.key); }, 
+              onMouseLeave: function () { setHovered(null); },
+              style: { cursor: "pointer" }
+            },
+            React.createElement("circle", { cx: sx, cy: sy, r: isHover ? 8 : 6, fill: d.color, stroke: isHover ? "var(--text)" : "var(--bg)", strokeWidth: 2 }),
+            isHover && React.createElement("text", { x: sx, y: sy - 12, textAnchor: "middle", fontSize: 11, fill: "var(--text)", fontWeight: 800, style: { paintOrder: "stroke", stroke: "var(--bg)", strokeWidth: 4 } }, d.name + " (" + Math.round(d.avgScore) + ")")
+          );
+        })
+      )
     ),
     React.createElement("div", { className: "stx-card", style: { padding: 20 } },
       React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Capital Flow Map"),
