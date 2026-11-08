@@ -12206,7 +12206,7 @@ function PulsePage({ holdings }) {
     { key: "backtest", label: "Backtesting", icon: Icons.clock },
     { key: "scoretuner", label: "Score Tuner", icon: Icons.settings },
     { key: "sectorrotation", label: "Sector Rotation", icon: Icons.chart },
-    { key: "regimemap", label: "Regime Map", icon: Icons.target },
+    { key: "regimemap", label: "Regime Map", icon: Icons.trendingUp },
     { key: "patternlab", label: "Pattern Lab", icon: Icons.flask },
   ];
 
