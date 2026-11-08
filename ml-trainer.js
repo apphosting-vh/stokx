@@ -357,7 +357,7 @@ window.MLTrainer = (function () {
        collapses to predicting "WIN" for everything (specificity 5%). 
        We heavily penalize missing a loser to force a real decision boundary. */
     if (label && label.is_winner === false) {
-      w *= 2.5;
+      w *= 3.0; 
     }
     
     return w;

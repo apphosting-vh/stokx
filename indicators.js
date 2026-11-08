@@ -5141,10 +5141,10 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
       var pen = 0;
       if (displayScore != null) {
-        /* NEW: Heavily penalize high-drift setups (momentum chasing) */
-        if (driftScore > 0.3) pen += 15 * clamp((driftScore - 0.3) / 0.7, 0, 1);
+        /* NEW: Mild penalty for extreme extension, but don't kill volatility */
+        if (driftScore > 0.6) pen += 10 * clamp((driftScore - 0.6) / 0.4, 0, 1);
         
-        if (rsi14 != null && rsi14 > 75) pen += 10 * clamp((rsi14 - 75) / 15, 0, 1);
+        if (rsi14 != null && rsi14 > 80) pen += 10 * clamp((rsi14 - 80) / 10, 0, 1);
         if (vwap != null && atrPct != null) {
           var vwScale = atrPct / 100 * c;
           var vwapExt = vwScale > 0 ? (c - vwap) / vwScale : 0;

@@ -570,8 +570,8 @@ window.BacktestEngine = (function () {
             barrier = "WIN";
             break;
           }
-          // Close target hit (requires holding the gain, avoids twitchy fake wins)
-          if (cur.c >= targetPrice) {
+          // Intraday target hit (simulates a limit-sell order executing)
+          if (cur.h >= targetPrice) {
             hitTarget = true;
             daysToTarget = j;
             exitDate = String(cur.t).slice(0, 10);
@@ -582,7 +582,7 @@ window.BacktestEngine = (function () {
         } else {
           // Optimistic mode: no exit costs on target
           var targetPriceRaw = entryPriceAdj * (1 + tradeTargetPct / 100);
-          if (cur.c >= targetPriceRaw) {
+          if (cur.h >= targetPriceRaw) {
             hitTarget = true;
             daysToTarget = j;
             exitDate = String(cur.t).slice(0, 10);
