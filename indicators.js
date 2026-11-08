@@ -2685,7 +2685,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      (Exit scoring keeps the full buildTFSnapshot.) `tf` controls the weekly-HA
      component: real weekly candles for W, synthesized weekly from daily for D,
      none for H. */
-  function buildEntrySnapshot(candles, indexCandles, tf) {
+  function buildEntrySnapshot(candles, indexCandles, tf, symbol) {
     try {
       var cl = closes(candles), hi = highs(candles), lo = lows(candles), op = opens(candles), vo = volumes(candles);
       var L = cl.length;
@@ -2827,6 +2827,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
       return {
         c: c, pc: L >= 2 ? cl[L1 - 1] : null, o: op[L1] != null ? op[L1] : c, h: hi[L1], l: lo[L1],
+        symbol: symbol || null,
         cl: cl, vo: vo, volRatio: volRatio,
         sma20: sma20, sma50: sma50, sma20Slope5: sma20Slope5, anchoredVwap: anchoredVwap,
         adxL: adxL, plusDI: plusDI, minusDI: minusDI, macdL: macdL, sigL: sigL, rsMansfield: rsMansfield,
@@ -3685,8 +3686,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      the old barrier-race pillar): pullback-reversal odds, breakout-continuation
      odds and the RS regime gate are inherently daily-scale. Returning null for
      H/W lets the MTF aggregation's wSum exclusion handle them — no dilution. */
-  function scoreEntryPillarsForTF(candles, indexCandles, tf) {
-    var sn = buildEntrySnapshot(candles, indexCandles, tf);
+  function scoreEntryPillarsForTF(candles, indexCandles, tf, symbol) {
+    var sn = buildEntrySnapshot(candles, indexCandles, tf, symbol);
     if (!sn) return null;
     var volRegime = calcVolRegime(sn, candles);
     return {
@@ -3703,9 +3704,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
   }
 
    /* Entry Score (single timeframe, daily) — 5-pillar model (100 total). */
-  function computeEntryScore(candles, indexCandles) {
+  function computeEntryScore(candles, indexCandles, symbol) {
     if (!candles || candles.length < 50) return { entry_score: null, reason: 'insufficient_data', need: 50, got: candles ? candles.length : 0 };
-    var sn = buildEntrySnapshot(candles, indexCandles, 'D');
+    var sn = buildEntrySnapshot(candles, indexCandles, 'D', symbol);
     if (!sn || sn.c == null) return { entry_score: null, reason: 'insufficient_data' };
 
     var volRegime = calcVolRegime(sn, candles);
@@ -3736,6 +3737,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        If the market is down, but the stock is outperforming (RS > 0) and in its own uptrend, let it pass. */
     if (isIndexDowntrend(indexCandles)) {
       var isLeader = (sn.c > sn.sma200) && (sn.rsMansfield !== null && sn.rsMansfield > 0);
+      if (!isLeader && symbol && window.SectorRRG) { try { var _rq = window.SectorRRG.getSectorQuadrantForSymbol(symbol); if (_rq && _rq.quadrant === "Leading") isLeader = true; } catch (_e) {} }
       if (!isLeader) {
         finalScore = Math.min(finalScore, 45);
       }
@@ -3776,7 +3778,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       value (normally just D).
       Modifiers run once on the Daily snapshot only (the primary decision
       frame); the MTF +10 needs weekly+daily ≥ 65 (as % of the MTF base). */
-  function computeMultiTFEntryScore(tfResults, indexCandles, indexWeeklyCandles) {
+  function computeMultiTFEntryScore(tfResults, indexCandles, indexWeeklyCandles, symbol) {
     if (!tfResults || tfResults.length === 0) return { multiTF_score: null, reason: 'no_timeframes' };
 
     function findTF(label) {
@@ -3796,9 +3798,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (!baseTF || !baseTF.candles || baseTF.candles.length < 50) return { multiTF_score: null, reason: 'no_valid_scores' };
 
     var perTF = {};
-    perTF.H = (hTF && hTF.candles && hTF.candles.length >= 50) ? scoreEntryPillarsForTF(hTF.candles, indexCandles, 'H') : null;
-    perTF.D = (dTF && dTF.candles && dTF.candles.length >= 50) ? scoreEntryPillarsForTF(dTF.candles, indexCandles, 'D') : null;
-    perTF.W = (wTF && wTF.candles && wTF.candles.length >= 50) ? scoreEntryPillarsForTF(wTF.candles, indexWeeklyCandles || indexCandles, 'W') : null;
+    perTF.H = (hTF && hTF.candles && hTF.candles.length >= 50) ? scoreEntryPillarsForTF(hTF.candles, indexCandles, 'H', symbol) : null;
+    perTF.D = (dTF && dTF.candles && dTF.candles.length >= 50) ? scoreEntryPillarsForTF(dTF.candles, indexCandles, 'D', symbol) : null;
+    perTF.W = (wTF && wTF.candles && wTF.candles.length >= 50) ? scoreEntryPillarsForTF(wTF.candles, indexWeeklyCandles || indexCandles, 'W', symbol) : null;
     if (!perTF.H && !perTF.D && !perTF.W) return { multiTF_score: null, reason: 'no_valid_scores' };
 
     var weights = SCORE_CONFIG.tfWeights;
@@ -3879,7 +3881,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     /* MACRO REGIME GATE with Relative Strength Override. */
     if (isIndexDowntrend(indexCandles)) {
       // If the stock has a positive Regime Alignment score, it's beating the market.
-      var isLeader = (aggRegimeAlignment > 0);
+      var isLeader = (agg.regimeAlignment > 0);
+      if (!isLeader && symbol && window.SectorRRG) { try { var _rqM = window.SectorRRG.getSectorQuadrantForSymbol(symbol); if (_rqM && _rqM.quadrant === "Leading") isLeader = true; } catch (_eM) {} }
       if (!isLeader) {
         finalScore = Math.min(finalScore, 45);
       }

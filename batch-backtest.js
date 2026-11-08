@@ -89,7 +89,7 @@ window.BatchBacktest = (function () {
         if (weeklySlice && weeklySlice.length >= 50) tfResults.push({ timeframe: "W", candles: weeklySlice });
         if (tfResults.length >= 2) {
           try {
-            var mtf = TI.computeMultiTFEntryScore(tfResults, idxSlice, null);
+            var mtf = TI.computeMultiTFEntryScore(tfResults, idxSlice, null, symbol);
             if (mtf && mtf.multiTF_score != null) {
               return { entryScore: mtf.multiTF_score, raw_score: mtf.raw_score, classification: mtf.classification, trendHealth: mtf.trendHealth, pullbackQuality: mtf.pullbackQuality, swingPotential: mtf.swingPotential, breakoutContinuation: mtf.breakoutContinuation, regimeAlignment: mtf.regimeAlignment, modifiers: mtf.modifiers };
             }
@@ -99,7 +99,7 @@ window.BatchBacktest = (function () {
 
       /* Fall back to single-TF daily scoring */
       var res;
-      try { res = TI.computeEntryScore(candles.slice(0, idx + 1), idxSlice && idxSlice.length ? idxSlice : null); } catch (e) { return null; }
+      try { res = TI.computeEntryScore(candles.slice(0, idx + 1), idxSlice && idxSlice.length ? idxSlice : null, symbol); } catch (e) { return null; }
       if (!res || res.entry_score == null) return null;
       return { entryScore: res.entry_score, raw_score: res.raw_score, classification: res.classification, trendHealth: res.trendHealth, pullbackQuality: res.pullbackQuality, swingPotential: res.swingPotential, breakoutContinuation: res.breakoutContinuation, regimeAlignment: res.regimeAlignment, modifiers: res.modifiers };
     };

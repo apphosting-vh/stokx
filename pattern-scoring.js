@@ -91,7 +91,7 @@ window.PatternScoring = (function () {
     // 1. Compute base (generic) entry score
     var baseResult = null;
     try {
-      baseResult = TI.computeEntryScore(candles, opts.indexCandles);
+      baseResult = TI.computeEntryScore(candles, opts.indexCandles, symbol);
     } catch (e) {
       return { entryScore: null, error: "computeEntryScore failed: " + e.message };
     }

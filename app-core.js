@@ -2921,7 +2921,7 @@ const TenDayConfidencePanel = ({ ticker }) => {
         if (!d || d.length < 30 || !h1 || h1.length < 60) { setErr("insufficient_data"); return; }
         var entryScoreContext = null;
         try {
-          var result = computeCompatEntryScore(w && w.length >= 50 ? w : null, d, h1 && h1.length >= 100 ? h1 : null, idxD, idxW);
+          var result = computeCompatEntryScore(w && w.length >= 50 ? w : null, d, h1 && h1.length >= 100 ? h1 : null, idxD, idxW, ticker);
           if (result) entryScoreContext = buildEntryScoreContext(result);
         } catch(e) {}
         const c = TI.computeTenDayForwardConfidence(h1, d, idxD, entryScoreContext);
@@ -4428,7 +4428,7 @@ const EntryScorePanel = ({ shares }) => {
           if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) continue;
           var _idxD = null;
           try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
-          var result = computeCompatEntryScore(resW.data, resD.data, null, _idxD, null);
+          var result = computeCompatEntryScore(resW.data, resD.data, null, _idxD, null, tk);
           try { result = window.applyPatternIntel(result, tk, resD.data); } catch(e) {}
           if (result && result._patternApplied) {
             var pm = buildPatMeta(result);
@@ -4545,7 +4545,7 @@ const EntryScorePanel = ({ shares }) => {
           const indW = TI.computeAll(resW.data);
           const indD = TI.computeAll(resD.data);
           const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
-          const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
+          const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW, tk);
           if (result) result.lastClose = entry.currentPrice || resD.data[resD.data.length - 1].c;
           const idx = updated.findIndex(e => e.id === entry.id);
           if (idx >= 0) updated[idx] = { ...updated[idx], result, indicators: { weekly: indW, daily: indD, hourly: indH } };
@@ -4597,7 +4597,7 @@ const EntryScorePanel = ({ shares }) => {
         const indD = TI.computeAll(resD.data);
         const indH = resH.data && resH.data.length >= 12 ? TI.computeAll(resH.data) : null;
         const lastClose = resD.data[resD.data.length - 1]?.close || entry.currentPrice || 0;
-        const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
+        const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW, tk);
         if (result) result.lastClose = lastClose;
         updated[i] = { ...updated[i], currentPrice: entry.currentPrice || lastClose, result, indicators: { weekly: indW, daily: indD, hourly: indH } };
       } catch {}
@@ -4782,7 +4782,7 @@ const EntryScorePanel = ({ shares }) => {
       let _idxD = null, _idxW = null;
       try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
       try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
-      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
+      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW, tk);
       try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch (e) {}
       if (result) result.lastClose = lastDailyClose;
       let conf10d = null, conf10dLog = null, conf10dEmp = null;
@@ -5530,7 +5530,7 @@ const ConfidenceTracker = () => {
       let _idxD = null, _idxW = null;
       try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
       try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
-      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
+      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW, tk);
       try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch (e) {}
       let confidence = null, conf10dLog = null, conf10dEmp = null;
       try {
@@ -5981,7 +5981,7 @@ const WatchlistTracker = () => {
           if (!resW.data || resW.data.length < 12 || !resD.data || resD.data.length < 12) continue;
           var _idxD = null;
           try { var _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch(e) {}
-          var result = computeCompatEntryScore(resW.data, resD.data, null, _idxD, null);
+          var result = computeCompatEntryScore(resW.data, resD.data, null, _idxD, null, tk);
           try { result = window.applyPatternIntel(result, tk, resD.data); } catch(e) {}
           if (result && result._patternApplied) {
             var pm = buildPatMeta(result);
@@ -6087,7 +6087,7 @@ const WatchlistTracker = () => {
       let _idxD = null, _idxW = null;
       try { const _r1 = await DF.fetchOHLCVCached("^NSEI", "daily"); _idxD = (_r1 && _r1.data) || null; } catch (e) {}
       try { const _r2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); _idxW = (_r2 && _r2.data) || null; } catch (e) {}
-      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW);
+      const result = computeCompatEntryScore(resW.data, resD.data, resH.data && resH.data.length >= 100 ? resH.data : null, _idxD, _idxW, tk);
       try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch (e) {}
       let conf10dLog = null, conf10dEmp = null;
       try {
@@ -9327,7 +9327,7 @@ function relabelDecision(score, storedDecision) {
 
 /* Wraps the new computeMultiTFEntryScore + per-timeframe computeEntryScore
    into the old result shape { finalScore, decision, baseScore, penalties, bonuses, weekly, daily, hourly } */
-function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles, indexCandles, indexWeeklyCandles) {
+function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles, indexCandles, indexWeeklyCandles, symbol) {
   if (!window.TechIndicators) return null;
   var TI = window.TechIndicators;
   var tfResults = [];
@@ -9335,7 +9335,7 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles, ind
   if (dailyCandles && dailyCandles.length >= 50) tfResults.push({ timeframe: 'D', candles: dailyCandles });
   if (hourlyCandles && hourlyCandles.length >= 50) tfResults.push({ timeframe: 'H', candles: hourlyCandles });
   if (!tfResults.length) return null;
-  var multi = TI.computeMultiTFEntryScore(tfResults, indexCandles || null, indexWeeklyCandles || null);
+  var multi = TI.computeMultiTFEntryScore(tfResults, indexCandles || null, indexWeeklyCandles || null, symbol);
   if (!multi || multi.multiTF_score == null) return null;
   function toDec(cls) {
     return SCREENER_DECISION_MAP[cls] || { label: cls, color: 'var(--text6)' };
@@ -10801,7 +10801,7 @@ function SingleStockAnalysis({ requestedTicker }) {
       var idxW = await DF.fetchOHLCVCached("^NSEI", "weekly");
       var entry = null;
       if (resW && resW.data && resD && resD.data) {
-        entry = computeCompatEntryScore(resW.data, resD.data, resH && resH.data && resH.data.length >= 100 ? resH.data : null, idxD && idxD.data, idxW && idxW.data);
+        entry = computeCompatEntryScore(resW.data, resD.data, resH && resH.data && resH.data.length >= 100 ? resH.data : null, idxD && idxD.data, idxW && idxW.data, tk);
         try { if (window.applyPatternIntel) entry = window.applyPatternIntel(entry, tk, resD.data); } catch(_e) {}
       }
       var rs = null, beta = null;
@@ -10877,7 +10877,7 @@ function SingleStockAnalysis({ requestedTicker }) {
           var idxW = null;
           try { var _idxR2 = await DF.fetchOHLCVCached("^NSEI", "weekly"); idxW = (_idxR2 && _idxR2.data) || null; } catch (e) {}
           if (resW && resW.data && d && resW.data.length >= 12 && d.length >= 12) {
-            entry = computeCompatEntryScore(resW.data, d, h1 && h1.length >= 100 ? h1 : null, idxD, idxW);
+            entry = computeCompatEntryScore(resW.data, d, h1 && h1.length >= 100 ? h1 : null, idxD, idxW, ticker);
           }
         } catch (e) {}
       }
@@ -11988,6 +11988,78 @@ function SingleStockAnalysis({ requestedTicker }) {
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PAGE: Pulse (Watchlist + Entry Score + Stock Screener)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+
+const SectorRotationPanel = React.memo(function () {
+  var _s = useState(function () { return window.SectorRRG ? window.SectorRRG.getState() : null; });
+  var state = _s[0], setState = _s[1];
+  var _b = useState(false); var busy = _b[0], setBusy = _b[1];
+  var doLoad = useCallback(function (f) {
+    setBusy(true);
+    window.SectorRRG.load({ force: !!f }).then(setState).catch(function () {}).finally(function () { setBusy(false); });
+  }, []);
+  useEffect(function () {
+    var unsub = window.SectorRRG.onUpdate(setState);
+    if (!state) doLoad(false);
+    return unsub;
+  }, []);
+  var secs = state && state.sectors ? state.sectors : [];
+  var lead = secs.filter(function (x) { return x.quadrant === "Leading"; });
+  var mx = 5;
+  secs.forEach(function (x) { x.tail.forEach(function (p) { mx = Math.max(mx, Math.abs(p.rsRatio - 100), Math.abs(p.rsMomentum - 100)); }); });
+  mx = Math.ceil(mx * 1.15);
+  var W = 460, H = 460, P = 40, PW = W - 2 * P, PH = H - 2 * P;
+  var CX = P + PW / 2, CY = P + PH / 2;
+  var X = function (v) { return CX + (v - 100) / mx * PW / 2; };
+  var Y = function (v) { return CY - (v - 100) / mx * PH / 2; };
+  var QUADS = [
+    { x: CX, y: P, w: PW / 2, h: PH / 2, f: "rgba(34,197,94,0.08)", t: "LEADING", c: "#16a34a" },
+    { x: P, y: P, w: PW / 2, h: PH / 2, f: "rgba(59,130,246,0.07)", t: "IMPROVING", c: "#2563eb" },
+    { x: CX, y: CY, w: PW / 2, h: PH / 2, f: "rgba(234,179,8,0.07)", t: "WEAKENING", c: "#ca8a04" },
+    { x: P, y: CY, w: PW / 2, h: PH / 2, f: "rgba(239,68,68,0.07)", t: "LAGGING", c: "#dc2626" }
+  ];
+  return React.createElement("div", null,
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, flexWrap: "wrap", gap: 8 } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 15, fontWeight: 700, fontFamily: "var(--font-heading)", color: "var(--text)" } }, "Sector Rotation Graph (RRG)"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginTop: 3 } }, "JdK RS-Ratio vs RS-Momentum · 14-day z-score · tail = 5 sessions")
+      ),
+      React.createElement("button", { onClick: function () { doLoad(true); }, disabled: busy, className: "stx-btn stx-btn-ghost", style: { fontSize: 11, padding: "6px 12px" } }, busy ? "Loading..." : "Refresh")
+    ),
+    secs.length === 0
+      ? React.createElement("div", { style: { padding: 40, textAlign: "center", color: "var(--text5)", fontSize: 13 } }, busy ? "Fetching sector indices..." : "Click Refresh to load RRG")
+      : React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", maxWidth: 520, height: "auto", display: "block", margin: "0 auto" } },
+          QUADS.map(function (q, i) {
+            return React.createElement("g", { key: i },
+              React.createElement("rect", { x: q.x, y: q.y, width: q.w, height: q.h, fill: q.f }),
+              React.createElement("text", { x: q.x + q.w / 2, y: q.y + 18, textAnchor: "middle", fontSize: 9, fontWeight: 800, fill: q.c, letterSpacing: 1, opacity: 0.7 }, q.t));
+          }),
+          React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P + PH, stroke: "var(--border3)", strokeWidth: 1, strokeDasharray: "3,3" }),
+          React.createElement("line", { x1: P, y1: CY, x2: P + PW, y2: CY, stroke: "var(--border3)", strokeWidth: 1, strokeDasharray: "3,3" }),
+          React.createElement("text", { x: CX, y: H - 8, textAnchor: "middle", fontSize: 10, fontWeight: 600, fill: "var(--text6)" }, "RS-Ratio"),
+          React.createElement("text", { x: 14, y: CY, textAnchor: "middle", fontSize: 10, fontWeight: 600, fill: "var(--text6)", transform: "rotate(-90,14," + CY + ")" }, "RS-Momentum"),
+          secs.map(function (sec) {
+            var c = sec.current;
+            return React.createElement("g", { key: sec.key },
+              sec.tail.length > 1 && React.createElement("polyline", { points: sec.tail.map(function (p) { return X(p.rsRatio).toFixed(1) + "," + Y(p.rsMomentum).toFixed(1); }).join(" "), fill: "none", stroke: sec.color, strokeWidth: 1.5, opacity: 0.35, strokeLinejoin: "round" }),
+              sec.tail.map(function (p, i) {
+                var isHead = i === sec.tail.length - 1;
+                return React.createElement("circle", { key: i, cx: X(p.rsRatio), cy: Y(p.rsMomentum), r: isHead ? 5 : 2, fill: sec.color, opacity: isHead ? 1 : 0.45, stroke: isHead ? "var(--bg)" : "none", strokeWidth: isHead ? 1.5 : 0 });
+              }),
+              React.createElement("text", { x: X(c.rsRatio) + 8, y: Y(c.rsMomentum) + 3, fontSize: 10, fontWeight: 800, fill: "var(--text)", fontFamily: "var(--font-heading)" }, sec.name));
+          })
+        ),
+    lead.length > 0 && React.createElement("div", { style: { marginTop: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.25)", fontSize: 11, color: "var(--text3)", lineHeight: 1.6 } },
+      React.createElement("div", { style: { fontWeight: 700, color: "#16a34a", marginBottom: 4 } }, "Leading sectors — where money is flowing"),
+      lead.map(function (x) {
+        return React.createElement("div", { key: x.key },
+          React.createElement("strong", { style: { color: x.color } }, x.name),
+          " · RS-Ratio " + x.current.rsRatio.toFixed(1) + " · RS-Mom " + x.current.rsMomentum.toFixed(1) + " · " + x.daysInQuadrant + "d in quadrant");
+      }),
+      React.createElement("div", { style: { marginTop: 6, color: "var(--text5)" } }, "Stocks in these sectors get the RS gate override — trade even when NIFTY < SMA200.")
+    )
+  );
+});
+
 function PulsePage({ holdings }) {
   const [activeTab, setActiveTab] = useState("screener");
   const [pendingTicker, setPendingTicker] = useState("");
@@ -12013,6 +12085,7 @@ function PulsePage({ holdings }) {
     { key: "singlestock", label: "Single Stock Analysis", icon: Icons.search },
     { key: "backtest", label: "Backtesting", icon: Icons.clock },
     { key: "scoretuner", label: "Score Tuner", icon: Icons.settings },
+    { key: "sectorrotation", label: "Sector Rotation", icon: Icons.chart },
     { key: "patternlab", label: "Pattern Lab", icon: Icons.flask },
   ];
 
@@ -12043,6 +12116,7 @@ function PulsePage({ holdings }) {
       activeTab === "confidencescore" && React.createElement(ConfidenceTracker, null),
       activeTab === "watchlisttracker" && React.createElement(WatchlistTracker, null),
       activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker }),
+      activeTab === "sectorrotation" && React.createElement(SectorRotationPanel, null),
       React.createElement("div", { style: { display: activeTab === "backtest" ? "" : "none" } }, React.createElement(BacktestSuitePanel, null)),
       React.createElement("div", { style: { display: activeTab === "scoretuner" ? "" : "none" } }, React.createElement(ScoreTunerPanel, null)),
       React.createElement("div", { style: { display: activeTab === "patternlab" ? "" : "none" } },
