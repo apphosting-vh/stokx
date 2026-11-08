@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-window.__STOX_APP_VERSION = "4.9.0";
+window.__STOX_APP_VERSION = "4.9.1";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -2524,7 +2524,7 @@ const SessionConfidencePanel = ({ ticker, buyPrice, buyDate, entryScore }) => {
   const DF = window.OHLCVFetcher;
   /* Target % must live in component scope \u2014 the render body references it
      (previously declared inside the fetch callback \u2192 ReferenceError). */
-  const _tgtPct = TI && TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.5;
+  const _tgtPct = TI && TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.1;
   const [loading, setLoading] = React.useState(true);
   const [conf, setConf] = React.useState(null);
   const [exitScore, setExitScore] = React.useState(null);
@@ -2636,7 +2636,7 @@ const ForwardConfidencePanel = ({ ticker }) => {
         const c = TI.computeHorizonConfidence(h1, d, {
           horizonDays: 5, windowSessions: 40,
           entry_price: cur.c,
-          targetPct: TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.5,
+          targetPct: TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.1,
           holdingDays: null,
           indexCandles: idxD
         });
@@ -2657,7 +2657,7 @@ const ForwardConfidencePanel = ({ ticker }) => {
   }
   if (err || !conf) return null;
 
-  const _tgtPct5 = TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.5;
+  const _tgtPct5 = TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.1;
   const sc = conf.confidence;
   const cp = conf.components;
   const remainingPct = cp.remainingPct != null ? Math.round(cp.remainingPct * 100) / 100 : null;
@@ -2951,8 +2951,8 @@ const TenDayConfidencePanel = ({ ticker }) => {
   function confBg(v) { return v != null ? (v >= 70 ? "var(--profitbg)" : v >= 40 ? "var(--warnbg)" : "var(--lossbg)") : "var(--bg5)"; }
   function confBd(v) { return v != null ? (v >= 70 ? "var(--profitborder)" : v >= 40 ? "var(--warnborder)" : "var(--lossborder)") : "var(--border)"; }
   const tone = { c: confColor(sc), bg: confBg(sc), bd: confBd(sc) };
-  const _hd = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().horizonDays || 15) : 20;
-  const _tgtPct = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5;
+  const _hd = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? (window.TechIndicators.getScoreConfig().horizonDays || 13) : 20;
+  const _tgtPct = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.1;
   const label = sc == null ? "Insufficient hourly data for a " + _hd + "-day read"
     : sc >= 70 ? "Strong odds \u2014 expect +" + _tgtPct + "% within " + _hd + " trading days"
     : sc >= 40 ? "Moderate \u2014 needs the hourly trend to cooperate"
@@ -3016,8 +3016,8 @@ const OptimumEntryPanel = ({ ticker, entryScoreContext }) => {
   const [loading, setLoading] = React.useState(true);
   const [res, setRes] = React.useState(null);
   const [err, setErr] = React.useState(null);
-  const _hd = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().horizonDays || 15) : 20;
-  const _tgtPct = (TI && TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 3.5;
+  const _hd = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().horizonDays || 13) : 20;
+  const _tgtPct = (TI && TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 3.1;
 
   React.useEffect(() => {
     if (!ticker || !DF || !TI) { setLoading(false); return; }
@@ -3414,7 +3414,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
               }
             }
           }
-          const conf = TI.computeSessionConfidence(i15, d, { entry_price: entry, target_pct: TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.5 });
+          const conf = TI.computeSessionConfidence(i15, d, { entry_price: entry, target_pct: TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.1 });
           const update = { golden: golden, conf: conf };
           if (golden || (conf && conf.confidence != null)) {
             setExitInfo((prev) => { const next = Object.assign({}, prev); next[h.id] = update; return next; });
@@ -3881,10 +3881,10 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 React.createElement("span", { style: { fontSize: 13 } }, "\u2728"),
                 React.createElement("div", { style: { flex: 1, minWidth: 0 } },
                   React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#d97706" } },
-                    exitInfo[h.id].golden.amount >= 5 ? "Golden Exit Opportunity" : "Spike Toward " + (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.5) + "% Target"
+                    exitInfo[h.id].golden.amount >= 5 ? "Golden Exit Opportunity" : "Spike Toward " + (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.1) + "% Target"
                   ),
                   React.createElement("div", { style: { fontSize: 10.5, color: "var(--text5)", marginTop: 1, lineHeight: 1.4 } },
-                    "Up-spike carrying this holding near the +" + (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.5) + "% target \u00b7 spikes often precede a sharp reversal \u2014 consider banking the gain"
+                    "Up-spike carrying this holding near the +" + (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.1) + "% target \u00b7 spikes often precede a sharp reversal \u2014 consider banking the gain"
                   )
                 ),
                 exitInfo[h.id].golden.exit_score != null && React.createElement("span", { style: { fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 6, background: "rgba(251,191,36,.18)", color: "#d97706", border: "1px solid rgba(251,191,36,.4)", whiteSpace: "nowrap" } }, "EXIT " + exitInfo[h.id].golden.exit_score)
@@ -3895,7 +3895,7 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
                 const ci = exitInfo[h.id] && exitInfo[h.id].conf;
                 if (!ci || ci.confidence == null || !ci.flags || !ci.flags.inTargetBand) return null;
                 const sc = ci.confidence;
-                const _tgtPctH = TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.5;
+                const _tgtPctH = TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.1;
                 const tone = sc >= 70 ? { c: "#16a34a", bg: "var(--profitbg)", bd: "var(--profitborder)" } : sc >= 40 ? { c: "#d97706", bg: "var(--warnbg)", bd: "var(--warnborder)" } : { c: "#dc2626", bg: "var(--lossbg)", bd: "var(--lossborder)" };
                 const label = sc >= 70 ? "Let it ride \u2014 strong chance of tagging +" + _tgtPctH + "% today" : sc >= 40 ? "Wait & watch \u2014 keep a tight stop" : "Low odds \u2014 bank the gain today";
                 return React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "8px 12px", borderRadius: 8, background: tone.bg, border: "1px solid " + tone.bd } },
@@ -5814,7 +5814,7 @@ const LS_WL_PRICES = "stox_watchlist_tracker_prices";
    up with the "Day N" counter in the day-wise movement table. */
 function wlTargetPct() {
   try {
-    var v = window.TechIndicators && window.TechIndicators.getTargetPctDisplay ? window.TechIndicators.getTargetPctDisplay() : 3.5;
+    var v = window.TechIndicators && window.TechIndicators.getTargetPctDisplay ? window.TechIndicators.getTargetPctDisplay() : 3.1;
     return typeof v === "number" && isFinite(v) && v > 0 ? v : 3.5;
   } catch (e) { return 3.5; }
 }
@@ -6949,7 +6949,7 @@ const BacktestPanel = () => {
   const setResult = (v) => { _btLastResult = v; try { localStorage.setItem(LS_BT_RESULT, JSON.stringify(v)); } catch (e) {} setResultState(v); };
   const cancelRef = useRef(false);
   const RANGES = [30, 60, 90, 180, 270, 365, 500, 730];
-  const _btTgtPct = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5;
+  const _btTgtPct = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.1;
   const _btHorizon = (window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 15;
 
   const run = async () => {
@@ -7281,8 +7281,8 @@ const BacktestSuitePanel = () => {
   const DF = window.OHLCVFetcher;
   const TI = window.TechIndicators;
   const BE = window.BacktestEngine;
-  const _btTgtPct = (TI && TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 3.5;
-  const _btHorizon = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().horizonDays || 15) : 20;
+  const _btTgtPct = (TI && TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 3.1;
+  const _btHorizon = (TI && TI.getScoreConfig) ? (TI.getScoreConfig().horizonDays || 13) : 20;
 
   function shuffleArray(arr) {
     var a = arr.slice();
@@ -7295,7 +7295,7 @@ const BacktestSuitePanel = () => {
 
   const [mode, setMode] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.mode) || "single"; } catch (e) { return "single"; } });
   const [ticker, setTicker] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.ticker) || ""; } catch (e) { return ""; } });
-  const [target, setTarget] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.target) || ((TI && TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 3.5); } catch (e) { return (TI && TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 3.5; } });
+  const [target, setTarget] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.target) || ((TI && TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 3.1); } catch (e) { return (TI && TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 3.1; } });
   const [holding, setHolding] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.holding) || ((TI && TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15); } catch (e) { return (TI && TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15; } });
   const [threshold, setThreshold] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.threshold) || 65; } catch (e) { return 65; } });
   const [batchCap, setBatchCap] = useState(function () { try { var m = JSON.parse(localStorage.getItem(LS_BT2_INPUT)); return (m && m.batchCap) || "20"; } catch (e) { return "20"; } });
@@ -7417,7 +7417,7 @@ const BacktestSuitePanel = () => {
     scoreFn: buildScoreFn(idxCandles, multiTFMap),
     multiTFMap: multiTFMap,
     indexCandles: idxCandles,
-    targetProfitPct: Number(target) || (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.5),
+    targetProfitPct: Number(target) || (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.1),
     holdingPeriodDays: Number(holding) || ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15),
     threshold: Number(threshold) || 65,
     warmup: 60
@@ -7565,7 +7565,7 @@ const BacktestSuitePanel = () => {
       const res = await eng.runBatch(dataMap, { symbols: ready }, {
         onSymbol: (d, t) => setProgress({ phase: "Backtesting " + t + " symbols\u2026", done: d, total: t })
       });
-      res.targetProfitPct = Number(target) || (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.5);
+      res.targetProfitPct = Number(target) || (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.1);
       res.holdingPeriodDays = Number(holding) || ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15);
       res.threshold = Number(threshold) || 65;
       if (cancelRef.current) { setErr("Cancelled \u2014 partial results discarded."); return; }
@@ -7699,7 +7699,7 @@ const BacktestSuitePanel = () => {
       const res = await eng.runBatch(dataMap, { symbols: ready }, {
         onSymbol: (d, t) => setProgress({ phase: "Backtesting " + d + " / " + t + " symbols\u2026", done: d, total: t })
       });
-      res.targetProfitPct = Number(target) || (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.5);
+      res.targetProfitPct = Number(target) || (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.1);
       res.holdingPeriodDays = Number(holding) || ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15);
       res.threshold = Number(threshold) || 65;
       res.sourceLabel = "Selected from Screener";
@@ -8365,8 +8365,8 @@ const ScoreTunerPanel = () => {
   const BE = window.BacktestEngine;
 
   const [universe, setUniverse] = useState("random50");
-  const [target, setTarget] = useState(3);
-  const [holding, setHolding] = useState(10);
+  const [target, setTarget] = useState(3.1);
+  const [holding, setHolding] = useState(13);
   const [threshold, setThreshold] = useState(65);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(null);
@@ -9071,8 +9071,8 @@ const ScoreTunerPanel = () => {
           React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Confidence Horizon"),
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 8 } },
             React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "Forward horizon (trading days)"),
-            React.createElement("input", { className: "inp", type: "range", min: 3, max: 30, step: 1, value: scoreConfig.horizonDays || 15, onChange: function(e) { updateScoreConfig("horizonDays", e.target.value); }, style: { width: 160, accentColor: "var(--accent)" } }),
-            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-mono)", minWidth: 30 } }, scoreConfig.horizonDays || 15),
+            React.createElement("input", { className: "inp", type: "range", min: 3, max: 30, step: 1, value: scoreConfig.horizonDays || 13, onChange: function(e) { updateScoreConfig("horizonDays", e.target.value); }, style: { width: 160, accentColor: "var(--accent)" } }),
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-mono)", minWidth: 30 } }, scoreConfig.horizonDays || 13),
             React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "days")
           ),
           (function () {
@@ -11613,7 +11613,7 @@ function SingleStockAnalysis({ requestedTicker }) {
     var oeConf = oe && oe.entryConfidence != null ? oe.entryConfidence : null;
     var oeTone = oeConf != null ? (oeConf >= 70 ? "#16a34a" : oeConf >= 40 ? "#d97706" : "#dc2626") : "var(--text5)";
     var _hdVal = (TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15;
-    var _tgtPctVal = (TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 3.5;
+    var _tgtPctVal = (TI.getTargetPctDisplay) ? TI.getTargetPctDisplay() : 3.1;
     var confLabel = confScore == null ? "No " + _hdVal + "-day read"
       : confScore >= 70 ? "Strong odds \u2014 +" + _tgtPctVal + "% likely in " + _hdVal + " sessions"
       : confScore >= 40 ? "Moderate odds" : "Low odds";
@@ -12388,7 +12388,7 @@ function InfoPage() {
         React.createElement(MethSection, { label: "Integrated Decision Engine", stateKey: "integrated" }),
         React.createElement(MethContent, { stateKey: "integrated" },
           React.createElement("p", { style: subSub }, "Layer 1 \u2014 Hard Rules"),
-          React.createElement("p", null, "Target hit (+" + (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.5) + "%) \u2192 EXIT. Time stop (" + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + " days, <2%) \u2192 EXIT. No stop loss \u2014 positions hold to the horizon or target."),
+          React.createElement("p", null, "Target hit (+" + (TI.getTargetPctDisplay ? TI.getTargetPctDisplay() : 3.1) + "%) \u2192 EXIT. Time stop (" + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + " days, <2%) \u2192 EXIT. No stop loss \u2014 positions hold to the horizon or target."),
           React.createElement("p", { style: subSub }, "Layer 2 \u2014 Exit Score"),
           React.createElement("p", null, "Delegates to Exit Score classification. REDUCE POSITION means the stock still holds gains but technicals are weakening \u2014 consider taking partial profits."),
           React.createElement("p", { style: subSub }, "Layer 3 \u2014 Entry Score Collapse"),

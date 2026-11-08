@@ -593,7 +593,7 @@ var INS_PILLARS = [
     // Run Batch tab state (must be at component top-level — Rules of Hooks)
     var _btConfig = useState(function () {
       var _scDef = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
-      var defaults = { targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5, holdingPeriodDays: _scDef.horizonDays || 15, threshold: 65, sampleEvery: 2, usePatternWeights: true, useMLBlend: true };
+      var defaults = { targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.1, holdingPeriodDays: _scDef.horizonDays || 13, threshold: 65, sampleEvery: 2, usePatternWeights: true, useMLBlend: true };
       try {
         var saved = localStorage.getItem("stox_best_bt_config");
         if (saved) {
@@ -1259,7 +1259,7 @@ var INS_PILLARS = [
         React.createElement("div", { style: cardStyle },
           React.createElement("div", { style: labelStyle }, "Backtest Configuration"),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 8 } },
-            configField("Target Profit %", btConfig.targetProfitPct, function (v) { var _def = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5; setBtConfig(Object.assign({}, btConfig, { targetProfitPct: parseFloat(v) || _def })); }),
+            configField("Target Profit %", btConfig.targetProfitPct, function (v) { var _def = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.1; setBtConfig(Object.assign({}, btConfig, { targetProfitPct: parseFloat(v) || _def })); }),
             configField("Holding Period (days)", btConfig.holdingPeriodDays, function (v) { var _defH = (window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 15; setBtConfig(Object.assign({}, btConfig, { holdingPeriodDays: parseInt(v) || _defH })); }),
             configField("Threshold Score", btConfig.threshold, function (v) { setBtConfig(Object.assign({}, btConfig, { threshold: parseInt(v) || 65 })); }),
             configField("Sample Every N bars", btConfig.sampleEvery, function (v) { setBtConfig(Object.assign({}, btConfig, { sampleEvery: parseInt(v) || 2 })); })
@@ -1603,7 +1603,7 @@ var INS_PILLARS = [
         );
       }
       var cal = data.cal;
-      var _tgtDef = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5;
+      var _tgtDef = (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.1;
       var target = (btConfig && btConfig.targetProfitPct) || _tgtDef;
       return React.createElement("div", { style: cardStyle },
         React.createElement("div", { style: labelStyle }, "1 · Calibration Reliability Curve — is your confidence honest?"),

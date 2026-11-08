@@ -419,9 +419,9 @@ window.BacktestEngine = (function () {
   function create(cfg) {
     cfg = cfg || {};
     var scoreFn = cfg.scoreFn || null;
-    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5);
+    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.1);
     var stopLossPct = cfg.stopLossPct != null ? cfg.stopLossPct : null;
-    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 15);
+    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 13);
     var threshold = cfg.threshold != null ? cfg.threshold : 65;
     var warmup = cfg.warmup != null ? cfg.warmup : 60;
     var multiTFMap = cfg.multiTFMap || null;

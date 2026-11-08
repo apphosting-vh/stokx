@@ -510,8 +510,8 @@ window.BatchBacktest = (function () {
   function create(cfg) {
     cfg = cfg || {};
 
-    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5);
-    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 15);
+    var targetProfitPct = cfg.targetProfitPct != null ? cfg.targetProfitPct : ((window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.1);
+    var holdingPeriodDays = cfg.holdingPeriodDays != null ? cfg.holdingPeriodDays : ((window.TechIndicators && window.TechIndicators.getScoreConfig && window.TechIndicators.getScoreConfig().horizonDays) || 13);
     var threshold = cfg.threshold != null ? cfg.threshold : 65;
     var slippagePct = cfg.slippagePct != null ? cfg.slippagePct : 0.1;
     var brokeragePct = cfg.brokeragePct != null ? cfg.brokeragePct : 0.05;

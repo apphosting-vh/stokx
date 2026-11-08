@@ -744,8 +744,8 @@
     var stocks = symbols || (window.NIFTY_200 && window.NIFTY_200.map ? window.NIFTY_200.map(function(s) { return s.t; }) : null) || getDefaultStocks();
     var _sc = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
     var runner = window.BatchBacktest.create({
-      targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5,
-      holdingPeriodDays: _sc.horizonDays || 15,
+      targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.1,
+      holdingPeriodDays: _sc.horizonDays || 13,
       threshold: 65,
       sampleEvery: 2
     });
@@ -776,8 +776,8 @@
 
     var _sc2 = (window.TechIndicators && window.TechIndicators.getScoreConfig) ? window.TechIndicators.getScoreConfig() : {};
     var runner = window.BatchBacktest.create({
-      targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.5,
-      holdingPeriodDays: _sc2.horizonDays || 15,
+      targetProfitPct: (window.TechIndicators && window.TechIndicators.getTargetPctDisplay) ? window.TechIndicators.getTargetPctDisplay() : 3.1,
+      holdingPeriodDays: _sc2.horizonDays || 13,
       threshold: 65,
       sampleEvery: 2
     });

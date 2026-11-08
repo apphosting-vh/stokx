@@ -2921,14 +2921,14 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
   var SCORE_CONFIG = {
     /* Outcome horizon for the win-rate backtest and forward-sim target
        (sessions). Locked 15 @2026-09-12 by calibration run R4. */
-    horizonDays: 10,
+    horizonDays: 13,
     /* Forward outcome simulation constant (target barrier for the win-rate
        backtest). No stop loss: positions are held to the horizon unless the
        +target barrier is touched. LOCKED 3.5%/15d @2026-09-12 (run R4) — the
        combo the current constants trace back to. The 4y harness's 4%/20d pick
        (WR 61.8%, PF 1.23) predates this pass. The stop side remains removed:
        the harness confirmed stop exits added no predictive signal. */
-    forwardSim: { targetPct: 0.05 },
+    forwardSim: { targetPct: 0.031 },
     /* Pillar max scores — five pillars (nominal sum 100). LOCKED @2026-09-12
        by the mod16 pass (see VERSION banner): Trend Health 28 (flat →
        kept) + Pullback Quality 28 (restored to the full cap: under the
@@ -3176,7 +3176,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      Bumped 16→17 at the mod16 lock-in pass (2026-09-12): pillarMax
      {28,28,12,22,4}, classification {62,60,58,34} re-derived under the V16
      tempered modifiers and OOS-validated. */
-  var SCORE_CONFIG_VERSION = 18;
+  var SCORE_CONFIG_VERSION = 19;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? Math.round(SCORE_CONFIG.forwardSim.targetPct * 1000) / 10 : 4; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
@@ -3397,7 +3397,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
   function calcSwingPotentialScore(candles, sn) {
     try {
       var c = SCORE_CONFIG.swingPotential;
-      var horizonDays = SCORE_CONFIG.horizonDays || 15;
+      var horizonDays = SCORE_CONFIG.horizonDays || 13;
       var targetPct = (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? SCORE_CONFIG.forwardSim.targetPct : 0.035;
       var pbState = detectPullbackState(sn);
       if (!pbState || !pbState.inPullback) return 0;
@@ -3555,7 +3555,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
   function calcBreakoutContinuationScore(candles, sn) {
     try {
-      var horizonDays = SCORE_CONFIG.horizonDays || 15;
+      var horizonDays = SCORE_CONFIG.horizonDays || 13;
       var targetPct = (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? SCORE_CONFIG.forwardSim.targetPct : 0.035;
       var bkState = detectBreakoutState(sn);
       if (!bkState) return 0;
@@ -4665,7 +4665,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       if (!intradayCandles || intradayCandles.length < 10) return base;
       position = position || {};
       var entry = position.entry_price || position.entry || 0;
-      var targetPct = position.target_pct != null ? position.target_pct : (SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5);
+      var targetPct = position.target_pct != null ? position.target_pct : (SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.1);
       if (entry <= 0) { base.reason = 'no_entry_price'; return base; }
 
       /* isolate today's session bars (same IST date as the last bar) */
@@ -4941,9 +4941,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      Returns { confidence, reason, components, flags }. */
   function computeHorizonConfidence(hourlyCandles, dailyCandles, cfg) {
     cfg = cfg || {};
-    var horizonDays = cfg.horizonDays != null ? cfg.horizonDays : (SCORE_CONFIG.horizonDays || 15);
+    var horizonDays = cfg.horizonDays != null ? cfg.horizonDays : (SCORE_CONFIG.horizonDays || 13);
     var windowSessions = cfg.windowSessions != null ? cfg.windowSessions : 40;
-    var targetPct = cfg.target_pct != null ? cfg.target_pct : (cfg.targetPct != null ? cfg.targetPct : (SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5));
+    var targetPct = cfg.target_pct != null ? cfg.target_pct : (cfg.targetPct != null ? cfg.targetPct : (SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.1));
     var holdingDays = cfg.holding_days != null ? cfg.holding_days : (cfg.holdingDays != null ? cfg.holdingDays : 0);
     var ctx = cfg.entryScoreContext || {};
     var base = {
@@ -5262,7 +5262,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     return computeHorizonConfidence(hourlyCandles, dailyCandles, {
       horizonDays: 5, windowSessions: 20,
       entry_price: entry,
-      targetPct: position.target_pct != null ? position.target_pct : (position.targetPct != null ? position.targetPct : (SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5)),
+      targetPct: position.target_pct != null ? position.target_pct : (position.targetPct != null ? position.targetPct : (SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.1)),
       holdingDays: position.holding_days != null ? position.holding_days : (position.holdingDays != null ? position.holdingDays : null),
       indexCandles: position.indexCandles || null
     });
@@ -5281,7 +5281,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     return computeHorizonConfidence(hourlyCandles, dailyCandles, {
       horizonDays: _hd, windowSessions: 40,
       entry_price: cur.c,
-targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5,
+targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.1,
       holdingDays: null,
       indexCandles: indexCandles,
       entryScoreContext: entryScoreContext
@@ -5498,7 +5498,7 @@ targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3
 
       /* ── 4. 10-day horizon context from current price ─────────────────── */
       var ctx = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-        horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 15, windowSessions: 40, entry_price: c, targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5,
+        horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 15, windowSessions: 40, entry_price: c, targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.1,
         holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
       });
       if (ctx.reason !== 'ok' || ctx.confidence == null) { base.reason = ctx.reason || base.reason; return base; }
@@ -5609,7 +5609,7 @@ targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3
         var P = prices[p2];
         var fp = fillProb(P);
         var res = computeHorizonConfidence(hourlyCandles, dailyCandles, {
-          horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 15, windowSessions: 40, entry_price: P, targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.5,
+          horizonDays: SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 15, windowSessions: 40, entry_price: P, targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3.1,
           holdingDays: 0, indexCandles: indexCandles, entryScoreContext: entryScoreCtx
         });
         var isAggressive = P < floorP;
