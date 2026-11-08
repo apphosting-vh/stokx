@@ -12404,6 +12404,441 @@ const RegimeMapPanel = React.memo(function () {
   );
 });
 
+/* ============================================================
+   Steady Leaders - which stocks in a sector have been consistent
+   over the last 20 trading days.
+   Two kinds of consistency, shown as the two axes:
+     X = Beats the sector  (% of days the stock out-performed its sector index)
+     Y = Smooth climb      (efficiency ratio: net move / total distance travelled)
+   Tunable constants are all at the top.
+   ============================================================ */
+var SL_WINDOW = 20;       // trading days measured
+var SL_HIT_MID = 55;      // % of days beating the sector that counts as "most days"
+var SL_ER_MID = 0.35;     // smoothness midline (1.0 = straight line, ~0.2 = noise)
+var SL_ER_FULL = 0.6;     // efficiency ratio treated as a 100 smoothness score (for rank only)
+var SL_EXT_LIMIT = 8;     // % above the 20 DMA that flags a stock as extended
+var SL_MIN_OVERLAP = 12;  // min days with sector-index data needed to score a stock
+var SL_HIT_LO = 25, SL_HIT_HI = 85;  // chart X range (the midline sits in the centre)
+var SL_ER_MAX = 0.7;                 // chart Y range 0..0.7
+
+function slAvg(a) { var s = 0; for (var i = 0; i < a.length; i++) s += a[i]; return a.length ? s / a.length : 0; }
+function slClamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+function slFx(v, dp) { return (v == null || isNaN(v)) ? "-" : Number(v).toFixed(dp); }
+function slSg(v, dp) { return (v == null || isNaN(v)) ? "-" : (v >= 0 ? "+" : "") + Number(v).toFixed(dp == null ? 1 : dp) + "%"; }
+
+function slClean(arr) {
+  var out = [];
+  for (var i = 0; i < (arr || []).length; i++) {
+    var c = arr[i];
+    if (!c) continue;
+    var cl = Number(c.c), d = String(c.t || "").slice(0, 10);
+    if (!isFinite(cl) || cl <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+    var h = Number(c.h), l = Number(c.l);
+    out.push({ d: d, c: cl, h: h > 0 ? h : cl, l: l > 0 ? l : cl });
+  }
+  out.sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : 0; });
+  var ded = [];
+  for (var k = 0; k < out.length; k++) {
+    if (ded.length && ded[ded.length - 1].d === out[k].d) ded[ded.length - 1] = out[k]; else ded.push(out[k]);
+  }
+  return ded;
+}
+
+async function slFetchDaily(DF, sym) {
+  try {
+    var r = await DF.fetchOHLCVCached(sym, "daily");
+    if (r && r.data && r.data.length) return slClean(r.data);
+    var dr = await DF.fetchOHLCV(sym, "daily");   // bypass a memoised failure
+    if (dr && dr.candles && dr.candles.length) return slClean(dr.candles);
+  } catch (e) {}
+  return null;
+}
+
+/* cs = stock candles, bs = sector-index candles (both cleaned, oldest first) */
+function slCalc(cs, bs) {
+  var n = cs.length;
+  if (n < SL_WINDOW + 15) return null;
+  var bidx = {};
+  for (var b = 0; b < bs.length; b++) bidx[bs[b].d] = b;
+  var wins = 0, counted = 0, strip = [], den = 0;
+  for (var i = n - SL_WINDOW; i < n; i++) {
+    var sr = cs[i].c / cs[i - 1].c - 1;
+    den += Math.abs(cs[i].c - cs[i - 1].c);
+    var bi = bidx[cs[i].d], x = null;
+    if (bi != null && bi > 0) {
+      var br = bs[bi].c / bs[bi - 1].c - 1;
+      x = (sr - br) * 100;
+      counted++;
+      if (sr > br) wins++;
+    }
+    strip.push({ d: cs[i].d, x: x });
+  }
+  if (counted < SL_MIN_OVERLAP) return null;
+  var c0 = cs[n - 1 - SL_WINDOW].c, c1 = cs[n - 1].c;
+  var net = (c1 / c0 - 1) * 100;
+  var er = den > 0 ? Math.abs(c1 - c0) / den : 0;
+  var b0 = bidx[cs[n - 1 - SL_WINDOW].d], b1 = bidx[cs[n - 1].d];
+  var rel = (b0 != null && b1 != null) ? net - (bs[b1].c / bs[b0].c - 1) * 100 : null;
+  var trs = [];
+  for (var j = n - 14; j < n; j++) {
+    var pc = cs[j - 1].c;
+    trs.push(Math.max(cs[j].h - cs[j].l, Math.abs(cs[j].h - pc), Math.abs(cs[j].l - pc)));
+  }
+  var atrPct = slAvg(trs) / c1 * 100;
+  var sma = slAvg(cs.slice(n - SL_WINDOW).map(function (q) { return q.c; }));
+  var ext = (c1 / sma - 1) * 100;
+  var hit = wins / counted * 100;
+  var smooth = slClamp(er / SL_ER_FULL * 100, 0, 100);
+  return { hit: hit, er: er, smooth: smooth, rank: 0.5 * hit + 0.5 * (net > 0 ? smooth : 0), net: net, rel: rel, atrPct: atrPct, ext: ext, strip: strip, counted: counted };
+}
+
+function slTag(m) {
+  var good = m.hit >= SL_HIT_MID, smooth = m.er >= SL_ER_MID;
+  m.quad = good && smooth ? "tr" : good ? "br" : smooth ? "tl" : "bl";
+  // direction gate: only a rising stock can be a leader; extension flag on top
+  m.tag = m.quad === "tr" ? (m.net <= 0 ? "falling" : (m.ext > SL_EXT_LIMIT ? "extended" : "leader"))
+        : m.quad === "br" ? "spiky" : m.quad === "tl" ? (m.net > 0 ? "follower" : "decliner") : "noise";
+  m.candidate = m.quad === "tr" && m.net > 0;
+}
+
+function slStocksFor(secKey) {
+  var map = (window.SectorRRG && window.SectorRRG.STOCK_SECTOR) || {};
+  var all = (typeof NIFTY_200_UNIQUE !== "undefined") ? NIFTY_200_UNIQUE : [];
+  return all.filter(function (s) { return map[s.t.replace(".NS", "")] === secKey; });
+}
+
+async function slLoadSector(sec) {
+  var DF = window.OHLCVFetcher;
+  if (!DF) throw new Error("Data fetcher is not ready yet");
+  var stocks = slStocksFor(sec.key);
+  var bench = await slFetchDaily(DF, sec.yahoo);
+  if (!bench || bench.length < 40) throw new Error("Could not load the " + sec.name + " index data");
+  var rows = [], failed = 0;
+  for (var i = 0; i < stocks.length; i += 4) {   // small batches: the data proxies are flaky under load
+    var batch = stocks.slice(i, i + 4);
+    var res = await Promise.all(batch.map(function (s) { return slFetchDaily(DF, s.t); }));
+    for (var k = 0; k < batch.length; k++) {
+      var m = res[k] ? slCalc(res[k], bench) : null;
+      if (!m) { failed++; continue; }
+      m.sym = batch[k].t.replace(".NS", ""); m.name = batch[k].n; m.cap = batch[k].cap;
+      slTag(m);
+      rows.push(m);
+    }
+    await new Promise(function (r) { setTimeout(r, 120); });
+  }
+  rows.sort(function (a, b) { return b.rank - a.rank; });
+  return { rows: rows, failed: failed, total: stocks.length, asOf: bench[bench.length - 1].d };
+}
+
+var SL_TAGS = {
+  leader:   { t: "Steady leader",   c: "#16a34a", bg: "rgba(34,197,94,0.15)" },
+  extended: { t: "Extended",        c: "#b45309", bg: "rgba(245,158,11,0.18)" },
+  falling:  { t: "Falling less",    c: "#dc2626", bg: "rgba(239,68,68,0.15)" },
+  spiky:    { t: "Spiky",           c: "#2563eb", bg: "rgba(59,130,246,0.15)" },
+  follower: { t: "Smooth follower", c: "#a16207", bg: "rgba(234,179,8,0.18)" },
+  decliner: { t: "Smooth decliner", c: "#dc2626", bg: "rgba(239,68,68,0.15)" },
+  noise:    { t: "Noise",           c: "var(--text5)", bg: "rgba(148,163,184,0.15)" }
+};
+
+function slExplainer(what, how, rows, tip, live) {
+  var h = { fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", color: "var(--text5)", margin: "12px 0 4px" };
+  var p = { fontSize: 12, lineHeight: 1.55, color: "var(--text)", margin: 0 };
+  var rowEl = function (r, i) {
+    return React.createElement("div", { key: i, style: { display: "flex", gap: 8, fontSize: 12, lineHeight: 1.5 } },
+      React.createElement("span", { style: { width: 8, height: 8, borderRadius: 2, background: r.c, marginTop: 5, flexShrink: 0 } }),
+      React.createElement("span", { style: { color: "var(--text)" } }, React.createElement("b", null, r.t + ": "), r.d));
+  };
+  return React.createElement("div", { style: { marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--border3)" } },
+    live && React.createElement("div", { style: { border: "1px solid var(--border3)", borderRadius: 8, padding: "10px 12px", marginBottom: 14 } },
+      React.createElement("div", { style: Object.assign({}, h, { marginTop: 0 }) }, "Right now"),
+      React.createElement("p", { style: Object.assign({}, p, { fontWeight: 700 }) }, live.head),
+      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6, marginTop: 8 } }, live.rows.map(rowEl))
+    ),
+    React.createElement("div", { style: Object.assign({}, h, { marginTop: 0 }) }, "What this chart shows"),
+    React.createElement("p", { style: p }, what),
+    React.createElement("div", { style: h }, "How to read it"),
+    React.createElement("p", { style: p }, how),
+    React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6, marginTop: 8 } }, rows.map(rowEl)),
+    tip && React.createElement("div", { style: h }, "Good to know"),
+    tip && React.createElement("p", { style: p }, tip)
+  );
+}
+
+var SteadyLeadersPanel = React.memo(function () {
+  var sectors = (window.SectorRRG && window.SectorRRG.SECTORS) ? window.SectorRRG.SECTORS : [];
+  var _k = useState(sectors.length ? sectors[0].key : ""); var selKey = _k[0], setSelKey = _k[1];
+  var _c = useState({}); var cache = _c[0], setCache = _c[1];
+  var _l = useState(false); var loading = _l[0], setLoading = _l[1];
+  var _e = useState({}); var errs = _e[0], setErrs = _e[1];
+  var _h = useState(null); var hovered = _h[0], setHovered = _h[1];
+  var _s = useState(null); var scan = _s[0], setScan = _s[1];
+  var alive = React.useRef(true);
+  var cancelScan = React.useRef(false);
+  var cacheRef = React.useRef({});
+  var inflight = React.useRef({});
+
+  var ensureSector = function (sec) {
+    if (cacheRef.current[sec.key]) return Promise.resolve(cacheRef.current[sec.key]);
+    if (inflight.current[sec.key]) return inflight.current[sec.key];
+    var pr = slLoadSector(sec).then(function (res) {
+      cacheRef.current[sec.key] = res;
+      if (alive.current) {
+        setCache(Object.assign({}, cacheRef.current));
+        setErrs(function (p) { var n = Object.assign({}, p); delete n[sec.key]; return n; });
+      }
+      return res;
+    }).catch(function (err) {
+      if (alive.current) setErrs(function (p) { var n = Object.assign({}, p); n[sec.key] = (err && err.message) || "Failed to load"; return n; });
+      throw err;
+    }).finally(function () { delete inflight.current[sec.key]; });
+    inflight.current[sec.key] = pr;
+    return pr;
+  };
+
+  useEffect(function () {
+    alive.current = true;
+    return function () { alive.current = false; cancelScan.current = true; };
+  }, []);
+
+  useEffect(function () {
+    var sec = sectors.filter(function (x) { return x.key === selKey; })[0];
+    if (!sec || cacheRef.current[selKey]) return;
+    setLoading(true);
+    ensureSector(sec).catch(function () {}).finally(function () { if (alive.current) setLoading(false); });
+  }, [selKey]);
+
+  var runScan = async function (force) {
+    if (force) { cacheRef.current = {}; inflight.current = {}; setCache({}); setErrs({}); }
+    cancelScan.current = false;
+    setScan({ running: true, done: 0, total: sectors.length, label: "" });
+    for (var i = 0; i < sectors.length; i++) {
+      if (cancelScan.current || !alive.current) break;
+      if (alive.current) setScan({ running: true, done: i, total: sectors.length, label: sectors[i].name });
+      try { await ensureSector(sectors[i]); } catch (e) {}
+    }
+    if (alive.current) setScan({ running: false, done: sectors.length, total: sectors.length, cancelled: cancelScan.current });
+  };
+
+  if (!window.OHLCVFetcher || !sectors.length) {
+    return React.createElement("div", { style: { padding: 40, textAlign: "center", color: "var(--text5)" } }, "Sector data is not available yet. Open the Sector Rotation tab once, then come back.");
+  }
+
+  var sec = sectors.filter(function (x) { return x.key === selKey; })[0] || sectors[0];
+  var data = cache[sec.key];
+  var rows = data ? data.rows : [];
+
+  /* ---------- chart geometry (same frame as the other three maps) ---------- */
+  var W = 500, H = 500, P = 40, PW = W - 2 * P, PH = H - 2 * P;
+  var CX = P + PW / 2, CY = P + PH / 2;
+  var nx = function (hit) { return slClamp((hit - SL_HIT_LO) / (SL_HIT_HI - SL_HIT_LO) * 100, 0, 100); };
+  var ny = function (er) { return slClamp(er / SL_ER_MAX * 100, 0, 100); };
+  var X = function (v) { return P + v / 100 * PW; };
+  var Y = function (v) { return P + PH - v / 100 * PH; };
+
+  var QUADS = [
+    { x: CX, y: P,  f: "rgba(34,197,94,0.08)",  t: "STEADY LEADERS",       d: "Beats sector + smooth climb", c: "#16a34a" },
+    { x: P,  y: P,  f: "rgba(234,179,8,0.08)",  t: "SMOOTH, NOT LEADING",  d: "Just rides the sector",       c: "#ca8a04" },
+    { x: CX, y: CY, f: "rgba(59,130,246,0.08)", t: "SPIKY OUTPERFORMERS",  d: "Wins often, jagged path",     c: "#2563eb" },
+    { x: P,  y: CY, f: "rgba(239,68,68,0.08)",  t: "NOISE",                d: "Neither smooth nor leading",  c: "#dc2626" }
+  ];
+
+  var dots = rows.map(function (r) {
+    var sx = X(nx(r.hit)), sy = Y(ny(r.er));
+    var isH = hovered === r.sym;
+    var rad = slClamp(3 + r.atrPct * 2.2, 4, 13) + (isH ? 2 : 0);
+    var ext = r.ext > SL_EXT_LIMIT;
+    return React.createElement("g", { key: r.sym, style: { cursor: "pointer" },
+        onMouseEnter: function () { setHovered(r.sym); }, onMouseLeave: function () { setHovered(null); }, onClick: function () { setHovered(r.sym); } },
+      React.createElement("circle", { cx: sx, cy: sy, r: rad, fill: r.net > 0 ? "#16a34a" : "#dc2626", fillOpacity: 0.85,
+        stroke: isH ? "var(--text)" : (ext ? "#f59e0b" : "var(--bg)"), strokeWidth: ext || isH ? 2.5 : 1.5, strokeDasharray: ext && !isH ? "3,2" : null }),
+      isH && React.createElement("text", { x: sx, y: sy - rad - 5, textAnchor: "middle", fontSize: 11, fill: "var(--text)", fontWeight: 800,
+        style: { paintOrder: "stroke", stroke: "var(--bg)", strokeWidth: 4 } }, r.sym)
+    );
+  });
+
+  var hovRow = rows.filter(function (r) { return r.sym === hovered; })[0];
+
+  /* ---------- live "Right now" box for the selected sector ---------- */
+  var list = function (fn, fmt) {
+    var a = rows.filter(fn).map(fmt);
+    if (!a.length) return "none";
+    return a.length > 8 ? a.slice(0, 8).join(", ") + " +" + (a.length - 8) + " more" : a.join(", ");
+  };
+  var f1 = function (r) { return r.sym + " (" + slFx(r.hit, 0) + "%, " + slFx(r.er, 2) + ")"; };
+  var nLead = rows.filter(function (r) { return r.candidate; }).length;
+  var nExt = rows.filter(function (r) { return r.tag === "extended"; }).length;
+  var live = rows.length ? {
+    head: nLead + " of " + rows.length + " stocks in " + sec.name + " are steady leaders" + (nExt ? ", and " + nExt + " of those are extended (more than " + SL_EXT_LIMIT + "% above the 20 DMA)." : "."),
+    rows: [
+      { c: "#16a34a", t: "Steady leaders", d: list(function (r) { return r.candidate; }, function (r) { return f1(r) + (r.tag === "extended" ? " extended" : ""); }) },
+      { c: "#dc2626", t: "Falling less than the sector", d: list(function (r) { return r.tag === "falling"; }, f1) },
+      { c: "#2563eb", t: "Spiky outperformers", d: list(function (r) { return r.quad === "br"; }, f1) },
+      { c: "#ca8a04", t: "Smooth followers", d: list(function (r) { return r.tag === "follower"; }, f1) },
+      { c: "#dc2626", t: "Smooth decliners", d: list(function (r) { return r.tag === "decliner"; }, f1) },
+      { c: "#94a3b8", t: "Noise", d: list(function (r) { return r.quad === "bl"; }, f1) }
+    ]
+  } : null;
+
+  var explain = slExplainer(
+    "Each dot is a stock in the sector you picked. It is judged on the last " + SL_WINDOW + " trading days in two ways: does it beat its sector most days, and does it climb smoothly instead of zig-zagging?",
+    "Left to right is how often the stock beat the sector index on a day. The midline is " + SL_HIT_MID + "% of days, which is what 'most days' means here. Bottom to top is smoothness (efficiency ratio): the net move over " + SL_WINDOW + " days divided by all the up-and-down distance the price travelled. A perfectly straight climb scores 1.0, a random zig-zag scores about 0.2, and the midline is " + SL_ER_MID + ". Bigger dots have a larger ATR%, so they move faster and reach a 4% target sooner. Green dots are up over " + SL_WINDOW + " days and red dots are down. An orange dashed ring means the stock is more than " + SL_EXT_LIMIT + "% above its 20 DMA (extended).",
+    [
+      { c: "#16a34a", t: "Top right, steady leaders", d: "Beats the sector most days and climbs smoothly. This is what you are looking for." },
+      { c: "#2563eb", t: "Bottom right, spiky outperformers", d: "Wins most days, but the path is jagged. Expect shakeouts, so give a trailing stop more room." },
+      { c: "#ca8a04", t: "Top left, smooth but not leading", d: "Moves in a steady line but does not beat the sector most days. If it is green it is a good follower, and if it is red it is a steady decliner." },
+      { c: "#dc2626", t: "Bottom left, noise", d: "Neither smooth nor leading. Skip." }
+    ],
+    "A stock sliding smoothly downward also scores high on smoothness, so only green dots count as leaders. A red dot in the top right is falling less than a falling sector, which is not a long setup. " + SL_WINDOW + " days is a short window, so treat this as a shortlist and not a signal on its own. Consistent winners are often already stretched, which is why extended stocks are flagged. Each stock is compared with the sector index used on the Regime Map, using Yahoo Finance daily data. Dots at the edge are capped (beats-sector below " + SL_HIT_LO + "% or above " + SL_HIT_HI + "%, smoothness above " + SL_ER_MAX + ").",
+    live
+  );
+
+  /* ---------- small style helpers ---------- */
+  var th = { textAlign: "left", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--text5)", padding: "6px 8px", whiteSpace: "nowrap" };
+  var td = { padding: "6px 8px", borderTop: "1px solid var(--border3)", fontSize: 12, whiteSpace: "nowrap" };
+  var chip = function (tag) {
+    var g = SL_TAGS[tag];
+    return React.createElement("span", { style: { display: "inline-block", padding: "1px 8px", borderRadius: 10, fontSize: 10, fontWeight: 700, color: g.c, background: g.bg } }, g.t);
+  };
+  var numCol = function (v, good) { return { color: good == null ? "var(--text)" : (good ? "var(--profit)" : "var(--loss)"), fontWeight: 600 }; };
+
+  /* ---------- "top steady leader per sector" table ---------- */
+  var topRows = sectors.map(function (s) {
+    var d = cache[s.key];
+    var lead = null, best = null;
+    if (d) {
+      for (var i = 0; i < d.rows.length; i++) { if (d.rows[i].candidate) { lead = d.rows[i]; break; } }
+      best = d.rows[0] || null;
+    }
+    return { s: s, d: d, lead: lead, best: best, err: errs[s.key] };
+  });
+
+  var scanned = Object.keys(cache).length;
+  var pct = scan && scan.total ? Math.round(scan.done / scan.total * 100) : 0;
+
+  var topTable = React.createElement("div", { className: "stx-card", style: { padding: 20, display: "flex", flexDirection: "column" } },
+    React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Top Steady Leader per Sector"),
+    React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 12 } }, "Highest-ranked stock in each sector that beats the sector most days, climbs smoothly and is rising. Rank = 50% beats-sector + 50% smoothness (smoothness only counts for rising stocks). Click a row to open that sector."),
+    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 } },
+      scan && scan.running
+        ? React.createElement("button", { className: "stx-btn", onClick: function () { cancelScan.current = true; } }, "Stop scan")
+        : React.createElement("button", { className: "stx-btn stx-btn-primary", onClick: function () { runScan(scanned >= sectors.length); } }, scanned >= sectors.length ? "Reload all sectors" : "Scan all sectors"),
+      React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } },
+        scan && scan.running ? "Scanning " + scan.label + " (" + (scan.done + 1) + " of " + scan.total + ")"
+          : scan && scan.cancelled ? "Scan stopped. " + scanned + " of " + sectors.length + " sectors loaded."
+          : scanned + " of " + sectors.length + " sectors loaded" + (scanned < sectors.length ? ". A full scan loads every Nifty 200 stock, so it takes a minute or two." : "."))
+    ),
+    scan && scan.running && React.createElement("div", { style: { height: 6, borderRadius: 3, background: "var(--border3)", marginBottom: 12, overflow: "hidden" } },
+      React.createElement("div", { style: { height: "100%", width: pct + "%", background: "var(--accent)", transition: "width .3s" } })),
+    React.createElement("div", { style: { overflowX: "auto" } },
+      React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+        React.createElement("thead", null, React.createElement("tr", null,
+          ["Sector", "Top steady leader", "Rank", "Beats %", "Smooth", "20d", "Flag"].map(function (h2) { return React.createElement("th", { key: h2, style: th }, h2); }))),
+        React.createElement("tbody", null, topRows.map(function (t) {
+          var isSel = t.s.key === sec.key;
+          var rowStyle = { cursor: "pointer", background: isSel ? "rgba(148,163,184,0.12)" : "transparent" };
+          var nameCell = React.createElement("td", { style: td }, React.createElement("span", { style: { display: "inline-block", width: 8, height: 8, borderRadius: 4, background: t.s.color, marginRight: 6 } }), t.s.name);
+          var muted = function (txt) { return React.createElement("td", { style: Object.assign({}, td, { color: "var(--text5)" }), colSpan: 6 }, txt); };
+          if (t.err) return React.createElement("tr", { key: t.s.key, style: rowStyle, onClick: function () { setSelKey(t.s.key); } }, nameCell, muted("Failed to load: " + t.err));
+          if (!t.d) return React.createElement("tr", { key: t.s.key, style: rowStyle, onClick: function () { setSelKey(t.s.key); } }, nameCell, muted("Not scanned yet"));
+          if (!t.lead) return React.createElement("tr", { key: t.s.key, style: rowStyle, onClick: function () { setSelKey(t.s.key); } }, nameCell,
+            muted("No steady leader right now" + (t.best ? " (best rank: " + t.best.sym + ", " + slFx(t.best.rank, 0) + ")" : "")));
+          var L = t.lead;
+          return React.createElement("tr", { key: t.s.key, style: rowStyle, onClick: function () { setSelKey(t.s.key); } }, nameCell,
+            React.createElement("td", { style: Object.assign({}, td, { fontWeight: 700 }) }, L.sym),
+            React.createElement("td", { style: td }, slFx(L.rank, 0)),
+            React.createElement("td", { style: td }, slFx(L.hit, 0) + "%"),
+            React.createElement("td", { style: td }, slFx(L.er, 2)),
+            React.createElement("td", { style: Object.assign({}, td, numCol(L.net, L.net > 0)) }, slSg(L.net)),
+            React.createElement("td", { style: td }, L.tag === "extended" ? chip("extended") : chip("leader")));
+        }))
+      )
+    )
+  );
+
+  /* ---------- chart card ---------- */
+  var chartCard = React.createElement("div", { className: "stx-card", style: { padding: 20, display: "flex", flexDirection: "column" } },
+    React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Steady Leaders Map \u2014 " + sec.name),
+    React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 12 } }, "X: Beats sector (% of last " + SL_WINDOW + " days) | Y: Smooth climb (efficiency ratio) | Size: ATR% | Colour: " + SL_WINDOW + "d return"),
+    React.createElement("div", { style: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 200 } },
+      loading && !data ? React.createElement("div", { style: { color: "var(--text5)", fontSize: 13 } }, "Loading " + sec.name + " stocks...")
+      : errs[sec.key] && !data ? React.createElement("div", { style: { color: "var(--loss)", fontSize: 13, textAlign: "center" } }, errs[sec.key])
+      : !rows.length ? React.createElement("div", { style: { color: "var(--text5)", fontSize: 13 } }, "No stocks could be scored for this sector.")
+      : React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto", maxHeight: "100%" } },
+          QUADS.map(function (q, i) {
+            return React.createElement("g", { key: i },
+              React.createElement("rect", { x: q.x, y: q.y, width: PW / 2, height: PH / 2, fill: q.f }),
+              React.createElement("text", { x: q.x + PW / 4, y: q.y + 20, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: q.c, letterSpacing: 1, opacity: 0.8 }, q.t),
+              React.createElement("text", { x: q.x + PW / 4, y: q.y + 34, textAnchor: "middle", fontSize: 9, fill: "var(--text5)" }, q.d));
+          }),
+          React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P + PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+          React.createElement("line", { x1: P, y1: CY, x2: P + PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+          React.createElement("text", { x: CX, y: H - 10, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600 }, "Beats sector (% of days) ->"),
+          React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Smooth climb (efficiency) ->"),
+          dots)
+    ),
+    React.createElement("div", { style: { minHeight: 34, marginTop: 8, fontSize: 12, color: "var(--text)" } },
+      hovRow ? React.createElement("span", null,
+        React.createElement("b", null, hovRow.sym), " \u2014 " + hovRow.name + ": beats sector " + slFx(hovRow.hit, 0) + "% of days, smoothness " + slFx(hovRow.er, 2) + ", " + SL_WINDOW + "d " + slSg(hovRow.net) +
+        (hovRow.rel != null ? " (" + slSg(hovRow.rel) + " vs sector)" : "") + ", ATR " + slFx(hovRow.atrPct, 1) + "%, " + slSg(hovRow.ext) + " vs 20 DMA")
+      : React.createElement("span", { style: { color: "var(--text5)" } }, rows.length ? "Hover or tap a dot (or a row below) to see its numbers." : "")),
+    data && React.createElement("div", { style: { fontSize: 10, color: "var(--text5)" } },
+      rows.length + " of " + data.total + " stocks scored" + (data.failed ? " (" + data.failed + " could not be loaded or had too little data)" : "") + ". Data as of " + data.asOf + "."),
+    explain
+  );
+
+  /* ---------- heat-strip leaderboard ---------- */
+  var cellColor = function (x) {
+    if (x == null) return "rgba(148,163,184,0.18)";
+    var a = 0.22 + Math.min(0.78, Math.abs(x) / 2 * 0.78);
+    return x > 0 ? "rgba(22,163,74," + a.toFixed(2) + ")" : "rgba(220,38,38," + a.toFixed(2) + ")";
+  };
+  var board = React.createElement("div", { className: "stx-card", style: { padding: 20 } },
+    React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Heat Strip Leaderboard \u2014 " + sec.name),
+    React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 12 } },
+      "Each small box is one trading day, oldest on the left and latest on the right. Green means the stock beat its sector that day and red means it lagged. The darker the box, the bigger the gap (full colour at 2 percentage points or more). A steady leader is a row that is mostly green with few red gaps. Grey means no sector data for that day."),
+    !rows.length ? React.createElement("div", { style: { color: "var(--text5)", fontSize: 13, padding: 12 } }, loading ? "Loading..." : "Nothing to show yet.")
+    : React.createElement("div", { style: { overflowX: "auto" } },
+      React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+        React.createElement("thead", null, React.createElement("tr", null,
+          ["#", "Stock", "Status", "Rank", "Beats %", "Smooth", SL_WINDOW + "d", "vs sector", "ATR %", "vs 20 DMA", "Last " + SL_WINDOW + " days"].map(function (h2) { return React.createElement("th", { key: h2, style: th }, h2); }))),
+        React.createElement("tbody", null, rows.map(function (r, i) {
+          return React.createElement("tr", { key: r.sym, onMouseEnter: function () { setHovered(r.sym); }, onMouseLeave: function () { setHovered(null); },
+              style: { background: hovered === r.sym ? "rgba(148,163,184,0.15)" : "transparent" } },
+            React.createElement("td", { style: Object.assign({}, td, { color: "var(--text5)" }) }, i + 1),
+            React.createElement("td", { style: td }, React.createElement("b", null, r.sym), React.createElement("span", { style: { color: "var(--text5)", marginLeft: 6, fontSize: 11 } }, r.name)),
+            React.createElement("td", { style: td }, chip(r.tag)),
+            React.createElement("td", { style: Object.assign({}, td, { fontWeight: 700 }) }, slFx(r.rank, 0)),
+            React.createElement("td", { style: td }, slFx(r.hit, 0) + "%"),
+            React.createElement("td", { style: td }, slFx(r.er, 2)),
+            React.createElement("td", { style: Object.assign({}, td, numCol(r.net, r.net > 0)) }, slSg(r.net)),
+            React.createElement("td", { style: Object.assign({}, td, r.rel == null ? {} : numCol(r.rel, r.rel > 0)) }, slSg(r.rel)),
+            React.createElement("td", { style: td }, slFx(r.atrPct, 1)),
+            React.createElement("td", { style: Object.assign({}, td, r.ext > SL_EXT_LIMIT ? { color: "#b45309", fontWeight: 700 } : {}) }, slSg(r.ext)),
+            React.createElement("td", { style: td }, React.createElement("div", { style: { display: "flex", gap: 2 } },
+              r.strip.map(function (c, j) {
+                return React.createElement("div", { key: j, title: c.d + (c.x == null ? ": no sector data" : ": " + slSg(c.x, 2) + " vs sector"),
+                  style: { width: 12, height: 18, borderRadius: 2, background: cellColor(c.x) } });
+              }))));
+        }))
+      )
+    )
+  );
+
+  return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 20, maxWidth: 1400, margin: "0 auto" } },
+    React.createElement("div", { className: "stx-card", style: { padding: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 16, fontWeight: 700 } }, "Steady Leaders"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)" } }, "Which stocks in a sector have been consistent over the last " + SL_WINDOW + " trading days?")),
+      React.createElement("div", { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 } },
+        React.createElement("label", { style: { fontSize: 10, fontWeight: 600, color: "var(--text5)", textTransform: "uppercase" } }, "Sector"),
+        React.createElement("select", { className: "inp", value: sec.key, style: { minWidth: 180 }, onChange: function (e) { setHovered(null); setSelKey(e.target.value); } },
+          sectors.map(function (s) { return React.createElement("option", { key: s.key, value: s.key }, s.name); })))
+    ),
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 20, alignItems: "start" } }, chartCard, topTable),
+    board
+  );
+});
+
 function PulsePage({ holdings }) {
   const [activeTab, setActiveTab] = useState("screener");
   const [pendingTicker, setPendingTicker] = useState("");
@@ -12431,6 +12866,7 @@ function PulsePage({ holdings }) {
     { key: "scoretuner", label: "Score Tuner", icon: Icons.settings },
     { key: "sectorrotation", label: "Sector Rotation", icon: Icons.chart },
     { key: "regimemap", label: "Regime Map", icon: Icons.trendingUp },
+    { key: "steadyleaders", label: "Steady Leaders", icon: Icons.trendingUp },
     { key: "patternlab", label: "Pattern Lab", icon: Icons.flask },
   ];
 
@@ -12463,6 +12899,7 @@ function PulsePage({ holdings }) {
       activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker }),
       activeTab === "sectorrotation" && React.createElement(SectorRotationPanel, null),
       activeTab === "regimemap" && React.createElement(RegimeMapPanel, null),
+      activeTab === "steadyleaders" && React.createElement(SteadyLeadersPanel, null),
       React.createElement("div", { style: { display: activeTab === "backtest" ? "" : "none" } }, React.createElement(BacktestSuitePanel, null)),
       React.createElement("div", { style: { display: activeTab === "scoretuner" ? "" : "none" } }, React.createElement(ScoreTunerPanel, null)),
       React.createElement("div", { style: { display: activeTab === "patternlab" ? "" : "none" } },
