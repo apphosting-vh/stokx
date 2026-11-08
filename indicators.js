@@ -3750,6 +3750,17 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       items.push({ reason: "High momentum in high-vol regime", amount: mc.highVolBonus });
     }
     if (sn && sn.crossSectionalRank != null && sn.crossSectionalRank < 20) { items.push({ reason: "Bottom 20% Cross-Sectional Momentum", amount: -10 }); }
+    
+    // Institutional Confluence Bonuses
+    if (sn && sn.crossSectionalRank != null && sn.crossSectionalRank > 90 && sn.amihud != null && sn.amihud < 0.05) {
+      items.push({ reason: "Institutional Tailwind (Top 10% Momentum + High Liquidity)", amount: 5 });
+    }
+    if (sn && sn.ouHalfLife != null && sn.ouHalfLife >= 3 && sn.ouHalfLife <= 8 && sn.pullbackDepth != null && sn.pullbackDepth > 0.04) {
+      items.push({ reason: "Precision Mean Reversion (OU Half-Life 3-8d in Pullback)", amount: 5 });
+    }
+    if (sn && sn.daysSinceHigh != null && sn.daysSinceHigh <= 1 && sn.vpin != null && sn.vpin > 0.4 && sn.breakoutContinuation != null && sn.breakoutContinuation > 0) {
+      items.push({ reason: "Fresh Ignition (New Breakout + Rising VPIN)", amount: 3 });
+    }
     if (sn && sn.amihud != null && sn.amihud > 0.5) { items.push({ reason: "High illiquidity risk (Amihud)", amount: -5 }); }
     if (sn && sn.ouHalfLife != null && sn.ouHalfLife > 13) { items.push({ reason: "Slow mean-reversion (Half-Life > 13d)", amount: -5 }); }
     if (sn && sn.vpin != null && sn.vpin > 0.6) { items.push({ reason: "High toxic order flow (VPIN)", amount: -5 }); }
