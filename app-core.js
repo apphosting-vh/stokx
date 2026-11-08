@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-window.__STOX_APP_VERSION = "5.0.1";
+window.__STOX_APP_VERSION = "5.1.0";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -12090,6 +12090,157 @@ const SectorRotationPanel = React.memo(function () {
   );
 });
 
+const EquityAnalyticsPanel = React.memo(function () {
+  var _l = useState(true); var loading = _l[0], setLoading = _l[1];
+  var _p = useState(""); var prog = _p[0], setProg = _p[1];
+  var _d = useState([]); var data = _d[0], setData = _d[1];
+  var _v = useState(""); var vpSym = _v[0], setVpSym = _v[1];
+  var _vpd = useState(null); var vpData = _vpd[0], setVpData = _vpd[1];
+
+  useEffect(function () {
+    (async function () {
+      if (!window.PatternStore || !window.TechIndicators) { setLoading(false); return; }
+      await window.PatternStore.init();
+      var univ = (window.NIFTY_200 || []).slice(0, 50).map(function (x) { return x.t.replace(".NS", ""); });
+      var rocMap = {}; var hlMap = {}; var cache = {};
+
+      for (var i = 0; i < univ.length; i++) {
+        var sym = univ[i];
+        setProg("Fetching " + sym + " (" + (i+1) + "/" + univ.length + ")...");
+        try {
+          var r = await window.OHLCVFetcher.fetchOHLCVCached(sym, "daily");
+          if (!r || !r.data || r.data.length < 30) continue;
+          var c = r.data;
+          cache[sym] = c;
+          rocMap[sym] = (c[c.length-1].c / c[c.length-21].c) - 1;
+          
+          var TI = window.TechIndicators;
+          var hlArr = TI.calcOUHalfLife ? TI.calcOUHalfLife(c) : [999];
+          hlMap[sym] = hlArr[hlArr.length-1] || 999;
+        } catch (e) {}
+      }
+
+      var sortedRoc = Object.keys(rocMap).sort(function (a, b) { return rocMap[b] - rocMap[a]; });
+      var rankMap = {};
+      sortedRoc.forEach(function (sym, idx) { rankMap[sym] = Math.round((1 - idx / sortedRoc.length) * 100); });
+
+      var results = [];
+      for (var j = 0; j < univ.length; j++) {
+        var s = univ[j];
+        if (!cache[s]) continue;
+        var pat = await window.PatternStore.get(s);
+        var wr = (pat && pat.tradeStats) ? pat.tradeStats.winRate : 50;
+        var cvar = (pat && pat.tradeStats && pat.tradeStats.cvar95 != null) ? pat.tradeStats.cvar95 : -5;
+        
+        results.push({ 
+          symbol: s, 
+          roc: rocMap[s] * 100, 
+          rank: rankMap[s], 
+          halfLife: hlMap[s], 
+          winRate: wr, 
+          cvar: cvar 
+        });
+      }
+      setData(results);
+      if (results.length > 0) setVpSym(results[0].symbol);
+      setLoading(false);
+    })();
+  }, []);
+
+  useEffect(function () {
+    if (!vpSym || !window.TechIndicators || !window.OHLCVFetcher) return;
+    (async function () {
+      var r = await window.OHLCVFetcher.fetchOHLCVCached(vpSym, "daily");
+      if (r && r.data) {
+        var vp = window.TechIndicators.volumeProfile(r.data, 24, 60);
+        setVpData(vp);
+      }
+    })();
+  }, [vpSym]);
+
+  if (loading) return React.createElement("div", { style: { padding: 40, textAlign: "center", color: "var(--text5)" } }, "Analyzing Universe: " + prog);
+
+  // --- Chart 1: Efficiency Quadrant ---
+  var W = 480, H = 400, P = 40, PW = W - 2 * P, PH = H - 2 * P;
+  var CX = P + PW / 2, CY = P + PH / 2;
+  var X = function (v) { return CX + ((v - 50) / 50) * (PW / 2); };
+  var Y = function (v) { return CY - ((v - 10) / 10) * (PH / 2); };
+
+  var effNodes = data.map(function (d) {
+    var sx = X(Math.min(100, Math.max(0, d.rank)));
+    var sy = Y(Math.min(20, Math.max(0, 15 - d.halfLife))); // Y axis inverted: lower hl = higher up
+    return React.createElement("g", { key: d.symbol },
+      React.createElement("circle", { cx: sx, cy: sy, r: 5, fill: "var(--accent)", opacity: 0.7 }),
+      React.createElement("text", { x: sx + 8, y: sy + 3, fontSize: 9, fill: "var(--text3)" }, d.symbol)
+    );
+  });
+
+  // --- Chart 2: Tail Risk Frontier ---
+  var X2 = function (v) { return P + (v / 100) * PW; };
+  var Y2 = function (v) { return P + (Math.abs(v) / 25) * PH; }; // 0 to -25% CVaR
+
+  var riskNodes = data.map(function (d) {
+    return React.createElement("circle", { key: d.symbol, cx: X2(d.winRate), cy: Y2(d.cvar), r: 5, fill: "#3b82f6", opacity: 0.7 });
+  });
+
+  // --- Chart 3: Volume Profile ---
+  var vpBars = [];
+  var maxVpVol = 1;
+  if (vpData && vpData.bins) {
+    vpData.bins.forEach(function(b) { if (b.volume > maxVpVol) maxVpVol = b.volume; });
+    vpBars = vpData.bins.map(function(b, i) {
+      var w = (b.volume / maxVpVol) * 150;
+      var isPoc = vpData.poc >= b.priceFrom && vpData.poc <= b.priceTo;
+      return React.createElement("g", { key: i },
+        React.createElement("rect", { x: 200 - w, y: 300 - (i * 12), width: w, height: 10, fill: isPoc ? "#eab308" : "var(--text5)", opacity: isPoc ? 1 : 0.5 }),
+        React.createElement("text", { x: 205, y: 308 - (i * 12), fontSize: 8, fill: "var(--text6)" }, b.priceFrom.toFixed(1))
+      );
+    });
+  }
+
+  return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 24 } },
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 } },
+      // Panel 1
+      React.createElement("div", { className: "stx-card", style: { padding: 16 } },
+        React.createElement("div", { style: { fontSize: 14, fontWeight: 700, marginBottom: 4 } }, "Efficiency Quadrant"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 12 } }, "X: Cross-Sectional Rank | Y: OU Half-Life (Speed)"),
+        React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
+          React.createElement("rect", { x: P, y: P, width: PW/2, height: PH/2, fill: "rgba(34,197,94,0.05)" }),
+          React.createElement("text", { x: P + PW/4, y: P + 20, fontSize: 10, fill: "#16a34a", textAnchor: "middle", fontWeight: 800 }, "FAST + STRONG"),
+          React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P+PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+          React.createElement("line", { x1: P, y1: CY, x2: P+PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+          effNodes
+        )
+      ),
+      // Panel 2
+      React.createElement("div", { className: "stx-card", style: { padding: 16 } },
+        React.createElement("div", { style: { fontSize: 14, fontWeight: 700, marginBottom: 4 } }, "Tail Risk Frontier"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 12 } }, "X: Win Rate | Y: CVaR (Top is safer)"),
+        React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
+          React.createElement("line", { x1: P, y1: P+PH, x2: P+PW, y2: P+PH, stroke: "var(--border3)" }),
+          React.createElement("line", { x1: P, y1: P, x2: P, y2: P+PH, stroke: "var(--border3)" }),
+          riskNodes
+        )
+      )
+    ),
+    // Panel 3
+    React.createElement("div", { className: "stx-card", style: { padding: 16 } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 } },
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 14, fontWeight: 700 } }, "Volume Profile Heatmap"),
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text5)" } }, "Institutional supply/demand walls")
+        ),
+        React.createElement("select", { value: vpSym, onChange: function(e) { setVpSym(e.target.value); }, style: { padding: "4px 8px", borderRadius: 6, background: "var(--bg4)", color: "var(--text)", border: "1px solid var(--border)" } },
+          data.map(function(d) { return React.createElement("option", { key: d.symbol, value: d.symbol }, d.symbol); })
+        )
+      ),
+      React.createElement("svg", { viewBox: "0 0 400 320", style: { width: "100%", maxWidth: 500, height: "auto", display: "block" } },
+        vpBars
+      )
+    )
+  );
+});
+
 function PulsePage({ holdings }) {
   const [activeTab, setActiveTab] = useState("screener");
   const [pendingTicker, setPendingTicker] = useState("");
@@ -12116,6 +12267,7 @@ function PulsePage({ holdings }) {
     { key: "backtest", label: "Backtesting", icon: Icons.clock },
     { key: "scoretuner", label: "Score Tuner", icon: Icons.settings },
     { key: "sectorrotation", label: "Sector Rotation", icon: Icons.chart },
+    { key: "equityanalytics", label: "Equity Analytics", icon: Icons.activity },
     { key: "patternlab", label: "Pattern Lab", icon: Icons.flask },
   ];
 
@@ -12147,6 +12299,7 @@ function PulsePage({ holdings }) {
       activeTab === "watchlisttracker" && React.createElement(WatchlistTracker, null),
       activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker }),
       activeTab === "sectorrotation" && React.createElement(SectorRotationPanel, null),
+      activeTab === "equityanalytics" && React.createElement(EquityAnalyticsPanel, null),
       React.createElement("div", { style: { display: activeTab === "backtest" ? "" : "none" } }, React.createElement(BacktestSuitePanel, null)),
       React.createElement("div", { style: { display: activeTab === "scoretuner" ? "" : "none" } }, React.createElement(ScoreTunerPanel, null)),
       React.createElement("div", { style: { display: activeTab === "patternlab" ? "" : "none" } },
