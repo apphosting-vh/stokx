@@ -3732,9 +3732,13 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var guard = computeSpikeGuard(candles);
     if (guard.todaySpike) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
     
-    /* MACRO REGIME GATE: If Nifty is in a downtrend, cap all scores at 45 */
+    /* MACRO REGIME GATE with Relative Strength Override. 
+       If the market is down, but the stock is outperforming (RS > 0) and in its own uptrend, let it pass. */
     if (isIndexDowntrend(indexCandles)) {
-      finalScore = Math.min(finalScore, 45);
+      var isLeader = (sn.c > sn.sma200) && (sn.rsMansfield !== null && sn.rsMansfield > 0);
+      if (!isLeader) {
+        finalScore = Math.min(finalScore, 45);
+      }
     }
 
     var cls = classifyScore(finalScore);
@@ -3872,9 +3876,13 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        print — cap below the WATCHLIST threshold. */
     if (spikeDay) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
     
-    /* MACRO REGIME GATE: If Nifty is in a downtrend, cap all scores at 45 */
+    /* MACRO REGIME GATE with Relative Strength Override. */
     if (isIndexDowntrend(indexCandles)) {
-      finalScore = Math.min(finalScore, 45);
+      // If the stock has a positive Regime Alignment score, it's beating the market.
+      var isLeader = (aggRegimeAlignment > 0);
+      if (!isLeader) {
+        finalScore = Math.min(finalScore, 45);
+      }
     }
 
     var cls = classifyScore(finalScore);
