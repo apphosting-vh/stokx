@@ -12101,7 +12101,20 @@ const EquityAnalyticsPanel = React.memo(function () {
     (async function () {
       if (!window.PatternStore || !window.TechIndicators) { setLoading(false); return; }
       await window.PatternStore.init();
-      var univ = (window.NIFTY_200 || []).slice(0, 50).map(function (x) { return x.t.replace(".NS", ""); });
+      var cachedScreener = null;
+      try { cachedScreener = await dbGetSetting("stox_screener_data"); } catch (e) {}
+      var univ = [];
+      var scoreMap = {};
+      if (cachedScreener && cachedScreener.results && cachedScreener.results.length > 0) {
+        var sorted = cachedScreener.results.slice().sort(function(a, b) {
+          return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
+        });
+        var top20 = sorted.slice(0, 20);
+        univ = top20.map(function(r) { return r.s.t.replace(".NS", ""); });
+        top20.forEach(function(r) { scoreMap[r.s.t.replace(".NS", "")] = r.result ? r.result.finalScore : 0; });
+      } else {
+        univ = (window.NIFTY_200 || []).slice(0, 20).map(function (x) { return x.t.replace(".NS", ""); });
+      }
       var rocMap = {}; var hlMap = {}; var cache = {};
 
       for (var i = 0; i < univ.length; i++) {
@@ -12138,7 +12151,8 @@ const EquityAnalyticsPanel = React.memo(function () {
           rank: rankMap[s], 
           halfLife: hlMap[s], 
           winRate: wr, 
-          cvar: cvar 
+          cvar: cvar,
+          entryScore: scoreMap[s] || 0
         });
       }
       setData(results);
@@ -12169,7 +12183,7 @@ const EquityAnalyticsPanel = React.memo(function () {
   var effNodes = data.map(function (d) {
     var sx = X(Math.min(100, Math.max(0, d.rank)));
     var sy = Y(Math.min(20, Math.max(0, 15 - d.halfLife))); // Y axis inverted: lower hl = higher up
-    return React.createElement("g", { key: d.symbol },
+    return React.createElement("g", { key: d.symbol, title: d.symbol + " (Score: " + d.entryScore + ")" },
       React.createElement("circle", { cx: sx, cy: sy, r: 5, fill: "var(--accent)", opacity: 0.7 }),
       React.createElement("text", { x: sx + 8, y: sy + 3, fontSize: 9, fill: "var(--text3)" }, d.symbol)
     );
@@ -12203,7 +12217,7 @@ const EquityAnalyticsPanel = React.memo(function () {
       // Panel 1
       React.createElement("div", { className: "stx-card", style: { padding: 16 } },
         React.createElement("div", { style: { fontSize: 14, fontWeight: 700, marginBottom: 4 } }, "Efficiency Quadrant"),
-        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 12 } }, "X: Cross-Sectional Rank | Y: OU Half-Life (Speed)"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 12 } }, "Top 20 by Entry Score · X: Rank | Y: Speed (Half-Life)"),
         React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
           React.createElement("rect", { x: P, y: P, width: PW/2, height: PH/2, fill: "rgba(34,197,94,0.05)" }),
           React.createElement("text", { x: P + PW/4, y: P + 20, fontSize: 10, fill: "#16a34a", textAnchor: "middle", fontWeight: 800 }, "FAST + STRONG"),
