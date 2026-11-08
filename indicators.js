@@ -3731,6 +3731,11 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        print — cap below the WATCHLIST threshold. */
     var guard = computeSpikeGuard(candles);
     if (guard.todaySpike) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
+    
+    /* MACRO REGIME GATE: If Nifty is in a downtrend, cap all scores at 45 */
+    if (isIndexDowntrend(indexCandles)) {
+      finalScore = Math.min(finalScore, 45);
+    }
 
     var cls = classifyScore(finalScore);
 
@@ -3866,6 +3871,11 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     /* Spike gate (hard override): never grade a buy on the day of an abnormal
        print — cap below the WATCHLIST threshold. */
     if (spikeDay) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
+    
+    /* MACRO REGIME GATE: If Nifty is in a downtrend, cap all scores at 45 */
+    if (isIndexDowntrend(indexCandles)) {
+      finalScore = Math.min(finalScore, 45);
+    }
 
     var cls = classifyScore(finalScore);
 
@@ -5978,6 +5988,17 @@ function computeMarketRegimeFeatures(indexCandles, atBar, precomputedSeries) {
 
   function closesArr(candles) { return candles.map(function (c) { return c.c; }); }
   function volumesArr(candles) { return candles.map(function (c) { return c.v; }); }
+
+  /* Helper: Returns true if the index is in a macro downtrend (Close < SMA200) */
+  function isIndexDowntrend(indexCandles) {
+    if (!indexCandles || indexCandles.length < 200) return false;
+    var cl = closes(indexCandles);
+    var sma200 = sma(cl, 200);
+    var lastClose = cl[cl.length - 1];
+    var lastSma = sma200[sma200.length - 1];
+    if (lastClose == null || lastSma == null) return false;
+    return lastClose < lastSma;
+  }
 
   /* --------------------------------------------------------------------------
      Public API
