@@ -12090,6 +12090,96 @@ const SectorRotationPanel = React.memo(function () {
   );
 });
 
+const RegimeMapPanel = React.memo(function () {
+  var _l = useState(true); var loading = _l[0], setLoading = _l[1];
+  var _d = useState([]); var data = _d[0], setData = _d[1];
+  var _h = useState(null); var hovered = _h[0], setHovered = _h[1];
+
+  useEffect(function () {
+    (async function () {
+      if (!window.OHLCVFetcher || !window.TechIndicators) { setLoading(false); return; }
+      
+      // Reuse the sector list from RRG
+      var sectors = window.SectorRRG ? window.SectorRRG.SECTORS : [];
+      var results = [];
+      
+      for (var i = 0; i < sectors.length; i++) {
+        var sec = sectors[i];
+        try {
+          var r = await window.OHLCVFetcher.fetchOHLCVCached(sec.yahoo, "daily");
+          if (!r || !r.data || r.data.length < 30) continue;
+          var c = r.data;
+          
+          var adxObj = window.TechIndicators.adx(c, 14);
+          var atrArr = window.TechIndicators.atr(c, 14);
+          
+          var adx = adxObj && adxObj.adx ? adxObj.adx[adxObj.adx.length-1] : 20;
+          var atr = atrArr[atrArr.length-1] || 2;
+          var close = c[c.length-1].c;
+          var atrPct = (atr / close) * 100;
+          
+          // Normalize ADX to 0-100 scale (ADX rarely goes above 60)
+          var trendScore = Math.min(100, Math.max(0, (adx / 60) * 100));
+          // Normalize ATR% to 0-100 scale (ATR > 4% is considered extremely high)
+          var volScore = Math.min(100, Math.max(0, (atrPct / 4) * 100));
+          
+          results.push({ key: sec.key, name: sec.name, color: sec.color, trend: trendScore, vol: volScore, adx: adx, atrPct: atrPct });
+        } catch (e) {}
+        await new Promise(function(res) { setTimeout(res, 100); });
+      }
+      setData(results);
+      setLoading(false);
+    })();
+  }, []);
+
+  if (loading) return React.createElement("div", { style: { padding: 40, textAlign: "center", color: "var(--text5)" } }, "Calculating Regimes...");
+
+  var W = 500, H = 500, P = 40, PW = W - 2 * P, PH = H - 2 * P;
+  var CX = P + PW / 2, CY = P + PH / 2;
+  var X = function (v) { return P + (Math.min(100, Math.max(0, v)) / 100) * PW; };
+  var Y = function (v) { return P + PH - (Math.min(100, Math.max(0, v)) / 100) * PH; };
+
+  var QUADS = [
+    { x: CX, y: P, w: PW / 2, h: PH / 2, f: "rgba(34,197,94,0.08)", t: "HIGH TREND + HIGH VOL", c: "#16a34a", desc: "Prime Zone: Fast 3.1% moves" },
+    { x: P, y: P, w: PW / 2, h: PH / 2, f: "rgba(234,179,8,0.08)", t: "LOW TREND + HIGH VOL", c: "#ca8a04", desc: "Choppy Zone: High risk" },
+    { x: CX, y: CY, w: PW / 2, h: PH / 2, f: "rgba(59,130,246,0.08)", t: "HIGH TREND + LOW VOL", c: "#2563eb", desc: "Slow Zone: Grind higher" },
+    { x: P, y: CY, w: PW / 2, h: PH / 2, f: "rgba(239,68,68,0.08)", t: "LOW TREND + LOW VOL", c: "#dc2626", desc: "Dead Zone: Avoid" }
+  ];
+
+  var nodes = data.map(function (d) {
+    var sx = X(d.trend);
+    var sy = Y(d.vol);
+    var isHover = hovered === d.key;
+    return React.createElement("g", { key: d.key,
+        onMouseEnter: function () { setHovered(d.key); }, 
+        onMouseLeave: function () { setHovered(null); },
+        style: { cursor: "pointer" }
+      },
+      React.createElement("circle", { cx: sx, cy: sy, r: isHover ? 8 : 6, fill: d.color, stroke: isHover ? "var(--text)" : "var(--bg)", strokeWidth: 2 }),
+      isHover && React.createElement("text", { x: sx, y: sy - 12, textAnchor: "middle", fontSize: 11, fill: "var(--text)", fontWeight: 800, style: { paintOrder: "stroke", stroke: "var(--bg)", strokeWidth: 4 } }, d.name)
+    );
+  });
+
+  return React.createElement("div", { className: "stx-card", style: { padding: 20, maxWidth: 600, margin: "0 auto" } },
+    React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Regime Map"),
+    React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 16 } }, "X: Trend Strength (ADX) | Y: Volatility (ATR%)"),
+    React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
+      QUADS.map(function (q, i) {
+        return React.createElement("g", { key: i },
+          React.createElement("rect", { x: q.x, y: q.y, width: q.w, height: q.h, fill: q.f }),
+          React.createElement("text", { x: q.x + q.w / 2, y: q.y + 20, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: q.c, letterSpacing: 1, opacity: 0.8 }, q.t),
+          React.createElement("text", { x: q.x + q.w / 2, y: q.y + 34, textAnchor: "middle", fontSize: 9, fill: "var(--text5)" }, q.desc)
+        );
+      }),
+      React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P + PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+      React.createElement("line", { x1: P, y1: CY, x2: P + PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+      React.createElement("text", { x: CX, y: H - 10, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600 }, "Trend Strength (ADX) ->"),
+      React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Volatility (ATR%) ->"),
+      nodes
+    )
+  );
+});
+
 function PulsePage({ holdings }) {
   const [activeTab, setActiveTab] = useState("screener");
   const [pendingTicker, setPendingTicker] = useState("");
