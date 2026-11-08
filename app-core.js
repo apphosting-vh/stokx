@@ -12106,9 +12106,8 @@ const RegimeMapPanel = React.memo(function () {
       for (var i = 0; i < sectors.length; i++) {
         var sec = sectors[i];
         try {
-          var r = await window.OHLCVFetcher.fetchOHLCVCached(sec.yahoo, "daily");
-          if (!r || !r.data || r.data.length < 30) continue;
-          var c = r.data;
+          var c = (window.SectorRRG && window.SectorRRG.fetchSectorCandles) ? await window.SectorRRG.fetchSectorCandles(sec) : null;
+          if (!c || c.length < 30) continue;
           
           var adxObj = window.TechIndicators.adx(c, 14);
           var atrArr = window.TechIndicators.atr(c, 14);
@@ -12147,7 +12146,7 @@ const RegimeMapPanel = React.memo(function () {
       if (cachedScreener && cachedScreener.results && window.SectorRRG) {
         cachedScreener.results.forEach(function(r) {
           var sym = r.s.t.replace(".NS", "");
-          var secKey = window.SectorRRG.STOCK_SECTOR[sym];
+          var secKey = (window.SectorRRG.STOCK_SECTOR_ALL || window.SectorRRG.STOCK_SECTOR)[sym];
           if (secKey) {
             if (!sectorScoreMap[secKey]) sectorScoreMap[secKey] = { total: 0, count: 0 };
             sectorScoreMap[secKey].total += (r.result ? r.result.finalScore : 0);
@@ -12502,7 +12501,7 @@ function slTag(m) {
 }
 
 function slStocksFor(secKey) {
-  var map = (window.SectorRRG && window.SectorRRG.STOCK_SECTOR) || {};
+  var map = (window.SectorRRG && (window.SectorRRG.STOCK_SECTOR_ALL || window.SectorRRG.STOCK_SECTOR)) || {};
   var all = (typeof NIFTY_200_UNIQUE !== "undefined") ? NIFTY_200_UNIQUE : [];
   return all.filter(function (s) { return map[s.t.replace(".NS", "")] === secKey; });
 }
@@ -12511,8 +12510,15 @@ async function slLoadSector(sec) {
   var DF = window.OHLCVFetcher;
   if (!DF) throw new Error("Data fetcher is not ready yet");
   var stocks = slStocksFor(sec.key);
-  var bench = await slFetchDaily(DF, sec.yahoo);
-  if (!bench || bench.length < 40) throw new Error("Could not load the " + sec.name + " index data");
+  if (!window.SectorRRG || !window.SectorRRG.fetchSectorCandles) {
+    throw new Error("Sector data is not ready yet");
+  }
+  var benchRaw = null;
+  try { benchRaw = await window.SectorRRG.fetchSectorCandles(sec); } catch (e) { benchRaw = null; }
+  var bench = benchRaw ? slClean(benchRaw) : null;
+  if (!bench || bench.length < 40) {
+    throw new Error("Could not load the " + sec.name + " " + (sec.basket ? "basket" : "index") + " data");
+  }
   var rows = [], failed = 0;
   for (var i = 0; i < stocks.length; i += 4) {   // small batches: the data proxies are flaky under load
     var batch = stocks.slice(i, i + 4);
