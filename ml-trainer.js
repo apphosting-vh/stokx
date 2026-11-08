@@ -337,7 +337,8 @@ window.MLTrainer = (function () {
     // market regime, cap tier
     "trend_structure", "price_vs_sma200", "ema20_50_cross",
     "volatility_regime", "mfi", "vol_price_trend",
-    "bull_bear", "market_momentum", "cap_tier", "rsi_regime"
+    "bull_bear", "market_momentum", "cap_tier", "rsi_regime",
+    "amihud", "ouHalfLife", "vpin", "daysSinceHigh"
   ];
 
   /* ════════════════════════════════════════════════════════════════════════

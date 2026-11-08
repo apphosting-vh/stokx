@@ -710,6 +710,70 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      Section 4.3 � Momentum Oscillators
      -------------------------------------------------------------------------- */
 
+
+  function calcAmihud(candles, period) {
+    period = period || 20;
+    var out = [];
+    for (var i = 0; i < candles.length; i++) {
+      if (i < 1) { out.push(null); continue; }
+      var ret = Math.abs((candles[i].c - candles[i-1].c) / candles[i-1].c);
+      var turnover = candles[i].c * candles[i].v;
+      out.push(turnover > 0 ? ret / (turnover / 1e7) : 0);
+    }
+    return sma(out, period);
+  }
+  function calcOUHalfLife(candles, period) {
+    period = period || 20;
+    var cl = closes(candles);
+    var smaArr = sma(cl, period);
+    var out = [];
+    for (var i = 0; i < cl.length; i++) {
+      if (i < period + 5) { out.push(null); continue; }
+      var sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, n = 0;
+      for (var j = i - 4; j <= i; j++) {
+        if (smaArr[j] == null) continue;
+        var x = cl[j-1] - smaArr[j-1];
+        var y = cl[j] - cl[j-1];
+        sumX += x; sumY += y; sumXY += x*y; sumX2 += x*x; n++;
+      }
+      var denom = n*sumX2 - sumX*sumX;
+      var beta = denom !== 0 ? (n*sumXY - sumX*sumY) / denom : 0;
+      if (beta >= 0) { out.push(999); continue; } // Not mean reverting
+      var hl = -Math.log(2) / Math.log(1 + beta);
+      out.push(hl > 0 && hl < 100 ? round(hl, 1) : 999);
+    }
+    return out;
+  }
+  function calcVPINProxy(candles, period) {
+    period = period || 14;
+    var out = [];
+    for (var i = 0; i < candles.length; i++) {
+      if (i < period) { out.push(null); continue; }
+      var buyVol = 0, sellVol = 0;
+      for (var j = i - period + 1; j <= i; j++) {
+        var vol = candles[j].v || 0;
+        if (candles[j].c >= candles[j].o) buyVol += vol; else sellVol += vol;
+      }
+      var tot = buyVol + sellVol;
+      out.push(tot > 0 ? Math.abs(buyVol - sellVol) / tot : 0);
+    }
+    return out;
+  }
+  function calcDaysSince(candles, period, isHigh) {
+    period = period || 20;
+    var out = [];
+    for (var i = 0; i < candles.length; i++) {
+      if (i < period - 1) { out.push(null); continue; }
+      var bestIdx = i, bestVal = isHigh ? -Infinity : Infinity;
+      for (var j = i - period + 1; j <= i; j++) {
+        var v = isHigh ? candles[j].h : candles[j].l;
+        if (isHigh ? v > bestVal : v < bestVal) { bestVal = v; bestIdx = j; }
+      }
+      out.push(i - bestIdx);
+    }
+    return out;
+  }
+
   function calcRSI(candles, period) {
     period = period || 14;
     var cl = closes(candles);
@@ -1511,7 +1575,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       fractals: calcWilliamsFractals(candles), zigZag: calcZigZag(candles),
       choppiness: last(calcChoppinessIndex(candles)),
       spike: last(calcDetectSpike(candles)), stabilityScore: calcStabilityScore(candles),
-      smartMoney: smc, mtfAlignment: last(calcMTFAlignment(candles)),
+      amihud: last(calcAmihud(candles)), ouHalfLife: last(calcOUHalfLife(candles)), vpin: last(calcVPINProxy(candles)), daysSinceHigh: last(calcDaysSince(candles, 20, true)), daysSinceLow: last(calcDaysSince(candles, 20, false)),
+    smartMoney: smc, mtfAlignment: last(calcMTFAlignment(candles)),
       week52HL: last(calcWeek52HL(candles)), lastClose: lastClose
     };
   }
@@ -2777,6 +2842,12 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
         if (prevC != null && prevC > 0) gapPct = (openL - prevC) / prevC * 100;
       }
 
+      var amihud = last(calcAmihud(candles));
+      var crossRank = (window.__stoxCrossSectionalRank && symbol) ? window.__stoxCrossSectionalRank[symbol] : null;
+      var ouHalfLife = last(calcOUHalfLife(candles));
+      var vpin = last(calcVPINProxy(candles));
+      var daysSinceHigh = last(calcDaysSince(candles, 20, true));
+      var daysSinceLow = last(calcDaysSince(candles, 20, false));
       var weeklyHABullish = null;
       var wha = tf === 'W' ? calcWeeklyHA(candles, true) : (tf === 'D' ? calcWeeklyHA(candles, false) : null);
       if (wha) weeklyHABullish = wha.bullish;
@@ -2839,7 +2910,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
         buyRef: buyRef,
         pullbackDepth: pullbackDepth, nearSupportCount: nearSupportCount,
         swingHigh20: swingHigh20, barsSinceHigh20: barsSinceHigh20,
-        dcUpperPrior: dcUpperPrior, barsSinceBreakout: barsSinceBreakout
+        dcUpperPrior: dcUpperPrior, barsSinceBreakout: barsSinceBreakout,
+        amihud: amihud, ouHalfLife: ouHalfLife, vpin: vpin, daysSinceHigh: daysSinceHigh, daysSinceLow: daysSinceLow, crossSectionalRank: crossRank
       };
     } catch (e) { return null; }
   }
@@ -3677,6 +3749,11 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (atrPercentile != null && atrPercentile >= mc.highVolATRPercentile && sn && sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > mc.highVolERThreshold) {
       items.push({ reason: "High momentum in high-vol regime", amount: mc.highVolBonus });
     }
+    if (sn && sn.crossSectionalRank != null && sn.crossSectionalRank < 20) { items.push({ reason: "Bottom 20% Cross-Sectional Momentum", amount: -10 }); }
+    if (sn && sn.amihud != null && sn.amihud > 0.5) { items.push({ reason: "High illiquidity risk (Amihud)", amount: -5 }); }
+    if (sn && sn.ouHalfLife != null && sn.ouHalfLife > 13) { items.push({ reason: "Slow mean-reversion (Half-Life > 13d)", amount: -5 }); }
+    if (sn && sn.vpin != null && sn.vpin > 0.6) { items.push({ reason: "High toxic order flow (VPIN)", amount: -5 }); }
+    if (sn && sn.daysSinceHigh != null && sn.daysSinceHigh > 3 && sn.c > sn.sma20) { items.push({ reason: "Stale breakout (Day " + sn.daysSinceHigh + ")", amount: -3 }); }
 
     return items;
   }

@@ -376,6 +376,9 @@ window.BacktestEngine = (function () {
     var avgLoss = losses.length ? losses.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / losses.length : 0;
     var avgTimeout = timeouts.length ? timeouts.reduce(function (s, t) { return s + t.finalReturnPct; }, 0) / timeouts.length : null;
     var avgDays = wins.length ? wins.reduce(function (s, t) { return s + (t.daysToTarget || 0); }, 0) / wins.length : null;
+    var sortedRets = trades.map(function(t){return t.finalReturnPct;}).sort(function(a,b){return a-b;});
+    var worst5Pct = sortedRets.slice(0, Math.max(1, Math.floor(sortedRets.length * 0.05)));
+    var cvar95 = worst5Pct.reduce(function(s,v){return s+v;}, 0) / worst5Pct.length;
     var grossProfit = trades.filter(function (t) { return t.finalReturnPct > 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0);
     var grossLoss = Math.abs(trades.filter(function (t) { return t.finalReturnPct < 0; }).reduce(function (s, t) { return s + t.finalReturnPct; }, 0));
     var profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? Infinity : 0);
@@ -411,6 +414,7 @@ window.BacktestEngine = (function () {
       equityCurve: eq,
       finalEquity: eq ? eq.finalEquity : null,
       maxDrawdown: eq ? eq.maxDrawdown : null,
+      cvar95: Math.round(cvar95 * 100) / 100,
       sharpeApprox: eq ? eq.sharpeApprox : null,
       trades: trades.slice().sort(function (a, b) { return String(b.entryDate).localeCompare(String(a.entryDate)); })
     };

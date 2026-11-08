@@ -369,6 +369,7 @@ var INS_PILLARS = [
       medianDD: ddList.length ? ddList[Math.floor(ddList.length / 2)] : null,
       maxConsecWins: maxCW,
       maxConsecLosses: maxCL,
+      medianCVaR: (function() { var cvs = scoped.map(function(p) { return p.tradeStats ? p.tradeStats.cvar95 : null; }).filter(function(v) { return v != null; }).sort(function(a,b){return a-b;}); return cvs.length ? cvs[Math.floor(cvs.length/2)] : null; })(),
       avgDaysToTarget: daysN ? Math.round((sumDays / daysN) * 10) / 10 : null,
       adjWinRate: adjN ? Math.round((adjWRsum / adjN) * 10) / 10 : null,
       mlWinRate: mlN ? Math.round((mlWRsum / mlN) * 10) / 10 : null
@@ -1807,6 +1808,7 @@ var INS_PILLARS = [
           statCard("Avg Return", agg.avgReturn + "%"),
           statCard("Median PF", fmtPF(agg.medianPF)),
           statCard("Median Max DD", (agg.medianDD != null ? agg.medianDD : "—") + (agg.medianDD != null ? "%" : "")),
+          agg.medianCVaR != null ? statCard("Median 95% CVaR", agg.medianCVaR + "%") : null,
           statCard("Max Streak", agg.maxConsecWins + "W / " + agg.maxConsecLosses + "L"),
           statCard("Avg Days to Target", agg.avgDaysToTarget != null ? agg.avgDaysToTarget : "—"),
           statCard("Avg Sharpe", agg.avgSharpe),

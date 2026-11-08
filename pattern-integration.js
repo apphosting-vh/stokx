@@ -81,10 +81,10 @@
       if (at && at.enabled && window.StoxStats) {
         var hist = Array.isArray(at.scoreHistory) ? at.scoreHistory : [];
         if (hist.length >= 30) {
-          var sb = window.StoxStats.adaptiveThreshold(hist, t.strongBuy, 80);
-          var b = window.StoxStats.adaptiveThreshold(hist, t.buy, 65);
-          var wl = window.StoxStats.adaptiveThreshold(hist, t.watchlist, 50);
-          var n = window.StoxStats.adaptiveThreshold(hist, t.neutral, 25);
+          var sb = Math.max(55, window.StoxStats.adaptiveThreshold(hist, t.strongBuy, 80));
+          var b = Math.max(50, window.StoxStats.adaptiveThreshold(hist, t.buy, 65));
+          var wl = Math.max(45, window.StoxStats.adaptiveThreshold(hist, t.watchlist, 50));
+          var n = Math.max(35, window.StoxStats.adaptiveThreshold(hist, t.neutral, 25));
           if (score >= sb) return "STRONG_BUY";
           if (score >= b) return "BUY";
           if (score >= wl) return "WATCHLIST";

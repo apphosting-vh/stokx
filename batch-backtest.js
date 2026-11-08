@@ -747,7 +747,23 @@ window.BatchBacktest = (function () {
      * @param {Array} indexCandles - NIFTY daily candles
      * @param {Object} opts - callbacks
      */
-    async function runBatchFromDataMap(dataMap, multiTFMap, indexCandles, opts) {
+  
+  function _applyCrossSectionalRanks(dataMap) {
+    var snapshot = {};
+    Object.keys(dataMap).forEach(function(sym) {
+      var c = dataMap[sym];
+      if (!c || c.length < 25) return;
+      var roc = (c[c.length-1].c / c[c.length-21].c) - 1;
+      snapshot[sym] = roc;
+    });
+    var sorted = Object.keys(snapshot).sort(function(a,b){ return snapshot[b] - snapshot[a]; });
+    var rankMap = {};
+    sorted.forEach(function(sym, i) { rankMap[sym] = Math.round((1 - i/sorted.length) * 100); });
+    window.__stoxCrossSectionalRank = rankMap;
+  }
+
+  async function runBatchFromDataMap(dataMap, multiTFMap, indexCandles, opts) {
+    _applyCrossSectionalRanks(dataMap);
       opts = opts || {};
       _cancelled = false;
       var storePatterns = opts.storePatterns !== false;

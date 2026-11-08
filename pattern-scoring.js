@@ -390,10 +390,10 @@ window.PatternScoring = (function () {
       if (_sc2 && _sc2.adaptiveThresholds && _sc2.adaptiveThresholds.enabled && window.StoxStats) {
         var _h = _sc2.adaptiveThresholds.scoreHistory || [];
         if (_h.length >= 30) {
-          var _sb = window.StoxStats.adaptiveThreshold(_h, _sc2.classification.strongBuy, 80);
-          var _b = window.StoxStats.adaptiveThreshold(_h, _sc2.classification.buy, 65);
-          var _wl = window.StoxStats.adaptiveThreshold(_h, _sc2.classification.watchlist, 50);
-          var _nn = window.StoxStats.adaptiveThreshold(_h, _sc2.classification.neutral, 25);
+          var _sb = Math.max(55, window.StoxStats.adaptiveThreshold(_h, _sc2.classification.strongBuy, 80));
+          var _b = Math.max(50, window.StoxStats.adaptiveThreshold(_h, _sc2.classification.buy, 65));
+          var _wl = Math.max(45, window.StoxStats.adaptiveThreshold(_h, _sc2.classification.watchlist, 50));
+          var _nn = Math.max(35, window.StoxStats.adaptiveThreshold(_h, _sc2.classification.neutral, 25));
           if (adjustedScore >= _sb) classification = "STRONG_BUY";
           else if (adjustedScore >= _b) classification = "BUY";
           else if (adjustedScore >= _wl) classification = "WATCHLIST";
