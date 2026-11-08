@@ -12107,7 +12107,6 @@ const EquityAnalyticsPanel = React.memo(function () {
       
       var results = [];
       if (cachedScreener && cachedScreener.results && cachedScreener.results.length > 0) {
-        // Sort by Entry Score (finalScore)
         var sorted = cachedScreener.results.slice().sort(function(a, b) {
           return (b.result ? b.result.finalScore : 0) - (a.result ? a.result.finalScore : 0);
         });
@@ -12117,17 +12116,26 @@ const EquityAnalyticsPanel = React.memo(function () {
           var r = top20[i];
           var sym = r.s.t.replace(".NS", "");
           
-          // Fetch trade stats from local IndexedDB (Instant)
           var pat = await window.PatternStore.get(sym);
           var wr = (pat && pat.tradeStats && pat.tradeStats.winRate) ? pat.tradeStats.winRate : 50;
-          var cvar = (pat && pat.tradeStats && pat.tradeStats.cvar95 != null) ? pat.tradeStats.cvar95 : -5;
+          
+          // Extract ATR% (Fuel) from the screener result
+          var atrPct = 2.0;
+          if (r.result && r.result.daily && r.result.daily.atr14) {
+            atrPct = (r.result.daily.atr14 / r.lc) * 100;
+          } else if (r.lc > 0) {
+             // Fallback if atr14 is missing: assume 2% volatility
+             atrPct = 2.0; 
+          }
           
           results.push({ 
             symbol: sym, 
             finalScore: r.result ? r.result.finalScore : 0,
-            conf10dLog: r.conf10dLog || 0,
+            trend: r.result ? r.result.trendHealth : 0,
+            pullback: r.result ? r.result.pullbackQuality : 0,
+            breakout: r.result ? (r.result.breakoutContinuation || 0) : 0,
             winRate: wr, 
-            cvar: cvar
+            atrPct: atrPct
           });
         }
       }
@@ -12142,13 +12150,11 @@ const EquityAnalyticsPanel = React.memo(function () {
     if (!vpSym || !window.TechIndicators) return;
     (async function () {
       var c = null;
-      // Try offline data first (instant)
       try {
         var offRec = await window.OfflineOHLCV.get(vpSym + ".NS") || await window.OfflineOHLCV.get(vpSym);
         c = offRec ? (offRec.daily || offRec.data) : null;
       } catch(e) {}
       
-      // Fallback to Yahoo ONLY for the selected stock if offline is missing
       if (!c && window.OHLCVFetcher) {
         var r = await window.OHLCVFetcher.fetchOHLCVCached(vpSym, "daily");
         c = r && r.data ? r.data : null;
@@ -12164,45 +12170,58 @@ const EquityAnalyticsPanel = React.memo(function () {
   if (loading) return React.createElement("div", { style: { padding: 40, textAlign: "center", color: "var(--text5)" } }, "Loading local data...");
   if (data.length === 0) return React.createElement("div", { style: { padding: 40, textAlign: "center", color: "var(--text5)" } }, "No Screener data found. Please run a Scan Nifty 200 first.");
 
-  // --- Chart 1: Efficiency Quadrant (Score vs Confidence) ---
+  // --- Chart 1: Setup DNA (Pillar Stacked Bar) ---
   var W = 480, H = 400, P = 40, PW = W - 2 * P, PH = H - 2 * P;
-  var CX = P + PW / 2, CY = P + PH / 2;
+  var barWidth = PW / data.length;
   
-  // X: Entry Score (0 to 100) -> Left to Right
-  var X = function (v) { return P + (Math.max(0, Math.min(100, v)) / 100) * PW; };
-  
-  // Y: 13-Day Confidence (0 to 100) -> Top to Bottom (Higher confidence = Higher up)
-  var Y = function (v) { return P + PH - (Math.max(0, Math.min(100, v)) / 100) * PH; };
+  var maxScore = Math.max.apply(null, data.map(function(d) { return d.finalScore; }).concat([100]));
 
-  var effNodes = data.map(function (d) {
-    var sx = X(d.finalScore);
-    var sy = Y(d.conf10dLog);
+  var dnaNodes = data.map(function(d, i) {
+    var x = P + (i * barWidth);
+    var totalH = (d.finalScore / maxScore) * PH;
+    var trendH = (d.trend / maxScore) * PH;
+    var pullH = (d.pullback / maxScore) * PH;
+    var breakH = (d.breakout / maxScore) * PH;
+    
+    var y = P + PH - totalH;
     var isHover = hovered === d.symbol;
+    
     return React.createElement("g", { key: d.symbol, 
         onMouseEnter: function () { setHovered(d.symbol); }, 
         onMouseLeave: function () { setHovered(null); },
         style: { cursor: "pointer" }
       },
-      React.createElement("circle", { cx: sx, cy: sy, r: isHover ? 7 : 5, fill: "var(--accent)", opacity: isHover ? 1 : 0.7 }),
-      isHover && React.createElement("text", { x: sx, y: sy - 12, textAnchor: "middle", fontSize: 10, fill: "var(--text)", fontWeight: 700, style: { paintOrder: "stroke", stroke: "var(--bg)", strokeWidth: 4 } }, d.symbol + " (" + d.finalScore + ")")
+      // Trend (Blue)
+      React.createElement("rect", { x: x, y: y, width: barWidth - 2, height: trendH, fill: "#3b82f6", opacity: isHover ? 1 : 0.8 }),
+      // Pullback (Purple)
+      React.createElement("rect", { x: x, y: y + trendH, width: barWidth - 2, height: pullH, fill: "#a855f7", opacity: isHover ? 1 : 0.8 }),
+      // Breakout (Orange)
+      React.createElement("rect", { x: x, y: y + trendH + pullH, width: barWidth - 2, height: breakH, fill: "#f97316", opacity: isHover ? 1 : 0.8 }),
+      
+      // Label on hover
+      isHover && React.createElement("text", { x: x + barWidth/2, y: y - 8, textAnchor: "middle", fontSize: 10, fill: "var(--text)", fontWeight: 700 }, d.symbol)
     );
   });
 
-  // --- Chart 2: Tail Risk Frontier ---
-  var X2 = function (v) { return P + (Math.max(40, Math.min(90, v)) - 40) / 50 * PW; };
-  var Y2 = function (v) { return P + (Math.abs(Math.max(-15, Math.min(0, v))) / 15) * PH; };
+  // --- Chart 2: Fuel Scatter (ATR% vs Win Rate) ---
+  var X2 = function (v) { return P + (Math.max(0.5, Math.min(6, v)) / 6) * PW; }; // 0.5% to 6% ATR
+  var Y2 = function (v) { return P + PH - (Math.max(30, Math.min(90, v)) - 30) / 60 * PH; }; // 30% to 90% WR
 
-  var riskNodes = data.map(function (d) {
-    var sx = X2(d.winRate);
-    var sy = Y2(d.cvar);
+  var fuelNodes = data.map(function (d) {
+    var sx = X2(d.atrPct);
+    var sy = Y2(d.winRate);
     var isHover = hovered === d.symbol;
+    
+    // Highlight the sweet spot (ATR 1.5% to 4%, WR > 65%)
+    var isSweetSpot = d.atrPct >= 1.5 && d.atrPct <= 4.0 && d.winRate > 65;
+    
     return React.createElement("g", { key: d.symbol,
         onMouseEnter: function () { setHovered(d.symbol); }, 
         onMouseLeave: function () { setHovered(null); },
         style: { cursor: "pointer" }
       },
-      React.createElement("circle", { cx: sx, cy: sy, r: isHover ? 7 : 5, fill: "#3b82f6", opacity: isHover ? 1 : 0.7 }),
-      isHover && React.createElement("text", { x: sx, y: sy - 12, textAnchor: "middle", fontSize: 10, fill: "var(--text)", fontWeight: 700, style: { paintOrder: "stroke", stroke: "var(--bg)", strokeWidth: 4 } }, d.symbol + " (WR: " + d.winRate + "%)")
+      React.createElement("circle", { cx: sx, cy: sy, r: isHover ? 8 : 5, fill: isSweetSpot ? "#16a34a" : "#64748b", opacity: isHover ? 1 : 0.8 }),
+      isHover && React.createElement("text", { x: sx, y: sy - 12, textAnchor: "middle", fontSize: 10, fill: "var(--text)", fontWeight: 700, style: { paintOrder: "stroke", stroke: "var(--bg)", strokeWidth: 4 } }, d.symbol + " (" + d.atrPct.toFixed(1) + "%)")
     );
   });
 
@@ -12223,30 +12242,31 @@ const EquityAnalyticsPanel = React.memo(function () {
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 24 } },
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 } },
-      // Panel 1
+      // Panel 1: Setup DNA
       React.createElement("div", { className: "stx-card", style: { padding: 16 } },
-        React.createElement("div", { style: { fontSize: 14, fontWeight: 700, marginBottom: 4 } }, "Efficiency Quadrant"),
-        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 12 } }, "X: Entry Score | Y: 13-Day Confidence"),
+        React.createElement("div", { style: { fontSize: 14, fontWeight: 700, marginBottom: 4 } }, "Setup DNA"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 12 } }, "Why did this stock rank high? (Trend / Pullback / Breakout)"),
         React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
-          React.createElement("rect", { x: CX, y: P, width: PW/2, height: PH/2, fill: "rgba(34,197,94,0.05)" }),
-          React.createElement("text", { x: CX + PW/4, y: P + 20, fontSize: 10, fill: "#16a34a", textAnchor: "middle", fontWeight: 800 }, "HIGH CONVICTION"),
-          React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P+PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
-          React.createElement("line", { x1: P, y1: CY, x2: P+PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
-          React.createElement("text", { x: P + PW/2, y: H - 10, textAnchor: "middle", fontSize: 10, fill: "var(--text6)" }, "Entry Score ->"),
-          React.createElement("text", { x: 10, y: CY, textAnchor: "middle", fontSize: 10, fill: "var(--text6)", transform: "rotate(-90,10," + CY + ")" }, "13-Day Confidence ->"),
-          effNodes
+          React.createElement("line", { x1: P, y1: P+PH, x2: P+PW, y2: P+PH, stroke: "var(--border3)" }),
+          React.createElement("text", { x: 10, y: CY, textAnchor: "middle", fontSize: 10, fill: "var(--text6)", transform: "rotate(-90,10," + CY + ")" }, "Score (0-100) ->"),
+          dnaNodes
+        ),
+        React.createElement("div", { style: { display: "flex", justifyContent: "center", gap: 12, marginTop: 8, fontSize: 10 } },
+          React.createElement("span", { style: { color: "#3b82f6" } }, "■ Trend"),
+          React.createElement("span", { style: { color: "#a855f7" } }, "■ Pullback"),
+          React.createElement("span", { style: { color: "#f97316" } }, "■ Breakout")
         )
       ),
-      // Panel 2
+      // Panel 2: Fuel Scatter
       React.createElement("div", { className: "stx-card", style: { padding: 16 } },
-        React.createElement("div", { style: { fontSize: 14, fontWeight: 700, marginBottom: 4 } }, "Tail Risk Frontier"),
-        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 12 } }, "X: Win Rate | Y: CVaR (Top is safer)"),
+        React.createElement("div", { style: { fontSize: 14, fontWeight: 700, marginBottom: 4 } }, "Fuel Scatter (ATR% vs Win Rate)"),
+        React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 12 } }, "Green = Ideal (1.5-4% ATR with >65% WR)"),
         React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
           React.createElement("line", { x1: P, y1: P+PH, x2: P+PW, y2: P+PH, stroke: "var(--border3)" }),
           React.createElement("line", { x1: P, y1: P, x2: P, y2: P+PH, stroke: "var(--border3)" }),
-          React.createElement("text", { x: P + PW/2, y: H - 10, textAnchor: "middle", fontSize: 10, fill: "var(--text6)" }, "Win Rate % ->"),
-          React.createElement("text", { x: 10, y: CY, textAnchor: "middle", fontSize: 10, fill: "var(--text6)", transform: "rotate(-90,10," + CY + ")" }, "CVaR % (Tail Risk) ->"),
-          riskNodes
+          React.createElement("text", { x: P + PW/2, y: H - 10, textAnchor: "middle", fontSize: 10, fill: "var(--text6)" }, "ATR % (Volatility / Speed) ->"),
+          React.createElement("text", { x: 10, y: CY, textAnchor: "middle", fontSize: 10, fill: "var(--text6)", transform: "rotate(-90,10," + CY + ")" }, "Win Rate % ->"),
+          fuelNodes
         )
       )
     ),
