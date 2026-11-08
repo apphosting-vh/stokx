@@ -606,6 +606,11 @@ window.BacktestEngine = (function () {
 
       var finalReturn = (exitPrice - entryPriceAdj) / entryPriceAdj * 100;
       if (exitPrice === undefined) exitPrice = entryPriceAdj;
+      // When stops are OFF, reclassify negative-return timeouts as LOSS so
+      // downstream stats (avgLossPct, losingTrades, profitFactor, barrier
+      // breakdown) reflect actual money-losing trades instead of lumping them
+      // into the neutral timeout bucket.
+      if (!useStopLoss && barrier === "TIMEOUT" && finalReturn < 0) barrier = "LOSS";
 
       return {
         symbol: score.symbol || "",
