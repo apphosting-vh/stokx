@@ -12206,6 +12206,7 @@ function PulsePage({ holdings }) {
     { key: "backtest", label: "Backtesting", icon: Icons.clock },
     { key: "scoretuner", label: "Score Tuner", icon: Icons.settings },
     { key: "sectorrotation", label: "Sector Rotation", icon: Icons.chart },
+    { key: "regimemap", label: "Regime Map", icon: Icons.target },
     { key: "patternlab", label: "Pattern Lab", icon: Icons.flask },
   ];
 
@@ -12237,6 +12238,7 @@ function PulsePage({ holdings }) {
       activeTab === "watchlisttracker" && React.createElement(WatchlistTracker, null),
       activeTab === "singlestock" && React.createElement(SingleStockAnalysis, { requestedTicker: pendingTicker }),
       activeTab === "sectorrotation" && React.createElement(SectorRotationPanel, null),
+      activeTab === "regimemap" && React.createElement(RegimeMapPanel, null),
       React.createElement("div", { style: { display: activeTab === "backtest" ? "" : "none" } }, React.createElement(BacktestSuitePanel, null)),
       React.createElement("div", { style: { display: activeTab === "scoretuner" ? "" : "none" } }, React.createElement(ScoreTunerPanel, null)),
       React.createElement("div", { style: { display: activeTab === "patternlab" ? "" : "none" } },
