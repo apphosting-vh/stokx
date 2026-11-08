@@ -112,8 +112,10 @@ window.BacktestEngine = (function () {
     var mean = returns.reduce(function (s, r) { return s + r; }, 0) / returns.length;
     var variance = returns.reduce(function (s, r) { return s + (r - mean) * (r - mean); }, 0) / (returns.length - 1);
     var std = Math.sqrt(variance);
-    if (std === 0) return null;
-    return Math.round(((mean - riskFreeRate) / std) * 100) / 100;
+    if (std < 1e-6) return null; // Protect against near-zero variance
+    var _sharpe = (mean - riskFreeRate) / std;
+    if (!isFinite(_sharpe)) return null;
+    return Math.round(Math.max(-10, Math.min(10, _sharpe)) * 100) / 100;
   }
 
   /* Phase 6 — Validation helpers. */
@@ -171,9 +173,11 @@ window.BacktestEngine = (function () {
     var mean = rets.reduce(function (s, r) { return s + r; }, 0) / rets.length;
     var variance = rets.reduce(function (s, r) { return s + (r - mean) * (r - mean); }, 0) / (rets.length - 1);
     var std = Math.sqrt(variance);
-    if (std === 0) return null;
+    if (std < 1e-6) return null; // Protect against near-zero variance
     var roundsPerYear = 252 / hd;
-    return Math.round((mean / std) * Math.sqrt(roundsPerYear) * 100) / 100;
+    var _psharpe = (mean / std) * Math.sqrt(roundsPerYear);
+    if (!isFinite(_psharpe)) return null;
+    return Math.round(Math.max(-10, Math.min(10, _psharpe)) * 100) / 100;
   }
 
   /* Blind holdout: a fixed-size final window that is never touched by training.
