@@ -12208,6 +12208,86 @@ const RegimeMapPanel = React.memo(function () {
     );
   });
 
+  // Plain-English write-up rendered under each chart
+  var explainer = function (what, how, rows, tip, live) {
+    var h = { fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", color: "var(--text5)", margin: "12px 0 4px" };
+    var p = { fontSize: 12, lineHeight: 1.55, color: "var(--text)", margin: 0 };
+    return React.createElement("div", { style: { marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--border3)" } },
+      live && React.createElement("div", { style: { border: "1px solid var(--border3)", borderRadius: 8, padding: "10px 12px", marginBottom: 14 } },
+        React.createElement("div", { style: Object.assign({}, h, { marginTop: 0 }) }, "Right now"),
+        React.createElement("p", { style: Object.assign({}, p, { fontWeight: 700 }) }, live.head),
+        React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6, marginTop: 8 } },
+          live.rows.map(function (r, i) {
+            return React.createElement("div", { key: i, style: { display: "flex", gap: 8, fontSize: 12, lineHeight: 1.5 } },
+              React.createElement("span", { style: { width: 8, height: 8, borderRadius: 2, background: r.c, marginTop: 5, flexShrink: 0 } }),
+              React.createElement("span", { style: { color: "var(--text)" } }, React.createElement("b", null, r.t + ": "), r.d)
+            );
+          })
+        )
+      ),
+      React.createElement("div", { style: Object.assign({}, h, { marginTop: 0 }) }, "What this chart shows"),
+      React.createElement("p", { style: p }, what),
+      React.createElement("div", { style: h }, "How to read it"),
+      React.createElement("p", { style: p }, how),
+      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6, marginTop: 8 } },
+        rows.map(function (r, i) {
+          return React.createElement("div", { key: i, style: { display: "flex", gap: 8, fontSize: 12, lineHeight: 1.5 } },
+            React.createElement("span", { style: { width: 8, height: 8, borderRadius: 2, background: r.c, marginTop: 5, flexShrink: 0 } }),
+            React.createElement("span", { style: { color: "var(--text)" } }, React.createElement("b", null, r.t + ": "), r.d)
+          );
+        })
+      ),
+      tip && React.createElement("div", { style: h }, "Good to know"),
+      tip && React.createElement("p", { style: p }, tip)
+    );
+  };
+
+
+  // Live "Right now" summaries built from the sector data on screen
+  var fx = function (v, dp) { return (v == null || isNaN(v)) ? "-" : Number(v).toFixed(dp); };
+  var sg = function (v) { return (v >= 0 ? "+" : "") + fx(v, 1) + "%"; };
+  var liveRows = function (defs) {
+    return defs.map(function (q) {
+      var list = data.filter(q.f).map(function (d) { return d.name + " (" + q.v(d) + ")"; });
+      return { c: q.c, t: q.t, d: list.length ? list.join(", ") : "none" };
+    });
+  };
+  var cnt = function (fn) { return data.filter(fn).length; };
+  var NS = data.length;
+  var screenerMissing = NS > 0 && data.every(function (d) { return !d.avgScore; });
+
+  var live1 = NS ? {
+    head: cnt(function (d) { return d.trend >= 50; }) + " of " + NS + " sectors have a clear trend (ADX 30 or more), and " + cnt(function (d) { return d.vol >= 50; }) + " have high volatility (ATR 2% or more).",
+    rows: liveRows([
+      { c: "#16a34a", t: "Prime zone", f: function (d) { return d.trend >= 50 && d.vol >= 50; }, v: function (d) { return "ADX " + fx(d.adx, 0) + ", ATR " + fx(d.atrPct, 1) + "%"; } },
+      { c: "#2563eb", t: "Grind higher", f: function (d) { return d.trend >= 50 && d.vol < 50; }, v: function (d) { return "ADX " + fx(d.adx, 0) + ", ATR " + fx(d.atrPct, 1) + "%"; } },
+      { c: "#ca8a04", t: "Choppy", f: function (d) { return d.trend < 50 && d.vol >= 50; }, v: function (d) { return "ADX " + fx(d.adx, 0) + ", ATR " + fx(d.atrPct, 1) + "%"; } },
+      { c: "#dc2626", t: "Dead zone", f: function (d) { return d.trend < 50 && d.vol < 50; }, v: function (d) { return "ADX " + fx(d.adx, 0) + ", ATR " + fx(d.atrPct, 1) + "%"; } }
+    ])
+  } : null;
+
+  var live2 = NS ? {
+    head: screenerMissing
+      ? "Every sector shows an Entry Score of 0 because no Stock Screener results are saved yet. Run the screener first, or this chart will read as 'No Setups' everywhere."
+      : cnt(function (d) { return d.momentum >= 50 && d.avgScore >= 50; }) + " of " + NS + " sectors are in Prime Setups, and " + cnt(function (d) { return d.momentum >= 50 && d.avgScore < 50; }) + " are rising but have no good setups.",
+    rows: liveRows([
+      { c: "#16a34a", t: "Prime setups", f: function (d) { return d.momentum >= 50 && d.avgScore >= 50; }, v: function (d) { return "ROC " + sg(d.roc) + ", score " + fx(d.avgScore, 0); } },
+      { c: "#dc2626", t: "No setups", f: function (d) { return d.momentum >= 50 && d.avgScore < 50; }, v: function (d) { return "ROC " + sg(d.roc) + ", score " + fx(d.avgScore, 0); } },
+      { c: "#ca8a04", t: "Weak setups", f: function (d) { return d.momentum < 50 && d.avgScore >= 50; }, v: function (d) { return "ROC " + sg(d.roc) + ", score " + fx(d.avgScore, 0); } },
+      { c: "#2563eb", t: "Waiting", f: function (d) { return d.momentum < 50 && d.avgScore < 50; }, v: function (d) { return "ROC " + sg(d.roc) + ", score " + fx(d.avgScore, 0); } }
+    ])
+  } : null;
+
+  var live3 = NS ? {
+    head: cnt(function (d) { return d.momentum >= 50 && d.flow >= 50; }) + " of " + NS + " sectors are rising on a volume surge, and " + cnt(function (d) { return d.momentum >= 50 && d.flow < 50; }) + " are rising on normal or light volume.",
+    rows: liveRows([
+      { c: "#16a34a", t: "Institutional feeding frenzy", f: function (d) { return d.momentum >= 50 && d.flow >= 50; }, v: function (d) { return "ROC " + sg(d.roc) + ", volume " + fx(d.volRatio, 2) + "x"; } },
+      { c: "#2563eb", t: "Quiet grind", f: function (d) { return d.momentum >= 50 && d.flow < 50; }, v: function (d) { return "ROC " + sg(d.roc) + ", volume " + fx(d.volRatio, 2) + "x"; } },
+      { c: "#ca8a04", t: "Churning or fakeout", f: function (d) { return d.momentum < 50 && d.flow >= 50; }, v: function (d) { return "ROC " + sg(d.roc) + ", volume " + fx(d.volRatio, 2) + "x"; } },
+      { c: "#dc2626", t: "Dead money", f: function (d) { return d.momentum < 50 && d.flow < 50; }, v: function (d) { return "ROC " + sg(d.roc) + ", volume " + fx(d.volRatio, 2) + "x"; } }
+    ])
+  } : null;
+
   return React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 20, maxWidth: 1400, margin: "0 auto" } },
     React.createElement("div", { className: "stx-card", style: { padding: 20, display: "flex", flexDirection: "column" } },
       React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Regime Map"),
@@ -12227,6 +12307,18 @@ const RegimeMapPanel = React.memo(function () {
           React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Volatility (ATR%) ->"),
           nodes
         )
+      ),
+      explainer(
+        "Each dot is a sector. It tells you what kind of market that sector is in right now: is there a clear trend, and how big are the daily swings?",
+        "Left to right is trend strength (ADX). The further right, the more clearly the sector is moving in one direction. The midline is ADX 30. Bottom to top is volatility (ATR%), meaning how much the price moves in a normal day as a percent of its price. The midline is 2%. Hover a dot to see the sector name.",
+        [
+          { c: "#16a34a", t: "Top right, high trend + high volatility", d: "Clear direction with big daily moves. The best place for quick trades, because targets get hit fast." },
+          { c: "#2563eb", t: "Bottom right, high trend + low volatility", d: "Clear direction but calm moves. The sector keeps grinding along, but it takes longer to make a few percent." },
+          { c: "#ca8a04", t: "Top left, low trend + high volatility", d: "Big swings with no clear direction. Choppy and risky, and stop-losses get hit often." },
+          { c: "#dc2626", t: "Bottom left, low trend + low volatility", d: "Nothing is happening. Money gets stuck here, so it is usually best to avoid these sectors." }
+        ],
+        "ADX measures how strong a trend is, not which way it points. A sector falling hard also shows up on the right side. Use the other two charts to check whether the move is up or down. A dot just left of the midline means the trend is not yet confirmed.",
+        live1
       )
     ),
     React.createElement("div", { className: "stx-card", style: { padding: 20, display: "flex", flexDirection: "column" } },
@@ -12260,6 +12352,18 @@ const RegimeMapPanel = React.memo(function () {
             );
           })
         )
+      ),
+      explainer(
+        "Each dot is a sector. It answers one question: is this sector rising, and are the stocks inside it giving good buy setups?",
+        "Left to right is momentum, meaning how much the sector has risen over the last 20 trading days. The midline is +2.5%. Bottom to top is the average Entry Score of the sector's stocks from your Stock Screener. The midline is a score of 50. You want dots in the top right: the sector is moving and its stocks look ready to buy.",
+        [
+          { c: "#16a34a", t: "Prime setups (top right)", d: "The sector is rising and its stocks score well. This is the best hunting ground for new trades." },
+          { c: "#ca8a04", t: "Weak setups (top left)", d: "The sector is flat or falling, but some stocks score well. Any trade here is a stock-specific bet against the sector." },
+          { c: "#dc2626", t: "No setups (bottom right)", d: "The sector has already run up, but its stocks do not score well. It is usually stretched with no good entry point. Wait for a pullback." },
+          { c: "#2563eb", t: "Waiting (bottom left)", d: "Weak sector and weak stocks. There is nothing to do here yet." }
+        ],
+        "The vertical position comes from the last Stock Screener run saved in the app. If you have not run the screener, every dot will sit at the bottom with a score of 0, so run it first. Dots pinned to the right edge have gained 10% or more in 20 days. Hover a dot to see its exact average score.",
+        live2
       )
     ),
     React.createElement("div", { className: "stx-card", style: { padding: 20, display: "flex", flexDirection: "column" } },
@@ -12283,6 +12387,18 @@ const RegimeMapPanel = React.memo(function () {
           React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Volume Surge (Ratio) ->"),
           flowNodes
         )
+      ),
+      explainer(
+        "Each dot is a sector. It shows whether big money is backing the price move, by combining how far the sector has risen with how much trading volume is behind it.",
+        "Left to right is momentum, the 20-day price change. The midline is +2.5%. Bottom to top is the volume surge: average volume over the last 5 days compared with the last 20 days. The midline is 1.25x, so a dot above the line means recent volume is at least 25% higher than normal. Price rising on heavy volume is more trustworthy than price rising on light volume.",
+        [
+          { c: "#16a34a", t: "Institutional feeding frenzy (top right)", d: "Price is rising and volume is surging. This is the strongest sign that large buyers are involved." },
+          { c: "#ca8a04", t: "Churning or fakeout (top left)", d: "Heavy volume but weak price. Buyers and sellers are fighting, and big holders may be selling into strength. Be careful." },
+          { c: "#2563eb", t: "Quiet grind (bottom right)", d: "Price is rising on normal or light volume. The move can continue, but with little fresh buying it can fade quickly." },
+          { c: "#dc2626", t: "Dead money (bottom left)", d: "Low momentum and low volume. Nobody is interested, so there is no reason to be here." }
+        ],
+        "Volume is the confirmation signal. A sector in the top right is the one attracting fresh money, so it is a good candidate to lead the market. A sector with high momentum but a very low volume surge is a warning sign, since the price may be running without support. Dots at the very top or bottom edge are capped, at 2x or more and 0.5x or less of normal volume.",
+        live3
       )
     )
   );
