@@ -12208,75 +12208,81 @@ const RegimeMapPanel = React.memo(function () {
     );
   });
 
-  return React.createElement("div", { style: { display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 20, maxWidth: 1400, margin: "0 auto" } },
-    React.createElement("div", { className: "stx-card", style: { padding: 20, flex: "1 1 400px", maxWidth: 600 } },
+  return React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 20, maxWidth: 1400, margin: "0 auto" } },
+    React.createElement("div", { className: "stx-card", style: { padding: 20, display: "flex", flexDirection: "column" } },
       React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Regime Map"),
-    React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 16 } }, "X: Trend Strength (ADX) | Y: Volatility (ATR%)"),
-    React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
-      QUADS.map(function (q, i) {
-        return React.createElement("g", { key: i },
-          React.createElement("rect", { x: q.x, y: q.y, width: q.w, height: q.h, fill: q.f }),
-          React.createElement("text", { x: q.x + q.w / 2, y: q.y + 20, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: q.c, letterSpacing: 1, opacity: 0.8 }, q.t),
-          React.createElement("text", { x: q.x + q.w / 2, y: q.y + 34, textAnchor: "middle", fontSize: 9, fill: "var(--text5)" }, q.desc)
-        );
-      }),
-      React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P + PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
-      React.createElement("line", { x1: P, y1: CY, x2: P + PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
-      React.createElement("text", { x: CX, y: H - 10, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600 }, "Trend Strength (ADX) ->"),
-      React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Volatility (ATR%) ->"),
-      nodes
-    )
-    ),
-    React.createElement("div", { className: "stx-card", style: { padding: 20 } },
-      React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Setup Map"),
-      React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 16 } }, "X: Sector Momentum (ROC) | Y: Avg Entry Score (Screener)"),
-      React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
-        React.createElement("rect", { x: CX, y: P, width: PW / 2, height: PH / 2, fill: "rgba(34,197,94,0.08)" }),
-        React.createElement("rect", { x: P, y: P, width: PW / 2, height: PH / 2, fill: "rgba(234,179,8,0.08)" }),
-        React.createElement("rect", { x: CX, y: CY, width: PW / 2, height: PH / 2, fill: "rgba(239,68,68,0.08)" }),
-        React.createElement("rect", { x: P, y: CY, width: PW / 2, height: PH / 2, fill: "rgba(59,130,246,0.08)" }),
-        React.createElement("text", { x: CX + PW/4, y: P + 20, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#16a34a", letterSpacing: 1, opacity: 0.8 }, "PRIME SETUPS"),
-        React.createElement("text", { x: P + PW/4, y: P + 20, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#ca8a04", letterSpacing: 1, opacity: 0.8 }, "WEAK SETUPS"),
-        React.createElement("text", { x: CX + PW/4, y: CY + PH/2 - 10, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#dc2626", letterSpacing: 1, opacity: 0.8 }, "NO SETUPS"),
-        React.createElement("text", { x: P + PW/4, y: CY + PH/2 - 10, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#2563eb", letterSpacing: 1, opacity: 0.8 }, "WAITING"),
-        React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P + PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
-        React.createElement("line", { x1: P, y1: CY, x2: P + PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
-        React.createElement("text", { x: CX, y: H - 10, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600 }, "Momentum (ROC%) ->"),
-        React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Avg Entry Score ->"),
-        data.map(function (d) {
-          var sx = X(d.momentum);
-          var sy = Y((d.avgScore / 100) * 100); // normalize 0-100
-          var isHover = hovered === d.key;
-          return React.createElement("g", { key: d.key,
-              onMouseEnter: function () { setHovered(d.key); }, 
-              onMouseLeave: function () { setHovered(null); },
-              style: { cursor: "pointer" }
-            },
-            React.createElement("circle", { cx: sx, cy: sy, r: isHover ? 8 : 6, fill: d.color, stroke: isHover ? "var(--text)" : "var(--bg)", strokeWidth: 2 }),
-            isHover && React.createElement("text", { x: sx, y: sy - 12, textAnchor: "middle", fontSize: 11, fill: "var(--text)", fontWeight: 800, style: { paintOrder: "stroke", stroke: "var(--bg)", strokeWidth: 4 } }, d.name + " (" + Math.round(d.avgScore) + ")")
-          );
-        })
+      React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 16 } }, "X: Trend Strength (ADX) | Y: Volatility (ATR%)"),
+      React.createElement("div", { style: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center" } },
+        React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto", maxHeight: "100%" } },
+          QUADS.map(function (q, i) {
+            return React.createElement("g", { key: i },
+              React.createElement("rect", { x: q.x, y: q.y, width: q.w, height: q.h, fill: q.f }),
+              React.createElement("text", { x: q.x + q.w / 2, y: q.y + 20, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: q.c, letterSpacing: 1, opacity: 0.8 }, q.t),
+              React.createElement("text", { x: q.x + q.w / 2, y: q.y + 34, textAnchor: "middle", fontSize: 9, fill: "var(--text5)" }, q.desc)
+            );
+          }),
+          React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P + PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+          React.createElement("line", { x1: P, y1: CY, x2: P + PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+          React.createElement("text", { x: CX, y: H - 10, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600 }, "Trend Strength (ADX) ->"),
+          React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Volatility (ATR%) ->"),
+          nodes
+        )
       )
     ),
-    React.createElement("div", { className: "stx-card", style: { padding: 20 } },
+    React.createElement("div", { className: "stx-card", style: { padding: 20, display: "flex", flexDirection: "column" } },
+      React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Setup Map"),
+      React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 16 } }, "X: Sector Momentum (ROC) | Y: Avg Entry Score (Screener)"),
+      React.createElement("div", { style: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center" } },
+        React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto", maxHeight: "100%" } },
+          React.createElement("rect", { x: CX, y: P, width: PW / 2, height: PH / 2, fill: "rgba(34,197,94,0.08)" }),
+          React.createElement("rect", { x: P, y: P, width: PW / 2, height: PH / 2, fill: "rgba(234,179,8,0.08)" }),
+          React.createElement("rect", { x: CX, y: CY, width: PW / 2, height: PH / 2, fill: "rgba(239,68,68,0.08)" }),
+          React.createElement("rect", { x: P, y: CY, width: PW / 2, height: PH / 2, fill: "rgba(59,130,246,0.08)" }),
+          React.createElement("text", { x: CX + PW/4, y: P + 20, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#16a34a", letterSpacing: 1, opacity: 0.8 }, "PRIME SETUPS"),
+          React.createElement("text", { x: P + PW/4, y: P + 20, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#ca8a04", letterSpacing: 1, opacity: 0.8 }, "WEAK SETUPS"),
+          React.createElement("text", { x: CX + PW/4, y: CY + PH/2 - 10, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#dc2626", letterSpacing: 1, opacity: 0.8 }, "NO SETUPS"),
+          React.createElement("text", { x: P + PW/4, y: CY + PH/2 - 10, textAnchor: "middle", fontSize: 10, fontWeight: 800, fill: "#2563eb", letterSpacing: 1, opacity: 0.8 }, "WAITING"),
+          React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P + PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+          React.createElement("line", { x1: P, y1: CY, x2: P + PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+          React.createElement("text", { x: CX, y: H - 10, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600 }, "Momentum (ROC%) ->"),
+          React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Avg Entry Score ->"),
+          data.map(function (d) {
+            var sx = X(d.momentum);
+            var sy = Y((d.avgScore / 100) * 100); // normalize 0-100
+            var isHover = hovered === d.key;
+            return React.createElement("g", { key: d.key,
+                onMouseEnter: function () { setHovered(d.key); }, 
+                onMouseLeave: function () { setHovered(null); },
+                style: { cursor: "pointer" }
+              },
+              React.createElement("circle", { cx: sx, cy: sy, r: isHover ? 8 : 6, fill: d.color, stroke: isHover ? "var(--text)" : "var(--bg)", strokeWidth: 2 }),
+              isHover && React.createElement("text", { x: sx, y: sy - 12, textAnchor: "middle", fontSize: 11, fill: "var(--text)", fontWeight: 800, style: { paintOrder: "stroke", stroke: "var(--bg)", strokeWidth: 4 } }, d.name + " (" + Math.round(d.avgScore) + ")")
+            );
+          })
+        )
+      )
+    ),
+    React.createElement("div", { className: "stx-card", style: { padding: 20, display: "flex", flexDirection: "column" } },
       React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 4 } }, "Sector Capital Flow Map"),
       React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 16 } }, "X: Momentum (20d ROC) | Y: Volume Surge (5d vs 20d Avg)"),
-      React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto" } },
-        QUADS.map(function (q, i) {
-          // Customize quad text for Capital Flow
-          var titles = ["HIGH MOMENTUM + HIGH VOLUME", "LOW MOMENTUM + HIGH VOLUME", "HIGH MOMENTUM + LOW VOLUME", "LOW MOMENTUM + LOW VOLUME"];
-          var descs = ["Institutional Feeding Frenzy", "Churning / Fakeout", "Quiet Grind", "Dead Money"];
-          return React.createElement("g", { key: i },
-            React.createElement("rect", { x: q.x, y: q.y, width: q.w, height: q.h, fill: q.f }),
-            React.createElement("text", { x: q.x + q.w / 2, y: q.y + 20, textAnchor: "middle", fontSize: 9, fontWeight: 800, fill: q.c, letterSpacing: 1, opacity: 0.8 }, titles[i]),
-            React.createElement("text", { x: q.x + q.w / 2, y: q.y + 34, textAnchor: "middle", fontSize: 9, fill: "var(--text5)" }, descs[i])
-          );
-        }),
-        React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P + PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
-        React.createElement("line", { x1: P, y1: CY, x2: P + PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
-        React.createElement("text", { x: CX, y: H - 10, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600 }, "Momentum (ROC%) ->"),
-        React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Volume Surge (Ratio) ->"),
-        flowNodes
+      React.createElement("div", { style: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center" } },
+        React.createElement("svg", { viewBox: "0 0 " + W + " " + H, style: { width: "100%", height: "auto", maxHeight: "100%" } },
+          QUADS.map(function (q, i) {
+            // Customize quad text for Capital Flow
+            var titles = ["HIGH MOMENTUM + HIGH VOLUME", "LOW MOMENTUM + HIGH VOLUME", "HIGH MOMENTUM + LOW VOLUME", "LOW MOMENTUM + LOW VOLUME"];
+            var descs = ["Institutional Feeding Frenzy", "Churning / Fakeout", "Quiet Grind", "Dead Money"];
+            return React.createElement("g", { key: i },
+              React.createElement("rect", { x: q.x, y: q.y, width: q.w, height: q.h, fill: q.f }),
+              React.createElement("text", { x: q.x + q.w / 2, y: q.y + 20, textAnchor: "middle", fontSize: 9, fontWeight: 800, fill: q.c, letterSpacing: 1, opacity: 0.8 }, titles[i]),
+              React.createElement("text", { x: q.x + q.w / 2, y: q.y + 34, textAnchor: "middle", fontSize: 9, fill: "var(--text5)" }, descs[i])
+            );
+          }),
+          React.createElement("line", { x1: CX, y1: P, x2: CX, y2: P + PH, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+          React.createElement("line", { x1: P, y1: CY, x2: P + PW, y2: CY, stroke: "var(--border3)", strokeDasharray: "3,3" }),
+          React.createElement("text", { x: CX, y: H - 10, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600 }, "Momentum (ROC%) ->"),
+          React.createElement("text", { x: 15, y: CY, textAnchor: "middle", fontSize: 11, fill: "var(--text6)", fontWeight: 600, transform: "rotate(-90,15," + CY + ")" }, "Volume Surge (Ratio) ->"),
+          flowNodes
+        )
       )
     )
   );
