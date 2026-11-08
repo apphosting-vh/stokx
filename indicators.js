@@ -5182,13 +5182,15 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
         if (ctx.entryScore != null) {
           if (displayScoreLog != null) {
             finalScoreLog = 0.60 * displayScoreLog + 0.40 * ctx.entryScore;
-            if (ctx.entryScore < 50) finalScoreLog = Math.min(finalScoreLog, 45);
-            if (ctx.entryScore < 35) finalScoreLog = Math.min(finalScoreLog, 30);
+            if (ctx.entryScore < 30) finalScoreLog = Math.min(finalScoreLog, 35);
+            else if (ctx.entryScore < 40) finalScoreLog = Math.min(finalScoreLog, 50);
+            else if (ctx.entryScore < 50) finalScoreLog = Math.min(finalScoreLog, 65);
           }
           if (displayScoreEmp != null) {
             finalScoreEmp = 0.60 * displayScoreEmp + 0.40 * ctx.entryScore;
-            if (ctx.entryScore < 50) finalScoreEmp = Math.min(finalScoreEmp, 45);
-            if (ctx.entryScore < 35) finalScoreEmp = Math.min(finalScoreEmp, 30);
+            if (ctx.entryScore < 30) finalScoreEmp = Math.min(finalScoreEmp, 35);
+            else if (ctx.entryScore < 40) finalScoreEmp = Math.min(finalScoreEmp, 50);
+            else if (ctx.entryScore < 50) finalScoreEmp = Math.min(finalScoreEmp, 65);
           }
           base.components.entryScoreUsed = true;
           base.components.entryScore = ctx.entryScore;
