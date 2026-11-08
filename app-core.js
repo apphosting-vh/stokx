@@ -12172,6 +12172,7 @@ const EquityAnalyticsPanel = React.memo(function () {
 
   // --- Chart 1: Setup DNA (Pillar Stacked Bar) ---
   var W = 480, H = 400, P = 40, PW = W - 2 * P, PH = H - 2 * P;
+  var CX = P + PW / 2, CY = P + PH / 2;
   var barWidth = PW / data.length;
   
   var maxScore = Math.max.apply(null, data.map(function(d) { return d.finalScore; }).concat([100]));
