@@ -520,9 +520,22 @@ window.BacktestEngine = (function () {
       var maxProfitPct = 0, maxLossPct = 0;
       var maxHolding = Math.min(tradeHoldingPeriod, candles.length - entryDateIdx - 1);
 
+      var stopPrice = useStopLoss ? entryPriceAdj * (1 - stopLossPct / 100) : 0;
+
       for (var j = 1; j <= maxHolding; j++) {
         var cur = candles[entryDateIdx + j];
         var prevClose = candles[entryDateIdx + j - 1].c;
+
+        // Check for Stop Loss hit first
+        if (useStopLoss && cur.l <= stopPrice) {
+          hitTarget = false;
+          daysToTarget = j;
+          exitDate = String(cur.t).slice(0, 10);
+          // If it gapped down below the stop, we exit at the Open, otherwise at the Stop Price
+          exitPrice = (cur.o < stopPrice ? cur.o : stopPrice) * (1 - slip / 100) * (1 - broker / 100);
+          barrier = "LOSS";
+          break;
+        }
 
         if (useRealisticExit) {
           // Gap open above target: exit at open

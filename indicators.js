@@ -5141,11 +5141,14 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
       var pen = 0;
       if (displayScore != null) {
-        if (rsi14 != null && rsi14 > 85) pen += 5 * clamp((rsi14 - 85) / 10, 0, 1);
+        /* NEW: Heavily penalize high-drift setups (momentum chasing) */
+        if (driftScore > 0.3) pen += 15 * clamp((driftScore - 0.3) / 0.7, 0, 1);
+        
+        if (rsi14 != null && rsi14 > 75) pen += 10 * clamp((rsi14 - 75) / 15, 0, 1);
         if (vwap != null && atrPct != null) {
           var vwScale = atrPct / 100 * c;
           var vwapExt = vwScale > 0 ? (c - vwap) / vwScale : 0;
-          if (vwapExt > 2.0) pen += 4 * clamp((vwapExt - 2.0) / 3, 0, 1);
+          if (vwapExt > 1.5) pen += 8 * clamp((vwapExt - 1.5) / 2, 0, 1);
         }
         if (pen > 0 && remainingPct != null) pen *= (1 + 0.3 * clamp(1 - remainingPct / 2.5, 0, 1));
         displayScore -= Math.min(15, pen);

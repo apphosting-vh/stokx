@@ -786,6 +786,8 @@ window.BatchBacktest = (function () {
         warmup: warmup,
         realisticEntry: true,
         realisticExit: true,
+        useStopLoss: true,
+        stopLossPct: 3.0,
         slippagePct: slippagePct,
         brokeragePct: brokeragePct,
         multiTFMap: multiTFMap,

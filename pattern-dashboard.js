@@ -166,7 +166,7 @@ var INS_PILLARS = [
     var gap = hi.winRate - lo.winRate;
     if (gap >= 8) return "StoX performs far better in high-volatility markets: " + hi.winRate + "% win rate in " + hi.label + " vs " + lo.winRate + "% in " + lo.label + ". The profit target is effectively a volatility bet.";
     if (gap <= -8) return "StoX only works in calm markets: " + lo.winRate + "% win rate in " + lo.label + " vs " + hi.winRate + "% in " + hi.label + ". High-vol entries keep getting caught before the target.";
-    return "Volatility regime barely matters here: " + rows.map(function (r) { return r.label + " " + r.winRate + "%"; }).join(" / ") + " (spread " + (gap > 0 ? "+" : "") + gap + "pt).";
+    return "Volatility regime barely matters here: " + rows.map(function (r) { return r.label + " " + r.winRate + "%"; }).join(" / ") + " (spread " + (gap > 0 ? "+" : "") + (gap || 0).toFixed(1) + "pt).";
   }
 
   function bracketVerdict(rows) {
