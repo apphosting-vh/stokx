@@ -520,7 +520,30 @@ window.BacktestEngine = (function () {
       var maxProfitPct = 0, maxLossPct = 0;
       var maxHolding = Math.min(tradeHoldingPeriod, candles.length - entryDateIdx - 1);
 
-      var stopPrice = useStopLoss ? entryPriceAdj * (1 - stopLossPct / 100) : 0;
+      // Calculate ATR (14) at entry to size the stop dynamically
+      var atr14 = null;
+      if (entryDateIdx >= 14) {
+        var trSum = 0;
+        for (var i = entryDateIdx - 13; i <= entryDateIdx; i++) {
+          var tr = Math.max(candles[i].h - candles[i].l, 
+                            Math.abs(candles[i].h - candles[i-1].c), 
+                            Math.abs(candles[i].l - candles[i-1].c));
+          trSum += tr;
+        }
+        atr14 = trSum / 14;
+      }
+
+      // Set stop price (1.5x ATR, max 8% loss)
+      var stopPrice = 0;
+      if (useStopLoss) {
+        if (atr14 != null) {
+          stopPrice = entryPriceAdj - (1.5 * atr14);
+          var maxLossPrice = entryPriceAdj * 0.92; // Hard floor at -8%
+          if (stopPrice < maxLossPrice) stopPrice = maxLossPrice;
+        } else {
+          stopPrice = entryPriceAdj * (1 - stopLossPct / 100);
+        }
+      }
 
       for (var j = 1; j <= maxHolding; j++) {
         var cur = candles[entryDateIdx + j];
