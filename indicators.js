@@ -3339,39 +3339,34 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
   function calcRangeAdequacyScore(sn) {
     if (!sn || sn.atr14 == null || sn.c == null || sn.c <= 0) return 0;
     var atrPct = (sn.atr14 / sn.c) * 100;
-    var cfg = SCORE_CONFIG.rangeAdequacy.curve;
     var maxPts = SCORE_CONFIG.pillarMax.rangeAdequacy;
     
-    // Find exact mathematical peak to ensure normalization is perfect
-    var maxVal = 0;
-    for (var a = 1.0; a <= 10.0; a += 0.01) {
-      var r = 1 / (1 + Math.exp(-(a - 1.0) * 2.0));
-      var d = a > 3.5 ? Math.exp(-Math.pow((a - 3.5) / 1.5, 2)) : 1.0;
-      if (r * d > maxVal) maxVal = r * d;
-    }
+    var ramp = 1 / (1 + Math.exp(-(atrPct - 2.0) * 2.0));
+    var decay = atrPct > 4.0 ? Math.exp(-Math.pow((atrPct - 4.0) / 2.0, 2)) : 1.0;
     
-    var ramp = 1 / (1 + Math.exp(-(atrPct - 1.0) * 2.0));
-    var decay = atrPct > 3.5 ? Math.exp(-Math.pow((atrPct - 3.5) / 1.5, 2)) : 1.0;
-    
+    var maxVal = 0.982; // peak is at 4.0%
     return round(maxPts * ((ramp * decay) / maxVal), 1);
   }
 
   function calcConfidencePillarScore(hourlyCandles, dailyCandles, indexCandles) {
-    if (!hourlyCandles || hourlyCandles.length < 60) return 0;
-    if (!dailyCandles || dailyCandles.length < 30) return 0;
+    var fallback = { score: 0, p_shrunk: null, belowBreakEven: false };
+    if (!hourlyCandles || hourlyCandles.length < 60) return fallback;
+    if (!dailyCandles || dailyCandles.length < 30) return fallback;
     try {
       var max = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence) || 25;
       var conf = window.TechIndicators.computeTenDayForwardConfidence(hourlyCandles, dailyCandles, indexCandles, null);
-      if (!conf) return 0;
+      if (!conf) return fallback;
       
-      var p_emp = conf.confidenceEmpirical != null ? conf.confidenceEmpirical / 100 : null;
+      var p_emp = null;
+      if (conf.components && conf.components.empiricalMethod === 'empirical' && conf.components.probTouch != null) {
+          p_emp = conf.components.probTouch / 100;
+      }
       
-      // Steeper ATR prior aligned with barrier math: ~42% at 1.5% ATR, ~70% at 4% ATR
       var atr = TechIndicators.atr(dailyCandles, 14);
       var atrPct = atr && atr.length ? (atr[atr.length-1] / dailyCandles[dailyCandles.length-1].c) * 100 : 3.0;
-      var p_prior = 0.35 + 0.35 / (1 + Math.exp(-(atrPct - 2.5) * 1.5));
+      var p_prior = 0.35 + 0.30 / (1 + Math.exp(-(atrPct - 3.0) * 1.2));
       
-      var k = 100; // Restored to 100 to fix noise
+      var k = 100;
       var rawN = conf.components && conf.components.empiricalSampleCount ? conf.components.empiricalSampleCount : 0;
       var n_eff = Math.floor(rawN / 10);
       
@@ -3380,20 +3375,18 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
         p_shrunk = (n_eff * p_emp + k * p_prior) / (n_eff + k);
       }
       
-      // Score = Excess over ATR baseline (0 to 15 percentage points excess = 0 to 25 pts)
       var excess = p_shrunk - p_prior;
       var score = 0;
       if (excess > 0) {
         score = Math.min(1, excess / 0.15) * max;
       }
       
-      // Hard Gate: Return a flag if absolute probability is below break-even (55%)
       return {
         score: round(score, 1),
         p_shrunk: p_shrunk,
         belowBreakEven: p_shrunk < 0.55
       };
-    } catch (e) { return { score: 0, belowBreakEven: false }; }
+    } catch (e) { return fallback; }
   }
 
   /* Pillar 1: Trend Health (max 28).
@@ -4009,7 +4002,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (!sn || sn.c == null) return { entry_score: null, reason: 'insufficient_data' };
 
     var volRegime = calcVolRegime(sn, candles);
-    var rangeAdequacy = calcRangeAdequacyScore(candles);
+    var rangeAdequacy = calcRangeAdequacyScore(sn);
     var confResult = calcConfidencePillarScore(hourlyCandles, candles, indexCandles);
     var confidencePillar = confResult.score;
     var trendHealth = calcTrendHealthScore(sn);
@@ -4056,10 +4049,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
     var baseScore = round(rawTotal, 1);
     var baseScore = round(rawTotal, 1);
-    var finalScore = Math.max(0, Math.min(100, baseScore + modifiers));
+    // finalScore was already calculated and gated (spike, index) above
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
-    // Confidence Hard Gate
     if (confResult && confResult.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
         cls = classifyScore(55); 
     }
@@ -4145,8 +4137,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        + the daily-only Breakout Continuation (max 22) + Regime Alignment
        (max 6) — sums to 100. */
     var _dailySnForRange = (perTF.D && perTF.D.sn) || (perTF.W && perTF.W.sn) || (perTF.H && perTF.H.sn) || null;
-    var _dCandles = dTF && dTF.candles ? dTF.candles : (wTF ? wTF.candles : (hTF ? hTF.candles : null));
-    var rangeAdequacyMTF = _dCandles ? calcRangeAdequacyScore(_dCandles) : 0;
+    var rangeAdequacyMTF = _dailySnForRange ? calcRangeAdequacyScore(_dailySnForRange) : 0;
     var confResultMTF = calcConfidencePillarScore(
       hTF ? hTF.candles : null,
       dTF ? dTF.candles : (tfResults[0] ? tfResults[0].candles : null),
@@ -4268,6 +4259,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     return {
       multiTF_score: round(finalScore, 1),
       raw_score: round(rawTotal, 1),
+      confResult: confResultMTF,
       rangeAdequacy: round(rangeAdequacyMTF, 1), rangeAdequacyMax: SCORE_CONFIG.pillarMax.rangeAdequacy,
       confidence: round(confidencePillarMTF, 1), confidenceMax: SCORE_CONFIG.pillarMax.confidence,
       trendHealth: round(agg.trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
@@ -5474,7 +5466,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       var empProbTouch = null;
       if (dailyCandles && dailyCandles.length >= remainingDays + 10 && requiredReturn >= 0) {
         var hitsTouch = 0, hitsTerminal = 0, totalWindows = 0;
-        var minLookback = Math.max(0, dailyCandles.length - 200);
+        var minLookback = Math.max(0, dailyCandles.length - 500);
         for (var ei = minLookback; ei <= dailyCandles.length - remainingDays - 1; ei++) {
           var eStart = dailyCandles[ei].c;
           if (!(eStart > 0)) continue;
