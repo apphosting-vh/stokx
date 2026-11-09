@@ -454,7 +454,7 @@ window.BacktestEngine = (function () {
         var last = candles[candles.length-1] ? candles[candles.length-1].t : 0;
         sym = first + '_' + last + '_' + candles.length;
       }
-      return sym + '_' + threshold + '_' + targetProfitPct + '_' + holdingPeriodDays;
+      return sym + '_' + targetProfitPct + '_' + holdingPeriodDays;
     }
 
     function scoreAt(candles, idx, symbol) {
@@ -517,9 +517,7 @@ window.BacktestEngine = (function () {
       var broker = opts.brokeragePct != null ? opts.brokeragePct : brokeragePct;
       var tradeTargetPct = opts.targetProfitPct != null ? opts.targetProfitPct : targetProfitPct;
       var tradeHoldingPeriod = opts.holdingPeriodDays != null ? opts.holdingPeriodDays : holdingPeriodDays;
-      var lookAheadNeeded = useRealisticEntry ? 2 : 1;
-      if (entryIdx + lookAheadNeeded > candles.length) return null;
-
+      
       var entryPrice, entryDateIdx;
       if (useRealisticEntry && entryIdx + 1 < candles.length) {
         entryPrice = candles[entryIdx + 1].o;
@@ -532,127 +530,94 @@ window.BacktestEngine = (function () {
       var entryPriceAdj = entryPrice * (1 + slip / 100) * (1 + broker / 100);
       var exitCostFactor = (1 - slip / 100) * (1 - broker / 100);
       var targetPrice = entryPriceAdj * (1 + tradeTargetPct / 100) / exitCostFactor;
-
       var entryDate = String(candles[entryDateIdx].t).slice(0, 10);
       var hitTarget = false, daysToTarget = null, exitPrice = entryPriceAdj, exitDate = entryDate;
       var barrier = "TIMEOUT";
       var maxProfitPct = 0, maxLossPct = 0;
-      var maxHolding = Math.min(tradeHoldingPeriod, candles.length - entryDateIdx - 1);
+      var maxHolding = Math.min(tradeHoldingPeriod, candles.length - entryDateIdx);
+      var exitIdx = entryDateIdx + maxHolding - 1;
 
-      // Calculate ATR (14) at entry to size the stop dynamically
       var atr14 = null;
       if (entryDateIdx >= 14) {
         var trSum = 0;
         for (var i = entryDateIdx - 13; i <= entryDateIdx; i++) {
-          var tr = Math.max(candles[i].h - candles[i].l, 
-                            Math.abs(candles[i].h - candles[i-1].c), 
-                            Math.abs(candles[i].l - candles[i-1].c));
+          var tr = Math.max(candles[i].h - candles[i].l, Math.abs(candles[i].h - candles[i-1].c), Math.abs(candles[i].l - candles[i-1].c));
           trSum += tr;
         }
         atr14 = trSum / 14;
       }
 
-      // Set stop price (1.5x ATR, max 8% loss)
       var stopPrice = 0;
       if (useStopLoss) {
         if (atr14 != null) {
           stopPrice = entryPriceAdj - (1.5 * atr14);
-          var maxLossPrice = entryPriceAdj * 0.92; // Hard floor at -8%
+          var maxLossPrice = entryPriceAdj * 0.92;
           if (stopPrice < maxLossPrice) stopPrice = maxLossPrice;
         } else {
           stopPrice = entryPriceAdj * (1 - stopLossPct / 100);
         }
       }
 
-      for (var j = 1; j <= maxHolding; j++) {
+      for (var j = 0; j < maxHolding; j++) {
         var cur = candles[entryDateIdx + j];
-        var prevClose = candles[entryDateIdx + j - 1].c;
+        if (!cur) break;
+        
+        var pnlHigh = (cur.h * exitCostFactor - entryPriceAdj) / entryPriceAdj * 100;
+        var pnlLow = (cur.l * exitCostFactor - entryPriceAdj) / entryPriceAdj * 100;
+        if (pnlHigh > maxProfitPct) maxProfitPct = pnlHigh;
+        if (pnlLow < maxLossPct) maxLossPct = pnlLow;
 
-        // Check for Stop Loss hit first
         if (useStopLoss && cur.l <= stopPrice) {
           hitTarget = false;
-          daysToTarget = j;
+          daysToTarget = j + 1;
           exitDate = String(cur.t).slice(0, 10);
-          // If it gapped down below the stop, we exit at the Open, otherwise at the Stop Price
           exitPrice = (cur.o < stopPrice ? cur.o : stopPrice) * (1 - slip / 100) * (1 - broker / 100);
           barrier = "LOSS";
+          exitIdx = entryDateIdx + j;
           break;
         }
 
         if (useRealisticExit) {
-          // Gap open above target: exit at open
           if (cur.o >= targetPrice) {
-            hitTarget = true;
-            daysToTarget = j;
-            exitDate = String(cur.t).slice(0, 10);
-            exitPrice = cur.o * (1 - slip / 100) * (1 - broker / 100);
-            barrier = "WIN";
-            break;
+            hitTarget = true; daysToTarget = j + 1; exitDate = String(cur.t).slice(0, 10);
+            exitPrice = cur.o * (1 - slip / 100) * (1 - broker / 100); barrier = "WIN"; exitIdx = entryDateIdx + j; break;
           }
-          // Intraday target hit (simulates a limit-sell order executing)
           if (cur.h >= targetPrice) {
-            hitTarget = true;
-            daysToTarget = j;
-            exitDate = String(cur.t).slice(0, 10);
-            exitPrice = targetPrice * (1 - slip / 100) * (1 - broker / 100);
-            barrier = "WIN";
-            break;
+            hitTarget = true; daysToTarget = j + 1; exitDate = String(cur.t).slice(0, 10);
+            exitPrice = targetPrice * (1 - slip / 100) * (1 - broker / 100); barrier = "WIN"; exitIdx = entryDateIdx + j; break;
           }
         } else {
-          // Optimistic mode: no exit costs on target
           var targetPriceRaw = entryPriceAdj * (1 + tradeTargetPct / 100);
           if (cur.h >= targetPriceRaw) {
-            hitTarget = true;
-            daysToTarget = j;
-            exitDate = String(cur.t).slice(0, 10);
-            exitPrice = targetPriceRaw;
-            barrier = "WIN";
-            break;
+            hitTarget = true; daysToTarget = j + 1; exitDate = String(cur.t).slice(0, 10);
+            exitPrice = targetPriceRaw; barrier = "WIN"; exitIdx = entryDateIdx + j; break;
           }
         }
 
-        // Track max profit/loss before exit (based on close, adjusted for exit costs)
-        var pnlClose = cur.c * exitCostFactor;
-        var pnl = (pnlClose - entryPriceAdj) / entryPriceAdj * 100;
-        if (pnl > maxProfitPct) maxProfitPct = pnl;
-        if (pnl < maxLossPct) maxLossPct = pnl;
-
-        if (j === maxHolding) {
+        if (j === maxHolding - 1) {
           exitPrice = cur.c * (1 - slip / 100) * (1 - broker / 100);
           exitDate = String(cur.t).slice(0, 10);
+          exitIdx = entryDateIdx + j;
         }
       }
 
       var finalReturn = (exitPrice - entryPriceAdj) / entryPriceAdj * 100;
-      if (exitPrice === undefined) exitPrice = entryPriceAdj;
-      // When stops are OFF, reclassify negative-return timeouts as LOSS so
-      // downstream stats (avgLossPct, losingTrades, profitFactor, barrier
-      // breakdown) reflect actual money-losing trades instead of lumping them
-      // into the neutral timeout bucket.
       if (!useStopLoss && barrier === "TIMEOUT" && finalReturn < 0) barrier = "LOSS";
 
       return {
-        symbol: score.symbol || "",
-        entryDate: entryDate,
-        exitDate: exitDate,
-        entryPrice: ROUND2(entryPrice),
-        exitPrice: ROUND2(exitPrice),
-        entryScore: ROUND2(score.entryScore),
-        signal: score.classification || classifyScore(score.entryScore),
-        targetPrice: ROUND2(targetPrice),
-        stopLossPrice: null,
-        hitTarget: hitTarget,
-        barrier: barrier,
-        daysToTarget: daysToTarget,
-        finalReturnPct: ROUND2(finalReturn),
-        maxProfitPct: ROUND2(maxProfitPct),
-        maxLossPct: ROUND2(maxLossPct),
+        symbol: score.symbol || "", entryDate: entryDate, exitDate: exitDate,
+        entryPrice: ROUND2(entryPrice), exitPrice: ROUND2(exitPrice),
+        entryScore: ROUND2(score.entryScore), signal: score.classification || classifyScore(score.entryScore),
+        targetPrice: ROUND2(targetPrice), stopLossPrice: useStopLoss ? ROUND2(stopPrice) : null,
+        hitTarget: hitTarget, barrier: barrier, daysToTarget: daysToTarget,
+        finalReturnPct: ROUND2(finalReturn), maxProfitPct: ROUND2(maxProfitPct), maxLossPct: ROUND2(maxLossPct),
         trendScore: score.trendHealth != null ? ROUND2(score.trendHealth) : null,
         pullbackScore: score.pullbackQuality != null ? ROUND2(score.pullbackQuality) : null,
         swingScore: score.swingPotential != null ? ROUND2(score.swingPotential) : null,
         breakoutContinuationScore: score.breakoutContinuation != null ? ROUND2(score.breakoutContinuation) : null,
         regimeAlignmentScore: score.regimeAlignment != null ? ROUND2(score.regimeAlignment) : null,
-        modifiers: score.modifiers != null ? ROUND2(score.modifiers) : null
+        modifiers: score.modifiers != null ? ROUND2(score.modifiers) : null,
+        exitIdx: exitIdx
       };
     }
 
@@ -709,6 +674,7 @@ window.BacktestEngine = (function () {
       opts = opts || {};
       var t = [];
       var sc = [];
+      var lastExitIdx = -1;
       var step = opts.sampleEvery || 1;
       var skip = opts.skipBars || {};
       var symbol = opts.symbol || candles._symbol || '';
@@ -720,6 +686,7 @@ window.BacktestEngine = (function () {
       for (var i = startIdx; i <= endIdx; i++) {
         if (skip[i]) { if (onBar) onBar(i - startIdx + 1, endIdx - startIdx + 1); continue; }
         if ((i - startIdx) % step !== 0) { if (onBar) onBar(i - startIdx + 1, endIdx - startIdx + 1); continue; }
+        if (i <= lastExitIdx) { if (onBar) onBar(i - startIdx + 1, endIdx - startIdx + 1); continue; }
         var r = scoreAt(candles, i, symbol);
         if (r && r.entryScore != null) {
           sc.push(r);
@@ -731,6 +698,7 @@ window.BacktestEngine = (function () {
               && (r.raw_score == null || r.raw_score >= minRaw)) {
             var trade = simulateTrade(candles, i, r, opts);
             if (!trade) continue;
+            if (trade.exitIdx != null) lastExitIdx = trade.exitIdx;
             trade.symbol = symbol;
             var c10 = conf10dAt(candles, i, symbol);
             trade.probTouch = c10 ? c10.probTouch : null;
@@ -906,6 +874,7 @@ window.BacktestEngine = (function () {
       var step = opts.sampleEvery || 1;
       var scoredBars = 0, totalBars = endIdx - startIdx + 1;
       var trades = [], scored = [], allScoredBars = [];
+      var lastExitIdx = -1;
       var minTH = opts.minTrendHealth != null ? opts.minTrendHealth : -Infinity;
       var minPQ = opts.minPullbackQuality != null ? opts.minPullbackQuality : -Infinity;
       var minSW = opts.minSwingPotential != null ? opts.minSwingPotential : -Infinity;
@@ -913,6 +882,7 @@ window.BacktestEngine = (function () {
       var minRaw = opts.minRawScore != null ? opts.minRawScore : -Infinity;
       for (var i = startIdx; i <= endIdx; i++) {
         if ((i - startIdx) % step === 0) {
+          if (i <= lastExitIdx) { if (hooks.onBar && (i - startIdx) % 25 === 0) { hooks.onBar(i - startIdx + 1, totalBars); await yieldToUI(); } continue; }
           var r = scoreAt(candles, i, symbol);
           if (r && r.entryScore != null) {
             allScoredBars.push({ idx: i, entryScore: ROUND2(r.entryScore), trendHealth: ROUND2(r.trendHealth), pullbackQuality: ROUND2(r.pullbackQuality), swingPotential: ROUND2(r.swingPotential), breakoutContinuation: ROUND2(r.breakoutContinuation), raw_score: ROUND2(r.raw_score), modifiers: ROUND2(r.modifiers) });
@@ -930,6 +900,7 @@ window.BacktestEngine = (function () {
                 && (rc.swingPotential == null || rc.swingPotential >= minSW)
                 && (rc.breakoutContinuation == null || rc.breakoutContinuation >= minBK)
                 && (rc.raw_score == null || rc.raw_score >= minRaw)) {
+              if (fwd.exitIdx != null) lastExitIdx = fwd.exitIdx;
               fwd.symbol = symbol;
               var c10 = conf10dAt(candles, i, symbol);
               fwd.probTouch = c10 ? c10.probTouch : null;

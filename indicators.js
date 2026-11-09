@@ -3320,7 +3320,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      Bumped 16→17 at the mod16 lock-in pass (2026-09-12): pillarMax
      {28,28,12,22,4}, classification {62,60,58,34} re-derived under the V16
      tempered modifiers and OOS-validated. */
-  var SCORE_CONFIG_VERSION = 35;
+  var SCORE_CONFIG_VERSION = 36;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? Math.round(SCORE_CONFIG.forwardSim.targetPct * 1000) / 10 : 4; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
@@ -3702,7 +3702,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      against the 98%-swing-high recovery definition, which graded a different
      — and, for deep pullbacks, much larger — event than the +targetPct
      being tested. */
-  var SWING_CAL = { p0: 0.65, k: 49.8 }; /* LOCKED @2026-09-12 (run R4): p0 = pooled universe single-barrier touch rate 0.65 re-derived from 5y NIFTY 200 forward outcomes; k = 50 / logit(p10-p90) over per-stock pullback rates (per-stock logit spread 1.0). */
+  var SWING_CAL = { p0: 0.57, k: 45.0 }; /* LOCKED @2026-09-12 (run R4): p0 = pooled universe single-barrier touch rate 0.65 re-derived from 5y NIFTY 200 forward outcomes; k = 50 / logit(p10-p90) over per-stock pullback rates (per-stock logit spread 1.0). */
 
   function calcSwingPotentialScore(candles, sn) {
     try {
@@ -3846,12 +3846,12 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var mu = 0;
     for (var i = 0; i < rets.length; i++) mu += rets[i];
     mu /= rets.length;
-    var muLog = mu - 0.5 * sigmaDaily * sigmaDaily;
+    var muLog = mu; // Fixed: mu is already the mean of log returns
     var b = Math.log(1 + targetPct);
     if (b <= 0) return { prob: 0.95 };
     var sdN = sigmaDaily * Math.sqrt(horizonDays);
     var muT = muLog * horizonDays;
-    var p = normCdf((b - muT) / sdN) + Math.exp(2 * muLog * b / (sigmaDaily * sigmaDaily)) * normCdf((-b - muT) / sdN);
+    var p = normCdf((muT - b) / sdN) + Math.exp(2 * muLog * b / (sigmaDaily * sigmaDaily)) * normCdf((-muT - b) / sdN);
     return { prob: Math.max(1e-6, Math.min(1 - 1e-6, p)) };
   }
 
@@ -3861,7 +3861,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      distribution (logit p10–p90 range 1.31 → k ≈ 38.1 spans the display band).
      Never hand-picked — re-run the R4 recalibration harness (c11/tx-sweep)
      whenever the target/horizon or gate definitions change. */
-  var BREAKOUT_CAL = { p0: 0.65, k: 38.1 }; /* LOCKED @2026-09-12 (run R4): shared p0 0.65; k = 50/logit(p10-p90) over per-stock breakout continuation rates (per-stock logit spread 1.31 — wider than pullback's). */
+  var BREAKOUT_CAL = { p0: 0.57, k: 35.0 }; /* LOCKED @2026-09-12 (run R4): shared p0 0.65; k = 50/logit(p10-p90) over per-stock breakout continuation rates (per-stock logit spread 1.31 — wider than pullback's). */
 
   function calcBreakoutContinuationScore(candles, sn) {
     try {
@@ -4662,40 +4662,26 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (!position || !currentData) return { signal: 'HOLD', reason: 'Missing position or data', action: 'Continue holding' };
     var ep = position.entry_price, cp = position.current_price, days = position.holding_days || 0;
     var atr = position.current_atr, es = position.entry_score, prevClose = position.prev_close;
-
     var exitResult = computeExitScore(currentData, { entry_price: ep, holding_days: days, entry_score: es }, indexCandles);
     var exitScore = exitResult && exitResult.exit_score != null ? exitResult.exit_score : 0;
-    var target = ep != null ? ep * (1 + (SCORE_CONFIG.forwardSim.targetPct != null ? SCORE_CONFIG.forwardSim.targetPct : 0.035)) : null;
+    var _hd = (SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10);
 
-    /* Layer 1: Hard Rules (target + time only — no stop loss) */
     if (ep != null && cp != null) {
-      if (target != null && cp >= target) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Target hit (+' + getTargetPctDisplay() + '%)', action: 'Full exit', exit_score: exitScore });
-      var _hd = (SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10);
-      if (days >= _hd && cp < ep * 1.015) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Time stop (' + _hd + ' days, <1.5%)', action: 'Full exit', exit_score: exitScore });
+      if (days >= _hd) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Time stop (' + _hd + ' days)', action: 'Full exit', exit_score: exitScore });
     }
-
-    /* Layer 2: Exit Score */
     if (exitResult && exitResult.exit_score != null) {
-      if (exitScore >= 85) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
       if (exitScore >= 65) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
       if (exitScore >= 50) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
-      if (exitScore >= 35) {
-        return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
-      }
+      if (exitScore >= 35) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
     }
-
-    /* Layer 3: Entry Score Collapse */
     var curEntryRes = computeEntryScore(currentData, indexCandles);
     var curEntry = curEntryRes && curEntryRes.entry_score != null ? curEntryRes.entry_score : null;
     if (days >= 5 && curEntry !== null && curEntry < 40 && es != null && es > 65) {
       return Object.assign({}, exitResult || {}, { signal: 'EXIT', reason: 'Entry score collapsed', action: 'Full exit at current price or next bar open', exit_score: exitScore });
     }
-
-    /* Layer 4: Partial Profit-Lock */
     if (ep != null && cp != null && cp >= ep * 1.02 && days >= 5 && exitScore >= 35) {
       return Object.assign({}, exitResult || {}, { signal: 'PARTIAL_EXIT', reason: 'Lock gains', action: 'Exit 50%', exit_score: exitScore });
     }
-
     return Object.assign({}, exitResult || {}, { signal: 'HOLD', reason: 'Exit score ' + exitScore + ' conditions intact', action: 'Continue holding', exit_score: exitScore });
   }
 
@@ -5460,7 +5446,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       base.components.dayDrift = round(dayDrift, 3);
       var displayScore = null, zScore = null, probTerminal = null, probTouch = null, muDaily = null, muLog = null;
       var displayScoreLog = null, displayScoreEmp = null;
-      var calP0 = 0.38, calK = 38.0;
+      var calP0 = 0.45, calK = 35.0;
       var empiricalMethod = 'lognormal';
       var empiricalSampleCount = 0;
       var requiredReturn = remainingPct / 100;
@@ -6430,6 +6416,7 @@ function computeMarketRegimeFeatures(indexCandles, atBar, precomputedSeries) {
     getDefaultScoreConfig: getDefaultScoreConfig,
     setScoreConfig: setScoreConfig,
     computeMarketRegimeFeatures: computeMarketRegimeFeatures,
+    synthWeeklyCandles: synthWeeklyCandles,
     computeExpandedFeatures: computeExpandedFeatures
   };
 })();

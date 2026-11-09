@@ -88,17 +88,24 @@ window.StoxStats = (function () {
   function baselineHitRate(candles, targetPct, holdingDays) {
     if (!candles || candles.length < holdingDays + 2) return null;
     var hits = 0, total = 0;
-    for (var i = 0; i < candles.length - holdingDays; i++) {
-      var c0 = candles[i];
-      if (!c0 || c0.c == null || !(c0.c > 0)) continue;
-      var target = c0.c * (1 + targetPct / 100), maxFwd = -Infinity, valid = false;
-      for (var k = i + 1; k <= i + holdingDays && k < candles.length; k++) {
+    var slip = 0.1, broker = 0.05;
+    var exitCostFactor = (1 - slip / 100) * (1 - broker / 100);
+    var costAdjTarget = (1 + slip / 100) * (1 + broker / 100) * (1 + targetPct / 100) / exitCostFactor;
+
+    for (var i = 0; i < candles.length - holdingDays - 1; i++) {
+      var entryBar = candles[i + 1];
+      if (!entryBar || entryBar.o == null || !(entryBar.o > 0)) continue;
+      var entryPriceAdj = entryBar.o * (1 + slip / 100) * (1 + broker / 100);
+      var targetPrice = entryPriceAdj * costAdjTarget;
+      
+      var maxFwd = -Infinity, valid = false;
+      for (var k = i + 1; k <= i + holdingDays + 1 && k < candles.length; k++) {
         var ch = candles[k]; if (!ch) continue;
         if (ch.h != null && isFinite(ch.h) && ch.h > 0) { valid = true; if (ch.h > maxFwd) maxFwd = ch.h; }
         else if (ch.c != null && isFinite(ch.c) && ch.c > 0) { valid = true; if (ch.c > maxFwd) maxFwd = ch.c; }
       }
       if (!valid || maxFwd === -Infinity) continue;
-      if (maxFwd >= target) hits++;
+      if (maxFwd >= targetPrice) hits++;
       total++;
     }
     return total > 0 ? hits / total : null;
