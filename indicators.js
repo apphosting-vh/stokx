@@ -3248,9 +3248,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       mtfAlignBonus: 2,
       mtfAlignThreshold: 72,
       mtfAlignFloor: 60,
-      highVolATRPercentile: 80,
-      highVolERThreshold: 0.5,
-      highVolBonus: 2,
+      highVolATRPercentile: 999,
+      highVolERThreshold: 999,
+      highVolBonus: 0,
       /* v21: Sector Outlier modifier — rewards stocks beating their sector
          index over the trailing 20 sessions, penalises laggards. Only
          index-based sectors qualify (BANK, IT, PHARMA, AUTO, FMCG,
@@ -3336,33 +3336,24 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (window.TechIndicators) window.TechIndicators._scoreConfigClassification = null;
   }
 
-  function calcRangeAdequacyScore(candles) {
-    if (!candles || candles.length < 20) return 0;
-    var trs = [];
-    for (var i = candles.length - 20; i < candles.length; i++) {
-      var pc = candles[i-1].c;
-      var tr = Math.max(candles[i].h - candles[i].l, Math.abs(candles[i].h - pc), Math.abs(candles[i].l - pc));
-      trs.push(tr);
-    }
-    // Winsorize: strip top 10% and bottom 10% (2 days each) to keep scale intact but ignore extreme gaps
-    trs.sort(function(a, b) { return a - b; });
-    var sum = 0, count = 0;
-    for (var i = 2; i < trs.length - 2; i++) { sum += trs[i]; count++; }
-    var smoothTR = count > 0 ? sum / count : trs[10];
-    var atrPct = (smoothTR / candles[candles.length - 1].c) * 100;
-    
+  function calcRangeAdequacyScore(sn) {
+    if (!sn || sn.atr14 == null || sn.c == null || sn.c <= 0) return 0;
+    var atrPct = (sn.atr14 / sn.c) * 100;
     var cfg = SCORE_CONFIG.rangeAdequacy.curve;
     var maxPts = SCORE_CONFIG.pillarMax.rangeAdequacy;
     
-    var ramp = 1 / (1 + Math.exp(-(atrPct - 1.5) * 2.5));
-    var decay = atrPct > 4.5 ? Math.exp(-Math.pow((atrPct - 4.5) / 1.5, 2)) : 1.0;
+    // Find exact mathematical peak to ensure normalization is perfect
+    var maxVal = 0;
+    for (var a = 1.0; a <= 10.0; a += 0.01) {
+      var r = 1 / (1 + Math.exp(-(a - 1.0) * 2.0));
+      var d = a > 3.5 ? Math.exp(-Math.pow((a - 3.5) / 1.5, 2)) : 1.0;
+      if (r * d > maxVal) maxVal = r * d;
+    }
     
-    // Normalization: Find the theoretical peak so max score is exact
-    var maxRamp = 1 / (1 + Math.exp(-(3.5 - 1.5) * 2.5)); // ramp at 3.5%
-    var maxDecay = 1.0; // decay is 1.0 at 3.5%
-    var peakMultiplier = maxRamp * maxDecay;
+    var ramp = 1 / (1 + Math.exp(-(atrPct - 1.0) * 2.0));
+    var decay = atrPct > 3.5 ? Math.exp(-Math.pow((atrPct - 3.5) / 1.5, 2)) : 1.0;
     
-    return round(maxPts * (ramp * decay) / peakMultiplier, 1);
+    return round(maxPts * ((ramp * decay) / maxVal), 1);
   }
 
   function calcConfidencePillarScore(hourlyCandles, dailyCandles, indexCandles) {
@@ -3375,24 +3366,34 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       
       var p_emp = conf.confidenceEmpirical != null ? conf.confidenceEmpirical / 100 : null;
       
-      // Prior is fixed at 48% (unconditional baseline), not the lognormal output
-      var p_prior = 0.48; 
-      var k = 100; // Cross-validation ideal is ~100 independent samples
+      // Steeper ATR prior aligned with barrier math: ~42% at 1.5% ATR, ~70% at 4% ATR
+      var atr = TechIndicators.atr(dailyCandles, 14);
+      var atrPct = atr && atr.length ? (atr[atr.length-1] / dailyCandles[dailyCandles.length-1].c) * 100 : 3.0;
+      var p_prior = 0.35 + 0.35 / (1 + Math.exp(-(atrPct - 2.5) * 1.5));
       
+      var k = 100; // Restored to 100 to fix noise
       var rawN = conf.components && conf.components.empiricalSampleCount ? conf.components.empiricalSampleCount : 0;
-      var n_eff = Math.floor(rawN / 10); // Overlap factor: 10-day windows step by 1
+      var n_eff = Math.floor(rawN / 10);
       
       var p_shrunk = p_prior;
       if (p_emp != null && n_eff > 0) {
         p_shrunk = (n_eff * p_emp + k * p_prior) / (n_eff + k);
       }
       
-      // Anchor: 52% = 0 pts, 72% = max pts
-      var minP = 0.52; var maxP = 0.72;
-      if (p_shrunk <= minP) return 0;
-      if (p_shrunk >= maxP) return max;
-      return round(((p_shrunk - minP) / (maxP - minP)) * max, 1);
-    } catch (e) { return 0; }
+      // Score = Excess over ATR baseline (0 to 15 percentage points excess = 0 to 25 pts)
+      var excess = p_shrunk - p_prior;
+      var score = 0;
+      if (excess > 0) {
+        score = Math.min(1, excess / 0.15) * max;
+      }
+      
+      // Hard Gate: Return a flag if absolute probability is below break-even (55%)
+      return {
+        score: round(score, 1),
+        p_shrunk: p_shrunk,
+        belowBreakEven: p_shrunk < 0.55
+      };
+    } catch (e) { return { score: 0, belowBreakEven: false }; }
   }
 
   /* Pillar 1: Trend Health (max 28).
@@ -3929,9 +3930,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       items.push({ reason: "MTF alignment (" + Math.round(opts.mtfAlignFactor * 100) + "%)", amount: mtfAmt });
     }
 
-    if (atrPercentile != null && atrPercentile >= mc.highVolATRPercentile && sn && sn.efficiencyRatio10 != null && sn.efficiencyRatio10 > mc.highVolERThreshold) {
-      items.push({ reason: "High momentum in high-vol regime", amount: mc.highVolBonus });
-    }
+    // Reviewer Fix: High Vol bonus removed (triple-counting volatility).
     if (sn && sn.crossSectionalRank != null && sn.crossSectionalRank < 20) { items.push({ reason: "Bottom 20% Cross-Sectional Momentum", amount: -10 }); }
     
     // Institutional Confluence Bonuses
@@ -4011,7 +4010,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
     var volRegime = calcVolRegime(sn, candles);
     var rangeAdequacy = calcRangeAdequacyScore(candles);
-    var confidencePillar = calcConfidencePillarScore(hourlyCandles, candles, indexCandles);
+    var confResult = calcConfidencePillarScore(hourlyCandles, candles, indexCandles);
+    var confidencePillar = confResult.score;
     var trendHealth = calcTrendHealthScore(sn);
     var pullbackQuality = calcPullbackScore(sn, volRegime, candles);
     var swingPotential = calcSwingPotentialScore(candles, sn);
@@ -4055,8 +4055,14 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     }
 
     var baseScore = round(rawTotal, 1);
+    var baseScore = round(rawTotal, 1);
+    var finalScore = Math.max(0, Math.min(100, baseScore + modifiers));
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
+    // Confidence Hard Gate
+    if (confResult && confResult.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
+        cls = classifyScore(55); 
+    }
 
     return {
       entry_score: round(finalScore, 1),
@@ -4141,11 +4147,12 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var _dailySnForRange = (perTF.D && perTF.D.sn) || (perTF.W && perTF.W.sn) || (perTF.H && perTF.H.sn) || null;
     var _dCandles = dTF && dTF.candles ? dTF.candles : (wTF ? wTF.candles : (hTF ? hTF.candles : null));
     var rangeAdequacyMTF = _dCandles ? calcRangeAdequacyScore(_dCandles) : 0;
-    var confidencePillarMTF = calcConfidencePillarScore(
+    var confResultMTF = calcConfidencePillarScore(
       hTF ? hTF.candles : null,
       dTF ? dTF.candles : (tfResults[0] ? tfResults[0].candles : null),
       indexCandles
     );
+    var confidencePillarMTF = confResultMTF.score;
     var rawTotal = rangeAdequacyMTF + confidencePillarMTF + agg.trendHealth + agg.pullbackQuality + agg.swingPotential + agg.breakoutContinuation + agg.regimeAlignment;
     /* v23: normalize to 100-scale when hourly is unavailable. */
     if (!hTF || !hTF.candles || hTF.candles.length < 60) {
@@ -4221,8 +4228,14 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     }
 
     var baseScore = round(rawTotal, 1);
+    var baseScore = round(rawTotal, 1);
+    var finalScore = Math.max(0, Math.min(100, baseScore + modifiers));
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
+    // Confidence Hard Gate
+    if (confResult && confResult.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
+        cls = classifyScore(55); 
+    }
 
     var tfDetails = [];
     ['D', 'H', 'W'].forEach(function (label) {
@@ -4329,8 +4342,14 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
     /* ── classification ── */
     var baseScore = round(rawTotal, 1);
+    var baseScore = round(rawTotal, 1);
+    var finalScore = Math.max(0, Math.min(100, baseScore + modifiers));
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
+    // Confidence Hard Gate
+    if (confResult && confResult.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
+        cls = classifyScore(55); 
+    }
 
     return {
       entry_score: round(finalScore, 1),
@@ -4474,8 +4493,14 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (guard.todaySpike) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
 
     var baseScore = round(rawTotal, 1);
+    var baseScore = round(rawTotal, 1);
+    var finalScore = Math.max(0, Math.min(100, baseScore + modifiers));
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
+    // Confidence Hard Gate
+    if (confResult && confResult.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
+        cls = classifyScore(55); 
+    }
 
     /* ── per-TF detail rows for the UI / compat shim ── */
     var tfDetails = [];
