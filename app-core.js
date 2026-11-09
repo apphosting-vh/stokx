@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-window.__STOX_APP_VERSION = "7.0.2";
+window.__STOX_APP_VERSION = "7.0.3";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -12462,9 +12462,27 @@ function slClean(arr) {
 async function slFetchDaily(DF, sym) {
   try {
     var r = await DF.fetchOHLCVCached(sym, "daily");
-    if (r && r.data && r.data.length) return slClean(r.data);
-    var dr = await DF.fetchOHLCV(sym, "daily");   // bypass a memoised failure
-    if (dr && dr.candles && dr.candles.length) return slClean(dr.candles);
+    var raw = (r && r.data && r.data.length) ? r.data : null;
+    if (!raw) {
+      var dr = await DF.fetchOHLCV(sym, "daily");
+      raw = (dr && dr.candles && dr.candles.length) ? dr.candles : null;
+    }
+    if (!raw) return null;
+    var clean = slClean(raw);
+    // v25: Override today's candle with live quote to fix API lag
+    var todayStr = (new Date(Date.now() + 19800000)).toISOString().split("T")[0];
+    var lastC = clean[clean.length - 1];
+    if (lastC && lastC.d === todayStr) {
+      try {
+        var q = await DF.fetchQuoteCached(sym);
+        if (q && q.price) {
+          lastC.c = q.price;
+          if (q.dayHigh && q.dayHigh > lastC.h) lastC.h = q.dayHigh;
+          if (q.dayLow && q.dayLow < lastC.l) lastC.l = q.dayLow;
+        }
+      } catch (e) {}
+    }
+    return clean;
   } catch (e) {}
   return null;
 }
@@ -12531,6 +12549,20 @@ async function slLoadSector(sec) {
   }
   var benchRaw = null;
   try { benchRaw = await window.SectorRRG.fetchSectorCandles(sec); } catch (e) { benchRaw = null; }
+  if (benchRaw && !sec.basket && sec.yahoo) {
+    var bToday = (new Date(Date.now() + 19800000)).toISOString().split("T")[0];
+    var bLast = benchRaw[benchRaw.length - 1];
+    if (bLast && String(bLast.t || "").slice(0, 10) === bToday) {
+      try {
+        var bq = await window.OHLCVFetcher.fetchQuoteCached(sec.yahoo);
+        if (bq && bq.price) {
+          bLast.c = bq.price;
+          if (bq.dayHigh && bq.dayHigh > bLast.h) bLast.h = bq.dayHigh;
+          if (bq.dayLow && bq.dayLow < bLast.l) bLast.l = bq.dayLow;
+        }
+      } catch(e) {}
+    }
+  }
   var bench = benchRaw ? slClean(benchRaw) : null;
   if (!bench || bench.length < 40) {
     throw new Error("Could not load the " + sec.name + " " + (sec.basket ? "basket" : "index") + " data");
