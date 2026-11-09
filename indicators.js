@@ -202,20 +202,25 @@ window.TechIndicators = (function () {
   }
 
   function calcMansfieldRS(c, idx_c, n) {
-    n = n || 52;
-    if (!c || !idx_c || c.length < n || idx_c.length < n) return null;
-    var cl = closes(c), ix = closes(idx_c);
-    var len = Math.min(cl.length, ix.length);
-    var rsArr = [];
-    for (var i = 0; i < len; i++) {
-      if (cl[i] != null && ix[i] != null && ix[i] > 0) {
-        rsArr.push(cl[i] / ix[i] * 100);
-      } else {
-        rsArr.push(null);
-      }
+    n = n || 252;
+    if (!c || !idx_c || c.length < 50 || idx_c.length < 50) return null;
+    
+    // Date-aligned mapping
+    var idxMap = {};
+    for (var i = 0; i < idx_c.length; i++) {
+      var d = String(idx_c[i].t).slice(0, 10);
+      if (idx_c[i].c > 0) idxMap[d] = idx_c[i].c;
     }
+    var rsArr = [];
+    for (var i = 0; i < c.length; i++) {
+      var d = String(c[i].t).slice(0, 10);
+      var ic = idxMap[d];
+      if (ic > 0 && c[i].c > 0) rsArr.push(c[i].c / ic * 100);
+      else rsArr.push(null);
+    }
+    
     var out = [];
-    for (var i = 0; i < len; i++) {
+    for (var i = 0; i < rsArr.length; i++) {
       if (rsArr[i] === null || i < n - 1) { out.push(null); continue; }
       var sum = 0, cnt = 0;
       for (var j = i - n + 1; j <= i; j++) {
@@ -223,7 +228,7 @@ window.TechIndicators = (function () {
       }
       if (cnt > 0) {
         var avg = sum / cnt;
-        out.push(avg > 0 ? round((rsArr[i] / avg - 1) * 100, 2) : null);
+        out.push(avg > 0 ? round((rsArr[i] / avg - 1) * 100, 2) : 0);
       } else {
         out.push(null);
       }
@@ -3924,22 +3929,22 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     }
 
     // Reviewer Fix: High Vol bonus removed (triple-counting volatility).
-    if (sn && sn.crossSectionalRank != null && sn.crossSectionalRank < 20) { items.push({ reason: "Bottom 20% Cross-Sectional Momentum", amount: -10 }); }
+    if (sn && sn.crossSectionalRank != null && sn.crossSectionalRank < 20) { items.push({ reason: "Bottom 20% Cross-Sectional Momentum", amount: -2 }); }
     
     // Institutional Confluence Bonuses
     if (sn && sn.crossSectionalRank != null && sn.crossSectionalRank > 90 && sn.amihud != null && sn.amihud < 0.05) {
-      items.push({ reason: "Institutional Tailwind (Top 10% Momentum + High Liquidity)", amount: 5 });
+      items.push({ reason: "Institutional Tailwind", amount: 1 });
     }
     if (sn && sn.ouHalfLife != null && sn.ouHalfLife >= 3 && sn.ouHalfLife <= 8 && sn.pullbackDepth != null && sn.pullbackDepth > 0.04) {
-      items.push({ reason: "Precision Mean Reversion (OU Half-Life 3-8d in Pullback)", amount: 5 });
+      items.push({ reason: "Precision Mean Reversion", amount: 1 });
     }
-    if (sn && sn.daysSinceHigh != null && sn.daysSinceHigh <= 1 && sn.vpin != null && sn.vpin > 0.4 && sn.breakoutContinuation != null && sn.breakoutContinuation > 0) {
-      items.push({ reason: "Fresh Ignition (New Breakout + Rising VPIN)", amount: 3 });
+    if (sn && sn.daysSinceHigh != null && sn.daysSinceHigh <= 1 && sn.vpin != null && sn.vpin > 0.4) {
+      items.push({ reason: "Fresh Ignition (New High + Rising VPIN)", amount: 1 });
     }
-    if (sn && sn.amihud != null && sn.amihud > 0.5) { items.push({ reason: "High illiquidity risk (Amihud)", amount: -5 }); }
-    if (sn && sn.ouHalfLife != null && sn.ouHalfLife > 13) { items.push({ reason: "Slow mean-reversion (Half-Life > 13d)", amount: -5 }); }
-    if (sn && sn.vpin != null && sn.vpin > 0.6) { items.push({ reason: "High toxic order flow (VPIN)", amount: -5 }); }
-    if (sn && sn.daysSinceHigh != null && sn.daysSinceHigh > 3 && sn.c > sn.sma20) { items.push({ reason: "Stale breakout (Day " + sn.daysSinceHigh + ")", amount: -3 }); }
+    if (sn && sn.amihud != null && sn.amihud > 0.5) { items.push({ reason: "High illiquidity risk", amount: -1 }); }
+    if (sn && sn.ouHalfLife != null && sn.ouHalfLife > 13) { items.push({ reason: "Slow mean-reversion", amount: -1 }); }
+    if (sn && sn.vpin != null && sn.vpin > 0.6) { items.push({ reason: "High toxic order flow", amount: -1 }); }
+    if (sn && sn.daysSinceHigh != null && sn.daysSinceHigh > 3 && sn.c > sn.sma20) { items.push({ reason: "Stale breakout (Day " + sn.daysSinceHigh + ")", amount: -1 }); }
 
     /* v21 — Sector Outlier modifier. Stock's 20-day return minus its
        sector index's 20-day return. Only index-based sectors (basket
@@ -4004,7 +4009,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var volRegime = calcVolRegime(sn, candles);
     var rangeAdequacy = calcRangeAdequacyScore(sn);
     var confResult = calcConfidencePillarScore(hourlyCandles, candles, indexCandles);
-    var confidencePillar = confResult.score;
+    var confidencePillar = (confResult && typeof confResult === "object") ? (confResult.score || 0) : 0;
     var trendHealth = calcTrendHealthScore(sn);
     var pullbackQuality = calcPullbackScore(sn, volRegime, candles);
     var swingPotential = calcSwingPotentialScore(candles, sn);
@@ -4052,7 +4057,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     // finalScore was already calculated and gated (spike, index) above
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
-    if (confResult && confResult.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
+    if (confResultMTF && confResultMTF.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
         cls = classifyScore(55); 
     }
 
@@ -4143,7 +4148,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       dTF ? dTF.candles : (tfResults[0] ? tfResults[0].candles : null),
       indexCandles
     );
-    var confidencePillarMTF = confResultMTF.score;
+    var confidencePillarMTF = (confResultMTF && typeof confResultMTF === "object") ? (confResultMTF.score || 0) : 0;
     var rawTotal = rangeAdequacyMTF + confidencePillarMTF + agg.trendHealth + agg.pullbackQuality + agg.swingPotential + agg.breakoutContinuation + agg.regimeAlignment;
     /* v23: normalize to 100-scale when hourly is unavailable. */
     if (!hTF || !hTF.candles || hTF.candles.length < 60) {
@@ -4224,7 +4229,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
     // Confidence Hard Gate
-    if (confResult && confResult.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
+    if (confResultMTF && confResultMTF.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
         cls = classifyScore(55); 
     }
 
@@ -4339,7 +4344,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
     // Confidence Hard Gate
-    if (confResult && confResult.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
+    if (confResultMTF && confResultMTF.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
         cls = classifyScore(55); 
     }
 
@@ -4490,7 +4495,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
     // Confidence Hard Gate
-    if (confResult && confResult.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
+    if (confResultMTF && confResultMTF.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
         cls = classifyScore(55); 
     }
 

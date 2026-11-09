@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-window.__STOX_APP_VERSION = "7.5.0";
+window.__STOX_APP_VERSION = "7.6.0";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -6801,9 +6801,11 @@ function _btEvalOne(TI, d1, h1, w1, idxD, i) {
 
 function _btSummarize(rows) {
   var entryBuckets = [
-    { label: "70\u2013100", lo: 70, hi: 101, n: 0, s5: 0, s10: 0, s20: 0, s5n: 0, s20n: 0, touch: 0, close: 0, loss: 0, sScore: 0 },
-    { label: "50\u201369", lo: 50, hi: 70, n: 0, s5: 0, s10: 0, s20: 0, s5n: 0, s20n: 0, touch: 0, close: 0, loss: 0, sScore: 0 },
-    { label: "0\u201349", lo: 0, hi: 50, n: 0, s5: 0, s10: 0, s20: 0, s5n: 0, s20n: 0, touch: 0, close: 0, loss: 0, sScore: 0 }
+    { label: "85\u2013100", lo: 85, hi: 101, n: 0, s5: 0, s10: 0, s20: 0, s5n: 0, s20n: 0, touch: 0, close: 0, loss: 0, sScore: 0 },
+    { label: "72\u201384", lo: 72, hi: 85, n: 0, s5: 0, s10: 0, s20: 0, s5n: 0, s20n: 0, touch: 0, close: 0, loss: 0, sScore: 0 },
+    { label: "55\u201371", lo: 55, hi: 72, n: 0, s5: 0, s10: 0, s20: 0, s5n: 0, s20n: 0, touch: 0, close: 0, loss: 0, sScore: 0 },
+    { label: "40\u201354", lo: 40, hi: 55, n: 0, s5: 0, s10: 0, s20: 0, s5n: 0, s20n: 0, touch: 0, close: 0, loss: 0, sScore: 0 },
+    { label: "0\u201339", lo: 0, hi: 40, n: 0, s5: 0, s10: 0, s20: 0, s5n: 0, s20n: 0, touch: 0, close: 0, loss: 0, sScore: 0 }
   ];
   var confBuckets = [
     { label: "70\u2013100", lo: 70, hi: 101, n: 0, touch: 0, close: 0, sConf: 0 },
