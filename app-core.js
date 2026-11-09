@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-window.__STOX_APP_VERSION = "7.9.1";
+window.__STOX_APP_VERSION = "7.10.0";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -6751,7 +6751,7 @@ function _btPearson(xs, ys) {
   return denom === 0 ? null : (n * sxy - sx * sy) / denom;
 }
 
-function _btEvalOne(TI, d1, h1, w1, idxD, i) {
+function _btEvalOne(TI, d1, h1, w1, idxD, i, symbol) {
   var D = _btDateStr(d1[i]);
   var entry = d1[i].c;
   var daySlice = _btDailyUpTo(d1, D, 520);
@@ -6923,7 +6923,7 @@ async function _btRun(bundle, daysBack, onProgress, onDone, onErr, isCancelled) 
     for (var c = 0; c < idx.length; c += CHUNK) {
       if (isCancelled && isCancelled()) { onErr("Backtest cancelled \u2014 partial results discarded."); return; }
       var chunkEnd = Math.min(c + CHUNK, idx.length);
-      for (var k = c; k < chunkEnd; k++) rows.push(_btEvalOne(TI, d1, h1, w1, idxD, idx[k]));
+      for (var k = c; k < chunkEnd; k++) rows.push(_btEvalOne(TI, d1, h1, w1, idxD, idx[k], bundle.ticker));
       if (onProgress) onProgress(Math.min(c + CHUNK, idx.length), idx.length);
       if (c + CHUNK < idx.length) await new Promise(function (res) { setTimeout(res, 0); });
     }
@@ -9347,7 +9347,8 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles, ind
     var _sc = (TI.getScoreConfig && TI.getScoreConfig()) || {};
     var _pm = __pm();
     var _modCfg = _sc.modifiers || {};
-    var _modMax = (_modCfg.mtfAlignBonus || 6) + (_modCfg.highVolBonus || 5);
+    var _modMax = ((_modCfg.mtfAlignBonus != null && isFinite(_modCfg.mtfAlignBonus)) ? Number(_modCfg.mtfAlignBonus) : 6)
+                + ((_modCfg.highVolBonus != null && isFinite(_modCfg.highVolBonus)) ? Number(_modCfg.highVolBonus) : 5);
     var out = {
     finalScore: multi.multiTF_score,
     decision: toDec(multi.classification),

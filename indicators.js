@@ -610,7 +610,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
   }
 
   function calcMACD(candles, fast, slow, signal) {
-    fast = fast || 12; slow = slow || 26; signal = signal || 9;
+    fast = fast || 12; slow = slow || 26;
+    signal = (signal != null && signal > 0) ? signal : 9;
     var cl = closes(candles);
     var emaFast = ema(cl, fast), emaSlow = ema(cl, slow);
     var macdLine = [];
@@ -2157,12 +2158,17 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     }
     var smRes = calcSqueezeMomentum(candles);
     var squeezeOn = null, squeezeOnPrev = null, squeezeMomVal = null, squeezeMomPrev = null;
+    // Walk *below the last non-null index* to find the previous value. The
+    // old "length-2" start re-found the same value whenever the newest bar
+    // was null (squeezeOnPrev would equal squeezeOn).
     var sqArr = smRes.squeeze;
-    for (var i = sqArr.length - 1; i >= 0; i--) { if (sqArr[i] !== null) { squeezeOn = sqArr[i]; break; } }
-    for (var i = sqArr.length - 2; i >= 0; i--) { if (sqArr[i] !== null) { squeezeOnPrev = sqArr[i]; break; } }
+    var _sqLastIdx = -1;
+    for (var i = sqArr.length - 1; i >= 0; i--) { if (sqArr[i] !== null) { squeezeOn = sqArr[i]; _sqLastIdx = i; break; } }
+    for (var i = _sqLastIdx - 1; i >= 0; i--) { if (sqArr[i] !== null) { squeezeOnPrev = sqArr[i]; break; } }
     var sqMomArr = smRes.values;
-    for (var i = sqMomArr.length - 1; i >= 0; i--) { if (sqMomArr[i] !== null) { squeezeMomVal = sqMomArr[i]; break; } }
-    for (var i = sqMomArr.length - 2; i >= 0; i--) { if (sqMomArr[i] !== null) { squeezeMomPrev = sqMomArr[i]; break; } }
+    var _sqmLastIdx = -1;
+    for (var i = sqMomArr.length - 1; i >= 0; i--) { if (sqMomArr[i] !== null) { squeezeMomVal = sqMomArr[i]; _sqmLastIdx = i; break; } }
+    for (var i = _sqmLastIdx - 1; i >= 0; i--) { if (sqMomArr[i] !== null) { squeezeMomPrev = sqMomArr[i]; break; } }
     var accumDist = calcAccumDistComposite(candles);
     var accumDistLabel = null;
     if (accumDist) { for (var i = accumDist.length - 1; i >= 0; i--) { if (accumDist[i] !== null) { accumDistLabel = accumDist[i]; break; } } }
@@ -2873,13 +2879,15 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
           else break;
         }
       }
-      var ret1M = (L > 22 && cl[L1 - 21] > 0) ? (c - cl[L1 - 21]) / cl[L1 - 21] : null;
-      var ret3M = (L > 64 && cl[L1 - 63] > 0) ? (c - cl[L1 - 63]) / cl[L1 - 63] : null;
-      var ret6M = (L > 127 && cl[L1 - 126] > 0) ? (c - cl[L1 - 126]) / cl[L1 - 126] : null;
-      var ret1Y = (L > 253 && cl[L1 - 252] > 0) ? (c - cl[L1 - 252]) / cl[L1 - 252] : null;
-      var roc5 = (L > 6 && cl[L1 - 5] > 0) ? (c - cl[L1 - 5]) / cl[L1 - 5] : null;
-      var roc10 = (L > 11 && cl[L1 - 10] > 0) ? (c - cl[L1 - 10]) / cl[L1 - 10] : null;
-      var roc20 = (L > 21 && cl[L1 - 20] > 0) ? (c - cl[L1 - 20]) / cl[L1 - 20] : null;
+      // cl[L1 - k] = cl[L - 1 - k], so the guard only needs L >= k+1.
+      // Each "L > k+1" excluded exactly the shortest viable window by one bar.
+      var ret1M = (L >= 22 && cl[L1 - 21] > 0) ? (c - cl[L1 - 21]) / cl[L1 - 21] : null;
+      var ret3M = (L >= 64 && cl[L1 - 63] > 0) ? (c - cl[L1 - 63]) / cl[L1 - 63] : null;
+      var ret6M = (L >= 127 && cl[L1 - 126] > 0) ? (c - cl[L1 - 126]) / cl[L1 - 126] : null;
+      var ret1Y = (L >= 253 && cl[L1 - 252] > 0) ? (c - cl[L1 - 252]) / cl[L1 - 252] : null;
+      var roc5 = (L >= 6 && cl[L1 - 5] > 0) ? (c - cl[L1 - 5]) / cl[L1 - 5] : null;
+      var roc10 = (L >= 11 && cl[L1 - 10] > 0) ? (c - cl[L1 - 10]) / cl[L1 - 10] : null;
+      var roc20 = (L >= 21 && cl[L1 - 20] > 0) ? (c - cl[L1 - 20]) / cl[L1 - 20] : null;
 
       var swingHigh20 = null, swingHigh20Idx = null;
       for (var j = Math.max(0, L - 20); j < L; j++) { if (hi[j] != null && (swingHigh20 === null || hi[j] > swingHigh20)) { swingHigh20 = hi[j]; swingHigh20Idx = j; } }
@@ -2962,7 +2970,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var atrVals = [];
     for (var i = period; i < cl.length; i++) {
       var tr = Math.max(hi[i] - lo[i], Math.abs(hi[i] - cl[i - 1]), Math.abs(lo[i] - cl[i - 1]));
-      atrVals.push(tr);
+      // Normalize to ATR% of close so a stock whose price has doubled doesn't
+      // read as "high volatility" purely from the rupee ATR doubling.
+      atrVals.push(cl[i] > 0 ? tr / cl[i] : 0);
     }
     if (atrVals.length < 20) return null;
     /* Use SMA of ATR values over recent window */
@@ -2993,7 +3003,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      without editing source code. Updated via setScoreConfig().
 
      ════════════════════════════════════════════════════════════════════
-     VERSION 17 — LOCKED 2026-09-12  (mod16 pass: tempered modifiers + OOS)
+     VERSION 37 — LOCKED 2026-11-09  (bug-fix pass: see stox-patch.js)
      ────────────────────────────────────────────────────────────────────
      Combo locked in:  +3.5% / 15 sessions / no stop loss — NIFTY 200, 5y
      daily cache, production multi-TF entry score (W→D frames; weekly
@@ -3320,7 +3330,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      Bumped 16→17 at the mod16 lock-in pass (2026-09-12): pillarMax
      {28,28,12,22,4}, classification {62,60,58,34} re-derived under the V16
      tempered modifiers and OOS-validated. */
-  var SCORE_CONFIG_VERSION = 36;
+  var SCORE_CONFIG_VERSION = 37;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? Math.round(SCORE_CONFIG.forwardSim.targetPct * 1000) / 10 : 4; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
@@ -3346,11 +3356,18 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var atrPct = (sn.atr14 / sn.c) * 100;
     var maxPts = SCORE_CONFIG.pillarMax.rangeAdequacy;
     
-    var ramp = 1 / (1 + Math.exp(-(atrPct - 2.0) * 2.0));
-    var decay = atrPct > 4.0 ? Math.exp(-Math.pow((atrPct - 4.0) / 2.0, 2)) : 1.0;
-    
-    var maxVal = 0.982; // peak is at 4.0%
-    return round(maxPts * ((ramp * decay) / maxVal), 1);
+    // Honour SCORE_CONFIG.rangeAdequacy.curve. The old hardcoded peak=4%,
+    // sigma=2 ignored the config entirely, so tuning the curve in the Score
+    // Config UI silently did nothing.
+    var _curve = (SCORE_CONFIG.rangeAdequacy && SCORE_CONFIG.rangeAdequacy.curve) || {};
+    var _peak = (_curve.peakAtr != null && isFinite(_curve.peakAtr)) ? Number(_curve.peakAtr) : 3.5;
+    var _lo   = (_curve.minAtr  != null && isFinite(_curve.minAtr))  ? Number(_curve.minAtr)  : 1.0;
+    var _hi   = (_curve.maxAtr  != null && isFinite(_curve.maxAtr))  ? Number(_curve.maxAtr)  : 9.0;
+    var _sigma = Math.max(0.5, (_hi - _lo) / 5);
+    var ramp  = 1 / (1 + Math.exp(-(atrPct - _lo) * 2.0));
+    var decay = atrPct > _peak ? Math.exp(-Math.pow((atrPct - _peak) / _sigma, 2)) : 1.0;
+    var peakRamp = 1 / (1 + Math.exp(-(_peak - _lo) * 2.0));
+    return round(maxPts * ((ramp * decay) / Math.max(0.01, peakRamp)), 1);
   }
 
   function calcConfidencePillarScore(hourlyCandles, dailyCandles, indexCandles) {
@@ -3358,7 +3375,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (!hourlyCandles || hourlyCandles.length < 60) return fallback;
     if (!dailyCandles || dailyCandles.length < 30) return fallback;
     try {
-      var max = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence) || 25;
+      var max = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence != null)
+        ? Number(SCORE_CONFIG.pillarMax.confidence) : 25;
       var conf = window.TechIndicators.computeTenDayForwardConfidence(hourlyCandles, dailyCandles, indexCandles, null);
       if (!conf) return fallback;
       
@@ -3483,7 +3501,10 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       var mtfPts = cfg.mtfConsistency != null ? cfg.mtfConsistency : 10;
       if (sn.ret1M != null && sn.ret3M != null && sn.ret6M != null) {
         var allPos = sn.ret1M > 0 && sn.ret3M > 0 && sn.ret6M > 0;
-        var has1Y = sn.ret1Y == null || sn.ret1Y > 0;
+        // Full consistency credit requires an actual positive 1Y return.
+        // Previously null 1Y (listed < 1y) scored the full tier while a
+        // genuinely flat year did not - i.e. missing data was rewarded.
+        var has1Y = sn.ret1Y != null && sn.ret1Y > 0;
         var consistent = sn.ret1M >= sn.ret6M * 0.25;
         if (allPos && has1Y && consistent) score += mtfPts;
         else if (allPos) score += mtfPts * 0.6;
@@ -3529,11 +3550,11 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
   function calcPullbackScore(sn, volRegime, candles) {
     var c = SCORE_CONFIG.pullbackQuality;
-    /* Shared structure gate: is the stock in a mean-reversion pullback right
-       now (retraced 0.04-0.25 from its 20d high)? If yes → pullback path only.
-       If no → price is at/near highs, so the breakout path is the alternative
-       that gets considered instead. */
-    var inPullback = sn.pullbackDepth != null && sn.pullbackDepth >= 0.04 && sn.pullbackDepth <= 0.25;
+    /* Delegate to the same gate used by detectBreakoutState. The old inline
+       depth-only check omitted the 2..15 bars-since-high window and could
+       score a bar as BOTH "in pullback" and "fresh breakout" in edge cases. */
+    var _pbGate = detectPullbackState(sn);
+    var inPullback = !!(_pbGate && _pbGate.inPullback);
     var s = 0;
     if (sn.c != null && sn.buyRef != null && sn.buyRef > 0 && sn.atr14 != null && sn.atr14 > 0) {
       var distATR = (sn.c - sn.buyRef) / sn.atr14;
@@ -4014,10 +4035,14 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var breakoutContinuation = calcBreakoutContinuationScore(candles, sn);
     var regimeAlignment = calcMarketRsAlignmentScore(sn, candles, indexCandles);
     var rawTotal = rangeAdequacy + confidencePillar + trendHealth + pullbackQuality + swingPotential + breakoutContinuation + regimeAlignment;
-    /* v23: normalize to 100-scale when confidence pillar is unavailable (no hourly). */
-    if (!hourlyCandles || hourlyCandles.length < 60) {
-      var _confMax = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence) || 20;
-      var _totMax = totalPillarMax();
+    /* v23: normalize whenever confidence pillar scored 0 — not just when
+       hourly data is absent. calcConfidencePillarScore also returns 0 when
+       daily is too short or the horizon model throws; gating on input length
+       alone left the ceiling at 100 - confidenceMax in those cases. */
+    var _confMax = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence != null)
+      ? Number(SCORE_CONFIG.pillarMax.confidence) : 20;
+    var _totMax = totalPillarMax();
+    if (!(confidencePillar > 0) && _confMax > 0) {
       var _activeMax = _totMax - _confMax;
       if (_activeMax > 0 && _activeMax < _totMax) rawTotal = rawTotal * (_totMax / _activeMax);
     }
@@ -4148,10 +4173,12 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     );
     var confidencePillarMTF = (confResultMTF && typeof confResultMTF === "object") ? (confResultMTF.score || 0) : 0;
     var rawTotal = rangeAdequacyMTF + confidencePillarMTF + agg.trendHealth + agg.pullbackQuality + agg.swingPotential + agg.breakoutContinuation + agg.regimeAlignment;
-    /* v23: normalize to 100-scale when hourly is unavailable. */
-    if (!hTF || !hTF.candles || hTF.candles.length < 60) {
-      var _confMaxM = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence) || 20;
-      var _totMaxM = totalPillarMax();
+    /* v23: normalize whenever confidence pillar scored 0 (no-hourly OR
+       hourly-present-but-scored-0). */
+    var _confMaxM = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence != null)
+      ? Number(SCORE_CONFIG.pillarMax.confidence) : 20;
+    var _totMaxM = totalPillarMax();
+    if (!(confidencePillarMTF > 0) && _confMaxM > 0) {
       var _activeMaxM = _totMaxM - _confMaxM;
       if (_activeMaxM > 0 && _activeMaxM < _totMaxM) rawTotal = rawTotal * (_totMaxM / _activeMaxM);
     }
@@ -4221,14 +4248,15 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       }
     }
 
+    // finalScore was already gated by the spike + macro-downtrend rules above.
+    // The old block recomputed it from baseScore + modifiers, silently
+    // discarding both gates AND the totalPillarMax() cap.
     var baseScore = round(rawTotal, 1);
-    var baseScore = round(rawTotal, 1);
-    var finalScore = Math.max(0, Math.min(100, baseScore + modifiers));
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
     // Confidence Hard Gate
     if (confResultMTF && confResultMTF.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
-        cls = classifyScore(55); 
+        cls = classifyScore(55);
     }
 
     var tfDetails = [];
@@ -4336,15 +4364,12 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (guard.todaySpike) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
 
     /* ── classification ── */
+    // finalScore was already gated by the spike rule above. The old block
+    // referenced modifiers and confResultMTF, neither of which exists in
+    // this legacy path - the function threw a ReferenceError if ever called.
     var baseScore = round(rawTotal, 1);
-    var baseScore = round(rawTotal, 1);
-    var finalScore = Math.max(0, Math.min(100, baseScore + modifiers));
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
-    // Confidence Hard Gate
-    if (confResultMTF && confResultMTF.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
-        cls = classifyScore(55); 
-    }
 
     return {
       entry_score: round(finalScore, 1),
@@ -4487,15 +4512,11 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     /* ── Spike gate (hard override): never score above NEUTRAL on the day of an abnormal print ── */
     if (guard.todaySpike) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
 
+    // finalScore was already gated above. The old block referenced
+    // modifiers and confResultMTF - both undefined in this legacy path.
     var baseScore = round(rawTotal, 1);
-    var baseScore = round(rawTotal, 1);
-    var finalScore = Math.max(0, Math.min(100, baseScore + modifiers));
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
-    // Confidence Hard Gate
-    if (confResultMTF && confResultMTF.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
-        cls = classifyScore(55); 
-    }
 
     /* ── per-TF detail rows for the UI / compat shim ── */
     var tfDetails = [];
@@ -5017,10 +5038,13 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
       /* isolate today's session bars (same IST date as the last bar) */
       var lastT = intradayCandles[intradayCandles.length - 1].t;
-      var sessionKey = lastT == null ? null : String(lastT).slice(0, 10);
+      // Real sentinel — 'all' !== null meant every bar was filtered out when
+      // the whole series had null timestamps.
+      var NO_DATE = '__nodate__';
+      var sessionKey = lastT == null ? NO_DATE : String(lastT).slice(0, 10);
       var session = [];
       for (var i = 0; i < intradayCandles.length; i++) {
-        var key = intradayCandles[i].t == null ? (sessionKey || 'all') : String(intradayCandles[i].t).slice(0, 10);
+        var key = intradayCandles[i].t == null ? NO_DATE : String(intradayCandles[i].t).slice(0, 10);
         if (key === sessionKey) session.push(intradayCandles[i]);
       }
       if (session.length < 6) { base.reason = 'insufficient_session_bars'; return base; }
@@ -5678,21 +5702,22 @@ targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3
       base.currentPrice = round(c, 2);
 
       /* ── 1. Remaining session time ─────────────────────────────────────── */
+      // IST, not local time. The old setHours()-based check used the user's
+      // local clock, so non-IST users saw a phantom "market open" and fake
+      // fill probabilities around the clock.
       var TRADING_HOURS = 6.25;
       var now = new Date();
-      var marketOpen = new Date(now);
-      marketOpen.setHours(9, 15, 0, 0);
-      var marketClose = new Date(now);
-      marketClose.setHours(15, 30, 0, 0);
+      var istNow = new Date(Date.now() + 5.5 * 3600000);
+      var istDow = istNow.getUTCDay();
+      var istMins = istNow.getUTCHours() * 60 + istNow.getUTCMinutes();
+      var OPEN_MINS = 555, CLOSE_MINS = 930;
       var hoursLeft = 0;
       var marketClosed = false;
-      if (now >= marketOpen && now <= marketClose) {
-        hoursLeft = (marketClose - now) / 3600000;
-      } else if (now > marketClose) {
-        hoursLeft = 0;
+      if (istDow === 0 || istDow === 6 || istMins < OPEN_MINS || istMins > CLOSE_MINS) {
         marketClosed = true;
+        hoursLeft = 0;
       } else {
-        hoursLeft = TRADING_HOURS;
+        hoursLeft = (CLOSE_MINS - istMins) / 60;
       }
       var fraction = Math.max(0.02, Math.min(1, hoursLeft / TRADING_HOURS));
       base.components.sessionFraction = round(fraction, 3);
@@ -5723,7 +5748,12 @@ targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3
         if (intraRets.length >= 20) {
           var intraVol = sampleStdDev(intraRets);
           if (intraVol != null) {
-            sigmaIntraday = intraVol * Math.sqrt(fraction);
+            // intraCandles are 5-minute bars -> 12 bars/trading-hour. Scale
+            // the per-bar sigma by sqrt(remaining bars), capped at 75. The
+            // old sqrt(fraction) was ~8.66x too small and collapsed fill
+            // probabilities to ~0 for any realistic limit price.
+            var _barsLeft = Math.max(1, 12 * hoursLeft);
+            sigmaIntraday = intraVol * Math.sqrt(_barsLeft);
           }
         }
       }
@@ -5745,7 +5775,7 @@ targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3
         var TRADING_MINUTES = 375;
         var BIN_SIZE = 75;
         var NUM_BINS = 5;
-        var nowMinutes = (now.getHours() - 9) * 60 + (now.getMinutes() - 15);
+        var nowMinutes = istMins - OPEN_MINS; // IST-relative session minute
         var currentBin = Math.max(0, Math.min(NUM_BINS - 1, Math.floor(nowMinutes / BIN_SIZE)));
         var binStartMin = currentBin * BIN_SIZE;
         var binEndMin = (currentBin + 1) * BIN_SIZE;
@@ -5814,7 +5844,9 @@ targetPct: SCORE_CONFIG.forwardSim.targetPct != null ? getTargetPctDisplay() : 3
         var sdN = sigmaIntraday;
         if (sdN < 1e-10) return null;
         var z = b / sdN;
-        var raw = normCdf(-z) + Math.exp(2 * 0 * b / (sigmaIntraday * sigmaIntraday)) * normCdf((-0 - b) / sdN);
+        // Driftless baseline (muLog = 0): reflection reduces to 2 * N(-z).
+        // The old "2 * 0 * b" exponent evaluated to exp(0) = 1 (dead code).
+        var raw = 2 * normCdf(-z);
         raw = Math.max(0, Math.min(1, raw));
         var weighted = Math.pow(raw, Math.sqrt(fraction));
         return Math.max(0, Math.min(1, weighted));
