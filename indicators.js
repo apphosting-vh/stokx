@@ -3320,7 +3320,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      Bumped 16→17 at the mod16 lock-in pass (2026-09-12): pillarMax
      {28,28,12,22,4}, classification {62,60,58,34} re-derived under the V16
      tempered modifiers and OOS-validated. */
-  var SCORE_CONFIG_VERSION = 23;
+  var SCORE_CONFIG_VERSION = 35;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? Math.round(SCORE_CONFIG.forwardSim.targetPct * 1000) / 10 : 4; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
