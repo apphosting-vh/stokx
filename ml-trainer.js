@@ -331,14 +331,12 @@ window.MLTrainer = (function () {
   var FEATURE_KEYS = [
     "rsi", "atr_pct", "bb_position", "volume_ratio",
     "macd_hist", "ema_slope", "adx", "entry_score",
-    // Pillar architecture (un-collapsed, May 2026): raw per-pillar scores
+    // Pillar architecture
     "trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment",
-    // Expanded (Phase 3): trend structure, volatility regime, volume/flow,
-    // market regime, cap tier
+    // Expanded
     "trend_structure", "price_vs_sma200", "ema20_50_cross",
     "volatility_regime", "mfi", "vol_price_trend",
-    "bull_bear", "market_momentum", "cap_tier", "rsi_regime",
-    "amihud", "ouHalfLife", "vpin", "daysSinceHigh"
+    "bull_bear", "market_momentum", "cap_tier", "rsi_regime"
   ];
 
   /* ════════════════════════════════════════════════════════════════════════
