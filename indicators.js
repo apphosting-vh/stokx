@@ -3245,12 +3245,12 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
                                penalty ramps to ~0 at the threshold. (Old flat
                                −15 hit 53% of the universe — population base
                                rate, not a discriminator.) */
-      mtfAlignBonus: 6,
+      mtfAlignBonus: 2,
       mtfAlignThreshold: 72,
       mtfAlignFloor: 60,
       highVolATRPercentile: 80,
       highVolERThreshold: 0.5,
-      highVolBonus: 5,
+      highVolBonus: 2,
       /* v21: Sector Outlier modifier — rewards stocks beating their sector
          index over the trailing 20 sessions, penalises laggards. Only
          index-based sectors qualify (BANK, IT, PHARMA, AUTO, FMCG,
@@ -3259,8 +3259,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
          Symmetric by default; dead zone below minExcessPct; linear
          ramp to maxBonus/maxPenalty at saturateAtPct. */
       sectorOutlier: {
-        maxBonus: 3,
-        maxPenalty: 3,
+        maxBonus: 2,
+        maxPenalty: 2,
         minExcessPct: 3,
         saturateAtPct: 8,
         skipBasketSectors: true,
@@ -3342,11 +3342,14 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     for (var i = candles.length - 20; i < candles.length; i++) {
       var pc = candles[i-1].c;
       var tr = Math.max(candles[i].h - candles[i].l, Math.abs(candles[i].h - pc), Math.abs(candles[i].l - pc));
-      trs.push(Math.min(tr, pc * 0.15)); // Winsorize gaps
+      trs.push(tr);
     }
+    // Winsorize: strip top 10% and bottom 10% (2 days each) to keep scale intact but ignore extreme gaps
     trs.sort(function(a, b) { return a - b; });
-    var medTR = trs[10];
-    var atrPct = (medTR / candles[candles.length - 1].c) * 100;
+    var sum = 0, count = 0;
+    for (var i = 2; i < trs.length - 2; i++) { sum += trs[i]; count++; }
+    var smoothTR = count > 0 ? sum / count : trs[10];
+    var atrPct = (smoothTR / candles[candles.length - 1].c) * 100;
     
     var cfg = SCORE_CONFIG.rangeAdequacy.curve;
     var maxPts = SCORE_CONFIG.pillarMax.rangeAdequacy;
@@ -3354,7 +3357,12 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var ramp = 1 / (1 + Math.exp(-(atrPct - 1.5) * 2.5));
     var decay = atrPct > 4.5 ? Math.exp(-Math.pow((atrPct - 4.5) / 1.5, 2)) : 1.0;
     
-    return round(maxPts * ramp * decay, 1);
+    // Normalization: Find the theoretical peak so max score is exact
+    var maxRamp = 1 / (1 + Math.exp(-(3.5 - 1.5) * 2.5)); // ramp at 3.5%
+    var maxDecay = 1.0; // decay is 1.0 at 3.5%
+    var peakMultiplier = maxRamp * maxDecay;
+    
+    return round(maxPts * (ramp * decay) / peakMultiplier, 1);
   }
 
   function calcConfidencePillarScore(hourlyCandles, dailyCandles, indexCandles) {
@@ -3366,17 +3374,21 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       if (!conf) return 0;
       
       var p_emp = conf.confidenceEmpirical != null ? conf.confidenceEmpirical / 100 : null;
-      var p_prior = conf.confidenceLognormal != null ? conf.confidenceLognormal / 100 : 0.5;
       
-      var n = conf.components && conf.components.empiricalSampleCount ? conf.components.empiricalSampleCount : 0;
-      var n_eff = Math.floor(n / 10);
+      // Prior is fixed at 48% (unconditional baseline), not the lognormal output
+      var p_prior = 0.48; 
+      var k = 100; // Cross-validation ideal is ~100 independent samples
+      
+      var rawN = conf.components && conf.components.empiricalSampleCount ? conf.components.empiricalSampleCount : 0;
+      var n_eff = Math.floor(rawN / 10); // Overlap factor: 10-day windows step by 1
       
       var p_shrunk = p_prior;
       if (p_emp != null && n_eff > 0) {
-        p_shrunk = (n_eff * p_emp + 50 * p_prior) / (n_eff + 50);
+        p_shrunk = (n_eff * p_emp + k * p_prior) / (n_eff + k);
       }
       
-      var minP = 0.55; var maxP = 0.75;
+      // Anchor: 52% = 0 pts, 72% = max pts
+      var minP = 0.52; var maxP = 0.72;
       if (p_shrunk <= minP) return 0;
       if (p_shrunk >= maxP) return max;
       return round(((p_shrunk - minP) / (maxP - minP)) * max, 1);
