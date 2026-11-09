@@ -3363,11 +3363,14 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var _peak = (_curve.peakAtr != null && isFinite(_curve.peakAtr)) ? Number(_curve.peakAtr) : 3.5;
     var _lo   = (_curve.minAtr  != null && isFinite(_curve.minAtr))  ? Number(_curve.minAtr)  : 1.0;
     var _hi   = (_curve.maxAtr  != null && isFinite(_curve.maxAtr))  ? Number(_curve.maxAtr)  : 9.0;
-    var _sigma = Math.max(0.5, (_hi - _lo) / 5);
-    var ramp  = 1 / (1 + Math.exp(-(atrPct - _lo) * 2.0));
-    var decay = atrPct > _peak ? Math.exp(-Math.pow((atrPct - _peak) / _sigma, 2)) : 1.0;
-    var peakRamp = 1 / (1 + Math.exp(-(_peak - _lo) * 2.0));
-    return round(maxPts * ((ramp * decay) / Math.max(0.01, peakRamp)), 1);
+    // Smoothstep honouring all three config points:
+    //   0 at atrPct <= minAtr, 1 at atrPct == peakAtr, 0 at atrPct >= maxAtr.
+    var _smooth = function(t) { t = Math.max(0, Math.min(1, t)); return t*t*(3 - 2*t); };
+    var _ramp;
+    if (atrPct <= _lo || atrPct >= _hi) _ramp = 0;
+    else if (atrPct <= _peak) _ramp = _smooth((atrPct - _lo) / Math.max(0.01, _peak - _lo));
+    else _ramp = _smooth((_hi - atrPct) / Math.max(0.01, _hi - _peak));
+    return round(maxPts * _ramp, 1);
   }
 
   function calcConfidencePillarScore(hourlyCandles, dailyCandles, indexCandles) {
