@@ -3043,7 +3043,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        diagnostics. Joint recommended config evaluates at threshold 65 to
        n=399 / WR 71.2% / ER 0.61% / PF 1.28; test-40% ER 1.16% (overfit
        direction is negative — the config strengthens out of sample). */
-    pillarMax: { trendHealth: 15, pullbackQuality: 10, swingPotential: 5, breakoutContinuation: 5, regimeAlignment: 5, rangeAdequacy: 40, confidence: 20 },
+    pillarMax: { trendHealth: 20, pullbackQuality: 10, swingPotential: 5, breakoutContinuation: 5, regimeAlignment: 5, rangeAdequacy: 35, confidence: 20 },
     /* MTF weights */
     tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
 
@@ -3214,16 +3214,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       relMomentum: 0,
       relMomBars: 21,
     },
-    /* v23: Range Adequacy — primary signal for +3%/10d. */
+    /* v28: Gaussian ATR curve to prevent cliff edges */
     rangeAdequacy: {
-      thresholds: [
-        { maxAtrPct: 1.5, pts: 0 },
-        { maxAtrPct: 2.0, pts: 10 },
-        { maxAtrPct: 2.5, pts: 22 },
-        { maxAtrPct: 4.0, pts: 40 },
-        { maxAtrPct: 6.0, pts: 35 },
-        { maxAtrPct: 100, pts: 20 },
-      ],
+      curve: { peakAtr: 4.0, spread: 1.8, minAtr: 1.0, maxAtr: 9.0 }
     },
     confidence: { pillarMin: 40, pillarMax: 95 },
     /* Modifiers — magnitudes tempered @2026-09-12 by a 5y NIFTY 200
@@ -3346,21 +3339,13 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
   function calcRangeAdequacyScore(sn) {
     if (!sn || sn.atr14 == null || sn.c == null || sn.c <= 0) return 0;
     var atrPct = (sn.atr14 / sn.c) * 100;
-    var max = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.rangeAdequacy) || 40;
-    var th = (SCORE_CONFIG.rangeAdequacy && SCORE_CONFIG.rangeAdequacy.thresholds) || [];
-    if (th.length === 0) return 0;
-    var prev = 0, prevPct = 0;
-    for (var i = 0; i < th.length; i++) {
-      if (atrPct <= th[i].maxAtrPct) {
-        var spanPct = th[i].maxAtrPct - prevPct;
-        var spanPts = th[i].pts - prev;
-        var frac = spanPct > 0 ? (atrPct - prevPct) / spanPct : 1;
-        return round(Math.min(max, Math.max(0, prev + frac * spanPts)), 1);
-      }
-      prev = th[i].pts;
-      prevPct = th[i].maxAtrPct;
-    }
-    return th[th.length - 1].pts;
+    var cfg = SCORE_CONFIG.rangeAdequacy.curve;
+    if (atrPct <= cfg.minAtr) return 0;
+    if (atrPct >= cfg.maxAtr) return 0;
+    var maxPts = SCORE_CONFIG.pillarMax.rangeAdequacy;
+    var x = atrPct - cfg.peakAtr;
+    var val = Math.exp(-(x * x) / (2 * cfg.spread * cfg.spread));
+    return round(val * maxPts, 1);
   }
 
   function calcConfidencePillarScore(hourlyCandles, dailyCandles, indexCandles) {
@@ -3370,8 +3355,10 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       var max = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence) || 20;
       var cfg = SCORE_CONFIG.confidence || { pillarMin: 40, pillarMax: 80 };
       var conf = window.TechIndicators.computeTenDayForwardConfidence(hourlyCandles, dailyCandles, indexCandles, null);
-      if (!conf || conf.confidence == null) return 0;
-      var c = conf.confidence;
+      if (!conf) return 0;
+      // v28: Prioritize empirical hit-rate over parametric lognormal
+      var c = conf.confidenceEmpirical != null ? conf.confidenceEmpirical : conf.confidence;
+      if (c == null) return 0;
       if (c <= cfg.pillarMin) return 0;
       if (c >= cfg.pillarMax) return max;
       return round((c - cfg.pillarMin) / (cfg.pillarMax - cfg.pillarMin) * max, 1);
@@ -3392,7 +3379,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        ADX is a lagging filter; either signal earns the ADX_DI points. */
     if ((sn.adxL != null && sn.plusDI != null && sn.minusDI != null && sn.adxL >= c.adxThreshold && sn.plusDI > sn.minusDI)
         || (sn.aroonOsc != null && sn.aroonOsc > 30)) s += c.ADX_DI;
-    if (sn.rsMansfield != null && sn.rsMansfield > c.mansfieldRSThreshold) s += c.mansfieldRS;
+    // v28: Mansfield RS removed from here to prevent double-counting.
     if (sn.macdL != null && sn.sigL != null && sn.macdL > sn.sigL) s += c.macdCross;
     if (sn.weeklyHABullish === true) s += c.weeklyHABullish;
     if (sn.sma20Slope5 != null && sn.sma20Slope5 > c.sma20SlopeThreshold && sn.c != null && sn.sma20 != null && sn.c > sn.sma20) s += c.sma20Slope;
@@ -4074,7 +4061,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     });
     var modifiers = penalties + bonuses;
 
-    var finalScore = Math.max(0, Math.min(totalPillarMax(), rawTotal + modifiers));
+    var finalScore = Math.max(0, Math.min(100, rawTotal + modifiers));
 
     /* Spike gate (hard override): never grade a buy on the day of an abnormal
        print — cap below the WATCHLIST threshold. */
