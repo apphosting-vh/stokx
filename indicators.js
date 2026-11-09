@@ -2202,7 +2202,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (indexCandles && indexCandles.length > 10) {
       try {
         beta = last(calcBeta(candles, indexCandles));
-        var rsSeries = calcMansfieldRS(candles, indexCandles, 52);
+        var rsSeries = calcMansfieldRS(candles, indexCandles, 252);
         if (rsSeries) {
           var rv = lastVals(rsSeries, 2);
           if (rv.length > 0) rsMansfield = rv[0];
@@ -2777,7 +2777,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
       var rsMansfield = null;
       if (indexCandles && indexCandles.length > 10) {
-        try { var rsSeries = calcMansfieldRS(candles, indexCandles, 52); if (rsSeries) rsMansfield = lastVals(rsSeries, 1)[0] || null; } catch (e) {}
+        try { var rsSeries = calcMansfieldRS(candles, indexCandles, 252); if (rsSeries) rsMansfield = lastVals(rsSeries, 1)[0] || null; } catch (e) {}
       }
 
       var bbRes = calcBollingerBands(candles);
@@ -3938,9 +3938,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (sn && sn.ouHalfLife != null && sn.ouHalfLife >= 3 && sn.ouHalfLife <= 8 && sn.pullbackDepth != null && sn.pullbackDepth > 0.04) {
       items.push({ reason: "Precision Mean Reversion", amount: 1 });
     }
-    if (sn && sn.daysSinceHigh != null && sn.daysSinceHigh <= 1 && sn.vpin != null && sn.vpin > 0.4) {
-      items.push({ reason: "Fresh Ignition (New High + Rising VPIN)", amount: 1 });
-    }
+    // Fresh Ignition modifier removed (was not in config)
     if (sn && sn.amihud != null && sn.amihud > 0.5) { items.push({ reason: "High illiquidity risk", amount: -1 }); }
     if (sn && sn.ouHalfLife != null && sn.ouHalfLife > 13) { items.push({ reason: "Slow mean-reversion", amount: -1 }); }
     if (sn && sn.vpin != null && sn.vpin > 0.6) { items.push({ reason: "High toxic order flow", amount: -1 }); }
@@ -4057,7 +4055,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     // finalScore was already calculated and gated (spike, index) above
     var cls = classifyScore(finalScore);
     if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
-    if (confResultMTF && confResultMTF.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
+    if (confResult && confResult.belowBreakEven && (cls.classification === 'BUY' || cls.classification === 'STRONG_BUY')) {
         cls = classifyScore(55); 
     }
 

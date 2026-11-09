@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-window.__STOX_APP_VERSION = "7.6.0";
+window.__STOX_APP_VERSION = "7.7.0";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -6754,7 +6754,7 @@ function _btPearson(xs, ys) {
 function _btEvalOne(TI, d1, h1, w1, idxD, i) {
   var D = _btDateStr(d1[i]);
   var entry = d1[i].c;
-  var daySlice = _btDailyUpTo(d1, D, 250);
+  var daySlice = _btDailyUpTo(d1, D, 520);
   var wSlice = _btSliceByDate(w1, D);
   var idxSlice = _btSliceByDate(idxD, D);
   if (idxSlice && idxSlice.length > 300) idxSlice = idxSlice.slice(idxSlice.length - 300);
@@ -6767,9 +6767,9 @@ function _btEvalOne(TI, d1, h1, w1, idxD, i) {
       { timeframe: "H", candles: hSliceE },
       { timeframe: "D", candles: daySlice },
       { timeframe: "W", candles: wSlice }
-    ], idxSlice, null);
+    ], idxSlice, null, symbol);
     entryScore = mtf && mtf.multiTF_score != null ? mtf.multiTF_score : null;
-  } catch (e) {}
+  } catch (e) { console.warn("Pulse Backtest MTF failed:", e.message); }
 
   var conf = null, confLog = null, confEmp = null;
   try {
@@ -7393,11 +7393,11 @@ const BacktestSuitePanel = () => {
       if (weeklySlice && weeklySlice.length >= 50) tfResults.push({ timeframe: "W", candles: weeklySlice });
       if (tfResults.length >= 2) {
         try {
-          var mtf = TI.computeMultiTFEntryScore(tfResults, idxSlice, null);
+          var mtf = TI.computeMultiTFEntryScore(tfResults, idxSlice, null, symbol);
           if (mtf && mtf.multiTF_score != null) {
             return { entryScore: mtf.multiTF_score, raw_score: mtf.raw_score, classification: mtf.classification, trendHealth: mtf.trendHealth, pullbackQuality: mtf.pullbackQuality, swingPotential: mtf.swingPotential, breakoutContinuation: mtf.breakoutContinuation, regimeAlignment: mtf.regimeAlignment, modifiers: mtf.modifiers };
           }
-        } catch (e) {}
+        } catch (e) { console.warn("Multi-Ticker MTF failed for", symbol, e.message); }
       }
     }
 
