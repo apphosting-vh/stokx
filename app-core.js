@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-window.__STOX_APP_VERSION = "6.0.0";
+window.__STOX_APP_VERSION = "7.0.0";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -9357,6 +9357,8 @@ function computeCompatEntryScore(weeklyCandles, dailyCandles, hourlyCandles, ind
     gapPct: multi.gapPct != null ? multi.gapPct : null,
     dominanceRatio: multi.dominanceRatio != null ? multi.dominanceRatio : null,
     efficiencyRatio10: multi.efficiencyRatio10 != null ? multi.efficiencyRatio10 : null,
+    aggRangeAdequacy: multi.rangeAdequacy != null ? multi.rangeAdequacy : null,
+    aggConfidence: multi.confidence != null ? multi.confidence : null,
     aggTrendHealth: multi.trendHealth != null ? multi.trendHealth : null,
     aggPullbackQuality: multi.pullbackQuality != null ? multi.pullbackQuality : null,
     aggSwingPotential: multi.swingPotential != null ? multi.swingPotential : null,

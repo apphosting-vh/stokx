@@ -355,8 +355,12 @@
       });
     }
 
-    var baseWeightedScore = uniformW ? compatResult.finalScore : (totalWeight > 0 ? (totalWeighted / totalWeight) * 100 : compatResult.finalScore);
-    var adjustedScore = clamp(round2(baseWeightedScore + powerBonusTotal), 0, 100);
+    /* v23: Range + Confidence are fixed bonuses not subject to pattern reweighting. */
+    var _rfSum = (compatResult.aggRangeAdequacy || 0) + (compatResult.aggConfidence || 0);
+    var _fivePillarMax = (pillarMax.trendHealth || 0) + (pillarMax.pullbackQuality || 0) + (pillarMax.swingPotential || 0) + (pillarMax.breakoutContinuation || 0) + (pillarMax.regimeAlignment || 0);
+    var _fivePillarRaw = compatResult.finalScore - _rfSum;
+    var baseWeightedScore = uniformW ? _fivePillarRaw : (totalWeight > 0 ? (totalWeighted / totalWeight) * _fivePillarMax : _fivePillarRaw);
+    var adjustedScore = clamp(round2(baseWeightedScore + powerBonusTotal + _rfSum), 0, 100);
 
     // ── ML Enhancement (synchronous, using pre-loaded model) ──
     // Skip ML blend only when disabled by the user.

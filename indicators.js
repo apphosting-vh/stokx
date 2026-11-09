@@ -2021,7 +2021,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      hardcoded constant, because pillarMax is user-tunable. */
   function totalPillarMax() {
     var pm = SCORE_CONFIG.pillarMax || {};
-    return (pm.trendHealth || 0) + (pm.pullbackQuality || 0) + (pm.swingPotential || 0) + (pm.breakoutContinuation || 0) + (pm.regimeAlignment || 0);
+    var sum = 0;
+    for (var k in pm) if (pm.hasOwnProperty(k)) sum += pm[k];
+    return sum;
   }
   function computeIndexTrendScore(indexCandles, indexWeeklyCandles) {
     try {
@@ -3041,7 +3043,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        diagnostics. Joint recommended config evaluates at threshold 65 to
        n=399 / WR 71.2% / ER 0.61% / PF 1.28; test-40% ER 1.16% (overfit
        direction is negative — the config strengthens out of sample). */
-    pillarMax: { trendHealth: 22, pullbackQuality: 40, swingPotential: 8, breakoutContinuation: 22, regimeAlignment: 8 },
+    pillarMax: { trendHealth: 15, pullbackQuality: 10, swingPotential: 5, breakoutContinuation: 5, regimeAlignment: 5, rangeAdequacy: 40, confidence: 20 },
     /* MTF weights */
     tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
 
@@ -3212,6 +3214,18 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       relMomentum: 0,
       relMomBars: 21,
     },
+    /* v23: Range Adequacy — primary signal for +3%/10d. */
+    rangeAdequacy: {
+      thresholds: [
+        { maxAtrPct: 1.5, pts: 0 },
+        { maxAtrPct: 2.0, pts: 10 },
+        { maxAtrPct: 2.5, pts: 22 },
+        { maxAtrPct: 4.0, pts: 40 },
+        { maxAtrPct: 6.0, pts: 35 },
+        { maxAtrPct: 100, pts: 20 },
+      ],
+    },
+    confidence: { pillarMin: 40, pillarMax: 80 },
     /* Modifiers — magnitudes tempered @2026-09-12 by a 5y NIFTY 200
        all-bars measurement (110,237 scored bars at target 3.5%/15d):
        the old flat values were too liberal vs the calibrated pillars —
@@ -3265,10 +3279,10 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        curve, maxLift 16.8pt at the new scale). The run-R4 values (66/64/62/34)
        and pre-pass values (64/58/48/35) predate this pass. */
     classification: {
-      strongBuy: 62,
+      strongBuy: 72,
       buy: 60,
-      watchlist: 58,
-      neutral: 34,
+      watchlist: 45,
+      neutral: 30,
     },
 
     /* Batch backtest Pass-2 re-scoring mix:
@@ -3308,7 +3322,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      Bumped 16→17 at the mod16 lock-in pass (2026-09-12): pillarMax
      {28,28,12,22,4}, classification {62,60,58,34} re-derived under the V16
      tempered modifiers and OOS-validated. */
-  var SCORE_CONFIG_VERSION = 21;
+  var SCORE_CONFIG_VERSION = 23;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? Math.round(SCORE_CONFIG.forwardSim.targetPct * 1000) / 10 : 4; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
@@ -3327,6 +3341,41 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     merge(SCORE_CONFIG, patch);
     // Invalidate cached classification for backtest engine
     if (window.TechIndicators) window.TechIndicators._scoreConfigClassification = null;
+  }
+
+  function calcRangeAdequacyScore(sn) {
+    if (!sn || sn.atr14 == null || sn.c == null || sn.c <= 0) return 0;
+    var atrPct = (sn.atr14 / sn.c) * 100;
+    var max = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.rangeAdequacy) || 40;
+    var th = (SCORE_CONFIG.rangeAdequacy && SCORE_CONFIG.rangeAdequacy.thresholds) || [];
+    if (th.length === 0) return 0;
+    var prev = 0, prevPct = 0;
+    for (var i = 0; i < th.length; i++) {
+      if (atrPct <= th[i].maxAtrPct) {
+        var spanPct = th[i].maxAtrPct - prevPct;
+        var spanPts = th[i].pts - prev;
+        var frac = spanPct > 0 ? (atrPct - prevPct) / spanPct : 1;
+        return round(Math.min(max, Math.max(0, prev + frac * spanPts)), 1);
+      }
+      prev = th[i].pts;
+      prevPct = th[i].maxAtrPct;
+    }
+    return th[th.length - 1].pts;
+  }
+
+  function calcConfidencePillarScore(hourlyCandles, dailyCandles, indexCandles) {
+    if (!hourlyCandles || hourlyCandles.length < 60) return 0;
+    if (!dailyCandles || dailyCandles.length < 30) return 0;
+    try {
+      var max = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence) || 20;
+      var cfg = SCORE_CONFIG.confidence || { pillarMin: 40, pillarMax: 80 };
+      var conf = window.TechIndicators.computeTenDayForwardConfidence(hourlyCandles, dailyCandles, indexCandles, null);
+      if (!conf || conf.confidence == null) return 0;
+      var c = conf.confidence;
+      if (c <= cfg.pillarMin) return 0;
+      if (c >= cfg.pillarMax) return max;
+      return round((c - cfg.pillarMin) / (cfg.pillarMax - cfg.pillarMin) * max, 1);
+    } catch (e) { return 0; }
   }
 
   /* Pillar 1: Trend Health (max 28).
@@ -3994,18 +4043,27 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
   }
 
    /* Entry Score (single timeframe, daily) — 5-pillar model (100 total). */
-  function computeEntryScore(candles, indexCandles, symbol) {
+  function computeEntryScore(candles, indexCandles, symbol, hourlyCandles) {
     if (!candles || candles.length < 50) return { entry_score: null, reason: 'insufficient_data', need: 50, got: candles ? candles.length : 0 };
     var sn = buildEntrySnapshot(candles, indexCandles, 'D', symbol);
     if (!sn || sn.c == null) return { entry_score: null, reason: 'insufficient_data' };
 
     var volRegime = calcVolRegime(sn, candles);
+    var rangeAdequacy = calcRangeAdequacyScore(sn);
+    var confidencePillar = calcConfidencePillarScore(hourlyCandles, candles, indexCandles);
     var trendHealth = calcTrendHealthScore(sn);
     var pullbackQuality = calcPullbackScore(sn, volRegime, candles);
     var swingPotential = calcSwingPotentialScore(candles, sn);
     var breakoutContinuation = calcBreakoutContinuationScore(candles, sn);
     var regimeAlignment = calcMarketRsAlignmentScore(sn, candles, indexCandles);
-    var rawTotal = trendHealth + pullbackQuality + swingPotential + breakoutContinuation + regimeAlignment;
+    var rawTotal = rangeAdequacy + confidencePillar + trendHealth + pullbackQuality + swingPotential + breakoutContinuation + regimeAlignment;
+    /* v23: normalize to 100-scale when confidence pillar is unavailable (no hourly). */
+    if (!hourlyCandles || hourlyCandles.length < 60) {
+      var _confMax = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence) || 20;
+      var _totMax = totalPillarMax();
+      var _activeMax = _totMax - _confMax;
+      if (_activeMax > 0 && _activeMax < _totMax) rawTotal = rawTotal * (_totMax / _activeMax);
+    }
 
     var spikeDay = sn.spikeLast === true || (sn.gapPct != null && Math.abs(sn.gapPct) > SCORE_CONFIG.modifiers.spikeGapThreshold);
     var modifierItems = buildEntryModifiers(sn, { spikeDay: spikeDay, volRegime: volRegime });
@@ -4038,6 +4096,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     return {
       entry_score: round(finalScore, 1),
       raw_score: round(rawTotal, 1),
+      rangeAdequacy: round(rangeAdequacy, 1), rangeAdequacyMax: SCORE_CONFIG.pillarMax.rangeAdequacy,
+      confidence: round(confidencePillar, 1), confidenceMax: SCORE_CONFIG.pillarMax.confidence,
       trendHealth: round(trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
       pullbackQuality: round(pullbackQuality, 1), pullbackQualityMax: SCORE_CONFIG.pillarMax.pullbackQuality,
       swingPotential: round(swingPotential, 1), swingPotentialMax: SCORE_CONFIG.pillarMax.swingPotential,
@@ -4113,7 +4173,21 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     /* Raw total: the three primary pillars aggregated across MTF (max 24 each)
        + the daily-only Breakout Continuation (max 22) + Regime Alignment
        (max 6) — sums to 100. */
-    var rawTotal = agg.trendHealth + agg.pullbackQuality + agg.swingPotential + agg.breakoutContinuation + agg.regimeAlignment;
+    var _dailySnForRange = (perTF.D && perTF.D.sn) || (perTF.W && perTF.W.sn) || (perTF.H && perTF.H.sn) || null;
+    var rangeAdequacyMTF = _dailySnForRange ? calcRangeAdequacyScore(_dailySnForRange) : 0;
+    var confidencePillarMTF = calcConfidencePillarScore(
+      hTF ? hTF.candles : null,
+      dTF ? dTF.candles : (tfResults[0] ? tfResults[0].candles : null),
+      indexCandles
+    );
+    var rawTotal = rangeAdequacyMTF + confidencePillarMTF + agg.trendHealth + agg.pullbackQuality + agg.swingPotential + agg.breakoutContinuation + agg.regimeAlignment;
+    /* v23: normalize to 100-scale when hourly is unavailable. */
+    if (!hTF || !hTF.candles || hTF.candles.length < 60) {
+      var _confMaxM = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence) || 20;
+      var _totMaxM = totalPillarMax();
+      var _activeMaxM = _totMaxM - _confMaxM;
+      if (_activeMaxM > 0 && _activeMaxM < _totMaxM) rawTotal = rawTotal * (_totMaxM / _activeMaxM);
+    }
 
     var baseSn = null;
     if (dTF && dTF.candles && dTF.candles.length >= 50) {
@@ -4211,6 +4285,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     return {
       multiTF_score: round(finalScore, 1),
       raw_score: round(rawTotal, 1),
+      rangeAdequacy: round(rangeAdequacyMTF, 1), rangeAdequacyMax: SCORE_CONFIG.pillarMax.rangeAdequacy,
+      confidence: round(confidencePillarMTF, 1), confidenceMax: SCORE_CONFIG.pillarMax.confidence,
       trendHealth: round(agg.trendHealth, 1), trendHealthMax: SCORE_CONFIG.pillarMax.trendHealth,
       pullbackQuality: round(agg.pullbackQuality, 1), pullbackQualityMax: SCORE_CONFIG.pillarMax.pullbackQuality,
       swingPotential: round(agg.swingPotential, 1), swingPotentialMax: SCORE_CONFIG.pillarMax.swingPotential,
