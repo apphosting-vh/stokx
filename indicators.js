@@ -3043,7 +3043,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        diagnostics. Joint recommended config evaluates at threshold 65 to
        n=399 / WR 71.2% / ER 0.61% / PF 1.28; test-40% ER 1.16% (overfit
        direction is negative — the config strengthens out of sample). */
-    pillarMax: { trendHealth: 20, pullbackQuality: 10, swingPotential: 5, breakoutContinuation: 5, regimeAlignment: 5, rangeAdequacy: 35, confidence: 20 },
+    pillarMax: { trendHealth: 15, pullbackQuality: 10, swingPotential: 5, breakoutContinuation: 5, regimeAlignment: 5, rangeAdequacy: 35, confidence: 25 },
     /* MTF weights */
     tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
 
@@ -3216,9 +3216,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     },
     /* v28: Gaussian ATR curve to prevent cliff edges */
     rangeAdequacy: {
-      curve: { peakAtr: 4.0, spread: 1.8, minAtr: 1.0, maxAtr: 9.0 }
+      curve: { peakAtr: 3.5, minAtr: 1.0, maxAtr: 9.0 }
     },
-    confidence: { pillarMin: 40, pillarMax: 95 },
+    confidence: { pillarMin: 40, pillarMax: 90 },
     /* Modifiers — magnitudes tempered @2026-09-12 by a 5y NIFTY 200
        all-bars measurement (110,237 scored bars at target 3.5%/15d):
        the old flat values were too liberal vs the calibrated pillars —
@@ -3336,32 +3336,50 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (window.TechIndicators) window.TechIndicators._scoreConfigClassification = null;
   }
 
-  function calcRangeAdequacyScore(sn) {
-    if (!sn || sn.atr14 == null || sn.c == null || sn.c <= 0) return 0;
-    var atrPct = (sn.atr14 / sn.c) * 100;
+  function calcRangeAdequacyScore(candles) {
+    if (!candles || candles.length < 20) return 0;
+    var trs = [];
+    for (var i = candles.length - 20; i < candles.length; i++) {
+      var pc = candles[i-1].c;
+      var tr = Math.max(candles[i].h - candles[i].l, Math.abs(candles[i].h - pc), Math.abs(candles[i].l - pc));
+      trs.push(Math.min(tr, pc * 0.15)); // Winsorize gaps
+    }
+    trs.sort(function(a, b) { return a - b; });
+    var medTR = trs[10];
+    var atrPct = (medTR / candles[candles.length - 1].c) * 100;
+    
     var cfg = SCORE_CONFIG.rangeAdequacy.curve;
-    if (atrPct <= cfg.minAtr) return 0;
-    if (atrPct >= cfg.maxAtr) return 0;
     var maxPts = SCORE_CONFIG.pillarMax.rangeAdequacy;
-    var x = atrPct - cfg.peakAtr;
-    var val = Math.exp(-(x * x) / (2 * cfg.spread * cfg.spread));
-    return round(val * maxPts, 1);
+    
+    var ramp = 1 / (1 + Math.exp(-(atrPct - 1.5) * 2.5));
+    var decay = atrPct > 4.5 ? Math.exp(-Math.pow((atrPct - 4.5) / 1.5, 2)) : 1.0;
+    
+    return round(maxPts * ramp * decay, 1);
   }
 
   function calcConfidencePillarScore(hourlyCandles, dailyCandles, indexCandles) {
     if (!hourlyCandles || hourlyCandles.length < 60) return 0;
     if (!dailyCandles || dailyCandles.length < 30) return 0;
     try {
-      var max = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence) || 20;
-      var cfg = SCORE_CONFIG.confidence || { pillarMin: 40, pillarMax: 80 };
+      var max = (SCORE_CONFIG.pillarMax && SCORE_CONFIG.pillarMax.confidence) || 25;
       var conf = window.TechIndicators.computeTenDayForwardConfidence(hourlyCandles, dailyCandles, indexCandles, null);
       if (!conf) return 0;
-      // v28: Prioritize empirical hit-rate over parametric lognormal
-      var c = conf.confidenceEmpirical != null ? conf.confidenceEmpirical : conf.confidence;
-      if (c == null) return 0;
-      if (c <= cfg.pillarMin) return 0;
-      if (c >= cfg.pillarMax) return max;
-      return round((c - cfg.pillarMin) / (cfg.pillarMax - cfg.pillarMin) * max, 1);
+      
+      var p_emp = conf.confidenceEmpirical != null ? conf.confidenceEmpirical / 100 : null;
+      var p_prior = conf.confidenceLognormal != null ? conf.confidenceLognormal / 100 : 0.5;
+      
+      var n = conf.components && conf.components.empiricalSampleCount ? conf.components.empiricalSampleCount : 0;
+      var n_eff = Math.floor(n / 10);
+      
+      var p_shrunk = p_prior;
+      if (p_emp != null && n_eff > 0) {
+        p_shrunk = (n_eff * p_emp + 50 * p_prior) / (n_eff + 50);
+      }
+      
+      var minP = 0.55; var maxP = 0.75;
+      if (p_shrunk <= minP) return 0;
+      if (p_shrunk >= maxP) return max;
+      return round(((p_shrunk - minP) / (maxP - minP)) * max, 1);
     } catch (e) { return 0; }
   }
 
@@ -3861,67 +3879,11 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        only by outperforming on its own merits. */
   function calcMarketRsAlignmentScore(sn, candles, indexCandles) {
     var c = SCORE_CONFIG.regimeAlignment || {};
-    if (!sn || sn.c == null || sn.c <= 0) return 0;
-    var score = 0;
-
-    /* 1) Relative strength vs the market — continuous Mansfield RS(52w):
-       linear ramp from zero at RS≤0 to full `rs` points at rsSaturation. */
-    var rsMax = c.rs != null ? c.rs : 6;
+    if (!sn || sn.rsMansfield == null) return 0;
+    var rsMax = c.rs != null ? c.rs : 5;
     var sat = (c.rsSaturation != null && c.rsSaturation > 0) ? c.rsSaturation : 20;
-    if (sn.rsMansfield != null && sn.rsMansfield > 0) {
-      score += rsMax * Math.max(0, Math.min(1, sn.rsMansfield / sat));
-    }
-
-    /* 2) Long-term structural uptrend: close above own SMA(longSmaBars),
-       degrading to SMA(100) / SMA(50) when history is too short. */
-    var longMax = c.longTrend != null ? c.longTrend : 2;
-    try {
-      var barsOpts = [c.longSmaBars != null ? c.longSmaBars : 200, 100, 50];
-      var smaVal = null;
-      for (var i = 0; i < barsOpts.length; i++) {
-        var b = barsOpts[i];
-        if (candles && candles.length > b) {
-          var s = calcSMA(candles, b);
-          if (s && s.length > 0 && s[s.length - 1] != null) { smaVal = s[s.length - 1]; break; }
-        }
-      }
-      if (smaVal != null && sn.c > smaVal) score += longMax;
-    } catch (e) {}
-
-    /* 3) Recent relative momentum vs NIFTY over the trailing relMomBars shared
-       trading days (aligned by timestamp like calcBeta). If the index series is
-       too short or missing, credit half only when the stock itself is rising. */
-    var momMax = c.relMomentum != null ? c.relMomentum : 2;
-    var win = c.relMomBars != null ? c.relMomBars : 21;
-    try {
-      if (candles && candles.length > win) {
-        var cl = closes(candles), L = cl.length;
-        var stockRet = null, idxRet = null;
-        if (cl[L - 1] != null && cl[L - 1 - win] != null && cl[L - 1 - win] > 0) {
-          stockRet = (cl[L - 1] - cl[L - 1 - win]) / cl[L - 1 - win];
-        }
-        if (stockRet != null && indexCandles && indexCandles.length > win) {
-          var sMap = {};
-          for (var a = 0; a < candles.length; a++) sMap[candles[a].t] = candles[a].c;
-          var pairs = [];
-          for (var y = 0; y < indexCandles.length; y++) {
-            var sv = sMap[indexCandles[y].t];
-            if (sv != null && sv > 0 && indexCandles[y].c > 0) pairs.push({ s: sv, i: indexCandles[y].c });
-          }
-          if (pairs.length > win) {
-            var pL = pairs.length, pLast = pairs[pL - 1], pWin = pairs[pL - 1 - win];
-            if (pWin.s > 0 && pWin.i > 0) {
-              idxRet = (pLast.i - pWin.i) / pWin.i;
-              var sOverlapRet = (pLast.s - pWin.s) / pWin.s;
-              if (sOverlapRet >= idxRet) score += momMax;
-            }
-          }
-        }
-        if (idxRet == null && stockRet != null && stockRet > 0) score += momMax / 2;
-      }
-    } catch (e) {}
-
-    return round(Math.max(0, Math.min(10, score)), 1);
+    var val = Math.max(0, Math.min(1, sn.rsMansfield / sat));
+    return round(val * rsMax, 1);
   }
 
   /* Modifiers (modest, severity-scaled): low-expansion, spike day (points
@@ -4036,7 +3998,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (!sn || sn.c == null) return { entry_score: null, reason: 'insufficient_data' };
 
     var volRegime = calcVolRegime(sn, candles);
-    var rangeAdequacy = calcRangeAdequacyScore(sn);
+    var rangeAdequacy = calcRangeAdequacyScore(candles);
     var confidencePillar = calcConfidencePillarScore(hourlyCandles, candles, indexCandles);
     var trendHealth = calcTrendHealthScore(sn);
     var pullbackQuality = calcPullbackScore(sn, volRegime, candles);
@@ -4060,6 +4022,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       if (it.amount < 0) { penalties += it.amount; penaltyItems.push(it); } else { bonuses += it.amount; bonusItems.push(it); }
     });
     var modifiers = penalties + bonuses;
+    if (modifiers > 5) modifiers = 5;
+    if (modifiers < -5) modifiers = -5;
 
     var finalScore = Math.max(0, Math.min(100, rawTotal + modifiers));
 
@@ -4078,7 +4042,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       }
     }
 
+    var baseScore = round(rawTotal, 1);
     var cls = classifyScore(finalScore);
+    if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
 
     return {
       entry_score: round(finalScore, 1),
@@ -4161,7 +4127,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        + the daily-only Breakout Continuation (max 22) + Regime Alignment
        (max 6) — sums to 100. */
     var _dailySnForRange = (perTF.D && perTF.D.sn) || (perTF.W && perTF.W.sn) || (perTF.H && perTF.H.sn) || null;
-    var rangeAdequacyMTF = _dailySnForRange ? calcRangeAdequacyScore(_dailySnForRange) : 0;
+    var _dCandles = dTF && dTF.candles ? dTF.candles : (wTF ? wTF.candles : (hTF ? hTF.candles : null));
+    var rangeAdequacyMTF = _dCandles ? calcRangeAdequacyScore(_dCandles) : 0;
     var confidencePillarMTF = calcConfidencePillarScore(
       hTF ? hTF.candles : null,
       dTF ? dTF.candles : (tfResults[0] ? tfResults[0].candles : null),
@@ -4222,6 +4189,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       if (it.amount < 0) { penalties += it.amount; penaltyItems.push(it); } else { bonuses += it.amount; bonusItems.push(it); }
     });
     var modifiers = penalties + bonuses;
+    if (modifiers > 5) modifiers = 5;
+    if (modifiers < -5) modifiers = -5;
 
     var finalScore = Math.max(0, Math.min(totalPillarMax(), rawTotal + modifiers));
 
@@ -4239,7 +4208,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       }
     }
 
+    var baseScore = round(rawTotal, 1);
     var cls = classifyScore(finalScore);
+    if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
 
     var tfDetails = [];
     ['D', 'H', 'W'].forEach(function (label) {
@@ -4345,7 +4316,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (guard.todaySpike) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
 
     /* ── classification ── */
+    var baseScore = round(rawTotal, 1);
     var cls = classifyScore(finalScore);
+    if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
 
     return {
       entry_score: round(finalScore, 1),
@@ -4488,7 +4461,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     /* ── Spike gate (hard override): never score above NEUTRAL on the day of an abnormal print ── */
     if (guard.todaySpike) finalScore = Math.min(finalScore, SCORE_CONFIG.classification.watchlist - 1);
 
+    var baseScore = round(rawTotal, 1);
     var cls = classifyScore(finalScore);
+    if (cls.classification === 'STRONG_BUY' && baseScore < 80) { cls = classifyScore(80); }
 
     /* ── per-TF detail rows for the UI / compat shim ── */
     var tfDetails = [];
