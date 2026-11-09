@@ -2026,6 +2026,8 @@ function EntryScoreAnalysis({ entry, onBack }) {
       ),
       activeScore && React.createElement("div", null,
         React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, marginBottom: 14 } },
+          factorBar("Range Adequacy", r.aggRangeAdequacy, _pm.rangeAdequacy, "#f59e0b"),
+          factorBar("Confidence", r.aggConfidence, _pm.confidence, "#84cc16"),
           factorBar("Trend Health", activeScore.trendHealthScore, activeScore.trendHealthMax, "#4a8fe0"),
           factorBar("Pullback", activeScore.pullbackScore, activeScore.pullbackMax, "#a855f7"),
           factorBar("Swing Potential", activeScore.swingPotentialScore, activeScore.swingPotentialMax, "#06b6d4"),
@@ -10418,14 +10420,14 @@ function StockScreener(props) {
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1420 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
-              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "yearChg", "avgTrend", "avgPullback", "avgSwing", "avgBreakout", "avgRegimeAlignment", "modifiers", "finalScore", "weekly", "daily", "hourly", "conf10dLog", "conf10dEmp", "actions"].map(function(k) {
+              ["select", "ticker", "name", "cap", "price", "todayChg", "dayChg", "weekChg", "monthChg", "yearChg", "avgRange", "avgConf", "avgTrend", "avgPullback", "avgSwing", "avgBreakout", "avgRegimeAlignment", "modifiers", "finalScore", "weekly", "daily", "hourly", "conf10dLog", "conf10dEmp", "actions"].map(function(k) {
                 if (k === "select") {
                   var allFilteredSelected = filtered.length > 0 && filtered.every(function(r) { return selected[r.s.t]; });
                   return React.createElement("th", { key: k, style: Object.assign({}, thStyle, { cursor: "default", textAlign: "center", width: 36 }) },
                     React.createElement("input", { type: "checkbox", checked: allFilteredSelected, onChange: toggleSelectAll, style: { accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 } })
                   );
                 }
-                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", yearChg: "Yearly %", avgTrend: "Trend", avgPullback: "Pullback", avgSwing: "Swing", avgBreakout: "Breakout", avgRegimeAlignment: "Regime", modifiers: "Modifiers", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10dLog: "Conf " + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + "DLN", conf10dEmp: "Conf " + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + "DEM", actions: "Last Refreshed" };
+                var labels = { ticker: "Ticker", name: "Company", cap: "Cap", price: "Price (\u20b9)", todayChg: "Today %", dayChg: "1D Chg %", weekChg: "1W Chg %", monthChg: "1M Chg %", yearChg: "Yearly %", avgRange: "Range", avgConf: "Conf", avgTrend: "Trend", avgPullback: "Pullback", avgSwing: "Swing", avgBreakout: "Breakout", avgRegimeAlignment: "Regime", modifiers: "Modifiers", finalScore: "Score", weekly: "Weekly", daily: "Daily", hourly: "Hourly", conf10dLog: "Conf " + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + "DLN", conf10dEmp: "Conf " + ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + "DEM", actions: "Last Refreshed" };
                 return React.createElement("th", { key: k, title: k === "conf10dLog" ? ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + "-Day Confidence \u2014 Lognormal Model" : k === "conf10dEmp" ? ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + "-Day Confidence \u2014 Empirical Model" : k === "modifiers" ? "Penalty/bonus modifiers applied to the entry score (net \u00b1 points)" : undefined, style: Object.assign({}, thStyle, { cursor: k === "actions" ? "default" : "pointer" }), onClick: k === "actions" ? undefined : function() { toggleSort(k); } }, [labels[k], (k === "actions" ? null : arrow(k))]);
               })
             )
@@ -10476,6 +10478,16 @@ function StockScreener(props) {
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.weekChg != null ? (r.weekChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.weekChg != null ? (r.weekChg >= 0 ? "+" : "") + Number(r.weekChg).toFixed(2) + "%" : "--"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.monthChg != null ? (r.monthChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.monthChg != null ? (r.monthChg >= 0 ? "+" : "") + Number(r.monthChg).toFixed(2) + "%" : "--"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { fontWeight: 600, fontFamily: "var(--font-heading)", color: r.yearChg != null ? (r.yearChg >= 0 ? "#22c55e" : "#ef4444") : "var(--text6)" }) }, r.yearChg != null ? (r.yearChg >= 0 ? "+" : "") + Number(r.yearChg).toFixed(2) + "%" : "--"),
+                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                  r.result.aggRangeAdequacy != null
+                    ? React.createElement("span", { title: "Range Adequacy contribution to entry score " + r.result.finalScore, style: { fontWeight: 700, color: "var(--accent)" } }, Number(r.result.aggRangeAdequacy).toFixed(1))
+                    : "\u2014"
+                ),
+                React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
+                  r.result.aggConfidence != null
+                    ? React.createElement("span", { title: "Confidence contribution to entry score " + r.result.finalScore, style: { fontWeight: 700, color: "var(--accent)" } }, Number(r.result.aggConfidence).toFixed(1))
+                    : "\u2014"
+                ),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
                   r.result.aggTrendHealth != null
                     ? React.createElement("span", { title: "Trend Health contribution to entry score " + r.result.finalScore, style: { fontWeight: 700, color: "var(--accent)" } }, Number(r.result.aggTrendHealth).toFixed(1))
@@ -11513,6 +11525,8 @@ function SingleStockAnalysis({ requestedTicker }) {
     var patMeta = buildPatMeta(mtf && mtf.entry);
     var _pm = __pm();;
     var pillars = entryScore != null ? [
+      { label: "Range Adequacy", val: mtf.entry.aggRangeAdequacy, max: _pm.rangeAdequacy, color: "#f59e0b" },
+      { label: "Confidence", val: mtf.entry.aggConfidence, max: _pm.confidence, color: "#84cc16" },
       { label: "Trend Health", val: mtf.entry.aggTrendHealth, max: _pm.trendHealth, color: "#22c55e" },
       { label: "Pullback Quality", val: mtf.entry.aggPullbackQuality, max: _pm.pullbackQuality, color: "#06b6d4" },
       { label: "Swing Potential", val: mtf.entry.aggSwingPotential, max: _pm.swingPotential, color: "#06b6d4" },
@@ -12969,6 +12983,40 @@ function InfoPage() {
       React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 4, color: "var(--text)" } }, "Entry Score \u2014 Pillars Explained"),
       React.createElement("p", { style: { fontSize: 11, color: "var(--text5)", lineHeight: 1.6, marginBottom: 14 } }, "The Entry Score (0\u2013100) tells you how strong a stock's setup looks right now. It is built from five independent pillars that each measure a different aspect of the trade. Think of them as five lenses \u2014 each one asks a different question about the stock before you buy."),
 
+      /* Pillar: Range Adequacy */
+      (function() {
+        var _pm = __pm();
+        var pts = _pm.rangeAdequacy;
+        return React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", marginBottom: 10 } },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 } },
+            React.createElement("span", { style: { fontSize: 16, fontWeight: 800, color: "var(--accent)", fontFamily: "var(--font-heading)" } }, "\u25C9"),
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)" } }, "Range Adequacy (ATR%)"),
+            React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, pts + " pts max")
+          ),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65, margin: 0 } },
+            "Can the stock actually move 3% in 10 days? This pillar scores the Average True Range (ATR) as a percentage of price. Higher ATR means the stock routinely makes larger daily swings, making a +3% move statistically easier to achieve. Scores peak at 4-6% ATR and decline above that. Below 1.5% ATR scores 0. ",
+            React.createElement("strong", { style: { color: "var(--text2)" } }, "Why it matters: "),
+            "This is the strongest empirical predictor of hitting a short-term target. If a stock's daily range is only 1%, asking for 3% in two weeks is a stretch. If its ATR is 3%, it's a normal Tuesday."
+          )
+        );
+      })(),
+      /* Pillar: Confidence */
+      (function() {
+        var _pm = __pm();
+        var pts = _pm.confidence;
+        return React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", marginBottom: 10 } },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 } },
+            React.createElement("span", { style: { fontSize: 16, fontWeight: 800, color: "var(--accent)", fontFamily: "var(--font-heading)" } }, "\u25C9"),
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)" } }, "Confidence Score"),
+            React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, pts + " pts max")
+          ),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65, margin: 0 } },
+            "What are the statistical odds of hitting the target? This pillar runs the 10-day forward confidence model (barrier-touch probability with volatility and drift), calibrated against actual outcomes. If the model gives a 60% or lower chance, it contributes little. If it gives an 80%+ chance, it contributes full points. ",
+            React.createElement("strong", { style: { color: "var(--text2)" } }, "Why it matters: "),
+            "It forces the score to respect the underlying probability math rather than just technical shapes."
+          )
+        );
+      })(),
       /* Pillar 1: Trend Health */
       (function() {
         var _pm = __pm();

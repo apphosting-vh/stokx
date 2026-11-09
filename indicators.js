@@ -3279,10 +3279,10 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        curve, maxLift 16.8pt at the new scale). The run-R4 values (66/64/62/34)
        and pre-pass values (64/58/48/35) predate this pass. */
     classification: {
-      strongBuy: 72,
-      buy: 60,
-      watchlist: 45,
-      neutral: 30,
+      strongBuy: 85,
+      buy: 72,
+      watchlist: 55,
+      neutral: 40,
     },
 
     /* Batch backtest Pass-2 re-scoring mix:
