@@ -46,6 +46,7 @@ function compute(sc,bc,meta){var al=align(sc,bc);if(al.length<W*2+TAIL+5)return 
    behave like an index. "v" is total traded VALUE (price x shares) so one
    low-priced stock cannot dominate volume. Inputs may use .t or .d for the date. */
 var BASKET_MIN=3,_bk={},_bkp={};
+var _sec20Map={};
 function bkDate(c){var t=c&&(c.d!=null?c.d:c.t);return t==null?"":String(t).slice(0,10);}
 function buildBasket(list){
   var per=[],i,j,k;
@@ -119,10 +120,27 @@ async function fetchSectorCandles(sec){
 var _s=null,_l=null,_u=[];
 function notify(){_u.slice().forEach(function(fn){try{fn(_s);}catch(e){}});}
 function onUpdate(fn){_u.push(fn);return function(){var i=_u.indexOf(fn);if(i>=0)_u.splice(i,1);};}
-async function load(opts){opts=opts||{};var force=!!opts.force;var DF=window.OHLCVFetcher;if(!DF)throw new Error("OHLCVFetcher not loaded");if(!force&&_s&&(Date.now()-_s.ts<TTL))return _s;if(_l&&!force)return _l;var pr=opts.onProgress||function(){};if(force)_bk={};_l=(async function(){try{pr(0,SEC.length+1,"Benchmark...");var bR=await DF.fetchOHLCVCached(BENCH,"daily");var b=bR&&bR.data?bR.data:null;if(!b||b.length<40)throw new Error("Benchmark data unavailable");var secs=[],tot=SEC.length+1,dn=1;for(var i=0;i<SEC.length;i++){var s=SEC[i];pr(dn,tot,"Fetching "+s.name);try{var c=await fetchSectorCandles(s);if(c&&c.length>=40){var cc=compute(c,b,s);if(cc)secs.push(cc);}}catch(e){}dn++;await new Promise(function(r){setTimeout(r,30);});}pr(tot,tot,"Computed");_s={ts:Date.now(),sectors:secs,benchmark:b};notify();return _s;}finally{_l=null;}})();return _l;}
+async function load(opts){opts=opts||{};var force=!!opts.force;var DF=window.OHLCVFetcher;if(!DF)throw new Error("OHLCVFetcher not loaded");if(!force&&_s&&(Date.now()-_s.ts<TTL))return _s;if(_l&&!force)return _l;var pr=opts.onProgress||function(){};if(force)_bk={};_sec20Map={};_l=(async function(){try{pr(0,SEC.length+1,"Benchmark...");var bR=await DF.fetchOHLCVCached(BENCH,"daily");var b=bR&&bR.data?bR.data:null;if(!b||b.length<40)throw new Error("Benchmark data unavailable");var secs=[],tot=SEC.length+1,dn=1;for(var i=0;i<SEC.length;i++){var s=SEC[i];pr(dn,tot,"Fetching "+s.name);try{var c=await fetchSectorCandles(s);if(c&&c.length>=40){var cc=compute(c,b,s);if(cc)secs.push(cc);if(!s.basket&&c.length>=21){var _m20=c.length-1;if(c[_m20].c>0&&c[_m20-20].c>0){var _s20=(c[_m20].c-c[_m20-20].c)/c[_m20-20].c*100;_sec20Map[s.key]=Math.round(_s20*100)/100;}}}}catch(e){}dn++;await new Promise(function(r){setTimeout(r,30);});}pr(tot,tot,"Computed");_s={ts:Date.now(),sectors:secs,benchmark:b};notify();return _s;}finally{_l=null;}})();return _l;}
 function getState(){return _s;}
 function getSectorQuadrantForSymbol(sym){if(!_s||!_s.sectors)return null;var k=GATE_MAP[norm(sym)];if(!k)return null;for(var i=0;i<_s.sectors.length;i++)if(_s.sectors[i].key===k)return _s.sectors[i];return null;}
 function getMarketRegime(){if(!_s||!_s.benchmark)return null;var b=_s.benchmark;if(b.length<200)return{isDowntrend:false};var s=0;for(var i=b.length-200;i<b.length;i++)s+=b[i].c;var ma=s/200,last=b[b.length-1].c;return{isDowntrend:last<ma,benchmarkClose:Math.round(last*100)/100,benchmarkSMA200:Math.round(ma*100)/100,distancePct:Math.round((last/ma-1)*10000)/100};}
+/* v21: sync lookup for the sector-outlier modifier. Returns the sector's
+   20-day % return so the entry scorer can compute stock-vs-sector excess.
+   Returns null if: sector state not loaded / stale, sector is a basket
+   (too noisy), or the symbol isn't mapped to a sector. Zero I/O. */
+function getSector20dPct(symbol){
+  if(!_s||!_sec20Map)return null;
+  if(Date.now()-_s.ts>24*3600*1000)return null;
+  var k=GATE_MAP[norm(symbol)];
+  if(!k)return null;
+  var sec=null;
+  for(var i=0;i<SEC.length;i++)if(SEC[i].key===k){sec=SEC[i];break;}
+  if(!sec)return null;
+  if(sec.basket)return null;
+  var pct=_sec20Map[k];
+  if(pct==null)return null;
+  return{sectorKey:k,sectorName:sec.name,sectorPct:pct};
+}
 setTimeout(function(){try{load({force:false}).catch(function(){});}catch(e){}},5000);
-return{SECTORS:SEC,load:load,getState:getState,getSectorQuadrantForSymbol:getSectorQuadrantForSymbol,getMarketRegime:getMarketRegime,onUpdate:onUpdate,STOCK_SECTOR:MAP,STOCK_SECTOR_ALL:MAP2,fetchSectorCandles:fetchSectorCandles,buildBasket:buildBasket,GATE_INCLUDES_BASKETS:GATE_INCLUDES_BASKETS};
+return{SECTORS:SEC,load:load,getState:getState,getSectorQuadrantForSymbol:getSectorQuadrantForSymbol,getSector20dPct:getSector20dPct,getMarketRegime:getMarketRegime,onUpdate:onUpdate,STOCK_SECTOR:MAP,STOCK_SECTOR_ALL:MAP2,fetchSectorCandles:fetchSectorCandles,buildBasket:buildBasket,GATE_INCLUDES_BASKETS:GATE_INCLUDES_BASKETS};
 })();

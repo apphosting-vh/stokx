@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-window.__STOX_APP_VERSION = "5.1.0";
+window.__STOX_APP_VERSION = "6.0.0";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {

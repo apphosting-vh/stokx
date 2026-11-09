@@ -3244,6 +3244,20 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       highVolATRPercentile: 80,
       highVolERThreshold: 0.5,
       highVolBonus: 5,
+      /* v21: Sector Outlier modifier — rewards stocks beating their sector
+         index over the trailing 20 sessions, penalises laggards. Only
+         index-based sectors qualify (BANK, IT, PHARMA, AUTO, FMCG,
+         METAL, REALTY, ENERGY, PSUBANK, MEDIA, FINSRV — basket sectors
+         are skipped because their synthesized index is too noisy).
+         Symmetric by default; dead zone below minExcessPct; linear
+         ramp to maxBonus/maxPenalty at saturateAtPct. */
+      sectorOutlier: {
+        maxBonus: 3,
+        maxPenalty: 3,
+        minExcessPct: 3,
+        saturateAtPct: 8,
+        skipBasketSectors: true,
+      },
     },
     /* Classification thresholds — LOCKED @2026-09-12 by the mod16 pass at the
        recommended pillarMax caps {28,28,12,22,4}: STRONG_BUY 62, BUY 60,
@@ -3294,7 +3308,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      Bumped 16→17 at the mod16 lock-in pass (2026-09-12): pillarMax
      {28,28,12,22,4}, classification {62,60,58,34} re-derived under the V16
      tempered modifiers and OOS-validated. */
-  var SCORE_CONFIG_VERSION = 20;
+  var SCORE_CONFIG_VERSION = 21;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? Math.round(SCORE_CONFIG.forwardSim.targetPct * 1000) / 10 : 4; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
@@ -3924,6 +3938,35 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (sn && sn.ouHalfLife != null && sn.ouHalfLife > 13) { items.push({ reason: "Slow mean-reversion (Half-Life > 13d)", amount: -5 }); }
     if (sn && sn.vpin != null && sn.vpin > 0.6) { items.push({ reason: "High toxic order flow (VPIN)", amount: -5 }); }
     if (sn && sn.daysSinceHigh != null && sn.daysSinceHigh > 3 && sn.c > sn.sma20) { items.push({ reason: "Stale breakout (Day " + sn.daysSinceHigh + ")", amount: -3 }); }
+
+    /* v21 — Sector Outlier modifier. Stock's 20-day return minus its
+       sector index's 20-day return. Only index-based sectors (basket
+       sectors skipped). Dead zone below minExcessPct, ramp to max at
+       saturateAtPct. */
+    try {
+      var socfg = mc.sectorOutlier || {};
+      if (sn && sn.symbol && sn.roc20 != null && window.SectorRRG && window.SectorRRG.getSector20dPct) {
+        var secInfo = window.SectorRRG.getSector20dPct(sn.symbol);
+        if (secInfo && secInfo.sectorPct != null) {
+          var stockPct = sn.roc20 * 100;
+          var excess = stockPct - secInfo.sectorPct;
+          var minEx = socfg.minExcessPct != null ? socfg.minExcessPct : 3;
+          var satAt = socfg.saturateAtPct != null ? socfg.saturateAtPct : 8;
+          if (Math.abs(excess) >= minEx && satAt > minEx) {
+            var mag = Math.min(1, (Math.abs(excess) - minEx) / (satAt - minEx));
+            var amt = excess > 0
+              ? Math.round((socfg.maxBonus != null ? socfg.maxBonus : 3) * mag * 10) / 10
+              : -Math.round((socfg.maxPenalty != null ? socfg.maxPenalty : 3) * mag * 10) / 10;
+            if (amt !== 0) {
+              items.push({
+                reason: (excess > 0 ? 'Sector outlier +' : 'Sector laggard ') + (Math.round(excess * 10) / 10) + '% vs ' + (secInfo.sectorName || secInfo.sectorKey),
+                amount: amt
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {}
 
     return items;
   }
