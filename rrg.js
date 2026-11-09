@@ -129,6 +129,11 @@ function getMarketRegime(){if(!_s||!_s.benchmark)return null;var b=_s.benchmark;
    Returns null if: sector state not loaded / stale, sector is a basket
    (too noisy), or the symbol isn't mapped to a sector. Zero I/O. */
 function getSector20dPct(symbol){
+  /* v22-bg: suppress the sector modifier during backtest scoring so a
+     historical bar is never boosted/penalised by today's sector return.
+     Live scoring never sets __stoxBacktestCtx.depth, so it keeps the
+     modifier. */
+  if(window.__stoxBacktestCtx&&window.__stoxBacktestCtx.depth>0)return null;
   if(!_s||!_sec20Map)return null;
   if(Date.now()-_s.ts>24*3600*1000)return null;
   var k=GATE_MAP[norm(symbol)];

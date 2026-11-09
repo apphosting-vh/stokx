@@ -471,6 +471,15 @@ window.BacktestEngine = (function () {
 
       var res = null;
       if (scoreFn) {
+        /* v22-bg: mark that we're inside a backtest scoring call so the
+           sector-outlier modifier (rrg.getSector20dPct) returns null and
+           historical bars don't pick up today's sector return. Because
+           scoreFn is synchronous there's no await inside this block, so
+           live scoring running concurrently (during yieldToUI yields)
+           still sees depth === 0. finally ensures the counter decrements
+           even if scoreFn throws. */
+        var _btctx = (window.__stoxBacktestCtx = window.__stoxBacktestCtx || { depth: 0 });
+        _btctx.depth++;
         try {
           res = scoreFn(candles, idx, symbol);
         } catch (e) {
@@ -478,6 +487,8 @@ window.BacktestEngine = (function () {
             scoreErrors.push({ idx: idx, symbol: symbol || candles._symbol || '', msg: e.message, stack: e.stack });
           }
           res = null;
+        } finally {
+          _btctx.depth = Math.max(0, _btctx.depth - 1);
         }
       }
       if (res && (res.entryScore == null || isNaN(res.entryScore))) res = null;
