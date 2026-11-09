@@ -3225,7 +3225,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
         { maxAtrPct: 100, pts: 20 },
       ],
     },
-    confidence: { pillarMin: 40, pillarMax: 80 },
+    confidence: { pillarMin: 40, pillarMax: 95 },
     /* Modifiers — magnitudes tempered @2026-09-12 by a 5y NIFTY 200
        all-bars measurement (110,237 scored bars at target 3.5%/15d):
        the old flat values were too liberal vs the calibrated pillars —
