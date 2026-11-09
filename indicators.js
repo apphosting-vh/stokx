@@ -1699,10 +1699,10 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
   function classifyExitScore(s) {
     if (s >= 85) return { classification: 'URGENT_EXIT', signal: 'URGENT_EXIT', action: 'Full exit immediately' };
-    if (s >= 70) return { classification: 'EXIT', signal: 'EXIT', action: 'Full exit at current price or next bar open' };
-    if (s >= 55) return { classification: 'PARTIAL_EXIT', signal: 'PARTIAL_EXIT', action: 'Exit 50%' };
-    if (s >= 40) return { classification: 'REDUCE_POSITION', signal: 'REDUCE_POSITION', action: 'Reduce position — consider taking partial profits' };
-    if (s >= 25) return { classification: 'MONITOR', signal: 'MONITOR', action: 'No action — watch for escalation next bar' };
+    if (s >= 65) return { classification: 'EXIT', signal: 'EXIT', action: 'Full exit at current price or next bar open' };
+    if (s >= 50) return { classification: 'PARTIAL_EXIT', signal: 'PARTIAL_EXIT', action: 'Exit 50%' };
+    if (s >= 35) return { classification: 'REDUCE_POSITION', signal: 'REDUCE_POSITION', action: 'Reduce position — consider taking partial profits' };
+    if (s >= 22) return { classification: 'MONITOR', signal: 'MONITOR', action: 'No action — watch for escalation next bar' };
     return { classification: 'HOLD', signal: 'HOLD', action: 'All conditions intact — continue holding' };
   }
 
@@ -1953,8 +1953,9 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     var guard = ctx.guard || null;
     if (guard && guard.todaySpike && guard.sessionReturnPct != null && guard.sessionReturnPct > 0 && c >= sn.ema21 && ctx.entryPrice != null && ctx.entryPrice > 0) {
       var profitPct = (c - ctx.entryPrice) / ctx.entryPrice * 100;
-      if (profitPct >= 3.0 && profitPct < 4.0) items.push({ reason: "Golden exit opportunity (spike near 4% target)", amount: 5 });
-      else if (profitPct >= 2.0 && profitPct < 3.0) items.push({ reason: "Spike toward 4% target", amount: 3 });
+      var _tgtP = (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? SCORE_CONFIG.forwardSim.targetPct * 100 : 3;
+      if (profitPct >= (_tgtP * 0.75) && profitPct < _tgtP) items.push({ reason: "Golden exit opportunity (spike near " + _tgtP.toFixed(0) + "% target)", amount: 5 });
+      else if (profitPct >= (_tgtP * 0.5) && profitPct < (_tgtP * 0.75)) items.push({ reason: "Spike toward " + _tgtP.toFixed(0) + "% target", amount: 3 });
     }
     if (sn.stabilityScore != null && sn.stabilityScore < 0.35 && sn.distDayRatio < 0.6 && !(guard && guard.todaySpike)) items.push({ reason: "Erratic whipsaw \u2014 stability collapse", amount: 3 });
     return items;
@@ -2853,6 +2854,25 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       if (wha) weeklyHABullish = wha.bullish;
 
       var sma20Slope5 = sma20_s ? slope(sma20_s, 5) : null;
+      var sma50_s = calcSMA(candles, 50);
+      var sma50Slope20 = sma50_s ? slope(sma50_s, 20) : null;
+      var aroonRes = calcAroon(candles, 25);
+      var aroonUp = aroonRes ? gv(aroonRes.up) : null;
+      var aroonOsc = aroonRes ? gv(aroonRes.osc) : null;
+      var sma20RisingSince = 0;
+      if (sma20_s) {
+        for (var _k = L1; _k >= 1; _k--) {
+          if (sma20_s[_k] != null && sma20_s[_k - 1] != null && sma20_s[_k] > sma20_s[_k - 1]) sma20RisingSince++;
+          else break;
+        }
+      }
+      var ret1M = (L > 22 && cl[L1 - 21] > 0) ? (c - cl[L1 - 21]) / cl[L1 - 21] : null;
+      var ret3M = (L > 64 && cl[L1 - 63] > 0) ? (c - cl[L1 - 63]) / cl[L1 - 63] : null;
+      var ret6M = (L > 127 && cl[L1 - 126] > 0) ? (c - cl[L1 - 126]) / cl[L1 - 126] : null;
+      var ret1Y = (L > 253 && cl[L1 - 252] > 0) ? (c - cl[L1 - 252]) / cl[L1 - 252] : null;
+      var roc5 = (L > 6 && cl[L1 - 5] > 0) ? (c - cl[L1 - 5]) / cl[L1 - 5] : null;
+      var roc10 = (L > 11 && cl[L1 - 10] > 0) ? (c - cl[L1 - 10]) / cl[L1 - 10] : null;
+      var roc20 = (L > 21 && cl[L1 - 20] > 0) ? (c - cl[L1 - 20]) / cl[L1 - 20] : null;
 
       var swingHigh20 = null, swingHigh20Idx = null;
       for (var j = Math.max(0, L - 20); j < L; j++) { if (hi[j] != null && (swingHigh20 === null || hi[j] > swingHigh20)) { swingHigh20 = hi[j]; swingHigh20Idx = j; } }
@@ -2910,6 +2930,10 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
         buyRef: buyRef,
         pullbackDepth: pullbackDepth, nearSupportCount: nearSupportCount,
         swingHigh20: swingHigh20, barsSinceHigh20: barsSinceHigh20,
+        sma50Slope20: sma50Slope20, aroonUp: aroonUp, aroonOsc: aroonOsc,
+        sma20RisingSince: sma20RisingSince,
+        ret1M: ret1M, ret3M: ret3M, ret6M: ret6M, ret1Y: ret1Y,
+        roc5: roc5, roc10: roc10, roc20: roc20,
         dcUpperPrior: dcUpperPrior, barsSinceBreakout: barsSinceBreakout,
         amihud: amihud, ouHalfLife: ouHalfLife, vpin: vpin, daysSinceHigh: daysSinceHigh, daysSinceLow: daysSinceLow, crossSectionalRank: crossRank
       };
@@ -2993,14 +3017,14 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
   var SCORE_CONFIG = {
     /* Outcome horizon for the win-rate backtest and forward-sim target
        (sessions). Locked 15 @2026-09-12 by calibration run R4. */
-    horizonDays: 13,
+    horizonDays: 10,
     /* Forward outcome simulation constant (target barrier for the win-rate
        backtest). No stop loss: positions are held to the horizon unless the
        +target barrier is touched. LOCKED 3.5%/15d @2026-09-12 (run R4) — the
        combo the current constants trace back to. The 4y harness's 4%/20d pick
        (WR 61.8%, PF 1.23) predates this pass. The stop side remains removed:
        the harness confirmed stop exits added no predictive signal. */
-    forwardSim: { targetPct: 0.031 },
+    forwardSim: { targetPct: 0.03 },
     /* Pillar max scores — five pillars (nominal sum 100). LOCKED @2026-09-12
        by the mod16 pass (see VERSION banner): Trend Health 28 (flat →
        kept) + Pullback Quality 28 (restored to the full cap: under the
@@ -3017,7 +3041,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
        diagnostics. Joint recommended config evaluates at threshold 65 to
        n=399 / WR 71.2% / ER 0.61% / PF 1.28; test-40% ER 1.16% (overfit
        direction is negative — the config strengthens out of sample). */
-    pillarMax: { trendHealth: 20, pullbackQuality: 40, swingPotential: 12, breakoutContinuation: 22, regimeAlignment: 6 },
+    pillarMax: { trendHealth: 22, pullbackQuality: 40, swingPotential: 8, breakoutContinuation: 22, regimeAlignment: 8 },
     /* MTF weights */
     tfWeights: { D: 0.55, H: 0.30, W: 0.15 },
 
@@ -3079,6 +3103,28 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       breakoutExtensionCapATR: 1.5,
       breakoutFreshMaxBars: 2,
       breakoutDonchianPeriod: 20,
+    },
+    /* Steady Trend sub-path (v20) — third alternate inside Setup Quality.
+       Catches persistent, non-pullback, non-fresh-breakout trends
+       (HDFCBANK/ICICIBANK grinding higher). Scaled by a 4-gate freshness
+       check so a day-3 setup scores ~30 and a day-22 extended one ~5. */
+    steadyTrend: {
+      mtfConsistency: 10,
+      maStack: 8,
+      smoothness: 6,
+      rsPersist: 6,
+      aroonUp: 6,
+      acceleration: 4,
+      smoothnessERThreshold: 0.4,
+      aroonUpThreshold: 70,
+      extensionThresholds: [3, 6, 9],
+      extensionMult: [1.0, 0.7, 0.4, 0],
+      ageThresholds: [10, 20],
+      ageMult: [1.0, 0.6, 0.3],
+      lastHighThresholds: [3, 10],
+      lastHighMult: [1.0, 0.7, 0.4],
+      decelMult: 0.6,
+      accelBonus: 1.10,
     },
     /* Pillar 3: Swing Potential (max 12 @2026-09-12, mod16 pass) — reinstated from the archived 4.3.10
        implementation. Reversal-from-pullback probability, not breakout/
@@ -3159,8 +3205,8 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
                                bucket noise. Kept tunable.
        The pillar's job is discrimination & strength attestation, not timing. */
     regimeAlignment: {
-      rs: 6,
-      rsSaturation: 20,
+      rs: 8,
+      rsSaturation: 12,
       longTrend: 0,
       longSmaBars: 200,
       relMomentum: 0,
@@ -3248,7 +3294,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      Bumped 16→17 at the mod16 lock-in pass (2026-09-12): pillarMax
      {28,28,12,22,4}, classification {62,60,58,34} re-derived under the V16
      tempered modifiers and OOS-validated. */
-  var SCORE_CONFIG_VERSION = 19;
+  var SCORE_CONFIG_VERSION = 20;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? Math.round(SCORE_CONFIG.forwardSim.targetPct * 1000) / 10 : 4; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
@@ -3279,7 +3325,10 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (sn.sma20 != null && sn.sma50 != null && sn.sma20 > sn.sma50) s += c.SMA20AboveSMA50;
     if (sn.c != null && sn.sma20 != null && sn.c > sn.sma20) s += c.priceAboveSMA20_or_VWAP;
     else if (sn.c != null && sn.anchoredVwap != null && sn.c > sn.anchoredVwap) s += c.priceAboveSMA20_or_VWAP;
-    if (sn.adxL != null && sn.plusDI != null && sn.minusDI != null && sn.adxL >= c.adxThreshold && sn.plusDI > sn.minusDI) s += c.ADX_DI;
+    /* v20: Aroon Osc > 30 is a faster trend-confirmation than ADX >= 25.
+       ADX is a lagging filter; either signal earns the ADX_DI points. */
+    if ((sn.adxL != null && sn.plusDI != null && sn.minusDI != null && sn.adxL >= c.adxThreshold && sn.plusDI > sn.minusDI)
+        || (sn.aroonOsc != null && sn.aroonOsc > 30)) s += c.ADX_DI;
     if (sn.rsMansfield != null && sn.rsMansfield > c.mansfieldRSThreshold) s += c.mansfieldRS;
     if (sn.macdL != null && sn.sigL != null && sn.macdL > sn.sigL) s += c.macdCross;
     if (sn.weeklyHABullish === true) s += c.weeklyHABullish;
@@ -3296,6 +3345,109 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      The breakout alternate path was SHRUNK to a 4-pt structural-confirm bonus;
      the core breakout probability now lives in the standalone Breakout
      Continuation pillar (calcBreakoutContinuationScore). */
+  /* ── Trend Freshness (v20) ─────────────────────────────────────────────
+     Four independent gates. Combined = product. A fresh, accelerating,
+     non-extended trend → ~1.0-1.1×. A 20-day, +7% extended, decelerating
+     trend → ~0.1-0.2×. This is what turns "BUY at day 20" into "BUY at
+     day 3, then downgrade to WATCHLIST as the trend matures." */
+  function computeTrendFreshness(sn) {
+    var c = SCORE_CONFIG.steadyTrend || {};
+    var extTh = c.extensionThresholds || [3, 6, 9];
+    var extMult = c.extensionMult || [1.0, 0.7, 0.4, 0];
+    var ageTh = c.ageThresholds || [10, 20];
+    var ageMult = c.ageMult || [1.0, 0.6, 0.3];
+    var lhTh = c.lastHighThresholds || [3, 10];
+    var lhMult = c.lastHighMult || [1.0, 0.7, 0.4];
+
+    var extPct = (sn.sma20 != null && sn.sma20 > 0 && sn.c != null) ? (sn.c - sn.sma20) / sn.sma20 * 100 : null;
+    var extGate = 1.0;
+    if (extPct != null) {
+      if (extPct >= extTh[2]) extGate = extMult[3];
+      else if (extPct >= extTh[1]) extGate = extMult[2];
+      else if (extPct >= extTh[0]) extGate = extMult[1];
+    }
+
+    var age = sn.sma20RisingSince != null ? sn.sma20RisingSince : 0;
+    var ageGate = 1.0;
+    if (age > ageTh[1]) ageGate = ageMult[2];
+    else if (age > ageTh[0]) ageGate = ageMult[1];
+
+    var lhAge = sn.barsSinceHigh20 != null ? sn.barsSinceHigh20 : 0;
+    var lhGate = 1.0;
+    if (lhAge > lhTh[1]) lhGate = lhMult[2];
+    else if (lhAge > lhTh[0]) lhGate = lhMult[1];
+
+    var accGate = 1.0;
+    if (sn.roc5 != null && sn.roc10 != null && sn.roc20 != null) {
+      if (sn.roc5 > sn.roc10 && sn.roc10 > sn.roc20 && sn.roc5 > 0) accGate = c.accelBonus || 1.10;
+      else if (sn.roc5 < sn.roc10) accGate = c.decelMult || 0.6;
+    }
+
+    return {
+      extPct: extPct != null ? round(extPct, 2) : null, extGate: extGate,
+      age: age, ageGate: ageGate,
+      lastHighAge: lhAge, lastHighGate: lhGate,
+      accGate: accGate,
+      combined: clamp(extGate * ageGate * lhGate * accGate, 0, c.accelBonus || 1.10)
+    };
+  }
+
+  /* ── Steady Trend sub-score (v20) ────────────────────────────────────────
+     Fires for stocks that are neither in a pullback (4-25% retracement)
+     nor in a fresh breakout. Scores 0-40 (before gate), then multiplied
+     by the freshness gate above. */
+  function calcSteadyTrendScore(sn) {
+    try {
+      var cfg = SCORE_CONFIG.steadyTrend || {};
+      var score = 0;
+
+      var mtfPts = cfg.mtfConsistency != null ? cfg.mtfConsistency : 10;
+      if (sn.ret1M != null && sn.ret3M != null && sn.ret6M != null) {
+        var allPos = sn.ret1M > 0 && sn.ret3M > 0 && sn.ret6M > 0;
+        var has1Y = sn.ret1Y == null || sn.ret1Y > 0;
+        var consistent = sn.ret1M >= sn.ret6M * 0.25;
+        if (allPos && has1Y && consistent) score += mtfPts;
+        else if (allPos) score += mtfPts * 0.6;
+        else if (sn.ret1M > 0 && sn.ret3M > 0) score += mtfPts * 0.3;
+      }
+
+      var maPts = cfg.maStack != null ? cfg.maStack : 8;
+      if (sn.c != null && sn.sma20 != null && sn.sma50 != null
+          && sn.c > sn.sma20 && sn.sma20 > sn.sma50
+          && sn.sma20Slope5 != null && sn.sma20Slope5 > 0) {
+        if (sn.sma50Slope20 != null && sn.sma50Slope20 > 0) score += maPts;
+        else score += maPts * 0.7;
+      }
+
+      var smPts = cfg.smoothness != null ? cfg.smoothness : 6;
+      if (sn.efficiencyRatio10 != null) {
+        var erTh = cfg.smoothnessERThreshold != null ? cfg.smoothnessERThreshold : 0.4;
+        if (sn.efficiencyRatio10 >= erTh) score += smPts;
+        else if (sn.efficiencyRatio10 >= erTh * 0.6) score += smPts * 0.5;
+      }
+
+      var rsPts = cfg.rsPersist != null ? cfg.rsPersist : 6;
+      if (sn.rsMansfield != null && sn.rsMansfield > 0) {
+        score += rsPts;
+        if (sn.rsMansfield > 5) score += rsPts * 0.3;
+      }
+
+      var arPts = cfg.aroonUp != null ? cfg.aroonUp : 6;
+      var arTh = cfg.aroonUpThreshold != null ? cfg.aroonUpThreshold : 70;
+      if (sn.aroonUp != null && sn.aroonUp >= arTh) score += arPts;
+      else if (sn.aroonUp != null && sn.aroonUp >= 50) score += arPts * 0.5;
+
+      var accPts = cfg.acceleration != null ? cfg.acceleration : 4;
+      if (sn.roc5 != null && sn.roc10 != null && sn.roc20 != null
+          && sn.roc5 > sn.roc10 && sn.roc10 > sn.roc20 && sn.roc5 > 0) {
+        score += accPts;
+      }
+
+      var fresh = computeTrendFreshness(sn);
+      return round(score * fresh.combined, 1);
+    } catch (e) { return 0; }
+  }
+
   function calcPullbackScore(sn, volRegime, candles) {
     var c = SCORE_CONFIG.pullbackQuality;
     /* Shared structure gate: is the stock in a mean-reversion pullback right
@@ -3348,8 +3500,15 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       }
     }
 
-    /* Pillar = max(pullbackPath, breakoutPath), capped at the 30-pt pillar max. */
-    return Math.min(Math.max(sPull, sBreak), SCORE_CONFIG.pillarMax.pullbackQuality);
+    /* Steady Trend sub-path (v20): the third alternate. Fires when the
+       stock is neither pulling back nor in a fresh breakout but is still
+       trending persistently with positive RS. Multiplied by freshness. */
+    var sSteady = 0;
+    if (!inPullback) {
+      sSteady = calcSteadyTrendScore(sn);
+    }
+
+    return Math.min(Math.max(sPull, sBreak, sSteady), SCORE_CONFIG.pillarMax.pullbackQuality);
   }
 
    /* ── Pillar 3: Swing Potential (max 24) ───────────────────────
@@ -4398,15 +4557,16 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     /* Layer 1: Hard Rules (target + time only — no stop loss) */
     if (ep != null && cp != null) {
       if (target != null && cp >= target) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Target hit (+' + getTargetPctDisplay() + '%)', action: 'Full exit', exit_score: exitScore });
-      if (days >= (SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 15) && cp < ep * 1.02) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Time stop (' + (SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 15) + ' days, <2%)', action: 'Full exit', exit_score: exitScore });
+      var _hd = (SCORE_CONFIG.horizonDays != null ? SCORE_CONFIG.horizonDays : 10);
+      if (days >= _hd && cp < ep * 1.015) return Object.assign({}, exitResult, { signal: 'EXIT', reason: 'Time stop (' + _hd + ' days, <1.5%)', action: 'Full exit', exit_score: exitScore });
     }
 
     /* Layer 2: Exit Score */
     if (exitResult && exitResult.exit_score != null) {
       if (exitScore >= 85) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
-      if (exitScore >= 70) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
-      if (exitScore >= 55) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
-      if (exitScore >= 40) {
+      if (exitScore >= 65) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
+      if (exitScore >= 50) return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
+      if (exitScore >= 35) {
         return Object.assign({}, exitResult, { reason: 'Score ' + exitScore });
       }
     }
@@ -4419,7 +4579,7 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     }
 
     /* Layer 4: Partial Profit-Lock */
-    if (ep != null && cp != null && cp >= ep * 1.02 && days >= 3 && exitScore >= 30) {
+    if (ep != null && cp != null && cp >= ep * 1.02 && days >= 5 && exitScore >= 35) {
       return Object.assign({}, exitResult || {}, { signal: 'PARTIAL_EXIT', reason: 'Lock gains', action: 'Exit 50%', exit_score: exitScore });
     }
 
