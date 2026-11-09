@@ -611,7 +611,10 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
 
   function calcMACD(candles, fast, slow, signal) {
     fast = fast || 12; slow = slow || 26;
-    signal = (signal != null && signal > 0) ? signal : 9;
+    // signal == null  → default 9 (backwards compatible)
+    // signal  >  0    → use it
+    // signal <=  0    → caller wants MACD line only; SKIP the signal EMA entirely
+    var computeSignal = (signal == null) ? 9 : Number(signal);
     var cl = closes(candles);
     var emaFast = ema(cl, fast), emaSlow = ema(cl, slow);
     var macdLine = [];
@@ -621,20 +624,22 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     }
     var validMacd = [], validIdx = [];
     for (var i = 0; i < macdLine.length; i++) { if (macdLine[i] !== null) { validMacd.push(macdLine[i]); validIdx.push(i); } }
-    var sigEmaInput = validMacd.map(function () { return null; });
-    if (validMacd.length >= signal) {
-      var seedSum = 0;
-      for (var i = 0; i < signal; i++) seedSum += validMacd[i];
-      sigEmaInput[signal - 1] = seedSum / signal;
-      for (var i = signal; i < validMacd.length; i++) sigEmaInput[i] = validMacd[i];
-    }
-    var sigEma = ema(sigEmaInput, signal);
     var signalLine = macdLine.map(function () { return null; });
-    for (var i = 0; i < sigEma.length; i++) { if (sigEma[i] !== null) signalLine[validIdx[i]] = sigEma[i]; }
     var histogram = [];
-    for (var i = 0; i < cl.length; i++) {
-      if (macdLine[i] === null || signalLine[i] === null) { histogram.push(null); continue; }
-      histogram.push(round(macdLine[i] - signalLine[i], 4));
+    if (computeSignal > 0) {
+      var sigEmaInput = validMacd.map(function () { return null; });
+      if (validMacd.length >= computeSignal) {
+        var seedSum = 0;
+        for (var i = 0; i < computeSignal; i++) seedSum += validMacd[i];
+        sigEmaInput[computeSignal - 1] = seedSum / computeSignal;
+        for (var i = computeSignal; i < validMacd.length; i++) sigEmaInput[i] = validMacd[i];
+      }
+      var sigEma = ema(sigEmaInput, computeSignal);
+      for (var i = 0; i < sigEma.length; i++) { if (sigEma[i] !== null) signalLine[validIdx[i]] = sigEma[i]; }
+      for (var i = 0; i < cl.length; i++) {
+        if (macdLine[i] === null || signalLine[i] === null) { histogram.push(null); continue; }
+        histogram.push(round(macdLine[i] - signalLine[i], 4));
+      }
     }
     return { macd: macdLine.map(function (v) { return v !== null ? round(v, 4) : null; }), signal: signalLine.map(function (v) { return v !== null ? round(v, 4) : null; }), histogram: histogram };
   }
