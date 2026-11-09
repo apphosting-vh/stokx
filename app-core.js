@@ -2,7 +2,7 @@
    StoX \u2014 Stock Analysis & Portfolio Tracking for Indian Equities
    app-core.js \u2014 React application (in-browser Babel compilation)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-window.__STOX_APP_VERSION = "7.0.1";
+window.__STOX_APP_VERSION = "7.0.2";
 
 /* Apply saved score config on startup \u2014 discard if version mismatch */
 (function() {
@@ -10527,9 +10527,9 @@ function StockScreener(props) {
                     mlBadge(r.patMeta)
                   )
                 ),
-                React.createElement("td", { style: tdStyle }, r.result.weekly ? React.createElement("span", { style: { fontWeight: 700, color: r.result.weekly.decision.color } }, r.result.weekly.total) : "\u2014"),
-                React.createElement("td", { style: tdStyle }, r.result.daily ? React.createElement("span", { style: { fontWeight: 700, color: r.result.daily.decision.color } }, r.result.daily.total) : "\u2014"),
-                React.createElement("td", { style: tdStyle }, r.result.hourly ? React.createElement("span", { style: { fontWeight: 700, color: r.result.hourly.decision.color } }, r.result.hourly.total) : "\u2014"),
+                React.createElement("td", { style: tdStyle }, r.result.weekly ? React.createElement("span", { style: { fontWeight: 700, color: "var(--text3)" } }, r.result.weekly.total) : "\u2014"),
+                React.createElement("td", { style: tdStyle }, r.result.daily ? React.createElement("span", { style: { fontWeight: 700, color: "var(--text3)" } }, r.result.daily.total) : "\u2014"),
+                React.createElement("td", { style: tdStyle }, r.result.hourly ? React.createElement("span", { style: { fontWeight: 700, color: "var(--text3)" } }, r.result.hourly.total) : "\u2014"),
                 React.createElement("td", { style: Object.assign({}, tdStyle, { textAlign: "center" }) },
                    r.conf10dLog != null
                     ? React.createElement("span", { title: ((TI.getScoreConfig && TI.getScoreConfig().horizonDays) || 15) + "-Day Confidence \u2014 Lognormal (" + Number(r.conf10dLog).toFixed(1) + "/100)", style: { fontWeight: 700, fontFamily: "var(--font-mono)", color: r.conf10dLog >= 70 ? "#16a34a" : r.conf10dLog >= 40 ? "#d97706" : "#dc2626", fontSize: 10 } }, Number(r.conf10dLog).toFixed(0))
