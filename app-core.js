@@ -1620,7 +1620,7 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
       entryScore: holding.entryScore,
     }),
 
-    // Forward Confidence \u2014 will this stock reach +4% from current price within the next 5 trading days?
+    // Expected Value / probability-calibrated trade decision\n    ticker && React.createElement(ExpectedValueTradePanel, { ticker: ticker }),\n\n    // Forward Confidence \u2014 will this stock reach +4% from current price within the next 5 trading days?
     ticker && React.createElement(ForwardConfidencePanel, {
       ticker: ticker,
     }),
@@ -2616,6 +2616,104 @@ const SessionConfidencePanel = ({ ticker, buyPrice, buyDate, entryScore }) => {
    10-day panel \u2014 40-session hourly tape + regime drift + BS probability \u2014
    with a 5-day horizon and tighter decay on hourly momentum.
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+
+/* ══════════════════════════════════════════════════════════════════════
+   EXPECTED VALUE TRADE PANEL — probability + EV decision layer
+   Injected by apply-stox-ev-overhaul.js
+   ══════════════════════════════════════════════════════════════════════ */
+const ExpectedValueTradePanel = ({ ticker }) => {
+  const DF = window.OHLCVFetcher;
+  const EV = window.ExpectedValueEngine;
+  const [loading, setLoading] = React.useState(true);
+  const [analysis, setAnalysis] = React.useState(null);
+  const [optimized, setOptimized] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+  const [horizon, setHorizon] = React.useState(10);
+  const [target, setTarget] = React.useState(4);
+
+  React.useEffect(() => {
+    if (!ticker || !DF || !EV) { setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true); setErr(null);
+    Promise.all([
+      DF.fetchOHLCVCached(ticker, "daily"),
+      DF.fetchOHLCVCached(ticker, "1h"),
+      DF.fetchOHLCVCached("^NSEI", "daily")
+    ]).then((res) => {
+      if (cancelled) return;
+      const d = res[0] && res[0].data;
+      const h = res[1] && res[1].data;
+      const idx = res[2] && res[2].data;
+      if (!d || d.length < 50 || !h || h.length < 60) {
+        setErr("insufficient_data"); return;
+      }
+      const input = { symbol: ticker, dailyCandles: d, hourlyCandles: h, indexCandles: idx };
+      setAnalysis(EV.analyze(Object.assign({}, input, { horizonDays: horizon, targetPct: target })));
+      setOptimized(EV.optimize(input));
+    }).catch(() => { if (!cancelled) setErr("fetch"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [ticker, horizon, target]);
+
+  if (loading) return React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: "12px 14px" } },
+    React.createElement("div", { style: { fontWeight: 700, fontSize: 12 } }, "Expected Value Trade Engine"),
+    React.createElement("div", { style: { fontSize: 10, color: "var(--text6)", marginTop: 4 } }, "Calibrating probability, expected value and evidence...")
+  );
+  if (err || !analysis) return null;
+
+  const a = analysis;
+  const ev = a.expectedValue;
+  const tone = a.decision.color === "profit" ? "#16a34a" : a.decision.color === "loss" ? "#dc2626" : a.decision.color === "warn" ? "#d97706" : "var(--text5)";
+  const metric = (label, value, sub) => React.createElement("div", {
+    style: { flex: "1 1 120px", padding: "10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg4)" }
+  },
+    React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", textTransform: "uppercase", letterSpacing: .5 } }, label),
+    React.createElement("div", { style: { fontSize: 17, fontWeight: 800, marginTop: 3, color: "var(--text)" } }, value),
+    sub && React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 2 } }, sub)
+  );
+
+  return React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: "14px" } },
+    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" } },
+      React.createElement("div", { style: { fontSize: 13, fontWeight: 800 } }, "Expected Value Trade Engine"),
+      React.createElement("span", { style: { marginLeft: "auto", padding: "3px 8px", borderRadius: 12, background: "var(--bg4)", color: tone, border: "1px solid var(--border)", fontSize: 10, fontWeight: 800 } }, a.decision.label)
+    ),
+    React.createElement("div", { style: { fontSize: 10, color: "var(--text5)", lineHeight: 1.55, marginBottom: 12 } },
+      "The legacy Entry Score is used as setup quality only. Trade qualification is based on calibrated target probability, modeled outcome distribution, net expected value and evidence confidence."
+    ),
+    React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12, alignItems: "center" } },
+      React.createElement("label", { style: { fontSize: 10, color: "var(--text5)" } }, "Horizon ",
+        React.createElement("select", { value: horizon, onChange: e => setHorizon(Number(e.target.value)), className: "inp", style: { marginLeft: 5, fontSize: 11 } },
+          [3,5,10,15,20].map(x => React.createElement("option", { key: x, value: x }, x + " days"))
+        )
+      ),
+      React.createElement("label", { style: { fontSize: 10, color: "var(--text5)" } }, "Target ",
+        React.createElement("select", { value: target, onChange: e => setTarget(Number(e.target.value)), className: "inp", style: { marginLeft: 5, fontSize: 11 } },
+          [2,3,4,5,6].map(x => React.createElement("option", { key: x, value: x }, "+" + x + "%"))
+        )
+      ),
+      optimized && optimized.best && React.createElement("span", { style: { fontSize: 10, color: "var(--accent)" } },
+        "Best EV plan: +" + optimized.best.targetPct + "% / " + optimized.best.horizonDays + "d"
+      )
+    ),
+    React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 } },
+      metric("Net Expected Value", ev ? (ev.netPct >= 0 ? "+" : "") + ev.netPct.toFixed(2) + "%" : "—", "after modeled costs"),
+      metric("Target Probability", a.probability.target != null ? (a.probability.target * 100).toFixed(1) + "%" : "—", a.probability.contributors + " model inputs"),
+      metric("Evidence Confidence", a.evidenceConfidence.toFixed(0) + "/100", "data completeness " + a.dataCompleteness.toFixed(0) + "%"),
+      metric("Setup Quality", a.setupQuality != null ? a.setupQuality.toFixed(0) + "/100" : "—", "not a direct buy signal")
+    ),
+    React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", fontSize: 10, color: "var(--text5)", paddingTop: 8, borderTop: "1px solid var(--border)" } },
+      React.createElement("span", null, "Target +" + a.targetPct + "%"),
+      React.createElement("span", null, "Risk −" + a.stopPct.toFixed(2) + "%"),
+      React.createElement("span", null, "Modeled costs " + a.costsPct.toFixed(2) + "%"),
+      ev && React.createElement("span", null, "Gross EV " + (ev.grossPct >= 0 ? "+" : "") + ev.grossPct.toFixed(2) + "%")
+    ),
+    React.createElement("div", { style: { marginTop: 9, fontSize: 10, color: "var(--text6)", lineHeight: 1.5 } },
+      a.explanation.join(" · ")
+    )
+  );
+};
+
+
 const ForwardConfidencePanel = ({ ticker }) => {
   const TI = window.TechIndicators;
   const DF = window.OHLCVFetcher;
@@ -3424,7 +3522,10 @@ function PortfolioPage({ holdings, setHoldings, prices, navigate, saveSnapshot, 
         })
         .catch(() => {});
     });
-    return () => { cancelled = true; };
+  
+
+
+  return () => { cancelled = true; };
   }, [holdings]);
 
   const resetForm = () => {
@@ -9504,6 +9605,119 @@ function StockScreener(props) {
   var onOpenStock = props.onOpenStock;
   var TI = window.TechIndicators;
   var DF = window.OHLCVFetcher;
+
+  /* === STOX SCREENER200 EV-FIRST HELPERS (v3) - EV_V2_APP_HELPERS ===
+     ev = the optimizer's BEST plan; every field below comes from that one plan.
+     Rows whose base signal is not Strong Buy / Buy are not optimized (engine
+     eligibility gate), so their ev is null. */
+  var computeScreenerEV = function(symbol, dailyCandles, hourlyCandles, indexCandles, baseDecision) {
+    try {
+      var EVX = window.ExpectedValueEngine;
+      if (!EVX || typeof EVX.optimize !== "function") return null;
+      if (!dailyCandles || dailyCandles.length < 50 || !hourlyCandles || hourlyCandles.length < 60) return null;
+      var opt = EVX.optimize({
+        symbol: symbol,
+        dailyCandles: dailyCandles,
+        hourlyCandles: hourlyCandles,
+        indexCandles: indexCandles || [],
+        baseDecision: baseDecision || null
+      });
+      var best = opt && opt.best ? opt.best : null;
+      if (!best || !best.expectedValue) return null;
+      var ex = best.expectedValue, pr = best.probability || {}, dist = best.distribution || {};
+      return {
+        version: best.version,
+        decision: best.decision || null,
+        netEV: ex.netPct,
+        bestNetEV: ex.netPct,
+        grossEV: ex.grossPct,
+        costPct: ex.costPct,
+        evStdErr: ex.stdErrPct,
+        probability: pr.target,
+        probTouch: pr.touch,
+        historicalN: pr.historicalN || 0,
+        pStop: dist.pStop,
+        pTimeout: dist.pTimeout,
+        evidence: best.evidenceConfidence,
+        setupQuality: best.setupQuality,
+        horizonDays: best.horizonDays,
+        targetPct: best.targetPct,
+        stopPct: best.stopPct,
+        utility: best.optimizerUtility,
+        baselineNetEV: opt.baseline && opt.baseline.expectedValue ? opt.baseline.expectedValue.netPct : null,
+        windows: best.windows ? best.windows.n : null
+      };
+    } catch (_evErr) { return null; }
+  };
+
+  /* Rank = evidence-adjusted net EV per sqrt(day) from the optimizer (same
+     metric the engine uses to pick the plan). Rows saved by an older build
+     fall back to net EV per sqrt(day). */
+  var evRankValue = function(r) {
+    var ev = r && r.ev;
+    if (!ev) return -999999;
+    var u = Number(ev.utility);
+    if (isFinite(u)) return u;
+    var net = Number(ev.bestNetEV != null ? ev.bestNetEV : ev.netEV);
+    var h = Math.max(1, Number(ev.horizonDays) || 10);
+    return isFinite(net) ? net / Math.sqrt(h) : -999999;
+  };
+
+  /* Background walk-forward calibration. Fills the engine's calibration store
+     with real historical target-first outcomes so the historical probability
+     and the evidence score can become real. Incremental and idempotent: a
+     stock's already-labelled windows are never counted twice. */
+  var runEvCalibration = async function(rows) {
+    var EVX = window.ExpectedValueEngine;
+    if (window.__stoxEvCalRunning || !EVX || typeof EVX.calibrateFromHistory !== "function" || !DF) return;
+    window.__stoxEvCalRunning = true;
+    var t0 = Date.now(), BUDGET_MS = 150000, added = 0;
+    try {
+      var idxR = await DF.fetchOHLCVCached("^NSEI", "daily");
+      var idx = (idxR && idxR.data) || [];
+      var tickers = (rows || []).map(function(r) { return r && r.s && r.s.t ? r.s.t.replace(".NS", "") : null; }).filter(Boolean);
+      for (var pass = 0; pass < 12 && Date.now() - t0 < BUDGET_MS; pass++) {
+        var progressed = 0;
+        for (var i = 0; i < tickers.length && Date.now() - t0 < BUDGET_MS; i++) {
+          var res = await DF.fetchOHLCVCached(tickers[i], "daily");
+          var d = res && res.data;
+          if (!d || d.length < 240) continue;
+          var out = EVX.calibrateFromHistory(d, idx, tickers[i], { maxSamples: 6 });
+          progressed += out.processed || 0;
+          added += out.rows || 0;
+          await new Promise(function(r) { setTimeout(r, 0); });
+        }
+        if (!progressed) break;
+      }
+      if (added > 0) {
+        var st = EVX.calibrationStatus();
+        if (typeof showToast === "function") showToast("EV calibration: " + st.outcomes + " outcomes, " + st.usableBuckets + " usable buckets. Re-scan to apply.", 6000);
+      }
+    } catch (_calErr) {
+    } finally { window.__stoxEvCalRunning = false; }
+  };
+
+  var evDecisionKey = function(r) {
+    var d = r && r.ev && r.ev.decision;
+    if (!d) return "none"; /* EV_V2_KEY */
+    var code = String(d && (d.code || d.label) || "").toUpperCase().replace(/\s+/g, "_");
+    if (code.indexOf("HIGH_CONVICTION") >= 0) return "high";
+    if (code.indexOf("QUALIFIED") >= 0) return "qualified";
+    if (code.indexOf("AVOID") >= 0 || code.indexOf("NEGATIVE") >= 0) return "avoid";
+    return "watch";
+  };
+  var evDecisionLabel = function(r) {
+    var d = r && r.ev && r.ev.decision;
+    return d && d.label ? d.label : (r && r.ev ? "WATCH" : "NOT CALIBRATED");
+  };
+  var evDecisionStyle = function(r) {
+    var k = evDecisionKey(r);
+    if (k === "high") return { color:"#15803d", bg:"rgba(34,197,94,.10)", border:"rgba(34,197,94,.28)" };
+    if (k === "qualified") return { color:"#16a34a", bg:"rgba(22,163,74,.08)", border:"rgba(22,163,74,.25)" };
+    if (k === "avoid") return { color:"#dc2626", bg:"rgba(220,38,38,.08)", border:"rgba(220,38,38,.25)" };
+    return { color:"#d97706", bg:"rgba(217,119,6,.08)", border:"rgba(217,119,6,.25)" };
+  };
+
   var _s = useState([]);
   var results = _s[0], setResults = _s[1];
   var _s2 = useState(false);
@@ -9780,10 +9994,11 @@ function StockScreener(props) {
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
       var _patMeta = buildPatMeta(result);
+      var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result)); /* EV_V2_REFRESH */
       setResults(function(p) {
         var idx = p.findIndex(function(r) { return r.s.t === s.t; });
-        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta }; return copy; }
-        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta }]);
+        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis }; return copy; }
+        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis }]);
       });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[s.t] = Date.now(); return c; });
     } catch(e) {}
@@ -9833,7 +10048,8 @@ function StockScreener(props) {
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
       var _patMeta = buildPatMeta(result);
-      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta }]); });
+      var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result)); /* EV_V2_REFRESH */
+      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis }]); });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[stockObj.t] = Date.now(); return c; });
     } catch(e) { setScanErr("Failed to fetch " + tk); }
     setManualLoading(false); setManualTicker("");
@@ -9961,8 +10177,9 @@ function StockScreener(props) {
         var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
         var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
         var _patMeta = buildPatMeta(result);
+        var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result)); /* EV_V2_REFRESH */
         var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
-        if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta };
+        if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis };
         bg.timestamps[stk.t] = Date.now();
         return null;
       });
@@ -10177,6 +10394,7 @@ function StockScreener(props) {
             try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch(_e) {}
             var conf10d = null, conf10dLog = null, conf10dEmp = null;
             try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
+            var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result));
             var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
             var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
             var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -10188,7 +10406,7 @@ function StockScreener(props) {
             var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
             var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
             var _patMeta = buildPatMeta(result);
-            return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta };
+            return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis };
           });
         }).catch(function() { return null; });
       });
@@ -10207,6 +10425,7 @@ function StockScreener(props) {
     setScanTime(now);
     setScanning(false);
     setProgress({ done: total, total: 0, current: "" });
+    try { runEvCalibration(out); } catch (_evCalErr) {} /* EV_V2_CAL */
   };
 
   var toggleSort = function(key) {
@@ -10230,6 +10449,10 @@ function StockScreener(props) {
     else if (sortKey === "hourly") { av = a.result.hourly ? a.result.hourly.total : 0; bv = b.result.hourly ? b.result.hourly.total : 0; }
     else if (sortKey === "conf10dLog") { av = a.conf10dLog != null ? a.conf10dLog : -1; bv = b.conf10dLog != null ? b.conf10dLog : -1; }
     else if (sortKey === "conf10dEmp") { av = a.conf10dEmp != null ? a.conf10dEmp : -1; bv = b.conf10dEmp != null ? b.conf10dEmp : -1; }
+    else if (sortKey === "netEV") { av = a.ev && a.ev.netEV != null ? a.ev.netEV : -999; bv = b.ev && b.ev.netEV != null ? b.ev.netEV : -999; }
+    else if (sortKey === "evProb") { av = a.ev && a.ev.probability != null ? a.ev.probability : -1; bv = b.ev && b.ev.probability != null ? b.ev.probability : -1; }
+    else if (sortKey === "evEvidence") { av = a.ev && a.ev.evidence != null ? a.ev.evidence : -1; bv = b.ev && b.ev.evidence != null ? b.ev.evidence : -1; }
+    else if (sortKey === "evRank") { av = evRankValue(a); bv = evRankValue(b); }
     else if (sortKey === "avgTrend") { av = a.result.aggTrendHealth != null ? a.result.aggTrendHealth : -1; bv = b.result.aggTrendHealth != null ? b.result.aggTrendHealth : -1; }
     else if (sortKey === "avgPullback") { av = a.result.aggPullbackQuality != null ? a.result.aggPullbackQuality : -1; bv = b.result.aggPullbackQuality != null ? b.result.aggPullbackQuality : -1; }
     else if (sortKey === "avgSwing") { av = a.result.aggSwingPotential != null ? a.result.aggSwingPotential : -1; bv = b.result.aggSwingPotential != null ? b.result.aggSwingPotential : -1; }
@@ -10248,12 +10471,18 @@ function StockScreener(props) {
     if (filter === "buy") return r.result.finalScore >= _buyTh;
     if (filter === "watch") return r.result.finalScore >= _wlTh && r.result.finalScore < _buyTh;
     if (filter === "avoid") return r.result.finalScore < _wlTh;
+    if (filter === "evhigh") return evDecisionKey(r) === "high";
+    if (filter === "evqualified") return evDecisionKey(r) === "qualified";
+    if (filter === "evwatch") return evDecisionKey(r) === "watch";
     return true;
   });
 
   var countBuy = results.filter(function(r) { return r.result.finalScore >= _buyTh; }).length;
   var countWatch = results.filter(function(r) { return r.result.finalScore >= _wlTh && r.result.finalScore < _buyTh; }).length;
   var countAvoid = results.filter(function(r) { return r.result.finalScore < _wlTh; }).length;
+  var countEVHigh = results.filter(function(r) { return evDecisionKey(r) === "high"; }).length;
+  var countEVQualified = results.filter(function(r) { return evDecisionKey(r) === "qualified"; }).length;
+  var countEVWatch = results.filter(function(r) { return evDecisionKey(r) === "watch"; }).length;
 
   var arrow = function(key) {
     if (sortKey !== key) return "";
@@ -10262,6 +10491,56 @@ function StockScreener(props) {
 
   var thStyle = { padding: "7px 5px", fontSize: 9, fontWeight: 700, color: "var(--text5)", textAlign: "left", borderBottom: "2px solid var(--border)", cursor: "pointer", whiteSpace: "nowrap", userSelect: "none" };
   var tdStyle = { padding: "6px 5px", fontSize: 10.5, borderBottom: "1px solid var(--border)" };
+
+  /* EV_V2_ELIGIBILITY_AND_RANKING
+   * Base model = trade eligibility gate. EV engine = trade-plan optimizer.
+   * stoxBaseDecision reads the live decision exactly like the main table does
+   * (relabelDecision on result.finalScore); v1 read row.decision, which does not
+   * exist, so every row resolved to NEUTRAL and the table was always empty.
+   * Rows come from 'results' (not 'filtered') so the panel does not change with
+   * the filter buttons, and are ranked by evRankValue. */
+  function stoxBaseDecision(row) {
+    var res = row && row.result ? row.result : row;
+    var raw = null;
+    if (res && res.finalScore != null && typeof relabelDecision === "function") {
+      try { raw = relabelDecision(res.finalScore, res.decision); } catch (_rl) { raw = null; }
+    }
+    if (!raw && res) raw = res.decision || res.rating || res.signal || res.classification;
+    if (raw && typeof raw === "object") {
+      raw = raw.code || raw.label || raw.rating || raw.signal;
+    }
+
+    raw = String(raw || "").toUpperCase().replace(/[\s-]+/g, "_");
+
+    if (raw === "STRONG_BUY" || raw === "STRONGBUY") return "STRONG_BUY";
+    if (raw === "BUY") return "BUY";
+    if (raw === "WATCHLIST" || raw === "WATCH") return "WATCHLIST";
+    if (raw === "NEUTRAL") return "NEUTRAL";
+    if (raw === "AVOID" || raw === "SELL") return "AVOID";
+
+    return raw || "NEUTRAL";
+  }
+
+  function stoxBaseSignalStyle(code) {
+    var map = {
+      STRONG_BUY: { label:"STRONG BUY", color:"#15803d", bg:"rgba(34,197,94,.12)", border:"rgba(34,197,94,.35)" },
+      BUY:        { label:"BUY", color:"#16a34a", bg:"rgba(22,163,74,.10)", border:"rgba(22,163,74,.30)" },
+      WATCHLIST:  { label:"WATCH", color:"#a16207", bg:"rgba(234,179,8,.12)", border:"rgba(234,179,8,.35)" },
+      NEUTRAL:    { label:"NEUTRAL", color:"#7c3aed", bg:"rgba(168,85,247,.10)", border:"rgba(168,85,247,.30)" },
+      AVOID:      { label:"AVOID", color:"#dc2626", bg:"rgba(239,68,68,.10)", border:"rgba(239,68,68,.30)" }
+    };
+    return map[code] || map.NEUTRAL;
+  }
+
+  var evTradeRows = (Array.isArray(results) ? results : []).filter(function(row) {
+    var d = stoxBaseDecision(row);
+    return d === "STRONG_BUY" || d === "BUY";
+  }).sort(function(a, b) {
+    var dv = evRankValue(b) - evRankValue(a);
+    if (dv) return dv;
+    return (Number(b.result && b.result.finalScore) || 0) - (Number(a.result && a.result.finalScore) || 0);
+  });
+
 
   return React.createElement("div", { style: { marginTop: 4 } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 } },
@@ -10413,12 +10692,60 @@ function StockScreener(props) {
         React.createElement("div", { style: { height: "100%", borderRadius: 3, background: "var(--accent)", transition: "width .3s", width: (bgProgress.total > 0 ? (bgProgress.done / bgProgress.total * 100) : 0) + "%" } })
       )
     ),
+
     results.length > 0 && React.createElement("div", null,
       React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
-        [{ k: "all", l: "All (" + results.length + ")" }, { k: "buy", l: "Buy (" + countBuy + ")" }, { k: "watch", l: "Watch (" + countWatch + ")" }, { k: "avoid", l: "Avoid (" + countAvoid + ")" }].map(function(f) {
+        [{ k: "all", l: "All (" + results.length + ")" }, { k: "evhigh", l: "High Conv. (" + countEVHigh + ")" }, { k: "evqualified", l: "Qualified (" + countEVQualified + ")" }, { k: "evwatch", l: "EV Watch (" + countEVWatch + ")" }, { k: "buy", l: "Legacy Buy (" + countBuy + ")" }].map(function(f) {
           return React.createElement("button", { key: f.k, onClick: function() { setFilter(f.k); }, className: "stx-btn" + (filter === f.k ? " stx-btn-primary" : ""), style: { padding: "5px 12px", fontSize: 10, fontWeight: filter === f.k ? 700 : 500 } }, f.l);
         })
       ),
+
+
+      /* === EV-FIRST COMPACT SCREENER200 VIEW — EV_REFINED_TABLE_V3_1 === */
+      React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: 0, overflow: "hidden", border: "1px solid var(--border)" } },
+        React.createElement("div", { style: { padding: "9px 12px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
+          React.createElement("div", null,
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 750, color: "var(--text)" } }, "EV-First Trade Ranking"),
+            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 2 } }, "Base-model Strong Buy and Buy candidates only, ranked by evidence-adjusted net EV per day. EV optimizes the trade plan; it does not replace the StoX signal.")
+          ),
+          React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, evTradeRows.length + " trade candidates")
+        ),
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", { style: { width: "100%", minWidth: 920, borderCollapse: "collapse", tableLayout: "fixed" } },
+            React.createElement("thead", null, React.createElement("tr", null,
+              ["Stock","Signal","Net EV","Win %","Evidence","Setup","Target","Days","Price"].map(function(h) {
+                var left = h === "Stock" || h === "Signal";
+                var widths = { Stock:"21%", Signal:"14%", "Net EV":"10%", "Win %":"8%", Evidence:"9%", Setup:"8%", Target:"8%", Days:"7%", Price:"15%" };
+                return React.createElement("th", { key:h, style:{
+                  padding:"6px 10px", fontSize:9, fontWeight:700, color:"var(--text6)",
+                  textAlign:left ? "left" : "right", borderBottom:"1px solid var(--border)",
+                  whiteSpace:"nowrap", width:widths[h]
+                } }, h);
+              })
+            )),
+            React.createElement("tbody", null, evTradeRows.slice(0,200).map(function(r) {
+              var ev = r.ev || {}, baseDecision = stoxBaseDecision(r), es = stoxBaseSignalStyle(baseDecision);
+              var net = ev.bestNetEV != null ? ev.bestNetEV : ev.netEV;
+              return React.createElement("tr", { key:"ev-"+r.s.t, style:{ borderBottom:"1px solid var(--border)", height:34 } },
+                React.createElement("td",{style:{padding:"5px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},
+                  React.createElement("button",{onClick:function(){if(onOpenStock) onOpenStock(r.s.t.replace(".NS",""));},style:{border:"none",background:"transparent",padding:0,cursor:"pointer",color:"var(--text)",fontWeight:700,fontSize:11,fontFamily:"var(--font-heading)"}},r.s.t.replace(".NS",""))
+                ),
+                React.createElement("td",{style:{padding:"5px 10px",whiteSpace:"nowrap",textAlign:"left"}},
+                  React.createElement("span",{style:{display:"inline-block",padding:"3px 6px",borderRadius:9,fontSize:8,fontWeight:800,color:es.color,background:es.bg,border:"1px solid "+es.border}},es.label)
+                ),
+                React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:800,color:net!=null?(Number(net)>=0?"#16a34a":"#dc2626"):"var(--text6)",fontFamily:"var(--font-mono)"}},net!=null?(Number(net)>=0?"+":"")+Number(net).toFixed(2)+"%":"—"),
+                React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700}},ev.probability!=null?(Number(ev.probability)*100).toFixed(0)+"%":"—"),
+                React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700}},ev.evidence!=null?Number(ev.evidence).toFixed(0):"—"),
+                React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700}},ev.setupQuality!=null?Number(ev.setupQuality).toFixed(0):"—"),
+                React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:"var(--text4)",whiteSpace:"nowrap"}},ev.targetPct!=null?"+"+Number(ev.targetPct).toFixed(0)+"%":"—"),
+                React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:"var(--text4)",whiteSpace:"nowrap"}},ev.horizonDays!=null?ev.horizonDays+"d":"—"),
+                React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}},r.lc!=null?"₹"+Number(r.lc).toLocaleString("en-IN",{maximumFractionDigits:2}):"—")
+              );
+            }))
+          )
+        )
+      ),
+
       React.createElement("div", { style: { overflowX: "auto", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg3)" } },
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 1420 } },
           React.createElement("thead", null,

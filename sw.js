@@ -6,6 +6,7 @@ const urlsToCache = [
   './yahoo-validation.js',
   './stats-utils.js',
   './indicators.js',
+  './expected-value-engine.js',
   './universe.js',
   './data-fetcher.js',
   './rrg.js',

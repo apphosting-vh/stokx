@@ -1,0 +1,583 @@
+/* ══════════════════════════════════════════════════════════════════════
+   StoX Expected Value & Probability-Calibrated Trade Engine
+   Version 1.0
+
+   Decision hierarchy:
+     Setup Quality -> Calibrated Probability -> Outcome Distribution
+     -> Net Expected Value -> Evidence Confidence -> Trade Decision
+
+   This module deliberately does NOT replace the existing technical engine.
+   It consumes existing StoX calculations and separates descriptive scoring
+   from predictive probability and economic expectancy.
+   ══════════════════════════════════════════════════════════════════════ */
+window.ExpectedValueEngine = (function () {
+  'use strict';
+
+  var DEFAULTS = {
+    horizons: [3, 5, 10, 15, 20],
+    targets: [2, 3, 4, 5, 6],
+    defaultHorizon: 10,
+    defaultTargetPct: 4,
+    minNetEV: 0.30,
+    minPositiveProbability: 0.55,
+    minEvidence: 60,
+    blend: { statistical: 0.55, historical: 0.25, ml: 0.20 },
+    costs: {
+      // Conservative editable defaults. Values are percentages per round trip.
+      brokerage: 0.06,
+      stt: 0.10,
+      exchange: 0.01,
+      sebi: 0.001,
+      gst: 0.0126,
+      stampDuty: 0.015,
+      slippage: 0.10
+    },
+    stopATR: 1.8,
+    maxStopPct: 6.0,
+    minStopPct: 1.5,
+    calibrationKey: 'stox_ev_calibration_v1'
+  };
+
+  function clone(x) { return JSON.parse(JSON.stringify(x)); }
+  function num(v, fallback) {
+    v = Number(v);
+    return isFinite(v) ? v : fallback;
+  }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function round(v, d) {
+    var p = Math.pow(10, d == null ? 2 : d);
+    return Math.round(v * p) / p;
+  }
+  function pct(v) { return v == null || !isFinite(v) ? null : round(v * 100, 1); }
+
+  function getConfig(overrides) {
+    var c = clone(DEFAULTS);
+    if (!overrides) return c;
+    Object.keys(overrides).forEach(function (k) {
+      if (overrides[k] && typeof overrides[k] === 'object' && !Array.isArray(overrides[k]) && c[k] && typeof c[k] === 'object') {
+        Object.assign(c[k], overrides[k]);
+      } else c[k] = overrides[k];
+    });
+    return c;
+  }
+
+  function totalRoundTripCost(costs) {
+    var c = costs || DEFAULTS.costs;
+    // Brokerage is charged both sides. GST applies to brokerage/exchange charges.
+    var broker = num(c.brokerage, 0) * 2;
+    var exch = num(c.exchange, 0) * 2;
+    var gst = (broker + exch) * num(c.gst, 0);
+    return broker + num(c.stt, 0) + exch + num(c.sebi, 0) * 2 +
+      gst + num(c.stampDuty, 0) + num(c.slippage, 0) * 2;
+  }
+
+  function setupQuality(daily, indexCandles, symbol, hourly) {
+    var TI = window.TechIndicators;
+    if (!TI || !TI.computeEntryScore) return { score: null, components: {}, reason: 'technical_engine_unavailable' };
+    var r;
+    try { r = TI.computeEntryScore(daily, indexCandles, symbol, hourly); }
+    catch (e) { return { score: null, components: {}, reason: 'entry_score_error' }; }
+    if (!r || r.entry_score == null) return { score: null, components: r || {}, reason: r && r.reason || 'insufficient_data' };
+
+    // Existing score remains useful as a normalized setup descriptor.
+    // We do not interpret it as a probability or a trading decision.
+    return {
+      score: clamp(Number(r.entry_score), 0, 100),
+      components: {
+        trend: r.trendHealth,
+        pullback: r.pullbackQuality,
+        swing: r.swingPotential,
+        breakout: r.breakoutContinuation,
+        regime: r.regimeAlignment,
+        range: r.rangeAdequacy,
+        legacyConfidence: r.confidencePillar
+      },
+      raw: r,
+      reason: 'ok'
+    };
+  }
+
+  function statisticalProbability(hourly, daily, indexCandles, setup, horizon, targetPct) {
+    var TI = window.TechIndicators;
+    if (!TI || !TI.computeHorizonConfidence || !hourly || !daily) return null;
+    var entry = hourly.length ? hourly[hourly.length - 1].c : daily[daily.length - 1].c;
+    try {
+      var r = TI.computeHorizonConfidence(hourly, daily, {
+        horizonDays: horizon,
+        windowSessions: 40,
+        entry_price: entry,
+        targetPct: targetPct,
+        holdingDays: null,
+        indexCandles: indexCandles,
+        entryScoreContext: setup && setup.raw ? {
+          entryScore: setup.score,
+          trendHealth: setup.components.trend,
+          pullbackQuality: setup.components.pullback,
+          swingPotential: setup.components.swing,
+          breakoutContinuation: setup.components.breakout,
+          regimeAlignment: setup.components.regime
+        } : null
+      });
+      if (r && r.components && r.components.probTouch != null) {
+        var p = Number(r.components.probTouch);
+        if (p > 1) p /= 100;
+        return { p: clamp(p, 0.01, 0.99), raw: r };
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function calibrationBucket(horizon, targetPct, setupScore) {
+    return 'h' + horizon + '|t' + round(targetPct, 1) + '|s' + Math.floor(clamp(setupScore || 0, 0, 99) / 10) * 10;
+  }
+  function loadCalibration(key) {
+    try {
+      var raw = localStorage.getItem(key || DEFAULTS.calibrationKey);
+      var d = raw ? JSON.parse(raw) : {};
+      return d && typeof d === 'object' ? d : {};
+    } catch (e) { return {}; }
+  }
+  function historicalProbability(horizon, targetPct, setupScore, key) {
+    var all = loadCalibration(key);
+    var b = all[calibrationBucket(horizon, targetPct, setupScore)];
+    if (!b || !b.n || b.n < 20) return null;
+    // Beta(1,1) shrinkage prevents small samples from producing extreme probabilities.
+    var p = (num(b.wins, 0) + 1) / (num(b.n, 0) + 2);
+    return { p: clamp(p, 0.01, 0.99), n: b.n, bucket: b };
+  }
+
+  function mlProbability(context) {
+    // Optional adapter: accepts a calibrated live ML probability if the existing
+    // StoX ML layer exposes one. No uncalibrated classifier score is used.
+    var candidates = [
+      window.LiveML && window.LiveML.getCalibratedProbability,
+      window.MLTrainer && window.MLTrainer.getCalibratedProbability
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      if (typeof candidates[i] === 'function') {
+        try {
+          var p = candidates[i](context);
+          p = Number(p);
+          if (isFinite(p)) {
+            if (p > 1) p /= 100;
+            return clamp(p, 0.01, 0.99);
+          }
+        } catch (e) {}
+      }
+    }
+    return null;
+  }
+
+  function blendProbability(parts, cfg) {
+    var weights = cfg.blend;
+    var available = [];
+    if (parts.statistical && parts.statistical.p != null) available.push({ k: 'statistical', p: parts.statistical.p, w: weights.statistical });
+    if (parts.historical && parts.historical.p != null) available.push({ k: 'historical', p: parts.historical.p, w: weights.historical });
+    if (parts.ml != null) available.push({ k: 'ml', p: parts.ml, w: weights.ml });
+    if (!available.length) return { p: null, contributors: 0, disagreement: null };
+    var wsum = available.reduce(function (s, x) { return s + x.w; }, 0);
+    var p = available.reduce(function (s, x) { return s + x.p * x.w / wsum; }, 0);
+    var mean = p;
+    var variance = available.reduce(function (s, x) {
+      return s + x.w / wsum * Math.pow(x.p - mean, 2);
+    }, 0);
+    return { p: clamp(p, 0.01, 0.99), contributors: available.length, disagreement: Math.sqrt(variance), parts: available };
+  }
+
+  function estimateStop(daily, cfg) {
+    if (!daily || !daily.length) return cfg.minStopPct;
+    var last = daily[daily.length - 1];
+    var close = last && last.c;
+    var atrPct = null;
+    var TI = window.TechIndicators;
+    try {
+      if (TI && TI.atr) {
+        var a = TI.atr(daily, 14);
+        if (a && a[a.length - 1] != null && close > 0) atrPct = a[a.length - 1] / close * 100;
+      }
+    } catch (e) {}
+    // Fallback to recent high-low realized range.
+    if (atrPct == null) {
+      var n = Math.min(14, daily.length), sum = 0, count = 0;
+      for (var i = daily.length - n; i < daily.length; i++) {
+        var b = daily[i];
+        if (b && b.h != null && b.l != null && close > 0) { sum += (b.h - b.l) / close * 100; count++; }
+      }
+      atrPct = count ? sum / count : cfg.minStopPct;
+    }
+    return clamp(atrPct * cfg.stopATR, cfg.minStopPct, cfg.maxStopPct);
+  }
+
+  function outcomeDistribution(pTarget, targetPct, stopPct, setupScore, probabilityDisagreement) {
+    // Explicitly model three outcomes: target, adverse outcome, and horizon timeout.
+    // Until the historical outcome distribution is populated, timeout expectancy
+    // is conservatively shrunk toward zero rather than assumed profitable.
+    var quality = setupScore == null ? 0.5 : clamp(setupScore / 100, 0, 1);
+    var pStop = clamp((1 - pTarget) * (0.35 + (1 - quality) * 0.25), 0.05, 0.70);
+    var pTimeout = clamp(1 - pTarget - pStop, 0, 0.80);
+    var timeoutReturn = (quality - 0.5) * Math.min(targetPct * 0.35, 1.2);
+    if (probabilityDisagreement != null) timeoutReturn *= (1 - clamp(probabilityDisagreement * 2, 0, 0.5));
+    return {
+      pTarget: pTarget,
+      pStop: pStop,
+      pTimeout: pTimeout,
+      targetReturnPct: targetPct,
+      stopReturnPct: -stopPct,
+      timeoutReturnPct: timeoutReturn
+    };
+  }
+
+  function expectedValue(dist, costsPct) {
+    var gross =
+      dist.pTarget * dist.targetReturnPct +
+      dist.pStop * dist.stopReturnPct +
+      dist.pTimeout * dist.timeoutReturnPct;
+    return {
+      grossPct: gross,
+      costPct: costsPct,
+      netPct: gross - costsPct
+    };
+  }
+
+  function evidenceConfidence(input) {
+    var sample = input.historicalN || 0;
+    var dataCompleteness = input.dataCompleteness == null ? 0 : input.dataCompleteness;
+    var contributors = input.contributors || 0;
+    var disagreement = input.disagreement;
+    var setupScore = input.setupScore == null ? 50 : input.setupScore;
+
+    var sampleScore = clamp(sample / 200, 0, 1) * 30;
+    var dataScore = clamp(dataCompleteness, 0, 1) * 15;
+    var agreementScore = contributors <= 1 ? 8 :
+      clamp(1 - num(disagreement, 0.25) / 0.25, 0, 1) * 15;
+    var modelScore = contributors >= 3 ? 15 : contributors === 2 ? 11 : 7;
+    var stabilityScore = clamp((setupScore - 35) / 50, 0, 1) * 10;
+    var regimeScore = input.regimeScore == null ? 5 : clamp(input.regimeScore / 5, 0, 1) * 15;
+
+    return round(clamp(sampleScore + dataScore + agreementScore + modelScore + stabilityScore + regimeScore, 0, 100), 1);
+  }
+
+  function classify(netEV, pPositive, evidence, setupScore) {
+    if (netEV == null || evidence < 45) return { code: 'INSUFFICIENT_EVIDENCE', label: 'WATCH', color: 'neutral' };
+    if (netEV <= 0) return { code: 'NEGATIVE_EV', label: 'AVOID', color: 'loss' };
+    if (netEV >= 0.75 && pPositive >= 0.62 && evidence >= 75 && setupScore >= 60)
+      return { code: 'HIGH_CONVICTION', label: 'HIGH CONVICTION', color: 'profit' };
+    if (netEV >= 0.30 && pPositive >= 0.55 && evidence >= 60)
+      return { code: 'QUALIFIED_TRADE', label: 'QUALIFIED TRADE', color: 'profit' };
+    return { code: 'WATCH', label: 'WATCH', color: 'warn' };
+  }
+
+  function analyze(input, overrides) {
+    input = input || {};
+    var cfg = getConfig(overrides);
+    var horizon = clamp(num(input.horizonDays, cfg.defaultHorizon), 3, 20);
+    var targetPct = clamp(num(input.targetPct, cfg.defaultTargetPct), 1, 10);
+    var daily = input.dailyCandles || [];
+    var hourly = input.hourlyCandles || [];
+    var indexCandles = input.indexCandles || [];
+
+    var setup = setupQuality(daily, indexCandles, input.symbol || '', hourly);
+    var stat = statisticalProbability(hourly, daily, indexCandles, setup, horizon, targetPct);
+    var hist = historicalProbability(horizon, targetPct, setup.score, cfg.calibrationKey);
+    var ml = mlProbability({
+      symbol: input.symbol,
+      dailyCandles: daily,
+      hourlyCandles: hourly,
+      indexCandles: indexCandles,
+      setup: setup,
+      horizonDays: horizon,
+      targetPct: targetPct
+    });
+
+    var probability = blendProbability({ statistical: stat, historical: hist, ml: ml }, cfg);
+    var stopPct = estimateStop(daily, cfg);
+    var dist = probability.p == null ? null :
+      outcomeDistribution(probability.p, targetPct, stopPct, setup.score, probability.disagreement);
+    var costs = totalRoundTripCost(cfg.costs);
+    var ev = dist ? expectedValue(dist, costs) : null;
+
+    var dataCompleteness =
+      (daily && daily.length >= 50 ? 0.45 : Math.min((daily || []).length / 50, 0.45)) +
+      (hourly && hourly.length >= 60 ? 0.35 : Math.min((hourly || []).length / 60, 0.35)) +
+      (indexCandles && indexCandles.length >= 30 ? 0.20 : Math.min((indexCandles || []).length / 30, 0.20));
+
+    var evidence = evidenceConfidence({
+      historicalN: hist ? hist.n : 0,
+      dataCompleteness: dataCompleteness,
+      contributors: probability.contributors,
+      disagreement: probability.disagreement,
+      setupScore: setup.score,
+      regimeScore: setup.components && setup.components.regime
+    });
+
+    var pPositive = dist ? clamp(dist.pTarget + dist.pTimeout * (dist.timeoutReturnPct > 0 ? 0.55 : 0.25), 0, 1) : null;
+    var decision = classify(ev ? ev.netPct : null, pPositive, evidence, setup.score);
+
+    return {
+      version: 'EV-1.0',
+      symbol: input.symbol || '',
+      horizonDays: horizon,
+      targetPct: targetPct,
+      setupQuality: setup.score,
+      setup: setup,
+      probability: {
+        target: probability.p,
+        positiveReturn: pPositive,
+        contributors: probability.contributors,
+        disagreement: probability.disagreement,
+        statistical: stat ? stat.p : null,
+        historical: hist ? hist.p : null,
+        historicalN: hist ? hist.n : 0,
+        ml: ml
+      },
+      distribution: dist,
+      stopPct: stopPct,
+      costsPct: costs,
+      expectedValue: ev,
+      evidenceConfidence: evidence,
+      dataCompleteness: round(dataCompleteness * 100, 1),
+      decision: decision,
+      explanation: buildExplanation(setup, probability, ev, evidence, decision)
+    };
+  }
+
+  function buildExplanation(setup, probability, ev, evidence, decision) {
+    var items = [];
+    if (setup.score != null) items.push('Setup quality ' + round(setup.score, 0) + '/100');
+    if (probability.p != null) items.push('target probability ' + pct(probability.p) + '%');
+    if (ev) items.push('net expected value ' + (ev.netPct >= 0 ? '+' : '') + round(ev.netPct, 2) + '% after modeled costs');
+    items.push('evidence confidence ' + round(evidence, 0) + '/100');
+    if (probability.contributors < 2) items.push('limited model triangulation');
+    if (decision.code === 'INSUFFICIENT_EVIDENCE') items.push('do not treat probability as trade-ready');
+    return items;
+  }
+
+  /*
+   * EV_OPTIMIZER_UTILITY_V3
+   * Ranks candidate plans by time-efficient, evidence-adjusted utility
+   * instead of raw Net EV alone.
+   */
+  function optimizerUtility(r, cfg) {
+    if (!r || !r.expectedValue) return -999999;
+
+    var rawEV = Number(r.expectedValue.netPct);
+    var p = r.probability && r.probability.target != null ? Number(r.probability.target) : 0;
+    var evidence = Number(r.evidenceConfidence);
+    var setup = Number(r.setupQuality);
+    var h = Math.max(1, Number(r.horizonDays) || 1);
+    var t = Number(r.targetPct) || 0;
+
+    if (!isFinite(rawEV)) rawEV = -9;
+    if (!isFinite(p)) p = 0;
+    if (!isFinite(evidence)) evidence = 0;
+    if (!isFinite(setup)) setup = 0;
+
+    var timeEfficiency = rawEV / Math.sqrt(h);
+    var evidenceFactor = 0.55 + 0.45 * Math.max(0, Math.min(100, evidence)) / 100;
+    var probabilityQuality = Math.max(0, Math.min(1, p)) * 0.35;
+    var setupBonus = Math.max(0, Math.min(100, setup)) / 100 * 0.15;
+
+    var maxH = Math.max.apply(null, cfg.horizons || [20]);
+    var maxT = Math.max.apply(null, cfg.targets || [6]);
+    var boundaryPenalty = 0;
+    if (h === maxH) boundaryPenalty += 0.10;
+    if (t === maxT) boundaryPenalty += 0.08;
+    if (h === maxH && t === maxT) boundaryPenalty += 0.12;
+
+    var capitalEfficiency = Math.max(0, rawEV) / Math.max(1, h) * 0.10;
+
+    return timeEfficiency * evidenceFactor + probabilityQuality +
+      setupBonus + capitalEfficiency - boundaryPenalty;
+  }
+
+  /*
+   * STOX_BASELINE_PLAN_V3_2
+   *
+   * The base StoX model is calibrated around a 3% move within 10 trading
+   * days. This plan is therefore a mandatory benchmark in EV optimisation.
+   *
+   * The optimizer can select another plan only when that plan has a
+   * materially better utility than the 3% / 10d baseline.
+   */
+  function optimize(input, overrides) {
+    /*
+     * STOX_EV_ELIGIBILITY_GATE_V4
+     * The technical/base model is the trade gatekeeper. EV optimizes only
+     * an already eligible setup. Neutral/watch rows may request diagnostics,
+     * but are never returned as trade plans; Avoid rows are excluded.
+     */
+    var baseRaw = input && (input.baseDecision || input.baseRating || input.baseSignal || input.rating);
+    if (baseRaw && typeof baseRaw === 'object') baseRaw = baseRaw.code || baseRaw.label || baseRaw.rating;
+    var baseDecision = String(baseRaw || '').toUpperCase().replace(/[\s-]+/g, '_');
+
+    var eligibility = 'UNSPECIFIED';
+    if (baseDecision === 'STRONG_BUY' || baseDecision === 'BUY') eligibility = 'ELIGIBLE';
+    else if (baseDecision === 'AVOID' || baseDecision === 'SELL') eligibility = 'EXCLUDED';
+    else if (baseDecision) eligibility = 'WATCH_ONLY';
+
+    if (eligibility === 'EXCLUDED') {
+      return {
+        best: null,
+        baseline: null,
+        candidates: [],
+        qualified: [],
+        eligibility: eligibility,
+        baseDecision: baseDecision,
+        reason: 'Base StoX signal is AVOID; EV trade optimization is excluded.'
+      };
+    }
+
+    var cfg = getConfig(overrides);
+    var results = [];
+    var seen = {};
+
+    // Start with configured candidate grid.
+    var horizons = (cfg.horizons || []).slice();
+    var targets = (cfg.targets || []).slice();
+
+    // Explicitly include the base-model benchmark.
+    if (horizons.indexOf(10) < 0) horizons.push(10);
+    if (targets.indexOf(3) < 0) targets.push(3);
+
+    function addCandidate(h, t, isBaseline) {
+      var key = String(h) + '|' + String(t);
+      if (seen[key]) return;
+      seen[key] = true;
+
+      var r = analyze(Object.assign({}, input, {
+        horizonDays: h,
+        targetPct: t
+      }), cfg);
+
+      if (r.expectedValue && r.probability && r.probability.target != null) {
+        // Preserve the existing v3.1 utility when available.
+        if (typeof optimizerUtility === 'function') {
+          r.optimizerUtility = optimizerUtility(r, {
+            horizons: horizons,
+            targets: targets
+          });
+        } else {
+          // Safe fallback for compatible pre-v3.1 engines.
+          var rawEV = Number(r.expectedValue.netPct);
+          var evidence = Number(r.evidenceConfidence);
+          if (!isFinite(rawEV)) rawEV = -9;
+          if (!isFinite(evidence)) evidence = 0;
+          r.optimizerUtility =
+            (rawEV / Math.sqrt(Math.max(1, h))) *
+            (0.55 + 0.45 * Math.max(0, Math.min(100, evidence)) / 100);
+        }
+
+        r.isBaseModelPlan = !!isBaseline;
+        r.optimizerRankMetric =
+          'time-efficient evidence-adjusted EV with 3%/10d baseline';
+        results.push(r);
+      }
+    }
+
+    // Evaluate the full configured grid.
+    horizons.forEach(function(h) {
+      targets.forEach(function(t) {
+        addCandidate(h, t, h === 10 && t === 3);
+      });
+    });
+
+    // Sort by utility first.
+    results.sort(function(a, b) {
+      var au = a.optimizerUtility != null ? a.optimizerUtility : -999999;
+      var bu = b.optimizerUtility != null ? b.optimizerUtility : -999999;
+      if (bu !== au) return bu - au;
+
+      var ae = Number(a.evidenceConfidence) || 0;
+      var be = Number(b.evidenceConfidence) || 0;
+      if (be !== ae) return be - ae;
+
+      return (Number(a.horizonDays) || 99) -
+             (Number(b.horizonDays) || 99);
+    });
+
+    var baseline = null;
+    for (var i = 0; i < results.length; i++) {
+      if (results[i].isBaseModelPlan) {
+        baseline = results[i];
+        break;
+      }
+    }
+
+    /*
+     * Baseline guard:
+     * Do not switch away from the established 3%/10d StoX plan for a
+     * trivial utility improvement. A competing plan must improve utility
+     * by at least 8%, or by an absolute 0.03 utility points.
+     */
+    var best = results.length ? results[0] : null;
+    if (best && baseline && best !== baseline) {
+      var bestU = Number(best.optimizerUtility);
+      var baseU = Number(baseline.optimizerUtility);
+      var requiredImprovement = Math.max(
+        0.03,
+        Math.abs(baseU) * 0.08
+      );
+
+      if (isFinite(bestU) && isFinite(baseU) &&
+          bestU < baseU + requiredImprovement) {
+        best = baseline;
+      }
+    }
+
+    // Expose the benchmark for UI, diagnostics and future backtesting.
+    if (best) {
+      best.baseModelPlan = {
+        targetPct: baseline ? baseline.targetPct : 3,
+        horizonDays: baseline ? baseline.horizonDays : 10,
+        utility: baseline && baseline.optimizerUtility != null
+          ? baseline.optimizerUtility : null,
+        selectedAgainstBaseline: baseline ? best !== baseline : null
+      };
+    }
+
+    // WATCH_ONLY retains candidates for diagnostics/backtesting but never
+    // exposes a trade-ready best plan.
+    var tradeBest = eligibility === 'WATCH_ONLY' ? null : best;
+
+    return {
+      best: tradeBest,
+      baseline: baseline,
+      candidates: results,
+      eligibility: eligibility,
+      baseDecision: baseDecision,
+      reason: eligibility === 'WATCH_ONLY'
+        ? 'Base StoX signal is not Buy/Strong Buy; EV results are diagnostic only.'
+        : null,
+      qualified: results.filter(function(r) {
+        return r.decision &&
+          (r.decision.code === 'HIGH_CONVICTION' ||
+           r.decision.code === 'QUALIFIED_TRADE');
+      })
+    };
+  }
+  // Calibration API for future backtests. Stores bucketed empirical target outcomes.
+  function recordOutcome(row, key) {
+    if (!row || row.horizonDays == null || row.targetPct == null || row.setupScore == null || row.hitTarget == null) return false;
+    key = key || DEFAULTS.calibrationKey;
+    var all = loadCalibration(key);
+    var bucket = calibrationBucket(row.horizonDays, row.targetPct, row.setupScore);
+    var b = all[bucket] || { n: 0, wins: 0 };
+    b.n++;
+    if (row.hitTarget) b.wins++;
+    all[bucket] = b;
+    try { localStorage.setItem(key, JSON.stringify(all)); return true; } catch (e) { return false; }
+  }
+
+  function clearCalibration(key) {
+    try { localStorage.removeItem(key || DEFAULTS.calibrationKey); return true; } catch (e) { return false; }
+  }
+
+  return {
+    getConfig: function () { return clone(DEFAULTS); },
+    totalRoundTripCost: totalRoundTripCost,
+    analyze: analyze,
+    optimize: optimize,
+    recordOutcome: recordOutcome,
+    clearCalibration: clearCalibration
+  };
+})();
