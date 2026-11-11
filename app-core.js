@@ -9718,33 +9718,45 @@ function StockScreener(props) {
      historical probability, the evidence score and the self-check can become real.
      Incremental and idempotent: a stock's already-processed windows are never
      counted twice. */
-  var runEvCalibration = async function(rows) {
+  var runEvCalibration = async function(rows) { /* EV_V31_CAL */
     var EVX = window.ExpectedValueEngine;
-    if (window.__stoxEvCalRunning || !EVX || typeof EVX.calibrateFromHistory !== "function" || !DF) return;
+    if (window.__stoxEvCalRunning) return;
+    if (!EVX || typeof EVX.calibrateFromHistory !== "function" || !DF) { console.warn("[EV calibration] engine or data fetcher unavailable"); return; }
+    var tickers = (rows || []).map(function(r) { return r && r.s && r.s.t ? r.s.t.replace(".NS", "") : null; }).filter(Boolean);
+    if (!tickers.length) return;
     window.__stoxEvCalRunning = true;
-    var t0 = Date.now(), BUDGET_MS = 150000, added = 0;
+    var t0 = Date.now(), BUDGET_MS = 150000, added = 0, processed = 0, last = {}, bars = [];
     try {
+      console.info("[EV calibration] starting for " + tickers.length + " stocks (idempotent; already-processed windows are skipped)");
+      if (EVX.calibrationStatus().outcomes === 0 && typeof showToast === "function") showToast("EV calibration is running in the background (a few minutes the first time).", 4000);
       var idxR = await DF.fetchOHLCVCached("^NSEI", "daily");
       var idx = (idxR && idxR.data) || [];
-      var tickers = (rows || []).map(function(r) { return r && r.s && r.s.t ? r.s.t.replace(".NS", "") : null; }).filter(Boolean);
+      if (!idx.length) console.warn("[EV calibration] NIFTY index data unavailable; setup scores will lack the market-regime term");
       for (var pass = 0; pass < 12 && Date.now() - t0 < BUDGET_MS; pass++) {
         var progressed = 0;
         for (var i = 0; i < tickers.length && Date.now() - t0 < BUDGET_MS; i++) {
-          var res = await DF.fetchOHLCVCached(tickers[i], "daily");
+          var res = null;
+          try { res = await DF.fetchOHLCVCached(tickers[i], "daily"); } catch (_fe) { last[tickers[i]] = "fetch_error"; continue; }
           var d = res && res.data;
-          if (!d || d.length < 240) continue;
+          if (!d || !d.length) { last[tickers[i]] = "no_data"; continue; }
           var out = EVX.calibrateFromHistory(d, idx, tickers[i], { maxSamples: 6 });
+          last[tickers[i]] = out.reason === "ok" ? "calibrating" : out.reason;
+          if (out.reason === "insufficient_history" && pass === 0) bars.push(d.length);
           progressed += out.processed || 0;
+          processed += out.processed || 0;
           added += out.rows || 0;
           await new Promise(function(r) { setTimeout(r, 0); });
         }
         if (!progressed) break;
       }
-      if (added > 0) {
-        var st = EVX.calibrationStatus();
-        if (typeof showToast === "function") showToast("EV calibration: " + st.outcomes + " outcomes, " + st.usableBuckets + " usable buckets. Re-scan to apply.", 6000);
-      }
+      var tally = {};
+      Object.keys(last).forEach(function(k) { tally[last[k]] = (tally[last[k]] || 0) + 1; });
+      var st = EVX.calibrationStatus();
+      console.info("[EV calibration] finished in " + Math.round((Date.now() - t0) / 1000) + "s: " + processed + " windows processed, " + added + " outcomes recorded. Per-stock status:", tally, "Store:", st);
+      if (bars.length) { bars.sort(function(a, b) { return a - b; }); console.warn("[EV calibration] " + bars.length + " stocks skipped for short history (need 240+ daily bars; median seen " + bars[Math.floor(bars.length / 2)] + ")."); }
+      if (added > 0 && typeof showToast === "function") showToast("EV calibration: " + st.outcomes + " outcomes, " + st.usableBuckets + " usable buckets. Re-scan to apply.", 6000);
     } catch (_calErr) {
+      console.error("[EV calibration] failed:", _calErr);
     } finally { window.__stoxEvCalRunning = false; }
   };
 
@@ -10585,6 +10597,21 @@ function StockScreener(props) {
   }
 
   var evRel = stoxEvReliability();
+
+  /* EV_V31_CAL_TRIGGER: calibration also starts when stored or refreshed results are
+     on screen (a full scan is not the only way results appear), and can be run by
+     hand from the console: stoxRunEvCalibration(). Guarded by the ticker set, so
+     it starts once per page load and never overlaps a running job. */
+  window.stoxRunEvCalibration = function() { return runEvCalibration(Array.isArray(results) ? results : []); };
+  (function() {
+    var rowsNow = Array.isArray(results) ? results : [];
+    if (!rowsNow.length || (typeof scanning !== "undefined" && scanning)) return;
+    var firstT = rowsNow[0] && rowsNow[0].s && rowsNow[0].s.t, lastT = rowsNow[rowsNow.length - 1] && rowsNow[rowsNow.length - 1].s && rowsNow[rowsNow.length - 1].s.t;
+    var sig = rowsNow.length + "|" + firstT + "|" + lastT;
+    if (window.__stoxEvCalSig === sig) return;
+    window.__stoxEvCalSig = sig;
+    setTimeout(function() { try { runEvCalibration(rowsNow); } catch (_e) {} }, 2000);
+  })();
 
   var evTradeRows = (Array.isArray(results) ? results : []).filter(function(row) {
     var d = stoxBaseDecision(row);
