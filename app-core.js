@@ -10787,7 +10787,7 @@ function StockScreener(props) {
         React.createElement("div", { style: { padding: "9px 12px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
           React.createElement("div", null,
             React.createElement("div", { style: { fontSize: 12, fontWeight: 750, color: "var(--text)" } }, "EV-First Trade Ranking"),
-            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 2 } }, "Base-model Strong Buy and Buy candidates only, ranked by trust-adjusted EV per day (after costs, DP charge and tax; shrunk for sampling noise and best-of-25 selection). EV optimizes the trade plan; it does not replace the StoX signal."),
+            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 2 } }, "Base-model Strong Buy and Buy candidates only, ranked by trust-adjusted EV per day (after costs, DP charges; shrunk for sampling noise and best-of-25 selection). EV optimizes the trade plan; it does not replace the StoX signal."),
             React.createElement("div", { title: evRel.title, style: { fontSize: 9, marginTop: 2, color: evRel.color } }, evRel.text)
           ),
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, evTradeRows.length + " trade candidates")

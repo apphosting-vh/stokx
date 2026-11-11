@@ -59,14 +59,14 @@ window.ExpectedValueEngine = (function () {
        Set costs.brokerage = 0 if your broker charges no delivery brokerage.
        Override at runtime with window.STOX_EV_CONFIG = { costs: { ... } }. */
     costs: {
-      brokerage: 0.06,
-      stt: 0.20,
-      exchange: 0.00297,
-      sebi: 0.0001,
-      gst: 0.18,
-      stampDuty: 0.015,
+      brokerage: 0,            // zero-brokerage delivery
+      stt: 0.20,               // 0.1% buy + 0.1% sell
+      exchange: 0.003,         // ~0.003% per side (0.006% round trip)
+      sebi: 0.001,             // GST & SEBI charges, ~0.001% per side (0.002% round trip); GST is folded in here, so gst below is 0
+      gst: 0,
+      stampDuty: 0.015,        // buy side only
       slippage: 0.10,
-      dpChargeRs: 15.93,
+      dpChargeRs: 0,           // DP charge is folded into the 0.223% statutory total
       positionSizeRs: 100000
     },
     /* Short-term capital gains on STT-paid listed equity: 20% + 4% cess = 20.8%.
@@ -76,9 +76,9 @@ window.ExpectedValueEngine = (function () {
        taxLossCredit = share of each loss that offsets gains (1 = full set-off, the
        default for a repeated strategy; 0 = taxed on every winner while losers earn
        nothing, only right for one-off trades or a year with no other gains). */
-    taxRatePct: 20.8,
+    taxRatePct: 0,                  // capital gains tax NOT deducted from Net EV (was 20.8)
     taxLossCredit: 1,
-    decideAfterTax: true,           // classify and rank on after-tax EV (false = pre-tax)
+    decideAfterTax: false,          // Net EV is after costs only (no capital gains tax)
     /* Trust adjustments */
     evPriorStdPct: 0.5,             // prior sd of the TRUE gross edge per trade, % (shrinkage strength)
     selectionHaircut: true,         // subtract the estimated best-of-N inflation
@@ -578,7 +578,7 @@ window.ExpectedValueEngine = (function () {
         taxPct: core.ev.taxPct,
         preTaxNetPct: core.ev.preTaxNetPct,
         afterTaxNetPct: core.ev.afterTaxNetPct,
-        basis: cfg.decideAfterTax !== false ? 'after-tax' : 'pre-tax',
+        basis: cfg.decideAfterTax !== false ? 'after-tax' : 'net of costs',
         rawBasisPct: core.basisEV,          // what the data say, no trust adjustment
         haircutPct: haircut,                // best-of-N selection inflation removed
         shrinkFactor: lam,
