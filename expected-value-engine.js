@@ -65,7 +65,7 @@ window.ExpectedValueEngine = (function () {
       sebi: 0.001,             // GST & SEBI charges, ~0.001% per side (0.002% round trip); GST is folded in here, so gst below is 0
       gst: 0,
       stampDuty: 0.015,        // buy side only
-      slippage: 0.10,
+      slippage: 0,             // removed so total cost = 0.223% statutory only (was 0.10% per side)
       dpChargeRs: 0,           // DP charge is folded into the 0.223% statutory total
       positionSizeRs: 100000
     },
@@ -90,13 +90,15 @@ window.ExpectedValueEngine = (function () {
     lookbackBars: 500,
     minWindows: 30,
     driftKeep: 0.5,
-    calibrationKey: 'stox_ev_calibration_v3'
+    calibrationKey: 'stox_ev_calibration_v4'
   };
 
   /* v2 stored calibration with a different label rule; it is not comparable. */
   try {
     localStorage.removeItem('stox_ev_calibration_v2');
     localStorage.removeItem('stox_ev_calibration_v2_meta');
+    localStorage.removeItem('stox_ev_calibration_v3');       // calibrated under old cost/tax settings
+    localStorage.removeItem('stox_ev_calibration_v3_meta');
   } catch (e) {}
 
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
