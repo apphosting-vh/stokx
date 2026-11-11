@@ -9606,11 +9606,14 @@ function StockScreener(props) {
   var TI = window.TechIndicators;
   var DF = window.OHLCVFetcher;
 
-  /* === STOX SCREENER200 EV-FIRST HELPERS (v3) - EV_V2_APP_HELPERS ===
+  /* === STOX SCREENER200 EV-FIRST HELPERS (v4) - EV_V3_APP_HELPERS ===
      ev = the optimizer's BEST plan; every field below comes from that one plan.
+     netEV is the TRUST-ADJUSTED EV on the engine's decision basis (after costs,
+     DP charge and tax by default): the data's EV, minus best-of-25 selection
+     inflation, pulled toward the zero-edge EV in proportion to its sampling error.
      Rows whose base signal is not Strong Buy / Buy are not optimized (engine
      eligibility gate), so their ev is null. */
-  var computeScreenerEV = function(symbol, dailyCandles, hourlyCandles, indexCandles, baseDecision) {
+  var computeScreenerEV = function(symbol, dailyCandles, hourlyCandles, indexCandles, baseDecision, baseScore) {
     try {
       var EVX = window.ExpectedValueEngine;
       if (!EVX || typeof EVX.optimize !== "function") return null;
@@ -9620,7 +9623,8 @@ function StockScreener(props) {
         dailyCandles: dailyCandles,
         hourlyCandles: hourlyCandles,
         indexCandles: indexCandles || [],
-        baseDecision: baseDecision || null
+        baseDecision: baseDecision || null,
+        baseScore: baseScore != null ? baseScore : null
       });
       var best = opt && opt.best ? opt.best : null;
       if (!best || !best.expectedValue) return null;
@@ -9630,9 +9634,17 @@ function StockScreener(props) {
         decision: best.decision || null,
         netEV: ex.netPct,
         bestNetEV: ex.netPct,
+        rawEV: ex.rawBasisPct,
+        evBasis: ex.basis,
+        preTaxEV: ex.preTaxNetPct,
+        afterTaxEV: ex.afterTaxNetPct,
         grossEV: ex.grossPct,
         costPct: ex.costPct,
+        taxPct: ex.taxPct,
+        haircut: ex.haircutPct,
+        shrinkFactor: ex.shrinkFactor,
         evStdErr: ex.stdErrPct,
+        pEvPositive: ex.pPositive,
         probability: pr.target,
         probTouch: pr.touch,
         historicalN: pr.historicalN || 0,
@@ -9644,14 +9656,15 @@ function StockScreener(props) {
         targetPct: best.targetPct,
         stopPct: best.stopPct,
         utility: best.optimizerUtility,
+        calScoreGap: best.calScoreGap,
         baselineNetEV: opt.baseline && opt.baseline.expectedValue ? opt.baseline.expectedValue.netPct : null,
         windows: best.windows ? best.windows.n : null
       };
     } catch (_evErr) { return null; }
   };
 
-  /* Rank = evidence-adjusted net EV per sqrt(day) from the optimizer (same
-     metric the engine uses to pick the plan). Rows saved by an older build
+  /* Rank = evidence-adjusted trust-adjusted net EV per sqrt(day) from the optimizer
+     (the same metric the engine uses to pick the plan). Rows saved by an older build
      fall back to net EV per sqrt(day). */
   var evRankValue = function(r) {
     var ev = r && r.ev;
@@ -9663,10 +9676,48 @@ function StockScreener(props) {
     return isFinite(net) ? net / Math.sqrt(h) : -999999;
   };
 
-  /* Background walk-forward calibration. Fills the engine's calibration store
-     with real historical target-first outcomes so the historical probability
-     and the evidence score can become real. Incremental and idempotent: a
-     stock's already-labelled windows are never counted twice. */
+  /* Tooltip: how the displayed Net EV was built. */
+  var stoxEvTitle = function(ev) {
+    if (!ev) return "";
+    var f = function(v) { return v == null || !isFinite(Number(v)) ? "n/a" : (Number(v) >= 0 ? "+" : "") + Number(v).toFixed(2) + "%"; };
+    var lines = [];
+    lines.push("Trust-adjusted " + (ev.evBasis || "after-tax") + " EV: " + f(ev.netEV));
+    if (ev.rawEV != null) lines.push("Data say " + f(ev.rawEV) + ", minus " + (ev.haircut != null ? Number(ev.haircut).toFixed(2) : "0.00") + "% best-of-25 selection inflation,");
+    if (ev.evStdErr != null) lines.push("pulled toward the zero-edge EV for +/-" + Number(ev.evStdErr).toFixed(2) + "% sampling error");
+    if (ev.grossEV != null) lines.push("Gross " + f(ev.grossEV) + " - costs " + Number(ev.costPct).toFixed(2) + "% - tax " + Number(ev.taxPct || 0).toFixed(2) + "%");
+    if (ev.pEvPositive != null) lines.push("P(true EV > 0): " + Math.round(Number(ev.pEvPositive) * 100) + "%");
+    if (ev.stopPct != null) lines.push("Stop -" + Number(ev.stopPct).toFixed(1) + "%" + (ev.pStop != null ? ", P(stop) " + Math.round(Number(ev.pStop) * 100) + "%" : ""));
+    if (ev.windows != null) lines.push("Measured on " + ev.windows + " historical windows");
+    return lines.join("\n");
+  };
+
+  /* Self-check line: has the table's EV matched what actually happened when the
+     optimizer's choices were played out walk-forward on your own price history? */
+  var stoxEvReliability = function() {
+    var none = { text: "", color: "var(--text6)", title: "" };
+    try {
+      var EVX = window.ExpectedValueEngine;
+      if (!EVX || typeof EVX.reliabilityStatus !== "function") return none;
+      var rs = EVX.reliabilityStatus();
+      var useElig = !!(rs && rs.elig && rs.elig.n >= 100);
+      var g = rs ? (useElig ? rs.elig : rs.all) : null;
+      if (!g || !g.n) return { text: "EV self-check: collecting walk-forward history (builds in the background after each scan).", color: "var(--text6)", title: "The engine replays its own plan choices on past data you already have and compares predicted vs realized EV." };
+      var f = function(v) { return (v >= 0 ? "+" : "") + Number(v).toFixed(2) + "%"; };
+      var words = { collecting: "still collecting (needs n>=100)", consistent: "consistent", overconfident: "OVERCONFIDENT - treat EVs as optimistic", conservative: "conservative", "weak-ranking": "levels fine, but ranking among trades is weak" };
+      var color = g.verdict === "overconfident" ? "#dc2626" : (g.verdict === "weak-ranking" ? "#d97706" : ((g.verdict === "consistent" || g.verdict === "conservative") ? "#16a34a" : "var(--text6)"));
+      return {
+        text: "EV self-check (" + (useElig ? "Buy-grade setups" : "all setups") + ", n=" + g.n + "): predicted " + f(g.meanPredicted) + " vs realized " + f(g.meanRealized) + " - " + (words[g.verdict] || g.verdict),
+        color: color,
+        title: "Walk-forward replay of the optimizer's choices using only data available at each start date. Bias " + f(g.bias) + " +/-" + Number(g.stdErr).toFixed(2) + "%" + (g.slope != null ? "; slope of realized on predicted " + Number(g.slope).toFixed(2) : "") + ". Own-history model only (no calibration or ML), so there is no look-ahead."
+      };
+    } catch (_relErr) { return none; }
+  };
+
+  /* Background walk-forward calibration + reliability. Fills the engine's stores
+     with real historical target-first outcomes and predicted-vs-realized EV so the
+     historical probability, the evidence score and the self-check can become real.
+     Incremental and idempotent: a stock's already-processed windows are never
+     counted twice. */
   var runEvCalibration = async function(rows) {
     var EVX = window.ExpectedValueEngine;
     if (window.__stoxEvCalRunning || !EVX || typeof EVX.calibrateFromHistory !== "function" || !DF) return;
@@ -9994,7 +10045,7 @@ function StockScreener(props) {
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
       var _patMeta = buildPatMeta(result);
-      var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result)); /* EV_V2_REFRESH */
+      var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore); /* EV_V2_REFRESH */
       setResults(function(p) {
         var idx = p.findIndex(function(r) { return r.s.t === s.t; });
         if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis }; return copy; }
@@ -10048,7 +10099,7 @@ function StockScreener(props) {
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
       var _patMeta = buildPatMeta(result);
-      var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result)); /* EV_V2_REFRESH */
+      var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore); /* EV_V2_REFRESH */
       setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis }]); });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[stockObj.t] = Date.now(); return c; });
     } catch(e) { setScanErr("Failed to fetch " + tk); }
@@ -10177,7 +10228,7 @@ function StockScreener(props) {
         var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
         var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
         var _patMeta = buildPatMeta(result);
-        var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result)); /* EV_V2_REFRESH */
+        var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore); /* EV_V2_REFRESH */
         var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
         if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis };
         bg.timestamps[stk.t] = Date.now();
@@ -10394,7 +10445,7 @@ function StockScreener(props) {
             try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch(_e) {}
             var conf10d = null, conf10dLog = null, conf10dEmp = null;
             try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
-            var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result));
+            var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore);
             var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
             var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
             var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -10492,13 +10543,14 @@ function StockScreener(props) {
   var thStyle = { padding: "7px 5px", fontSize: 9, fontWeight: 700, color: "var(--text5)", textAlign: "left", borderBottom: "2px solid var(--border)", cursor: "pointer", whiteSpace: "nowrap", userSelect: "none" };
   var tdStyle = { padding: "6px 5px", fontSize: 10.5, borderBottom: "1px solid var(--border)" };
 
-  /* EV_V2_ELIGIBILITY_AND_RANKING
+  /* EV_V3_ELIGIBILITY_AND_RANKING
    * Base model = trade eligibility gate. EV engine = trade-plan optimizer.
    * stoxBaseDecision reads the live decision exactly like the main table does
    * (relabelDecision on result.finalScore); v1 read row.decision, which does not
    * exist, so every row resolved to NEUTRAL and the table was always empty.
    * Rows come from 'results' (not 'filtered') so the panel does not change with
-   * the filter buttons, and are ranked by evRankValue. */
+   * the filter buttons, and are ranked by evRankValue. evRel is the EV self-check
+   * line (walk-forward predicted vs realized). */
   function stoxBaseDecision(row) {
     var res = row && row.result ? row.result : row;
     var raw = null;
@@ -10531,6 +10583,8 @@ function StockScreener(props) {
     };
     return map[code] || map.NEUTRAL;
   }
+
+  var evRel = stoxEvReliability();
 
   var evTradeRows = (Array.isArray(results) ? results : []).filter(function(row) {
     var d = stoxBaseDecision(row);
@@ -10706,16 +10760,17 @@ function StockScreener(props) {
         React.createElement("div", { style: { padding: "9px 12px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
           React.createElement("div", null,
             React.createElement("div", { style: { fontSize: 12, fontWeight: 750, color: "var(--text)" } }, "EV-First Trade Ranking"),
-            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 2 } }, "Base-model Strong Buy and Buy candidates only, ranked by evidence-adjusted net EV per day. EV optimizes the trade plan; it does not replace the StoX signal.")
+            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 2 } }, "Base-model Strong Buy and Buy candidates only, ranked by trust-adjusted EV per day (after costs, DP charge and tax; shrunk for sampling noise and best-of-25 selection). EV optimizes the trade plan; it does not replace the StoX signal."),
+            React.createElement("div", { title: evRel.title, style: { fontSize: 9, marginTop: 2, color: evRel.color } }, evRel.text)
           ),
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, evTradeRows.length + " trade candidates")
         ),
         React.createElement("div", { style: { overflowX: "auto" } },
-          React.createElement("table", { style: { width: "100%", minWidth: 920, borderCollapse: "collapse", tableLayout: "fixed" } },
+          React.createElement("table", { style: { width: "100%", minWidth: 1000, borderCollapse: "collapse", tableLayout: "fixed" } },
             React.createElement("thead", null, React.createElement("tr", null,
-              ["Stock","Signal","Net EV","Win %","Evidence","Setup","Target","Days","Price"].map(function(h) {
+              ["Stock","Signal","Net EV","EV Conf.","Win %","Evidence","Setup","Target","Days","Price"].map(function(h) {
                 var left = h === "Stock" || h === "Signal";
-                var widths = { Stock:"21%", Signal:"14%", "Net EV":"10%", "Win %":"8%", Evidence:"9%", Setup:"8%", Target:"8%", Days:"7%", Price:"15%" };
+                var widths = { Stock:"19%", Signal:"13%", "Net EV":"10%", "EV Conf.":"8%", "Win %":"7%", Evidence:"8%", Setup:"7%", Target:"7%", Days:"6%", Price:"15%" };
                 return React.createElement("th", { key:h, style:{
                   padding:"6px 10px", fontSize:9, fontWeight:700, color:"var(--text6)",
                   textAlign:left ? "left" : "right", borderBottom:"1px solid var(--border)",
@@ -10733,7 +10788,8 @@ function StockScreener(props) {
                 React.createElement("td",{style:{padding:"5px 10px",whiteSpace:"nowrap",textAlign:"left"}},
                   React.createElement("span",{style:{display:"inline-block",padding:"3px 6px",borderRadius:9,fontSize:8,fontWeight:800,color:es.color,background:es.bg,border:"1px solid "+es.border}},es.label)
                 ),
-                React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:800,color:net!=null?(Number(net)>=0?"#16a34a":"#dc2626"):"var(--text6)",fontFamily:"var(--font-mono)"}},net!=null?(Number(net)>=0?"+":"")+Number(net).toFixed(2)+"%":"—"),
+                React.createElement("td",{title:stoxEvTitle(ev),style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:800,color:net!=null?(Number(net)>=0?"#16a34a":"#dc2626"):"var(--text6)",fontFamily:"var(--font-mono)"}},net!=null?(Number(net)>=0?"+":"")+Number(net).toFixed(2)+"%":"—"),
+                React.createElement("td",{title:"Probability that the true EV is above zero, after shrinking for sampling noise",style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:ev.pEvPositive==null?"var(--text6)":(Number(ev.pEvPositive)>=0.8?"#16a34a":(Number(ev.pEvPositive)>=0.5?"#d97706":"var(--text6)"))}},ev.pEvPositive!=null?Math.round(Number(ev.pEvPositive)*100)+"%":"—"),
                 React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700}},ev.probability!=null?(Number(ev.probability)*100).toFixed(0)+"%":"—"),
                 React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700}},ev.evidence!=null?Number(ev.evidence).toFixed(0):"—"),
                 React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700}},ev.setupQuality!=null?Number(ev.setupQuality).toFixed(0):"—"),
