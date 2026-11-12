@@ -9606,10 +9606,11 @@ function StockScreener(props) {
   var TI = window.TechIndicators;
   var DF = window.OHLCVFetcher;
 
-  /* === STOX SCREENER200 EV-FIRST HELPERS (v4) - EV_V3_APP_HELPERS ===
+  /* === STOX SCREENER200 EV-FIRST HELPERS (v4.1) - EV_V3_APP_HELPERS ===
      ev = the optimizer's BEST plan; every field below comes from that one plan.
-     netEV is the TRUST-ADJUSTED EV on the engine's decision basis (after costs,
-     DP charge and tax by default): the data's EV, minus best-of-25 selection
+     netEV is the TRUST-ADJUSTED EV on the engine's decision basis (after costs
+     and the DP charge; capital-gains tax per cfg.decideAfterTax): the data's EV,
+     minus best-of-25 selection
      inflation, pulled toward the zero-edge EV in proportion to its sampling error.
      Rows whose base signal is not Strong Buy / Buy are not optimized (engine
      eligibility gate), so their ev is null. */
