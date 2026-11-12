@@ -1016,6 +1016,44 @@ window.addEventListener('fsa:permission-needed', function() {
   }
 });
 
+/* FSA write serialization: every __fsa.writeNow() call site runs independently
+   (price refreshes, screener writes, two debounced autosave timers, the score-
+   config save). Concurrent createWritable() calls on the same file handle abort
+   each other (AbortError) and can leave the handle stuck until reload — which
+   surfaces as intermittent "FSA write failed". Route all writes through one
+   queue so they can never overlap, and log the real error instead of only
+   toasting. (The FSA implementation lives in fsa-storage; this wrapper is safe
+   regardless of which __fsa object instance is active.) */
+(function () {
+  function wrapFsaWrites() {
+    var fsa = window.__fsa;
+    if (!fsa || typeof fsa.writeNow !== 'function' || fsa.writeNow.__stoxSerialized) return;
+    var orig = fsa.writeNow.bind(fsa);
+    var chain = Promise.resolve();
+    var wrapped = function () {
+      chain = chain.then(function () {
+        return Promise.resolve().then(orig).then(function (ok) {
+          if (!ok) console.warn('[FSA] write failed: writeNow() returned false (permission granted? see fsa:permission-needed).');
+          return ok;
+        }).catch(function (e) {
+          console.warn('[FSA] write failed:', e && (e.name || e.message) ? (e.name + ': ' + e.message) : e);
+          return false;
+        });
+      });
+      return chain;
+    };
+    wrapped.__stoxSerialized = true;
+    fsa.writeNow = wrapped;
+  }
+  wrapFsaWrites();
+  /* __fsaInit() restores the handle asynchronously and may replace the object. */
+  var iv = setInterval(function () {
+    wrapFsaWrites();
+    if (window.__fsa && window.__fsa.writeNow && window.__fsa.writeNow.__stoxSerialized) clearInterval(iv);
+  }, 500);
+  setTimeout(function () { clearInterval(iv); }, 60000);
+})();
+
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    THEMES & FONTS
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */

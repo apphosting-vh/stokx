@@ -85,19 +85,52 @@ var fsaVerifyPermission = async function(handle) {
 };
 
 /* ── FSA Write: builds StoX envelope and writes to file ── */
-var fsaWriteFile = async function(handle, stateData) {
-  try {
+/* Single-flight write queue: concurrent createWritable() calls on the SAME
+   handle abort each other (AbortError at close) and were the top source of
+   intermittent "[FSA] Write failed" console errors (autosave timers, price
+   refreshes, the boot-time purge write and manual saves could all overlap).
+   Every file write now passes through one queue; a lost race is retried once
+   after the winner finishes. */
+var _fsaWriteChain = Promise.resolve();
+var _fsaWriteTextQueued = async function(handle, text) {
+  for (var attempt = 0; attempt < 2; attempt++) {
+    var writable = null;
+    try {
+      writable = await handle.createWritable();
+      await writable.write(text);
+      await writable.close();
+      return true;
+    } catch (e) {
+      if (writable) { try { await writable.abort(); } catch (e2) {} }
+      if (attempt === 0 && e && e.name === "AbortError") {
+        await new Promise(function(r) { setTimeout(r, 250); });
+        continue;
+      }
+      console.warn("[FSA] Write failed:", e);
+      window.dispatchEvent(new CustomEvent("fsa:write-failed"));
+      return false;
+    }
+  }
+  return false;
+};
+var _fsaEnqueueWrite = function(fn) {
+  var result = _fsaWriteChain.then(fn);
+  _fsaWriteChain = result.catch(function() {});   // keep the queue alive regardless
+  return result;
+};
+var fsaWriteFile = function(handle, stateData) {
+  return _fsaEnqueueWrite(async function() {
     /* Patterns (incl. live corpus) stay in IndexedDB only — keep the FSA file lean */
     var payload = await window.__stoxBuildSyncPayload(stateData, true, { excludePatterns: true });
-    var writable = await handle.createWritable();
-    await writable.write(JSON.stringify(payload, null, 2));
-    await writable.close();
-    return true;
-  } catch (e) {
-    console.warn("[FSA] Write failed:", e);
-    window.dispatchEvent(new CustomEvent("fsa:write-failed"));
-    return false;
-  }
+    var ok = await _fsaWriteTextQueued(handle, JSON.stringify(payload, null, 2));
+    if (ok && payload && payload.data && payload.data.scoreConfig) {
+      /* Remember exactly which config the file now holds, so the boot-time
+         restore can tell "local untouched since sync" (safe to restore) from
+         "local has unsynced changes" (never silently revert those). */
+      try { localStorage.setItem("stox_score_config_synced", JSON.stringify(payload.data.scoreConfig)); } catch (e) {}
+    }
+    return ok;
+  });
 };
 
 /* ── FSA Read: parses envelope and returns raw StoX state ── */
@@ -129,6 +162,7 @@ var fsaReadFile = async function(handle) {
       wlTrackerPrices: d.wlTrackerPrices || {},
       notes: d.notes || [],
       scoreConfig: d.scoreConfig || null,
+      evStores: d.evStores || null,
       patterns: d.patterns || null
     };
   } catch (e) {
@@ -144,7 +178,15 @@ window.__fsa = { handle: null, filename: "", lastSaved: null, ready: false, writ
 var _fsaMakeWriteNow = function() {
   return async function() {
     if (!window.__fsa.handle || !window.__fsa.ready) return false;
-    var st = window.__fsa.state || { holdings: [], watchlist: [], soldShareSnapshots: {} };
+    /* Never write the envelope before the app attached real state: the old
+       fallback ({holdings:[],watchlist:[],soldShareSnapshots:{}}) could clobber
+       the file's holdings with empty arrays if a write ran on a page or boot
+       moment where the main app state was not attached yet. */
+    if (!window.__fsa.state) {
+      console.warn("[FSA] writeNow skipped: app state not attached yet (refusing to write empty holdings).");
+      return false;
+    }
+    var st = window.__fsa.state;
     var ok = await fsaWriteFile(window.__fsa.handle, st);
     if (ok) { window.__fsa.lastSaved = new Date(); window.dispatchEvent(new CustomEvent("fsa:saved")); }
     return ok;
@@ -181,12 +223,39 @@ window.__fsaInit = async function() {
               var scLocal = null;
               try { scLocal = JSON.parse(localStorage.getItem("stox_score_config")); } catch (e2) {}
               if (!scLocal || JSON.stringify(scLocal) !== JSON.stringify(fsc)) {
-                localStorage.setItem("stox_score_config", JSON.stringify(fsc));
-                if (window.TechIndicators && window.TechIndicators.setScoreConfig) window.TechIndicators.setScoreConfig(fsc);
-                window.dispatchEvent(new CustomEvent("stox:score-config-restored", { detail: fsc }));
+                /* Two-way tie-breaker: the file only wins when the local config
+                   is untouched since the last successful sync. If local has
+                   unsynced changes (e.g. writes kept failing), keep local —
+                   the old behavior silently reverted the user's config every
+                   boot. */
+                var scSynced = null;
+                try { scSynced = localStorage.getItem("stox_score_config_synced"); } catch (e2) {}
+                var localUntouchedSinceSync = scLocal != null && scSynced != null && JSON.stringify(scLocal) === scSynced;
+                if (!scLocal || localUntouchedSinceSync) {
+                  localStorage.setItem("stox_score_config", JSON.stringify(fsc));
+                  try { localStorage.setItem("stox_score_config_synced", JSON.stringify(fsc)); } catch (e2) {}
+                  if (window.TechIndicators && window.TechIndicators.setScoreConfig) window.TechIndicators.setScoreConfig(fsc);
+                  window.dispatchEvent(new CustomEvent("stox:score-config-restored", { detail: fsc }));
+                } else {
+                  console.warn("[FSA] boot config restore skipped: local score config has unsynced changes newer than the file; keeping local.");
+                }
               }
             } catch (e2) {}
           }
+        }
+        /* Adopt saved EV calibration stores when this browser has none (fresh
+           device). Before this change, stox_ev_* stores were localStorage-only
+           and never reached the FSA file at all. Local data always wins. */
+        var evs = pd ? pd.evStores : null;
+        if (evs && typeof evs === "object") {
+          Object.keys(evs).forEach(function(k) {
+            if (k.indexOf("stox_ev_") !== 0) return;   // never write foreign keys
+            try {
+              if (localStorage.getItem(k) == null) {
+                localStorage.setItem(k, typeof evs[k] === "string" ? evs[k] : JSON.stringify(evs[k]));
+              }
+            } catch (e2) {}
+          });
         }
         var hasPatterns = pd && pd.patterns != null &&
           ((pd.patterns.patterns && pd.patterns.patterns.length > 0) ||
@@ -201,10 +270,10 @@ window.__fsaInit = async function() {
             parsed.summary.patternMeta = 0;
             parsed.summary.patternLive = 0;
           }
-          var w = await h.createWritable();
-          await w.write(JSON.stringify(parsed, null, 2));
-          await w.close();
-          window.dispatchEvent(new CustomEvent("fsa:saved"));
+          /* Through the shared queue: a raw createWritable() here raced the
+             autosave writes and aborted them (intermittent boot-time failures). */
+          var purgeOk = await _fsaEnqueueWrite(function() { return _fsaWriteTextQueued(h, JSON.stringify(parsed, null, 2)); });
+          if (purgeOk) window.dispatchEvent(new CustomEvent("fsa:saved"));
         }
       } catch (e) {}
       return true;
@@ -262,6 +331,21 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
       }
     } catch (e) {}
   }
+  /* EV calibration / live-prediction stores (stox_ev_* in localStorage). These
+     were never part of the sync payload before: calibrations lived only in the
+     browser and never reached the FSA file or Drive. */
+  var evStores = null;
+  try {
+    evStores = {};
+    for (var ei = 0; ei < localStorage.length; ei++) {
+      var ek = localStorage.key(ei);
+      if (ek && ek.indexOf("stox_ev_") === 0) {
+        var evRaw = localStorage.getItem(ek);
+        try { evStores[ek] = JSON.parse(evRaw); } catch (e) { evStores[ek] = evRaw; }
+      }
+    }
+    if (!Object.keys(evStores).length) evStores = null;
+  } catch (e) {}
 
   return {
     app: "StoX",
@@ -285,6 +369,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
       wlTrackerPrices: Object.keys(wlTrackerPrices).length,
       notes: notes.length,
       scoreConfig: !!scoreConfig,
+      evStores: evStores ? Object.keys(evStores).length : 0,
       patterns: patterns ? patterns.patterns.length : 0,
       patternFeatures: patterns && patterns.features ? patterns.features.length : 0,
       patternMeta: patterns && patterns.meta ? patterns.meta.length : 0,
@@ -308,6 +393,7 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
       wlTrackerPrices: wlTrackerPrices,
       notes: notes,
       scoreConfig: scoreConfig,
+      evStores: evStores,
       patterns: patterns
     }
   };
@@ -381,6 +467,20 @@ window.__stoxRestoreFromPayload = async function(data) {
           }
         } catch (e) {}
       }
+    }
+    /* EV calibration stores: adopt from the file only where local is missing.
+       Local calibration always wins — it is measurement data, and replacing
+       in-progress local calibration with an older device's copy would corrupt
+       the same-basis bookkeeping. */
+    if (data.evStores && typeof data.evStores === "object") {
+      Object.keys(data.evStores).forEach(function(k) {
+        if (k.indexOf("stox_ev_") !== 0) return;   // never write foreign keys
+        try {
+          if (localStorage.getItem(k) == null) {
+            localStorage.setItem(k, typeof data.evStores[k] === "string" ? data.evStores[k] : JSON.stringify(data.evStores[k]));
+          }
+        } catch (e) {}
+      });
     }
     if (window.__fsa) window.__fsa.state = {
       holdings: data.holdings || [],

@@ -118,7 +118,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.2';
+  var VERSION = 'EV-4.2.1';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -591,10 +591,21 @@ window.ExpectedValueEngine = (function () {
       var raw = localStorage.getItem(key);
       var d = raw ? JSON.parse(raw) : {};
       return d && typeof d === 'object' ? d : {};
-    } catch (e) { return {}; }
+    } catch (e) {
+      console.warn('[EV] store read FAILED for "' + key + '" (corrupt JSON?): starting empty.');
+      return {};
+    }
   }
   function saveStore(key, obj) {
-    try { localStorage.setItem(key, JSON.stringify(obj)); return true; } catch (e) { return false; }
+    try { localStorage.setItem(key, JSON.stringify(obj)); return true; }
+    catch (e) {
+      /* v4.2.1: never fail silently. A swallowed write error here is exactly
+         how calibrations stop persisting without anyone noticing (typically
+         QuotaExceededError once buckets/_rel/live records grow). */
+      console.warn('[EV] store write FAILED for "' + key + '" (' + (e && e.name || 'error') +
+        '): this batch is NOT persisted. Check localStorage quota (stox_ev_* sizes).');
+      return false;
+    }
   }
   function loadCalibration(key) { return loadStore(key || DEFAULTS.calibrationKey); }
 
