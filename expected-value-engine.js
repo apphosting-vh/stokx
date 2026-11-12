@@ -123,7 +123,20 @@ window.ExpectedValueEngine = (function () {
     lookbackBars: 500,
     minWindows: 30,
     driftKeep: 0.5,
-    calibrationKey: 'stox_ev_calibration_v6',
+    calibrationKey: 'stox_ev_calibration_v7',
+
+    /*
+     * EV-DATA-2 / V4.1 REV 2 integrity boundary.
+     *
+     * v7 is intentionally isolated from v6 because Rev 2 changes the
+     * statistical meaning of calibration data, including stop-aware
+     * calibration, drift methodology and entry conventions.
+     *
+     * Derived stores:
+     *   stox_ev_calibration_v7_meta
+     *   stox_ev_calibration_v7_rel
+     *   stox_ev_calibration_v7_sig
+     */
 
     /* ── v4 options ─────────────────────────────────────────────────────── */
     /* Eligibility gate. By default only base-model Strong Buy / Buy rows are
@@ -149,7 +162,14 @@ window.ExpectedValueEngine = (function () {
     liquidity: { enabled: false, impactCoef: 0.5, maxPerSidePct: 1.0, advBars: 20 },
     sizing: { kellyFraction: 0.25, maxPositionPct: 20, maxRiskPerTradePct: 1.0 },
     correlation: { lookbackBars: 120, minOverlap: 60, threshold: 0.7, penalty: 0.5, maxPicks: 5, maxPerGroup: 1, groupPrefixes: ['ADANI', 'TATA', 'BAJAJ'] },
-    live: { key: 'stox_ev_live_v1', maxRecords: 4000 },
+    live: {
+      /*
+       * EV-DATA-2 live tracking boundary.
+       * v2 records are statistically isolated from prior live predictions.
+       */
+      key: 'stox_ev_live_v2',
+      maxRecords: 4000
+    },
     staleCalibrationDays: 21,
     noTrade: { minPPositive: 0.5 },
     upside: { horizons: [3, 5, 10, 15, 20], targets: [2, 3, 4, 5, 6], shrinkK: 8 }
@@ -1479,7 +1499,14 @@ window.ExpectedValueEngine = (function () {
      calibration is cleared and rebuilt (win counts alone would be fine, but the
      per-stock progress marker would stop the rest from being re-labeled). */
   function calibrationSignature(cfg) {
-    return ['v5', round(totalRoundTripCost(cfg.costs), 4), num(cfg.taxRatePct, 0), num(cfg.taxLossCredit, 0), cfg.decideAfterTax !== false ? 1 : 0].join('|');
+    return [
+      'v6',
+      EV_DATA_SCHEMA_VERSION,
+      round(totalRoundTripCost(cfg.costs), 4),
+      num(cfg.taxRatePct, 0),
+      num(cfg.taxLossCredit, 0),
+      cfg.decideAfterTax !== false ? 1 : 0
+    ].join('|');
   }
   function refreshCalibrationSignature(key, cfg) {
     try {
@@ -1501,7 +1528,13 @@ window.ExpectedValueEngine = (function () {
       if ((all[k].n || 0) >= 20) usable++;
     });
     var meta = loadStore(key + '_meta');
-    return { buckets: buckets, usableBuckets: usable, outcomes: total, symbols: Object.keys(meta).length };
+    return {
+      buckets: buckets,
+      usableBuckets: usable,
+      outcomes: total,
+      symbols: Object.keys(meta).length,
+      dataSchemaVersion: EV_DATA_SCHEMA_VERSION
+    };
   }
 
   /* ── Reliability: did the table's EV match what actually happened? ───────
@@ -2147,6 +2180,10 @@ window.ExpectedValueEngine = (function () {
 
   return {
     version: VERSION,
+
+    /* Public metadata for deployment and browser-console verification. */
+    dataSchemaVersion: EV_DATA_SCHEMA_VERSION,
+
     getConfig: function () { return getConfig(); },
     totalRoundTripCost: totalRoundTripCost,
     analyze: analyze,
