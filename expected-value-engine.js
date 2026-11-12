@@ -56,7 +56,21 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.1';
+  var VERSION = 'EV-4.1-REV2';
+
+  /*
+   * Persisted model-generated data schema.
+   *
+   * Bump this when changes alter the statistical meaning or compatibility of:
+   *   - calibration buckets
+   *   - historical outcome labels
+   *   - drift methodology
+   *   - entry/exit conventions
+   *   - live performance measurements
+   *
+   * Do NOT bump this merely for UI or display changes.
+   */
+  var EV_DATA_SCHEMA_VERSION = 'EV-DATA-2';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -414,13 +428,35 @@ window.ExpectedValueEngine = (function () {
     var lastStart = last - horizon;
     if (lastStart - firstStart + 1 < cfg.minWindows) return null;
 
-    var sum = 0, cnt = 0;
-    for (var k = firstStart; k <= last; k++) {
-      var a = daily[k - 1].c, b = daily[k].c;
-      if (a > 0 && b > 0) { sum += Math.log(b / a); cnt++; }
+    /* REV 2 integrity:
+       Build prefix sums of log returns. Historical window i must never use
+       returns occurring after i when estimating the drift removed from that
+       window.
+
+       prefix[k] contains valid log-return information through bar k. */
+    var driftSum = new Array(n);
+    var driftCount = new Array(n);
+    var runningSum = 0, runningCount = 0;
+
+    driftSum[0] = 0;
+    driftCount[0] = 0;
+
+    for (var k = 1; k < n; k++) {
+      var a = daily[k - 1].c;
+      var b = daily[k].c;
+
+      if (a > 0 && b > 0) {
+        runningSum += Math.log(b / a);
+        runningCount++;
+      }
+
+      driftSum[k] = runningSum;
+      driftCount[k] = runningCount;
     }
-    var mu = cnt ? sum / cnt : 0;
-    var removed = (1 - clamp(num(cfg.driftKeep, 0.5), 0, 1)) * mu;
+
+    var driftKeep =
+      clamp(num(cfg.driftKeep, 0.5), 0, 1);
+
     var up = Math.log(1 + targetPct / 100);
     var dn = Math.log(1 - stopPct / 100);
     var ex = exitOpts(cfg);
@@ -431,7 +467,29 @@ window.ExpectedValueEngine = (function () {
     for (var i = firstStart; i <= lastStart; i++) {
       var w = weights ? weights[i] : 1;
       if (!(w > 0)) continue;
-      var o = windowOutcome(daily, i, horizon, up, dn, removed, stopPct, mode, ex);
+      /* Only returns ending before the entry bar are available at entry.
+         driftSum[i - 1] therefore excludes both the entry day's future path
+         and all subsequent bars. */
+      var histCount = i > 1 ? driftCount[i - 1] : 0;
+      var histMu =
+        histCount > 0
+          ? driftSum[i - 1] / histCount
+          : 0;
+
+      var removed =
+        (1 - driftKeep) * histMu;
+
+      var o = windowOutcome(
+        daily,
+        i,
+        horizon,
+        up,
+        dn,
+        removed,
+        stopPct,
+        mode,
+        ex
+      );
       if (!o) continue;
       var v = outcomeValues(o, targetPct, costPct, cfg);
       vals.push(useAft ? v.aft : v.pre); ws.push(w); maes.push(o.mae == null ? 0 : o.mae);
@@ -477,8 +535,14 @@ window.ExpectedValueEngine = (function () {
       stdErr: sd / Math.sqrt(Math.max(1, nEff)),
       halfA: half > 0 && wA > 0 ? hA / wA : null,
       halfB: m - half > 0 && wB > 0 ? hB / wB : null,
-      driftPerDayPct: mu * 100,
-      removedDriftPerDayPct: removed * 100,
+      /* Descriptive current-lookback drift. It is NOT used retroactively
+         to adjust historical windows. */
+      driftPerDayPct:
+        (driftCount[last] > 0 ? driftSum[last] / driftCount[last] : 0) * 100,
+
+      removedDriftPerDayPct:
+        (1 - driftKeep) *
+        (driftCount[last] > 0 ? driftSum[last] / driftCount[last] : 0) * 100,
       cvar5Pct: wTailMean(pairs, 0.05),
       p5Pct: wQuantile(pairs, 0.05),
       worstPct: worst,
@@ -487,9 +551,37 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-  /* ── Calibration store (bucketed empirical target-first outcomes) ───────── */
-  function calibrationBucket(horizon, targetPct, setupScore, volClass) {
-    return 'h' + horizon + '|t' + round(targetPct, 1) + '|s' + Math.floor(clamp(setupScore || 0, 0, 99) / 10) * 10 + '|v' + (volClass || 'M');
+  /* ── Calibration store (bucketed empirical target-first outcomes) ─────────
+     REV 2 integrity:
+     Target-first probability depends materially on stop width. The stop band
+     is therefore part of the calibration state.
+
+     Bands are deliberately broad enough to retain usable samples while
+     preventing 1.5% and 6% stops from contaminating the same estimate. */
+  function stopBucket(stopPct) {
+    var s = Number(stopPct);
+    if (!isFinite(s) || !(s > 0)) return 'U';
+    if (s < 2.0) return 'S1';
+    if (s < 3.5) return 'S2';
+    if (s < 5.0) return 'S3';
+    return 'S4';
+  }
+
+  function calibrationBucket(horizon, targetPct, stopPct, setupScore, volClass) {
+    return 'h' + horizon +
+      '|t' + round(targetPct, 1) +
+      '|p' + stopBucket(stopPct) +
+      '|s' + Math.floor(clamp(setupScore || 0, 0, 99) / 10) * 10 +
+      '|v' + (volClass || 'M');
+  }
+
+  /* Legacy key is retained only for reading old stores during migration.
+     New calibration writes always use the stop-aware schema. */
+  function legacyCalibrationBucket(horizon, targetPct, setupScore, volClass) {
+    return 'h' + horizon +
+      '|t' + round(targetPct, 1) +
+      '|s' + Math.floor(clamp(setupScore || 0, 0, 99) / 10) * 10 +
+      '|v' + (volClass || 'M');
   }
   function loadStore(key) {
     try {
@@ -503,13 +595,45 @@ window.ExpectedValueEngine = (function () {
   }
   function loadCalibration(key) { return loadStore(key || DEFAULTS.calibrationKey); }
 
-  function historicalProbability(horizon, targetPct, setupScore, volClass, key) {
+  function historicalProbability(horizon, targetPct, stopPct, setupScore, volClass, key) {
     var all = loadCalibration(key);
-    var b = all[calibrationBucket(horizon, targetPct, setupScore, volClass)];
-    if (!b || !b.n || b.n < 20) return null;
-    // Beta(1,1) shrinkage prevents small samples from producing extreme probabilities.
-    var p = (num(b.wins, 0) + 1) / (num(b.n, 0) + 2);
-    return { p: clamp(p, 0.01, 0.99), n: b.n, bucket: b };
+
+    var bucketKey =
+      calibrationBucket(horizon, targetPct, stopPct, setupScore, volClass);
+
+    var b = all[bucketKey];
+
+    if (b && b.n >= 20) {
+      var p = (num(b.wins, 0) + 1) / (num(b.n, 0) + 2);
+      return {
+        p: clamp(p, 0.01, 0.99),
+        n: b.n,
+        bucket: b,
+        key: bucketKey,
+        legacy: false
+      };
+    }
+
+    /* Backward compatibility only. Legacy observations mixed stop widths,
+       so do not give them the same evidential status as the new schema. */
+    var legacyKey =
+      legacyCalibrationBucket(horizon, targetPct, setupScore, volClass);
+
+    var legacy = all[legacyKey];
+
+    if (!legacy || !legacy.n || legacy.n < 40) return null;
+
+    var legacyP =
+      (num(legacy.wins, 0) + 1) /
+      (num(legacy.n, 0) + 2);
+
+    return {
+      p: clamp(legacyP, 0.01, 0.99),
+      n: legacy.n,
+      bucket: legacy,
+      key: legacyKey,
+      legacy: true
+    };
   }
 
   function mlProbability(context) {
@@ -991,7 +1115,18 @@ window.ExpectedValueEngine = (function () {
       }
       if (ok && g > bestG) { bestG = g; bestF = f; }
     }
-    var scale = rawEdge > 1e-9 ? clamp(ev.netPct / rawEdge, 0, 1) : 0;
+    /* rawEdge is calculated on an after-tax basis. Use the same basis for
+       the shrunk EV numerator; otherwise sizing changes merely because the
+       display/decision tax basis changes. */
+    var sizingBasis =
+      cfg.decideAfterTax !== false
+        ? num(ev.netPct, 0)
+        : num(ev.netPct, 0);
+
+    var scale =
+      rawEdge > 1e-9
+        ? clamp(sizingBasis / rawEdge, 0, 1)
+        : 0;
     var kelly = bestF * 100 * num(sc.kellyFraction, 0.25) * scale;
     var riskCap = stopPct > 0 ? num(sc.maxRiskPerTradePct, 1) / stopPct * 100 : null;
     var cap = num(sc.maxPositionPct, 20);
@@ -1484,8 +1619,20 @@ window.ExpectedValueEngine = (function () {
     var daily = opts.dailyCandles || [];
     var symbol = opts.symbol || (best && best.symbol);
     if (!best || !best.expectedValue || !symbol || !daily.length) return false;
-    var date = String(daily[daily.length - 1].t).slice(0, 10);
-    var id = [symbol, date, best.horizonDays, best.targetPct, best.exitMode || 'fixed'].join('|');
+    var signalDate =
+      String(daily[daily.length - 1].t).slice(0, 10);
+
+    /* The entry bar is intentionally not known yet. Settlement will locate
+       the first available session strictly after signalDate. */
+    var date = signalDate;
+
+    var id = [
+      symbol,
+      signalDate,
+      best.horizonDays,
+      best.targetPct,
+      best.exitMode || 'fixed'
+    ].join('|');
     var st = loadLive(cfg);
     for (var i = 0; i < st.records.length; i++) if (st.records[i].id === id) return false;   // already logged
     /* V4.1 integrity:
@@ -1511,7 +1658,14 @@ window.ExpectedValueEngine = (function () {
     st.records.push({
       id: id,
       symbol: symbol,
+
+      /* date is retained for V4.1 compatibility and means signal date. */
       date: date,
+      signalDate: signalDate,
+      entryDate: null,
+      entryPrice: null,
+      entryConvention: 'next_session_open',
+
       h: best.horizonDays,
       t: best.targetPct,
       stop: best.stopPct,
@@ -1548,9 +1702,44 @@ window.ExpectedValueEngine = (function () {
     daily.forEach(function (b, k) { byDate[String(b.t).slice(0, 10)] = k; });
     st.records.forEach(function (rec) {
       if (rec.status !== 'open' || rec.symbol !== symbol) return;
-      var i = byDate[rec.date];
-      if (i == null) return;
-      var complete = i + rec.h <= daily.length - 1;
+      var signalDate =
+        rec.signalDate || rec.date;
+
+      var signalIndex =
+        byDate[signalDate];
+
+      if (signalIndex == null) return;
+
+      var useNextSession =
+        rec.entryConvention === 'next_session_open';
+
+      var i =
+        useNextSession
+          ? signalIndex + 1
+          : signalIndex;
+
+      if (i >= daily.length) return;
+
+      var entryBar = daily[i];
+
+      if (!entryBar || !(entryBar.o > 0 || entryBar.c > 0)) return;
+
+      /* New EOD convention: next tradable session's open. */
+      var entryPrice =
+        useNextSession && entryBar.o > 0
+          ? entryBar.o
+          : entryBar.c;
+
+      if (!(entryPrice > 0)) return;
+
+      rec.entryDate =
+        String(entryBar.t).slice(0, 10);
+
+      rec.entryPrice =
+        entryPrice;
+
+      var complete =
+        i + rec.h <= daily.length - 1;
 
       /* V4.1:
          Use the configuration captured at prediction time. V4.0 records
@@ -1584,8 +1773,18 @@ window.ExpectedValueEngine = (function () {
             }
           : exitOpts(cfg);
 
+      /* Create a lightweight series view whose entry close equals the
+         executable entry price. Historical bars remain untouched. */
+      var settlementDaily =
+        daily.slice();
+
+      settlementDaily[i] =
+        Object.assign({}, daily[i], {
+          c: entryPrice
+        });
+
       var o = windowOutcome(
-        daily,
+        settlementDaily,
         i,
         rec.h,
         Math.log(1 + rec.t / 100),
@@ -1660,6 +1859,13 @@ window.ExpectedValueEngine = (function () {
     out.meanRealized = sr / n;
     out.bias = bias;
     out.stdErr = se;
+
+    /* REV 2:
+       This comparison is now explicitly an executable trading-performance
+       comparison. It must not be interpreted as proof that the conditional
+       probability model is calibrated, because realized P&L includes market
+       drift and entry execution. */
+    out.comparisonBasis = 'predicted_model_ev_vs_realized_executable_pnl';
     out.effectiveN = effectiveN;
     out.avgHorizonDays = avgHorizon;
     out.z = se > 0 ? bias / se : 0;
