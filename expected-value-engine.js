@@ -56,7 +56,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.0';
+  var VERSION = 'EV-4.1';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -745,24 +745,94 @@ window.ExpectedValueEngine = (function () {
     };
     if (!tb || probability.p == null) return core;
 
-    /* The blended target-first probability sets P(target); the remaining mass
-       keeps the MEASURED stop / timeout split. */
-    var pT = probability.p, rest = 1 - pT;
-    var denom = tb.pStop + tb.pTimeout;
-    var stopShare = denom > 0 ? tb.pStop / denom : 0.5;
-    var pS = rest * stopShare, pO = rest - pS;
+    /* V4.1 EV INTEGRITY
+       ------------------
+       Primary EV must use a coherent joint outcome distribution.
+
+       V4.0 used a blended target probability but retained only the historical
+       conditional stop/timeout split. That produced a synthetic distribution.
+
+       V4.1 uses the measured triple-barrier probabilities together for the
+       primary EV. The blended target probability remains available as a
+       predictive diagnostic and is exposed separately. */
+
+    var pT = clamp(tb.pTarget, 0, 1);
+    var pS = clamp(tb.pStop, 0, 1);
+    var pO = clamp(tb.pTimeout, 0, 1);
+
+    /* Defensive normalization for floating-point accumulation. */
+    var totalP = pT + pS + pO;
+
+    if (totalP > 0) {
+      pT /= totalP;
+      pS /= totalP;
+      pO /= totalP;
+    } else {
+      /* Should not normally occur because tripleBarrierWindows supplies
+         outcomes, but preserve a safe fallback. */
+      pT = 0;
+      pS = 0.5;
+      pO = 0.5;
+    }
+
     var c = pre.costs;
+    var predictiveTargetProbability = probability.p;
+
     var dist = {
-      pTarget: pT, pStop: pS, pTimeout: pO,
-      targetReturnPct: targetPct, stopReturnPct: tb.meanStopRet, timeoutReturnPct: tb.meanTimeoutRet
+      pTarget: pT,
+      pStop: pS,
+      pTimeout: pO,
+
+      /* Diagnostic only. It does not alter the joint EV distribution. */
+      predictiveTargetProbability: predictiveTargetProbability,
+
+      targetReturnPct: targetPct,
+      stopReturnPct: tb.meanStopRet,
+      timeoutReturnPct: tb.meanTimeoutRet
     };
-    var gross = pT * targetPct + pS * tb.meanStopRet + pO * tb.meanTimeoutRet;
-    var preNet = pT * (targetPct - c) + pS * (tb.meanStopRet - c) + pO * (tb.meanTimeoutRet - c);
-    var aftNet = pT * afterTax(targetPct - c, cfg) + pS * tb.meanAfStop + pO * tb.meanAfTimeout;
+
+    var gross =
+      pT * targetPct +
+      pS * tb.meanStopRet +
+      pO * tb.meanTimeoutRet;
+
+    var preNet =
+      pT * (targetPct - c) +
+      pS * (tb.meanStopRet - c) +
+      pO * (tb.meanTimeoutRet - c);
+
+    var aftNet =
+      pT * afterTax(targetPct - c, cfg) +
+      pS * tb.meanAfStop +
+      pO * tb.meanAfTimeout;
+
     core.dist = dist;
-    core.ev = { grossPct: gross, costPct: c, preTaxNetPct: preNet, afterTaxNetPct: aftNet, taxPct: preNet - aftNet };
-    core.basisEV = cfg.decideAfterTax !== false ? aftNet : preNet;
-    core.pReturnPositive = clamp(pT + pO * tb.timeoutPosShare, 0, 1);
+
+    core.ev = {
+      grossPct: gross,
+      costPct: c,
+      preTaxNetPct: preNet,
+      afterTaxNetPct: aftNet,
+      taxPct: preNet - aftNet,
+
+      /* Probability-model diagnostic. */
+      predictiveTargetProbability: predictiveTargetProbability,
+      empiricalTargetProbability: pT,
+      probabilityGapPct:
+        predictiveTargetProbability == null
+          ? null
+          : (predictiveTargetProbability - pT) * 100
+    };
+
+    core.basisEV =
+      cfg.decideAfterTax !== false ? aftNet : preNet;
+
+    core.pReturnPositive = clamp(
+      pT + pO * tb.timeoutPosShare,
+      0,
+      1
+    );
+
     return core;
   }
 
@@ -827,7 +897,8 @@ window.ExpectedValueEngine = (function () {
         rangeLoPct: shrunk - 1.645 * postSd,    // 90% interval for the TRUE EV
         rangeHiPct: shrunk + 1.645 * postSd,
         evPerDayPct: shrunk / Math.max(1, core.horizonDays),
-        annualizedPct: shrunk * 252 / Math.max(1, core.horizonDays)   // simple (not compounded) EV x trades per year
+        annualizedPct: shrunk * 252 / Math.max(1, core.horizonDays),  // theoretical continuous deployment only
+        theoreticalContinuousDeploymentEV: true
       };
     }
 
@@ -1417,11 +1488,46 @@ window.ExpectedValueEngine = (function () {
     var id = [symbol, date, best.horizonDays, best.targetPct, best.exitMode || 'fixed'].join('|');
     var st = loadLive(cfg);
     for (var i = 0; i < st.records.length; i++) if (st.records[i].id === id) return false;   // already logged
+    /* V4.1 integrity:
+       Freeze all settlement-relevant configuration at prediction time.
+       Historical predictions must not change because a user later modifies
+       tax or exit settings. */
+    var currentExit = exitOpts(cfg);
+
+    var decisionSnapshot = {
+      decideAfterTax: cfg.decideAfterTax !== false,
+
+      /* Preserve explicit values where present. */
+      taxRatePct: num(cfg.taxRatePct, 0),
+      taxLossCredit: num(cfg.taxLossCredit, 0),
+
+      exit: {
+        armFrac: currentExit.armFrac,
+        trailFrac: currentExit.trailFrac,
+        lockDelay: currentExit.lockDelay
+      }
+    };
+
     st.records.push({
-      id: id, symbol: symbol, date: date, h: best.horizonDays, t: best.targetPct, stop: best.stopPct,
-      cost: best.costsPct, mode: best.exitMode || 'fixed',
-      pred: best.expectedValue.netPct, raw: best.expectedValue.rawBasisPct, pPos: best.expectedValue.pPositive,
-      evid: best.evidenceConfidence, score: best.setupQuality, status: 'open', ts: Date.now()
+      id: id,
+      symbol: symbol,
+      date: date,
+      h: best.horizonDays,
+      t: best.targetPct,
+      stop: best.stopPct,
+      cost: best.costsPct,
+      mode: best.exitMode || 'fixed',
+
+      /* Immutable V4.1 settlement specification. */
+      decisionSnapshot: decisionSnapshot,
+
+      pred: best.expectedValue.netPct,
+      raw: best.expectedValue.rawBasisPct,
+      pPos: best.expectedValue.pPositive,
+      evid: best.evidenceConfidence,
+      score: best.setupQuality,
+      status: 'open',
+      ts: Date.now()
     });
     var max = num(cfg.live && cfg.live.maxRecords, 1500);
     if (st.records.length > max) {
@@ -1445,11 +1551,66 @@ window.ExpectedValueEngine = (function () {
       var i = byDate[rec.date];
       if (i == null) return;
       var complete = i + rec.h <= daily.length - 1;
-      var o = windowOutcome(daily, i, rec.h, Math.log(1 + rec.t / 100), Math.log(1 - rec.stop / 100), 0, rec.stop, rec.mode, exitOpts(cfg));
+
+      /* V4.1:
+         Use the configuration captured at prediction time. V4.0 records
+         without a snapshot continue to use the current configuration. */
+      var snap = rec.decisionSnapshot || null;
+      var settlementCfg = cfg;
+
+      if (snap) {
+        settlementCfg = {};
+
+        Object.keys(cfg).forEach(function (key) {
+          settlementCfg[key] = cfg[key];
+        });
+
+        settlementCfg.decideAfterTax =
+          snap.decideAfterTax !== false;
+
+        settlementCfg.taxRatePct =
+          snap.taxRatePct;
+
+        settlementCfg.taxLossCredit =
+          snap.taxLossCredit;
+      }
+
+      var settlementExit =
+        snap && snap.exit
+          ? {
+              armFrac: snap.exit.armFrac,
+              trailFrac: snap.exit.trailFrac,
+              lockDelay: snap.exit.lockDelay
+            }
+          : exitOpts(cfg);
+
+      var o = windowOutcome(
+        daily,
+        i,
+        rec.h,
+        Math.log(1 + rec.t / 100),
+        Math.log(1 - rec.stop / 100),
+        0,
+        rec.stop,
+        rec.mode,
+        settlementExit
+      );
+
       if (!o) return;
-      if (!complete && o.oP > 0) return;                 // neither target nor stop yet and bars remain
-      var v = outcomeValues(o, rec.t, rec.cost, cfg);
-      rec.real = cfg.decideAfterTax !== false ? v.aft : v.pre;
+
+      if (!complete && o.oP > 0) return;
+
+      var v = outcomeValues(
+        o,
+        rec.t,
+        rec.cost,
+        settlementCfg
+      );
+
+      rec.real =
+        settlementCfg.decideAfterTax !== false
+          ? v.aft
+          : v.pre;
       rec.outcome = o.tP >= 0.5 ? 'target' : (o.sP >= 0.5 ? 'stop' : 'timeout');
       rec.status = 'settled'; rec.settledAt = Date.now();
       settled++; changed = true;
@@ -1470,8 +1631,37 @@ window.ExpectedValueEngine = (function () {
     done.forEach(function (r) { var d = r.real - r.pred; sp += r.pred; sr += r.real; sd += d; sdd += d * d; });
     var n = done.length, bias = (sr - sp) / n;
     var varD = Math.max(0, sdd / n - Math.pow(sd / n, 2));
-    var se = Math.sqrt(varD / Math.max(1, n / 2));
-    out.meanPredicted = sp / n; out.meanRealized = sr / n; out.bias = bias; out.stdErr = se;
+
+    /* V4.1 transparency:
+       Live predictions can overlap in time. Use the average holding horizon
+       to report a conservative effective sample size.
+
+       This replaces the previous hard-coded n/2 rule. */
+    var avgHorizon = 0;
+
+    done.forEach(function (r) {
+      avgHorizon += Math.max(1, Number(r.h) || 1);
+    });
+
+    avgHorizon /= Math.max(1, n);
+
+    /* Cap the penalty to avoid treating every long-horizon trade as one
+       completely dependent observation. */
+    var overlapFactor =
+      Math.max(1, Math.min(avgHorizon, 10) / 2);
+
+    var effectiveN =
+      Math.max(1, n / overlapFactor);
+
+    var se =
+      Math.sqrt(varD / effectiveN);
+
+    out.meanPredicted = sp / n;
+    out.meanRealized = sr / n;
+    out.bias = bias;
+    out.stdErr = se;
+    out.effectiveN = effectiveN;
+    out.avgHorizonDays = avgHorizon;
     out.z = se > 0 ? bias / se : 0;
     out.verdict = n < 30 ? 'collecting' : (out.z < -2 ? 'overconfident' : (out.z > 2 ? 'conservative' : 'consistent'));
     [['positiveEV', function (r) { return r.pred > 0; }], ['nonPositiveEV', function (r) { return r.pred <= 0; }]].forEach(function (g) {
