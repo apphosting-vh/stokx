@@ -9629,6 +9629,12 @@ function StockScreener(props) {
       var best = opt && opt.best ? opt.best : null;
       if (!best || !best.expectedValue) return null;
       var ex = best.expectedValue, pr = best.probability || {}, dist = best.distribution || {};
+      /* Live scorecard: settle earlier predictions for this stock on the fresh bars,
+         then log today's prediction (every eligible row, so the check is unbiased). */
+      try {
+        if (typeof EVX.settlePredictions === "function") EVX.settlePredictions(symbol, dailyCandles);
+        if (typeof EVX.recordPrediction === "function") EVX.recordPrediction(best, { symbol: symbol, dailyCandles: dailyCandles });
+      } catch (_liveErr) {}
       return {
         version: best.version,
         decision: best.decision || null,
@@ -9658,7 +9664,27 @@ function StockScreener(props) {
         utility: best.optimizerUtility,
         calScoreGap: best.calScoreGap,
         baselineNetEV: opt.baseline && opt.baseline.expectedValue ? opt.baseline.expectedValue.netPct : null,
-        windows: best.windows ? best.windows.n : null
+        windows: best.windows ? best.windows.n : null,
+        /* v4 additions */
+        rangeLo: ex.rangeLoPct,
+        rangeHi: ex.rangeHiPct,
+        evPerDay: ex.evPerDayPct,
+        annualizedEV: ex.annualizedPct,
+        priorMean: ex.priorMeanPct,
+        zeroEdgePrior: ex.zeroEdgePriorPct,
+        pooledMean: ex.pooledMeanPct,
+        pooledWeight: ex.pooledWeight,
+        breakEvenProb: best.breakEvenTargetProb,
+        sizePct: best.sizing ? best.sizing.suggestedPct : null,
+        sizeBinding: best.sizing ? best.sizing.binding : null,
+        kellyFullPct: best.sizing ? best.sizing.fullKellyPct : null,
+        downside: best.downside || null,
+        reasons: best.reasons || [],
+        strength: best.signalStrength || null,
+        regime: best.regime || null,
+        exitMode: best.exitMode || "fixed",
+        exitRule: best.exitRule || null,
+        rets: typeof EVX.returnSeries === "function" ? EVX.returnSeries(dailyCandles, 90) : null
       };
     } catch (_evErr) { return null; }
   };
@@ -9688,6 +9714,16 @@ function StockScreener(props) {
     if (ev.pEvPositive != null) lines.push("P(true EV > 0): " + Math.round(Number(ev.pEvPositive) * 100) + "%");
     if (ev.stopPct != null) lines.push("Stop -" + Number(ev.stopPct).toFixed(1) + "%" + (ev.pStop != null ? ", P(stop) " + Math.round(Number(ev.pStop) * 100) + "%" : ""));
     if (ev.windows != null) lines.push("Measured on " + ev.windows + " historical windows");
+    var p2 = function(v) { return v == null || !isFinite(Number(v)) ? "n/a" : Math.round(Number(v) * 100) + "%"; };
+    if (ev.rangeLo != null && ev.rangeHi != null) lines.push("90% range for the true EV: " + f(ev.rangeLo) + " to " + f(ev.rangeHi));
+    if (ev.pooledMean != null && ev.pooledWeight > 0) lines.push("Prior leans " + Math.round(ev.pooledWeight * 100) + "% on similar setups across stocks (pooled EV " + f(ev.pooledMean) + ")");
+    if (ev.regime) lines.push("Market regime: " + ev.regime.trend + "trend, " + ev.regime.volatility + " vol" + (ev.regime.matchedShare != null ? " (" + Math.round(ev.regime.matchedShare * 100) + "% of weighted history is similar)" : ""));
+    if (ev.breakEvenProb != null) lines.push("Break-even target-first chance: " + p2(ev.breakEvenProb) + " (history: " + p2(ev.probability) + ")");
+    if (ev.evPerDay != null) lines.push("EV per day " + f(ev.evPerDay) + ", annualized " + (ev.annualizedEV >= 0 ? "+" : "") + Number(ev.annualizedEV).toFixed(0) + "% (simple, not compounded)");
+    if (ev.sizePct != null) lines.push(ev.sizePct > 0 ? "Suggested size: " + Number(ev.sizePct).toFixed(1) + "% of capital" + (ev.sizeBinding ? " (limited by " + ev.sizeBinding + ")" : "") : "Suggested size: none (no positive edge)");
+    if (ev.downside) lines.push("Worst 5% of trades average " + f(ev.downside.expectedShortfall5Pct) + "; typical dip before exit " + f(ev.downside.meanAdverseExcursionPct) + ", bad case " + f(ev.downside.p90AdverseExcursionPct));
+    if (ev.exitRule && ev.exitMode && ev.exitMode !== "fixed") lines.push("Exit rule: " + ev.exitRule);
+    if (ev.reasons && ev.reasons.length) { lines.push(""); ev.reasons.forEach(function(t) { lines.push("- " + t); }); }
     return lines.join("\n");
   };
 
@@ -9711,6 +9747,45 @@ function StockScreener(props) {
         title: "Walk-forward replay of the optimizer's choices using only data available at each start date. Bias " + f(g.bias) + " +/-" + Number(g.stdErr).toFixed(2) + "%" + (g.slope != null ? "; slope of realized on predicted " + Number(g.slope).toFixed(2) : "") + ". Own-history model only (no calibration or ML), so there is no look-ahead."
       };
     } catch (_relErr) { return none; }
+  };
+
+  /* Live scorecard, Buy-filter check and trust flag, as short lines for the EV table header. */
+  var stoxEvHealth = function() {
+    var lines = [], verdict = null;
+    try {
+      var EVX = window.ExpectedValueEngine;
+      if (!EVX) return { lines: lines };
+      var f = function(v) { return (v >= 0 ? "+" : "") + Number(v).toFixed(2) + "%"; };
+      if (typeof EVX.livePerformance === "function") {
+        var lp = EVX.livePerformance();
+        if (lp && (lp.settled > 0 || lp.open > 0)) {
+          if (lp.settled > 0) {
+            var lc = lp.verdict === "overconfident" ? "#dc2626" : (lp.verdict === "collecting" ? "var(--text6)" : "#16a34a");
+            lines.push({ text: "Live scorecard (n=" + lp.settled + " settled, " + lp.open + " open): predicted " + f(lp.meanPredicted) + " vs realized " + f(lp.meanRealized) + " - " + lp.verdict, color: lc,
+              title: "Every Buy-grade prediction shown here is saved and compared with what the price actually did once the plan finished. Needs 30+ settled to judge." });
+          } else {
+            lines.push({ text: "Live scorecard: " + lp.open + " predictions logged, waiting for them to play out.", color: "var(--text6)", title: "Predictions are settled automatically on later refreshes." });
+          }
+        }
+      }
+      if (typeof EVX.gateReport === "function") {
+        var gr = EVX.gateReport();
+        if (gr && gr.verdict && gr.verdict !== "collecting") {
+          var gw = { "gate-adds-value": "Buy filter adds value", "gate-no-better": "Buy filter shows no detectable edge over rejected setups", "gate-hurts": "rejected setups did BETTER than Buy-rated ones" };
+          lines.push({ text: "Buy-filter check: " + (gw[gr.verdict] || gr.verdict) + " (realized " + f(gr.eligible.meanRealized) + " vs " + f(gr.notEligible.meanRealized) + ")", color: gr.verdict === "gate-adds-value" ? "#16a34a" : "#d97706", title: "Walk-forward comparison of the optimizer's realized EV on Buy-grade vs lower-grade setups." });
+        }
+      }
+      if (typeof EVX.reliabilityStatus === "function") {
+        var rs = EVX.reliabilityStatus(), tr = rs && rs.trust;
+        if (tr && tr.messages && tr.messages.length && tr.level !== "ok") {
+          var tcol = tr.level === "stale" ? "#dc2626" : (tr.level === "caution" ? "#d97706" : "var(--text6)");
+          lines.push({ text: (tr.level === "stale" ? "Trust: STALE - " : (tr.level === "caution" ? "Trust: caution - " : "Trust: ")) + tr.messages[0] + (tr.messages.length > 1 ? " (+" + (tr.messages.length - 1) + " more)" : ""), color: tcol, title: tr.messages.join("\n") });
+        }
+        var tb = rs && rs.topBucket;
+        if (tb) lines.push({ text: "Top EV bucket (" + tb.label + ", n=" + tb.n + "): predicted " + f(tb.meanPredicted) + " vs realized " + f(tb.meanRealized), color: tb.verdict === "optimistic" ? "#d97706" : "var(--text6)", title: "Calibration by EV bucket: are the highest-EV picks really delivering?" });
+      }
+    } catch (_hErr) {}
+    return { lines: lines };
   };
 
   /* Background walk-forward calibration + reliability. Fills the engine's stores
@@ -10622,6 +10697,49 @@ function StockScreener(props) {
     return (Number(b.result && b.result.finalScore) || 0) - (Number(a.result && a.result.finalScore) || 0);
   });
 
+  /* v4: "anything worth trading today?" verdict, plus a correlation-aware order so
+     two stocks that move together (e.g. ADANI group) are not both ranked as top picks. */
+  var evHealth = stoxEvHealth();
+  var evVerdict = null, evDiv = {};
+  var evSym = function(row) { return row.s.t.replace(".NS", ""); };
+  try {
+    var EVXv = window.ExpectedValueEngine;
+    if (EVXv && evTradeRows.length) {
+      var evNet = function(row) { return row.ev ? (row.ev.bestNetEV != null ? row.ev.bestNetEV : row.ev.netEV) : null; };
+      if (typeof EVXv.rankingVerdict === "function") {
+        evVerdict = EVXv.rankingVerdict(evTradeRows.filter(function(row) { return row.ev && evNet(row) != null; }).map(function(row) {
+          return { symbol: evSym(row), expectedValue: { netPct: Number(evNet(row)), pPositive: row.ev.pEvPositive }, decision: row.ev.decision };
+        }));
+      }
+      var withRets = evTradeRows.filter(function(row) { return row.ev && row.ev.rets && evNet(row) != null; });
+      if (withRets.length > 1 && typeof EVXv.diversify === "function") {
+        var dvOut = EVXv.diversify(withRets.map(function(row) {
+          return { symbol: evSym(row), returns: row.ev.rets, result: { symbol: evSym(row), optimizerUtility: row.ev.utility, expectedValue: { netPct: Number(evNet(row)) } } };
+        }));
+        var evOrder = {};
+        dvOut.forEach(function(d) { evDiv[d.symbol] = d; evOrder[d.symbol] = d.rank; });
+        evTradeRows = evTradeRows.slice().sort(function(a, b) {
+          var ra = evOrder[evSym(a)], rb = evOrder[evSym(b)];
+          if (ra == null && rb == null) return 0;
+          if (ra == null) return 1;
+          if (rb == null) return -1;
+          return ra - rb;
+        });
+      }
+    }
+  } catch (_dvErr) {}
+  var evStrengthColor = function(ev) {
+    var t = ev && ev.strength && ev.strength.tier;
+    if (t === "strong") return "#16a34a";
+    if (t === "moderate") return "#ca8a04";
+    if (t === "weak") return "var(--text4)";
+    if (t === "near-breakeven") return "var(--text5)";
+    if (t === "negative") return "#dc2626";
+    var n = ev && (ev.bestNetEV != null ? ev.bestNetEV : ev.netEV);
+    return n != null ? (Number(n) >= 0 ? "#16a34a" : "#dc2626") : "var(--text6)";
+  };
+  var evVerdictColor = !evVerdict ? "var(--text6)" : (evVerdict.verdict === "TRADE" ? "#16a34a" : (evVerdict.verdict === "WEAK" ? "#d97706" : (evVerdict.verdict === "NO_TRADE" ? "#dc2626" : "var(--text6)")));
+
 
   return React.createElement("div", { style: { marginTop: 4 } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 } },
@@ -10787,18 +10905,21 @@ function StockScreener(props) {
         React.createElement("div", { style: { padding: "9px 12px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
           React.createElement("div", null,
             React.createElement("div", { style: { fontSize: 12, fontWeight: 750, color: "var(--text)" } }, "EV-First Trade Ranking"),
-            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 2 } }, "Base-model Strong Buy and Buy candidates only, ranked by trust-adjusted EV per day (after costs, DP charges; shrunk for sampling noise and best-of-25 selection). EV optimizes the trade plan; it does not replace the StoX signal."),
-            React.createElement("div", { title: evRel.title, style: { fontSize: 9, marginTop: 2, color: evRel.color } }, evRel.text)
+            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 2 } }, "Base-model Strong Buy and Buy candidates only, ranked by trust-adjusted EV per day (after costs; shrunk for sampling noise, best-of-25 selection luck and market regime; correlated picks pushed down). EV optimizes the trade plan; it does not replace the StoX signal."),
+            evVerdict ? React.createElement("div", { title: evVerdict.trust && evVerdict.trust.messages ? evVerdict.trust.messages.join("\n") : "", style: { fontSize: 10, fontWeight: 700, marginTop: 4, color: evVerdictColor } }, (evVerdict.verdict === "NO_TRADE" ? "NO TRADE TODAY - " : (evVerdict.verdict === "WEAK" ? "WEAK DAY - " : (evVerdict.verdict === "TRADE" ? "TRADES AVAILABLE - " : ""))) + evVerdict.message) : null,
+            React.createElement("div", { title: evRel.title, style: { fontSize: 9, marginTop: 2, color: evRel.color } }, evRel.text),
+            evHealth.lines.map(function(ln, i) { return React.createElement("div", { key: "evh" + i, title: ln.title, style: { fontSize: 9, marginTop: 2, color: ln.color } }, ln.text); })
           ),
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, evTradeRows.length + " trade candidates")
         ),
         React.createElement("div", { style: { overflowX: "auto" } },
-          React.createElement("table", { style: { width: "100%", minWidth: 1000, borderCollapse: "collapse", tableLayout: "fixed" } },
+          React.createElement("table", { style: { width: "100%", minWidth: 1260, borderCollapse: "collapse", tableLayout: "fixed" } },
             React.createElement("thead", null, React.createElement("tr", null,
-              ["Stock","Signal","Net EV","EV Conf.","Win %","Evidence","Setup","Target","Days","Price"].map(function(h) {
+              ["Stock","Signal","Net EV","EV Conf.","Win %","Evidence","Setup","Target","Days","Size","EV/day","Worst 5%","Price"].map(function(h) {
                 var left = h === "Stock" || h === "Signal";
-                var widths = { Stock:"19%", Signal:"13%", "Net EV":"10%", "EV Conf.":"8%", "Win %":"7%", Evidence:"8%", Setup:"7%", Target:"7%", Days:"6%", Price:"15%" };
-                return React.createElement("th", { key:h, style:{
+                var widths = { Stock:"15%", Signal:"9%", "Net EV":"12%", "EV Conf.":"6%", "Win %":"5%", Evidence:"6%", Setup:"5%", Target:"5%", Days:"5%", Size:"6%", "EV/day":"7%", "Worst 5%":"8%", Price:"11%" };
+                var hTitles = { Size:"Suggested position as % of capital: fractional Kelly, capped by risk per trade and a maximum position", "EV/day":"Net EV divided by the holding days: how fast the edge is earned", "Worst 5%":"Average result of the worst 5% of historical trades for this plan (expected shortfall)", "Net EV":"Trust-adjusted net EV with its 90% range underneath" };
+                return React.createElement("th", { key:h, title:hTitles[h], style:{
                   padding:"6px 10px", fontSize:9, fontWeight:700, color:"var(--text6)",
                   textAlign:left ? "left" : "right", borderBottom:"1px solid var(--border)",
                   whiteSpace:"nowrap", width:widths[h]
@@ -10808,20 +10929,34 @@ function StockScreener(props) {
             React.createElement("tbody", null, evTradeRows.slice(0,200).map(function(r) {
               var ev = r.ev || {}, baseDecision = stoxBaseDecision(r), es = stoxBaseSignalStyle(baseDecision);
               var net = ev.bestNetEV != null ? ev.bestNetEV : ev.netEV;
-              return React.createElement("tr", { key:"ev-"+r.s.t, style:{ borderBottom:"1px solid var(--border)", height:34 } },
+              return React.createElement("tr", { key:"ev-"+r.s.t, style:{ borderBottom:"1px solid var(--border)", height:40 } },
                 React.createElement("td",{style:{padding:"5px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},
-                  React.createElement("button",{onClick:function(){if(onOpenStock) onOpenStock(r.s.t.replace(".NS",""));},style:{border:"none",background:"transparent",padding:0,cursor:"pointer",color:"var(--text)",fontWeight:700,fontSize:11,fontFamily:"var(--font-heading)"}},r.s.t.replace(".NS",""))
+                  React.createElement("button",{onClick:function(){if(onOpenStock) onOpenStock(r.s.t.replace(".NS",""));},style:{border:"none",background:"transparent",padding:0,cursor:"pointer",color:"var(--text)",fontWeight:700,fontSize:11,fontFamily:"var(--font-heading)"}},r.s.t.replace(".NS","")),
+                  (function() {
+                    var dv = evDiv[evSym(r)];
+                    if (!dv) return null;
+                    if (dv.selected) return React.createElement("span",{title:"Top diversified pick: positive EV and not correlated with a better pick",style:{marginLeft:5,fontSize:8,fontWeight:800,color:"#16a34a"}},"PICK");
+                    if (dv.flags && dv.flags.length) return React.createElement("span",{title:dv.flags.join("; "),style:{marginLeft:5,fontSize:8,fontWeight:800,color:"#d97706"}},"CORR");
+                    return null;
+                  })(),
+                  ev.reasons && ev.reasons.length ? React.createElement("div",{title:ev.reasons.join("\n"),style:{fontSize:8,fontWeight:500,color:"var(--text6)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:1}},ev.reasons[0]) : null
                 ),
                 React.createElement("td",{style:{padding:"5px 10px",whiteSpace:"nowrap",textAlign:"left"}},
                   React.createElement("span",{style:{display:"inline-block",padding:"3px 6px",borderRadius:9,fontSize:8,fontWeight:800,color:es.color,background:es.bg,border:"1px solid "+es.border}},es.label)
                 ),
-                React.createElement("td",{title:stoxEvTitle(ev),style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:800,color:net!=null?(Number(net)>=0?"#16a34a":"#dc2626"):"var(--text6)",fontFamily:"var(--font-mono)"}},net!=null?(Number(net)>=0?"+":"")+Number(net).toFixed(2)+"%":"—"),
+                React.createElement("td",{title:stoxEvTitle(ev),style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:800,color:evStrengthColor(ev),fontFamily:"var(--font-mono)"}},
+                  net!=null?(Number(net)>=0?"+":"")+Number(net).toFixed(2)+"%":"—",
+                  ev.rangeLo!=null&&ev.rangeHi!=null?React.createElement("div",{style:{fontSize:8,fontWeight:500,color:"var(--text6)"}},"("+Number(ev.rangeLo).toFixed(2)+" to "+(Number(ev.rangeHi)>=0?"+":"")+Number(ev.rangeHi).toFixed(2)+")"):null
+                ),
                 React.createElement("td",{title:"Probability that the true EV is above zero, after shrinking for sampling noise",style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:ev.pEvPositive==null?"var(--text6)":(Number(ev.pEvPositive)>=0.8?"#16a34a":(Number(ev.pEvPositive)>=0.5?"#d97706":"var(--text6)"))}},ev.pEvPositive!=null?Math.round(Number(ev.pEvPositive)*100)+"%":"—"),
                 React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700}},ev.probability!=null?(Number(ev.probability)*100).toFixed(0)+"%":"—"),
                 React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700}},ev.evidence!=null?Number(ev.evidence).toFixed(0):"—"),
                 React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700}},ev.setupQuality!=null?Number(ev.setupQuality).toFixed(0):"—"),
                 React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:"var(--text4)",whiteSpace:"nowrap"}},ev.targetPct!=null?"+"+Number(ev.targetPct).toFixed(0)+"%":"—"),
-                React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:"var(--text4)",whiteSpace:"nowrap"}},ev.horizonDays!=null?ev.horizonDays+"d":"—"),
+                React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:"var(--text4)",whiteSpace:"nowrap"}},ev.horizonDays!=null?ev.horizonDays+"d"+(ev.exitMode==="breakeven"?" BE":(ev.exitMode==="trail"?" TR":"")):"—"),
+                React.createElement("td",{title:ev.sizePct!=null?(ev.sizePct>0?"Full Kelly "+Number(ev.kellyFullPct).toFixed(0)+"%; suggested is a fraction of that, limited by "+(ev.sizeBinding||"kelly"):"No positive edge: no position suggested"):"",style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:ev.sizePct>0?"var(--text)":"var(--text6)"}},ev.sizePct!=null?(ev.sizePct>0?Number(ev.sizePct).toFixed(1)+"%":"0%"):"—"),
+                React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:ev.evPerDay!=null?(Number(ev.evPerDay)>=0?"#16a34a":"var(--text4)"):"var(--text6)",fontFamily:"var(--font-mono)"}},ev.evPerDay!=null?(Number(ev.evPerDay)>=0?"+":"")+Number(ev.evPerDay).toFixed(3)+"%":"—"),
+                React.createElement("td",{title:ev.downside?"Typical dip before exit "+Number(ev.downside.meanAdverseExcursionPct).toFixed(1)+"%; bad case "+Number(ev.downside.p90AdverseExcursionPct).toFixed(1)+"%; worst window "+Number(ev.downside.worstWindowPct).toFixed(1)+"%":"",style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:"#dc2626",fontFamily:"var(--font-mono)"}},ev.downside&&ev.downside.expectedShortfall5Pct!=null?Number(ev.downside.expectedShortfall5Pct).toFixed(2)+"%":"—"),
                 React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}},r.lc!=null?"₹"+Number(r.lc).toLocaleString("en-IN",{maximumFractionDigits:2}):"—")
               );
             }))

@@ -135,7 +135,7 @@ window.ExpectedValueEngine = (function () {
     liquidity: { enabled: false, impactCoef: 0.5, maxPerSidePct: 1.0, advBars: 20 },
     sizing: { kellyFraction: 0.25, maxPositionPct: 20, maxRiskPerTradePct: 1.0 },
     correlation: { lookbackBars: 120, minOverlap: 60, threshold: 0.7, penalty: 0.5, maxPicks: 5, maxPerGroup: 1, groupPrefixes: ['ADANI', 'TATA', 'BAJAJ'] },
-    live: { key: 'stox_ev_live_v1', maxRecords: 1500 },
+    live: { key: 'stox_ev_live_v1', maxRecords: 4000 },
     staleCalibrationDays: 21,
     noTrade: { minPPositive: 0.5 }
   };
@@ -1464,11 +1464,13 @@ window.ExpectedValueEngine = (function () {
   }
 
   /* ── Correlation-aware pick list ────────────────────────────────────────── */
+  /* Compact {dayOrdinal: logReturn} map (4 decimals) so a row can carry its own
+     correlation inputs without storing candles. */
   function retSeries(daily, lookback) {
     var m = {}, n = daily ? daily.length : 0;
     for (var i = Math.max(1, n - lookback); i < n; i++) {
-      var a = daily[i - 1].c, b = daily[i].c;
-      if (a > 0 && b > 0) m[String(daily[i].t).slice(0, 10)] = Math.log(b / a);
+      var a = daily[i - 1].c, b = daily[i].c, o = dayOrdinal(daily[i].t);
+      if (a > 0 && b > 0 && o != null) m[o] = Math.round(Math.log(b / a) * 10000) / 10000;
     }
     return m;
   }
@@ -1491,7 +1493,7 @@ window.ExpectedValueEngine = (function () {
     return null;
   }
 
-  /* items: [{ symbol, result (the optimizer's best plan), dailyCandles, group? }]
+  /* items: [{ symbol, result (the optimizer's best plan), dailyCandles OR returns (from returnSeries), group? }]
      Returns the items re-ordered so that picks highly correlated with a better
      pick already chosen (or in the same group) are pushed down. */
   function diversify(items, opts) {
@@ -1501,7 +1503,7 @@ window.ExpectedValueEngine = (function () {
       return {
         symbol: it.symbol || it.result.symbol, result: it.result,
         utility: it.result.optimizerUtility != null ? Number(it.result.optimizerUtility) : Number(it.result.expectedValue.netPct),
-        series: retSeries(it.dailyCandles, num(cc.lookbackBars, 120)),
+        series: it.returns || retSeries(it.dailyCandles, num(cc.lookbackBars, 120)),
         group: groupOf(it.symbol || it.result.symbol, it.group, cc.groupPrefixes)
       };
     });
@@ -1694,6 +1696,7 @@ window.ExpectedValueEngine = (function () {
     clearLive: clearLive,
     rankingVerdict: rankingVerdict,
     diversify: diversify,
+    returnSeries: function (daily, lookback) { return retSeries(daily, lookback || 90); },
     clearCalibration: clearCalibration,
     _test: { windowOutcome: windowOutcome, buildWindowWeights: buildWindowWeights, computeSizing: computeSizing, breakEvenTargetProb: breakEvenTargetProb, liquidityCostPct: liquidityCostPct, afterTax: afterTax, outcomeValues: outcomeValues, Phi: Phi, tripleBarrierWindows: tripleBarrierWindows }
   };
