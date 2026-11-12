@@ -9613,6 +9613,15 @@ function StockScreener(props) {
      inflation, pulled toward the zero-edge EV in proportion to its sampling error.
      Rows whose base signal is not Strong Buy / Buy are not optimized (engine
      eligibility gate), so their ev is null. */
+  /* Upside Candidates data: how often this stock's high reached +T% within N days (any signal, no EV gate). */
+  var computeScreenerUpside = function(dailyCandles, indexCandles) {
+    try {
+      var EVX = window.ExpectedValueEngine;
+      if (!EVX || typeof EVX.upsideProfile !== "function" || !dailyCandles || dailyCandles.length < 60) return null;
+      return EVX.upsideProfile(dailyCandles, indexCandles || []) || null;
+    } catch (_upErr) { return null; }
+  };
+
   var computeScreenerEV = function(symbol, dailyCandles, hourlyCandles, indexCandles, baseDecision, baseScore) {
     try {
       var EVX = window.ExpectedValueEngine;
@@ -9870,6 +9879,8 @@ function StockScreener(props) {
   var scanErr = _s6[0], setScanErr = _s6[1];
   var _s7 = useState("all");
   var filter = _s7[0], setFilter = _s7[1];
+  var _sUp = useState({ n: 10, t: 3, sort: "chance" });   /* Upside Candidates view controls */
+  var upState = _sUp[0], setUpState = _sUp[1];
   var _s8 = useState({});
   var timestamps = _s8[0], setTimestamps = _s8[1];
   var _s9 = useState(0);
@@ -10132,11 +10143,11 @@ function StockScreener(props) {
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
       var _patMeta = buildPatMeta(result);
-      var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore); /* EV_V2_REFRESH */
+      var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore); var upAnalysis = computeScreenerUpside(resD.data, indexDaily); /* EV_V2_REFRESH */
       setResults(function(p) {
         var idx = p.findIndex(function(r) { return r.s.t === s.t; });
-        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis }; return copy; }
-        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis }]);
+        if (idx >= 0) { var copy = p.slice(); copy[idx] = { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis, up: upAnalysis }; return copy; }
+        return p.concat([{ s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis, up: upAnalysis }]);
       });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[s.t] = Date.now(); return c; });
     } catch(e) {}
@@ -10186,8 +10197,8 @@ function StockScreener(props) {
       var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
       var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
       var _patMeta = buildPatMeta(result);
-      var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore); /* EV_V2_REFRESH */
-      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis }]); });
+      var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore); var upAnalysis = computeScreenerUpside(resD.data, indexDaily); /* EV_V2_REFRESH */
+      setResults(function(p) { return p.concat([{ s: stockObj, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis, up: upAnalysis }]); });
       setTimestamps(function(p) { var c = Object.assign({}, p); c[stockObj.t] = Date.now(); return c; });
     } catch(e) { setScanErr("Failed to fetch " + tk); }
     setManualLoading(false); setManualTicker("");
@@ -10315,9 +10326,9 @@ function StockScreener(props) {
         var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
         var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
         var _patMeta = buildPatMeta(result);
-        var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore); /* EV_V2_REFRESH */
+        var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore); var upAnalysis = computeScreenerUpside(resD.data, indexDaily); /* EV_V2_REFRESH */
         var idx = bg.results.findIndex(function(r) { return r.s.t === stk.t; });
-        if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis };
+        if (idx >= 0) bg.results[idx] = { s: stk, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis, up: upAnalysis };
         bg.timestamps[stk.t] = Date.now();
         return null;
       });
@@ -10532,7 +10543,7 @@ function StockScreener(props) {
             try { if (window.applyPatternIntel) result = window.applyPatternIntel(result, tk, resD.data); } catch(_e) {}
             var conf10d = null, conf10dLog = null, conf10dEmp = null;
             try { var _c10 = TI.computeTenDayForwardConfidence(resH.data, resD.data, indexDaily, buildEntryScoreContext(result), tk); if (_c10) { try { if (window.applyPatternConfCal) _c10 = window.applyPatternConfCal(_c10, tk); } catch(_e2) {} conf10dLog = _c10.confidenceLognormal; conf10dEmp = _c10.confidenceEmpirical; conf10d = _c10.confidence; } } catch(e) {}
-            var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore);
+            var evAnalysis = computeScreenerEV(tk, resD.data, resH.data, indexDaily, stoxBaseDecision(result), result.finalScore); var upAnalysis = computeScreenerUpside(resD.data, indexDaily);
             var yesterdayClose = quotePrice != null && livePriceRes.previousClose != null && livePriceRes.previousClose > 0 ? livePriceRes.previousClose : lastDailyClose;
             var dbyClose = _yi - 1 >= 0 ? dc[_yi - 1].c : null;
             var c5d = _yi - 5 >= 0 ? dc[_yi - 5].c : null;
@@ -10544,7 +10555,7 @@ function StockScreener(props) {
             var monthChg = lc > 0 && c21d > 0 ? Math.round((lc - c21d) / c21d * 10000) / 100 : null;
             var yearChg = lc > 0 && c252d > 0 ? Math.round((lc - c252d) / c252d * 10000) / 100 : null;
             var _patMeta = buildPatMeta(result);
-            return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis };
+            return { s: s, result: result, lc: lc, dayChg: dayChg, weekChg: weekChg, monthChg: monthChg, yearChg: yearChg, todayChg: todayChg, conf10d: conf10d, conf10dLog: conf10dLog, conf10dEmp: conf10dEmp, patMeta: _patMeta, ev: evAnalysis, up: upAnalysis };
           });
         }).catch(function() { return null; });
       });
@@ -10738,6 +10749,20 @@ function StockScreener(props) {
     var n = ev && (ev.bestNetEV != null ? ev.bestNetEV : ev.netEV);
     return n != null ? (Number(n) >= 0 ? "#16a34a" : "#dc2626") : "var(--text6)";
   };
+  /* Upside Candidates: rank every screened stock by the chance of reaching +T% within N days. */
+  var EVXu = window.ExpectedValueEngine;
+  var upRowsAll = [];
+  try {
+    if (EVXu && typeof EVXu.upsideEstimate === "function") {
+      (Array.isArray(results) ? results : []).forEach(function(row) {
+        var est = row && row.up ? EVXu.upsideEstimate(row.up, upState.n, upState.t) : null;
+        if (est) upRowsAll.push({ row: row, est: est });
+      });
+      upRowsAll.sort(function(a, b) { return upState.sort === "lift" ? b.est.lift - a.est.lift : b.est.chance - a.est.chance; });
+    }
+  } catch (_upViewErr) {}
+  var upMissing = (Array.isArray(results) ? results.length : 0) - upRowsAll.length;
+  var upBtn = function(active) { return { padding: "3px 9px", fontSize: 10, fontWeight: active ? 700 : 500 }; };
   var evVerdictColor = !evVerdict ? "var(--text6)" : (evVerdict.verdict === "TRADE" ? "#16a34a" : (evVerdict.verdict === "WEAK" ? "#d97706" : (evVerdict.verdict === "NO_TRADE" ? "#dc2626" : "var(--text6)")));
 
 
@@ -10962,6 +10987,69 @@ function StockScreener(props) {
             }))
           )
         )
+      ),
+
+      /* === UPSIDE CANDIDATES: chance of reaching +T% within N days (any signal) === */
+      React.createElement("div", { className: "stx-card", style: { marginBottom: 12, padding: 0, overflow: "hidden", border: "1px solid var(--border)" } },
+        React.createElement("div", { style: { padding: "9px 12px", borderBottom: "1px solid var(--border)" } },
+          React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 750, color: "var(--text)" } }, "Upside Candidates - chance of reaching +" + upState.t + "% within " + upState.n + " days"),
+            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, upRowsAll.length + " stocks" + (upMissing > 0 ? " (" + upMissing + " need a refresh to compute)" : ""))
+          ),
+          React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 3, lineHeight: 1.4 } },
+            "How often this stock's high reached the target within the window in its own history (recent and similar-market periods count more), pulled toward what a driftless stock with the same volatility would do. This is the chance of TOUCHING the target; it ignores your stop and costs, so check Net EV and the stop before acting. A stock that already jumped today may have used up its move (see Today %)."),
+          React.createElement("div", { style: { display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", alignItems: "center" } },
+            React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
+              React.createElement("span", { style: { fontSize: 9, color: "var(--text6)", marginRight: 2 } }, "Days"),
+              [3, 5, 10, 15, 20].map(function(n) { return React.createElement("button", { key: "upn" + n, className: "stx-btn" + (upState.n === n ? " stx-btn-primary" : ""), style: upBtn(upState.n === n), onClick: function() { setUpState(function(p) { return Object.assign({}, p, { n: n }); }); } }, n + "d"); })
+            ),
+            React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
+              React.createElement("span", { style: { fontSize: 9, color: "var(--text6)", marginRight: 2 } }, "Target"),
+              [2, 3, 4, 5, 6].map(function(t) { return React.createElement("button", { key: "upt" + t, className: "stx-btn" + (upState.t === t ? " stx-btn-primary" : ""), style: upBtn(upState.t === t), onClick: function() { setUpState(function(p) { return Object.assign({}, p, { t: t }); }); } }, "+" + t + "%"); })
+            ),
+            React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
+              React.createElement("span", { style: { fontSize: 9, color: "var(--text6)", marginRight: 2 } }, "Rank by"),
+              [{ k: "chance", l: "Chance" }, { k: "lift", l: "Lift vs random" }].map(function(o) { return React.createElement("button", { key: "ups" + o.k, className: "stx-btn" + (upState.sort === o.k ? " stx-btn-primary" : ""), style: upBtn(upState.sort === o.k), title: o.k === "lift" ? "Chance minus what a driftless stock with the same volatility would have: separates real tendency from plain volatility" : "Raw ranking by chance of touching the target", onClick: function() { setUpState(function(p) { return Object.assign({}, p, { sort: o.k }); }); } }, o.l); })
+            )
+          )
+        ),
+        upRowsAll.length === 0
+          ? React.createElement("div", { style: { padding: "14px 12px", fontSize: 10, color: "var(--text6)" } }, "No upside data yet. Run a scan or refresh the stocks (saved results from older versions do not have it).")
+          : React.createElement("div", { style: { overflowX: "auto" } },
+            React.createElement("table", { style: { width: "100%", minWidth: 980, borderCollapse: "collapse", tableLayout: "fixed" } },
+              React.createElement("thead", null, React.createElement("tr", null,
+                ["Stock", "Signal", "Chance", "History", "Random walk", "Lift", "Samples", "Net EV", "Today %", "1M %", "Price"].map(function(h) {
+                  var left = h === "Stock" || h === "Signal";
+                  var widths = { Stock: "15%", Signal: "9%", Chance: "8%", History: "8%", "Random walk": "10%", Lift: "9%", Samples: "8%", "Net EV": "9%", "Today %": "8%", "1M %": "8%", Price: "8%" };
+                  var tips = { Chance: "Shrunk chance the high reaches the target within the window", History: "Raw share of this stock's own windows that reached the target", "Random walk": "Chance for a driftless stock with the same daily volatility", Lift: "Chance minus random-walk baseline, in percentage points", Samples: "Effective number of independent historical trials. Under 15 = thin evidence", "Net EV": "Net EV of this stock's best EV plan (a different target and stop; shown for context)" };
+                  return React.createElement("th", { key: h, title: tips[h], style: { padding: "6px 10px", fontSize: 9, fontWeight: 700, color: "var(--text6)", textAlign: left ? "left" : "right", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", width: widths[h] } }, h);
+                })
+              )),
+              React.createElement("tbody", null, upRowsAll.slice(0, 40).map(function(u) {
+                var row = u.row, est = u.est, sym = evSym(row);
+                var d0 = stoxBaseDecision(row), st0 = stoxBaseSignalStyle(d0);
+                var net = row.ev ? (row.ev.bestNetEV != null ? row.ev.bestNetEV : row.ev.netEV) : null;
+                var liftPts = est.lift * 100;
+                var liftCol = liftPts >= 10 ? "#16a34a" : (liftPts >= 3 ? "#ca8a04" : "var(--text6)");
+                var cell = { padding: "5px 10px", textAlign: "right", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" };
+                return React.createElement("tr", { key: "up-" + row.s.t, style: { borderBottom: "1px solid var(--border)", height: 34 } },
+                  React.createElement("td", { style: { padding: "5px 10px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } },
+                    React.createElement("button", { onClick: function() { if (onOpenStock) onOpenStock(sym); }, style: { border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "var(--text)", fontWeight: 700, fontSize: 11, fontFamily: "var(--font-heading)" } }, sym)),
+                  React.createElement("td", { style: { padding: "5px 10px", whiteSpace: "nowrap", textAlign: "left" } },
+                    React.createElement("span", { style: { display: "inline-block", padding: "3px 6px", borderRadius: 9, fontSize: 8, fontWeight: 800, color: st0.color, background: st0.bg, border: "1px solid " + st0.border } }, st0.label)),
+                  React.createElement("td", { style: Object.assign({}, cell, { color: liftPts >= 10 ? "#16a34a" : "var(--text)" }) }, Math.round(est.chance * 100) + "%"),
+                  React.createElement("td", { style: Object.assign({}, cell, { color: "var(--text4)" }) }, Math.round(est.raw * 100) + "%"),
+                  React.createElement("td", { style: Object.assign({}, cell, { color: "var(--text6)" }) }, Math.round(est.baseline * 100) + "%"),
+                  React.createElement("td", { style: Object.assign({}, cell, { color: liftCol, fontFamily: "var(--font-mono)" }) }, (liftPts >= 0 ? "+" : "") + liftPts.toFixed(0) + " pts"),
+                  React.createElement("td", { title: est.nEff < 15 ? "Thin evidence: few independent trials" : "", style: Object.assign({}, cell, { color: est.nEff < 15 ? "#d97706" : "var(--text4)" }) }, est.nEff.toFixed(0) + (est.nEff < 15 ? " thin" : "")),
+                  React.createElement("td", { title: row.ev ? stoxEvTitle(row.ev) : "Not a Buy-grade EV candidate", style: Object.assign({}, cell, { color: net != null ? (Number(net) >= 0 ? "#16a34a" : "#dc2626") : "var(--text6)", fontFamily: "var(--font-mono)" }) }, net != null ? (Number(net) >= 0 ? "+" : "") + Number(net).toFixed(2) + "%" : "-"),
+                  React.createElement("td", { style: Object.assign({}, cell, { color: row.todayChg == null ? "var(--text6)" : (Number(row.todayChg) >= 5 ? "#d97706" : (Number(row.todayChg) >= 0 ? "#16a34a" : "#dc2626")), fontFamily: "var(--font-mono)" }), title: Number(row.todayChg) >= 5 ? "Already up 5%+ today: part of the move may be done" : "" }, row.todayChg != null ? (Number(row.todayChg) >= 0 ? "+" : "") + Number(row.todayChg).toFixed(2) + "%" : "-"),
+                  React.createElement("td", { style: Object.assign({}, cell, { color: row.monthChg == null ? "var(--text6)" : (Number(row.monthChg) >= 0 ? "#16a34a" : "#dc2626"), fontFamily: "var(--font-mono)" }) }, row.monthChg != null ? (Number(row.monthChg) >= 0 ? "+" : "") + Number(row.monthChg).toFixed(1) + "%" : "-"),
+                  React.createElement("td", { style: cell }, row.lc != null ? "\u20b9" + Number(row.lc).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "-")
+                );
+              }))
+            )
+          )
       ),
 
       React.createElement("div", { style: { overflowX: "auto", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg3)" } },

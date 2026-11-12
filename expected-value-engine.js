@@ -137,7 +137,8 @@ window.ExpectedValueEngine = (function () {
     correlation: { lookbackBars: 120, minOverlap: 60, threshold: 0.7, penalty: 0.5, maxPicks: 5, maxPerGroup: 1, groupPrefixes: ['ADANI', 'TATA', 'BAJAJ'] },
     live: { key: 'stox_ev_live_v1', maxRecords: 4000 },
     staleCalibrationDays: 21,
-    noTrade: { minPPositive: 0.5 }
+    noTrade: { minPPositive: 0.5 },
+    upside: { horizons: [3, 5, 10, 15, 20], targets: [2, 3, 4, 5, 6], shrinkK: 8 }
   };
 
   /* v2 stored calibration with a different label rule; it is not comparable. */
@@ -968,6 +969,68 @@ window.ExpectedValueEngine = (function () {
     return out.slice(0, 4);
   }
 
+
+  /* ── Upside candidates: chance of REACHING +T% within N days ──────────────
+     Different question from EV: this ignores the stop and costs. For every
+     historical close, did the high reach +T% within N bars? Windows are
+     weighted by recency and index-regime match (same weights as the EV model),
+     the stock's own drift is kept (it is what makes a stock a candidate), and
+     the estimate is shrunk toward the random-walk baseline for a driftless
+     stock with the same daily volatility, so a thin or lucky history does not
+     look like a sure thing. lift = shrunk chance - baseline. */
+  function upsideProfile(dailyCandles, indexCandles, overrides) {
+    var cfg = getConfig(overrides), uc = cfg.upside || {};
+    var daily = dailyCandles || [], n = daily.length;
+    if (n < 60) return null;
+    var H = uc.horizons || [3, 5, 10, 15, 20], T = uc.targets || [2, 3, 4, 5, 6];
+    var ww = buildWindowWeights(daily, indexCandles || [], cfg);
+    var last = n - 1, firstStart = Math.max(1, n - cfg.lookbackBars);
+    var s1 = 0, s2 = 0, c = 0, k;
+    for (k = firstStart; k <= last; k++) {
+      if (daily[k - 1].c > 0 && daily[k].c > 0) { var lr = Math.log(daily[k].c / daily[k - 1].c); s1 += lr; s2 += lr * lr; c++; }
+    }
+    if (c < 30) return null;
+    var sigma = Math.sqrt(Math.max(0, s2 / c - Math.pow(s1 / c, 2)));
+    var p = [], nEff = [];
+    H.forEach(function (h) {
+      var lastStart = last - h, row = T.map(function () { return 0; }), W = 0, W2 = 0;
+      if (lastStart - firstStart + 1 < 30) { p.push(T.map(function () { return null; })); nEff.push(0); return; }
+      for (var i = firstStart; i <= lastStart; i++) {
+        var base = daily[i].c, w = ww.weights[i];
+        if (!(base > 0) || !(w > 0)) continue;
+        var mx = 0;
+        for (var j = 1; j <= h; j++) { var hi = daily[i + j] && daily[i + j].h; if (hi > mx) mx = hi; }
+        var up = mx / base - 1;
+        W += w; W2 += w * w;
+        for (var t = 0; t < T.length; t++) if (up >= T[t] / 100) row[t] += w;
+      }
+      if (!(W > 0)) { p.push(T.map(function () { return null; })); nEff.push(0); return; }
+      p.push(row.map(function (x) { return Math.round(x / W * 1000) / 1000; }));
+      nEff.push(Math.round((W * W / W2) / h * 10) / 10);   // overlapping windows are not independent
+    });
+    return {
+      sigmaPct: Math.round(sigma * 100 * 1000) / 1000, horizons: H, targets: T, p: p, nEff: nEff,
+      regime: ww.regime, asOf: String(daily[last].t).slice(0, 10)
+    };
+  }
+  /* P(max reaches +T% within N days) for a driftless random walk with daily vol sigma (reflection principle). */
+  function upsideBaseline(sigmaPct, horizon, targetPct) {
+    var sg = sigmaPct / 100 * Math.sqrt(horizon);
+    if (!(sg > 0)) return 0;
+    return clamp(2 * (1 - Phi(Math.log(1 + targetPct / 100) / sg)), 0, 1);
+  }
+  function upsideEstimate(profile, horizon, targetPct, overrides) {
+    if (!profile) return null;
+    var cfg = getConfig(overrides), k = num(cfg.upside && cfg.upside.shrinkK, 8);
+    var hi = profile.horizons.indexOf(horizon), ti = profile.targets.indexOf(targetPct);
+    if (hi < 0 || ti < 0) return null;
+    var raw = profile.p[hi] ? profile.p[hi][ti] : null;
+    if (raw == null) return null;
+    var base = upsideBaseline(profile.sigmaPct, horizon, targetPct), ne = profile.nEff[hi] || 0;
+    var adj = base + (raw - base) * ne / (ne + k);
+    return { chance: adj, raw: raw, baseline: base, lift: adj - base, nEff: ne };
+  }
+
   function analyze(input, overrides) {
     input = input || {};
     var cfg = getConfig(overrides);
@@ -1696,6 +1759,9 @@ window.ExpectedValueEngine = (function () {
     clearLive: clearLive,
     rankingVerdict: rankingVerdict,
     diversify: diversify,
+    upsideProfile: upsideProfile,
+    upsideEstimate: upsideEstimate,
+    upsideBaseline: upsideBaseline,
     returnSeries: function (daily, lookback) { return retSeries(daily, lookback || 90); },
     clearCalibration: clearCalibration,
     _test: { windowOutcome: windowOutcome, buildWindowWeights: buildWindowWeights, computeSizing: computeSizing, breakEvenTargetProb: breakEvenTargetProb, liquidityCostPct: liquidityCostPct, afterTax: afterTax, outcomeValues: outcomeValues, Phi: Phi, tripleBarrierWindows: tripleBarrierWindows }
