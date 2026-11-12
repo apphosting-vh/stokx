@@ -109,7 +109,7 @@ window.ExpectedValueEngine = (function () {
     lookbackBars: 500,
     minWindows: 30,
     driftKeep: 0.5,
-    calibrationKey: 'stox_ev_calibration_v5',
+    calibrationKey: 'stox_ev_calibration_v6',
 
     /* ── v4 options ─────────────────────────────────────────────────────── */
     /* Eligibility gate. By default only base-model Strong Buy / Buy rows are
@@ -148,6 +148,7 @@ window.ExpectedValueEngine = (function () {
     localStorage.removeItem('stox_ev_calibration_v3');       // calibrated under old cost/tax settings
     localStorage.removeItem('stox_ev_calibration_v3_meta');
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v4' + sfx); });  // pre-regime/recency model
+    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v5' + sfx); });  // win labels were raw while val/live model were detrended
   } catch (e) {}
 
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
@@ -1120,6 +1121,11 @@ window.ExpectedValueEngine = (function () {
     else if (baseDecision === 'AVOID' || baseDecision === 'SELL') eligibility = 'EXCLUDED';
     else if (baseDecision) eligibility = 'WATCH_ONLY';
 
+    /* A missing base decision fails closed (diagnostic only). Internal callers that
+       deliberately run without a base signal (walk-forward calibration) pass internal.skipGate. */
+    var missingBase = eligibility === 'UNSPECIFIED' && !(internal && internal.skipGate);
+    if (missingBase) eligibility = 'WATCH_ONLY';
+
     var cfg = getConfig(overrides);
     var gateOpts = cfg.gate || {};
     var ungated = false;                       // optimized although the base signal would not normally qualify
@@ -1217,7 +1223,9 @@ window.ExpectedValueEngine = (function () {
       selectionHaircutPct: haircut,
       ungated: ungated,
       reason: eligibility === 'WATCH_ONLY'
-        ? 'Base StoX signal is not Buy/Strong Buy; EV results are diagnostic only.'
+        ? (missingBase
+            ? 'No base decision supplied (baseDecision / baseRating / baseSignal / rating); EV results are diagnostic only.'
+            : 'Base StoX signal is not Buy/Strong Buy; EV results are diagnostic only.')
         : null,
       qualified: results.filter(function (r) {
         return r.decision && (r.decision.code === 'HIGH_CONVICTION' || r.decision.code === 'QUALIFIED_TRADE');
@@ -1704,16 +1712,16 @@ window.ExpectedValueEngine = (function () {
         var removedC = (1 - clamp(num(cfg.driftKeep, 0.5), 0, 1)) * (mc ? mu / mc : 0);
         cfg.horizons.forEach(function (h) {
           cfg.targets.forEach(function (t) {
-            var o = windowOutcome(daily, idx, h, Math.log(1 + t / 100), Math.log(1 - stopPct / 100), 0, stopPct);
-            if (!o) return;
-            var oV = windowOutcome(daily, idx, h, Math.log(1 + t / 100), Math.log(1 - stopPct / 100), removedC, stopPct) || o;
+            /* win and val are both DETRENDED, matching the live model's tb.pTarget. */
+            var oV = windowOutcome(daily, idx, h, Math.log(1 + t / 100), Math.log(1 - stopPct / 100), removedC, stopPct);
+            if (!oV) return;
             var ov = outcomeValues(oV, t, costPct, cfg);
-            rows.push({ horizonDays: h, targetPct: t, setupScore: score, volClass: vc, win: o.tP, val: cfg.decideAfterTax !== false ? ov.aft : ov.pre });
+            rows.push({ horizonDays: h, targetPct: t, setupScore: score, volClass: vc, win: oV.tP, val: cfg.decideAfterTax !== false ? ov.aft : ov.pre });
           });
         });
         if (doRel) {
           try {
-            var res = optimize({ symbol: symbol, dailyCandles: slice, hourlyCandles: [], indexCandles: idxSlice }, opts.config, { setupScoreOverride: score, noHist: true });
+            var res = optimize({ symbol: symbol, dailyCandles: slice, hourlyCandles: [], indexCandles: idxSlice }, opts.config, { setupScoreOverride: score, noHist: true, skipGate: true });
             var b = res && res.best;
             if (b && b.expectedValue) {
               var o2 = windowOutcome(daily, idx, b.horizonDays, Math.log(1 + b.targetPct / 100), Math.log(1 - b.stopPct / 100), 0, b.stopPct, b.exitMode, exitOpts(cfg));

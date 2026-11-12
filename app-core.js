@@ -2649,7 +2649,7 @@ const ExpectedValueTradePanel = ({ ticker }) => {
       }
       const input = { symbol: ticker, dailyCandles: d, hourlyCandles: h, indexCandles: idx };
       setAnalysis(EV.analyze(Object.assign({}, input, { horizonDays: horizon, targetPct: target })));
-      setOptimized(EV.optimize(input));
+      setOptimized(EV.optimize(input, undefined, { skipGate: true })); /* panel has no base signal; diagnostic label only */
     }).catch(() => { if (!cancelled) setErr("fetch"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
