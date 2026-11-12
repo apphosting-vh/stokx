@@ -9879,7 +9879,7 @@ function StockScreener(props) {
   var scanErr = _s6[0], setScanErr = _s6[1];
   var _s7 = useState("all");
   var filter = _s7[0], setFilter = _s7[1];
-  var _sUp = useState({ n: 10, t: 3, sort: "chance" });   /* Upside Candidates view controls */
+  var _sUp = useState({ n: 10, t: 3, sort: "chance", view: "top" });   /* Upside Candidates view controls */
   var upState = _sUp[0], setUpState = _sUp[1];
   var _s8 = useState({});
   var timestamps = _s8[0], setTimestamps = _s8[1];
@@ -10994,7 +10994,7 @@ function StockScreener(props) {
         React.createElement("div", { style: { padding: "9px 12px", borderBottom: "1px solid var(--border)" } },
           React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" } },
             React.createElement("div", { style: { fontSize: 12, fontWeight: 750, color: "var(--text)" } }, "Upside Candidates - chance of reaching +" + upState.t + "% within " + upState.n + " days"),
-            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, upRowsAll.length + " stocks" + (upMissing > 0 ? " (" + upMissing + " need a refresh to compute)" : ""))
+            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, (upState.view === "all" ? upRowsAll.length : Math.min(40, upRowsAll.length)) + " of " + upRowsAll.length + " stocks" + (upMissing > 0 ? " (" + upMissing + " need a refresh to compute)" : ""))
           ),
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 3, lineHeight: 1.4 } },
             "How often this stock's high reached the target within the window in its own history (recent and similar-market periods count more), pulled toward what a driftless stock with the same volatility would do. This is the chance of TOUCHING the target; it ignores your stop and costs, so check Net EV and the stop before acting. A stock that already jumped today may have used up its move (see Today %)."),
@@ -11008,6 +11008,10 @@ function StockScreener(props) {
               [2, 3, 4, 5, 6].map(function(t) { return React.createElement("button", { key: "upt" + t, className: "stx-btn" + (upState.t === t ? " stx-btn-primary" : ""), style: upBtn(upState.t === t), onClick: function() { setUpState(function(p) { return Object.assign({}, p, { t: t }); }); } }, "+" + t + "%"); })
             ),
             React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
+              React.createElement("span", { style: { fontSize: 9, color: "var(--text6)", marginRight: 2 } }, "Show"),
+              [{ k: "top", l: "Top 40" }, { k: "all", l: "All (" + upRowsAll.length + ")" }].map(function(o) { return React.createElement("button", { key: "upv" + o.k, className: "stx-btn" + (upState.view === o.k ? " stx-btn-primary" : ""), style: upBtn(upState.view === o.k), onClick: function() { setUpState(function(p) { return Object.assign({}, p, { view: o.k }); }); } }, o.l); })
+            ),
+            React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
               React.createElement("span", { style: { fontSize: 9, color: "var(--text6)", marginRight: 2 } }, "Rank by"),
               [{ k: "chance", l: "Chance" }, { k: "lift", l: "Lift vs random" }].map(function(o) { return React.createElement("button", { key: "ups" + o.k, className: "stx-btn" + (upState.sort === o.k ? " stx-btn-primary" : ""), style: upBtn(upState.sort === o.k), title: o.k === "lift" ? "Chance minus what a driftless stock with the same volatility would have: separates real tendency from plain volatility" : "Raw ranking by chance of touching the target", onClick: function() { setUpState(function(p) { return Object.assign({}, p, { sort: o.k }); }); } }, o.l); })
             )
@@ -11015,17 +11019,17 @@ function StockScreener(props) {
         ),
         upRowsAll.length === 0
           ? React.createElement("div", { style: { padding: "14px 12px", fontSize: 10, color: "var(--text6)" } }, "No upside data yet. Run a scan or refresh the stocks (saved results from older versions do not have it).")
-          : React.createElement("div", { style: { overflowX: "auto" } },
+          : React.createElement("div", { style: { overflowX: "auto", overflowY: "auto", maxHeight: 560 } },
             React.createElement("table", { style: { width: "100%", minWidth: 980, borderCollapse: "collapse", tableLayout: "fixed" } },
               React.createElement("thead", null, React.createElement("tr", null,
                 ["Stock", "Signal", "Chance", "History", "Random walk", "Lift", "Samples", "Net EV", "Today %", "1M %", "Price"].map(function(h) {
                   var left = h === "Stock" || h === "Signal";
                   var widths = { Stock: "15%", Signal: "9%", Chance: "8%", History: "8%", "Random walk": "10%", Lift: "9%", Samples: "8%", "Net EV": "9%", "Today %": "8%", "1M %": "8%", Price: "8%" };
                   var tips = { Chance: "Shrunk chance the high reaches the target within the window", History: "Raw share of this stock's own windows that reached the target", "Random walk": "Chance for a driftless stock with the same daily volatility", Lift: "Chance minus random-walk baseline, in percentage points", Samples: "Effective number of independent historical trials. Under 15 = thin evidence", "Net EV": "Net EV of this stock's best EV plan (a different target and stop; shown for context)" };
-                  return React.createElement("th", { key: h, title: tips[h], style: { padding: "6px 10px", fontSize: 9, fontWeight: 700, color: "var(--text6)", textAlign: left ? "left" : "right", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", width: widths[h] } }, h);
+                  return React.createElement("th", { key: h, title: tips[h], style: { padding: "6px 10px", fontSize: 9, fontWeight: 700, color: "var(--text6)", textAlign: left ? "left" : "right", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", width: widths[h], position: "sticky", top: 0, zIndex: 1, background: "var(--bg3)" } }, h);
                 })
               )),
-              React.createElement("tbody", null, upRowsAll.slice(0, 40).map(function(u) {
+              React.createElement("tbody", null, (upState.view === "all" ? upRowsAll : upRowsAll.slice(0, 40)).map(function(u) {
                 var row = u.row, est = u.est, sym = evSym(row);
                 var d0 = stoxBaseDecision(row), st0 = stoxBaseSignalStyle(d0);
                 var net = row.ev ? (row.ev.bestNetEV != null ? row.ev.bestNetEV : row.ev.netEV) : null;
