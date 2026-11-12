@@ -1,6 +1,6 @@
 /* ══════════════════════════════════════════════════════════════════════
    StoX Expected Value & Probability-Calibrated Trade Engine
-   Version 3.0  (EV_V3_ENGINE)
+   Version 4.0  (EV_V4_ENGINE)
 
    Decision hierarchy:
      Setup Quality -> Calibrated Probability -> Outcome Distribution
@@ -26,6 +26,25 @@
         realized EV of the optimizer's choice, and reliabilityStatus() reports
         whether the table's numbers have been over- or under-confident.
 
+   v3 -> v4 (decision quality, risk and self-honesty)
+     1. REGIME + RECENCY WEIGHTING: historical windows are weighted by how recent
+        they are and by how closely the index regime then (trend, volatility)
+        matches the regime now. Effective sample size falls accordingly.
+     2. POOLED PRIOR: when the calibration store has enough similar setups (same
+        plan, score band, volatility class) across stocks, the shrinkage target
+        moves from the zero-edge EV toward that pooled EV.
+     3. REALISTIC EXITS: stops locked behind a no-trade (limit) bar exit on the
+        next tradable bar; optional liquidity impact; optional exit variants
+        ('breakeven', 'trail') that compete with the fixed plan (off by default).
+     4. SIZING + RISK: fractional-Kelly position size, EV per day / annualized,
+        expected shortfall, worst window, adverse excursion, EV range,
+        break-even win probability, plain-language reasons, signal strength.
+     5. PORTFOLIO: diversify() ranks picks with correlation and group penalties;
+        rankingVerdict() answers "is there anything worth trading today?".
+     6. SELF-HONESTY: live prediction log + settlement, gate backtest (does the
+        Buy filter add value?), EV-bucket calibration table, stale/trust flag,
+        and calibration that clears itself when the cost or tax model changes.
+
    Earlier (v2): first-passage outcome model, corrected costs, probTouch percent
    fix, evidence reflects measured sample, shared per-stock setup computation,
    idempotent walk-forward calibration.
@@ -37,7 +56,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-3.0';
+  var VERSION = 'EV-4.0';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -90,7 +109,35 @@ window.ExpectedValueEngine = (function () {
     lookbackBars: 500,
     minWindows: 30,
     driftKeep: 0.5,
-    calibrationKey: 'stox_ev_calibration_v4'
+    calibrationKey: 'stox_ev_calibration_v5',
+
+    /* ── v4 options ─────────────────────────────────────────────────────── */
+    /* Eligibility gate. By default only base-model Strong Buy / Buy rows are
+       optimized. includeWatch also optimizes Watch/Hold rows; includeAvoid also
+       optimizes Avoid/Sell rows. Use gateReport() to see whether the gate helps. */
+    gate: { includeWatch: false, includeAvoid: false },
+    /* Exit rules the optimizer may choose between. 'fixed' = target / stop /
+       timeout. 'breakeven' = once price reaches armFrac of the target, the stop
+       moves to entry. 'trail' = after arming, the stop trails the peak by
+       trailFrac of the initial stop (never below entry). The variants use the
+       stock's own history only (no calibration/ML blend), so they carry less
+       evidence. Off by default because the UI must show the exit rule. */
+    exitVariants: ['fixed'],
+    exit: { armFrac: 0.5, trailFrac: 0.6 },
+    lockedLimitDelay: true,         // a stop hit on a locked (no-trade) bar exits on the next tradable bar
+    /* Historical windows are down-weighted by age and by regime mismatch. */
+    recency: { halfLifeBars: 250 }, // 0 disables
+    regime: { enabled: true, mismatchWeight: 0.6, trendBars: 50, volBars: 20, minIndexBars: 80 },
+    /* Shrink toward the pooled EV of similar setups when the store has enough. */
+    pooledPrior: { enabled: true, minN: 30, k: 60, maxWeight: 0.5 },
+    /* Extra per-side impact cost from position size vs average daily turnover
+       (square-root law). Off by default so costs stay at the statutory total. */
+    liquidity: { enabled: false, impactCoef: 0.5, maxPerSidePct: 1.0, advBars: 20 },
+    sizing: { kellyFraction: 0.25, maxPositionPct: 20, maxRiskPerTradePct: 1.0 },
+    correlation: { lookbackBars: 120, minOverlap: 60, threshold: 0.7, penalty: 0.5, maxPicks: 5, maxPerGroup: 1, groupPrefixes: ['ADANI', 'TATA', 'BAJAJ'] },
+    live: { key: 'stox_ev_live_v1', maxRecords: 1500 },
+    staleCalibrationDays: 21,
+    noTrade: { minPPositive: 0.5 }
   };
 
   /* v2 stored calibration with a different label rule; it is not comparable. */
@@ -99,6 +146,7 @@ window.ExpectedValueEngine = (function () {
     localStorage.removeItem('stox_ev_calibration_v2_meta');
     localStorage.removeItem('stox_ev_calibration_v3');       // calibrated under old cost/tax settings
     localStorage.removeItem('stox_ev_calibration_v3_meta');
+    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v4' + sfx); });  // pre-regime/recency model
   } catch (e) {}
 
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
@@ -241,36 +289,74 @@ window.ExpectedValueEngine = (function () {
      that a driftless walk starting at the bar's OPEN reaches the target level
      before the stop level; an open beyond a level means that level was hit first.
      A stop that the bar gaps through fills at the open (worse than the stop). */
-  function windowOutcome(daily, i, horizon, up, dn, removed, stopPct) {
+  function exitOpts(cfg) {
+    return { armFrac: cfg.exit && cfg.exit.armFrac, trailFrac: cfg.exit && cfg.exit.trailFrac, lockDelay: cfg.lockedLimitDelay !== false };
+  }
+  function windowOutcome(daily, i, horizon, up, dn, removed, stopPct, mode, ex) {
     var base = daily[i].c;
     if (!(base > 0)) return null;
+    mode = mode || 'fixed';
+    ex = ex || {};
+    var lvl = dn;                                   // current stop level (log, drift-adjusted)
+    var armAt = up * (ex.armFrac == null ? 0.5 : ex.armFrac);
+    var trailDist = Math.abs(dn) * (ex.trailFrac == null ? 0.6 : ex.trailFrac);
+    var peak = -Infinity, minLow = 0;
     for (var j = 1; j <= horizon; j++) {
       var bar = daily[i + j];
       if (!bar || !(bar.h > 0) || !(bar.l > 0)) continue;
       var adj = removed * j;
-      var hitS = Math.log(bar.l / base) - adj <= dn;
-      var hitT = Math.log(bar.h / base) - adj >= up;
-      if (!hitS && !hitT) continue;
-      var gapRet = -stopPct;
+      var lowL = Math.log(bar.l / base), highL = Math.log(bar.h / base);
+      if (lowL < minLow) minLow = lowL;
+      var hitS = lowL - adj <= lvl;
+      var hitT = highL - adj >= up;
+      if (!hitS && !hitT) {
+        if (mode !== 'fixed') {                     // the new stop applies from the NEXT bar
+          var pk = highL - adj;
+          if (pk > peak) peak = pk;
+          if (peak >= armAt) {
+            var nl = mode === 'breakeven' ? 0 : Math.max(0, peak - trailDist);
+            if (nl > lvl) lvl = nl;
+          }
+        }
+        continue;
+      }
+      var stopRet = (Math.exp(lvl) - 1) * 100;      // equals -stopPct while the stop has not moved
+      var gapRet = stopRet;
       if (bar.o > 0) {
         var oRet = (bar.o / base - 1) * 100;
         if (oRet < gapRet) gapRet = oRet;
       }
+      var mae = (Math.exp(minLow) - 1) * 100;
       if (hitS && hitT) {
         var share = 0.5;
         if (bar.o > 0) {
           var oL = Math.log(bar.o / base) - adj;
-          if (oL >= up) share = 1; else if (oL <= dn) share = 0; else share = (oL - dn) / (up - dn);
+          if (oL >= up) share = 1; else if (oL <= lvl) share = 0; else share = (oL - lvl) / (up - lvl);
         }
-        return { tP: share, sP: 1 - share, oP: 0, x: 0, sRet: gapRet };
+        return { tP: share, sP: 1 - share, oP: 0, x: 0, sRet: gapRet, mae: mae };
       }
-      if (hitT) return { tP: 1, sP: 0, oP: 0, x: 0, sRet: -stopPct };
-      return { tP: 0, sP: 1, oP: 0, x: 0, sRet: gapRet };
+      if (hitT) return { tP: 1, sP: 0, oP: 0, x: 0, sRet: stopRet, mae: mae };
+      /* Stop hit. If this bar is locked (no range: lower circuit / suspended)
+         nobody could sell at the stop: exit on the next tradable bar instead. */
+      if (ex.lockDelay !== false && bar.h === bar.l) {
+        var exitRet = null;
+        for (var k = j + 1; k <= horizon; k++) {
+          var b2 = daily[i + k];
+          if (!b2 || !(b2.h > 0) || !(b2.l > 0)) continue;
+          if (b2.h > b2.l) { exitRet = b2.o > 0 ? (b2.o / base - 1) * 100 : (b2.c / base - 1) * 100; break; }
+        }
+        if (exitRet == null) {
+          var lastB = daily[Math.min(daily.length - 1, i + horizon)];
+          exitRet = lastB && lastB.c > 0 ? (lastB.c / base - 1) * 100 : gapRet;
+        }
+        if (exitRet < gapRet) gapRet = exitRet;
+      }
+      return { tP: 0, sP: 1, oP: 0, x: 0, sRet: gapRet, mae: Math.min(mae, gapRet) };
     }
     var endBar = daily[i + horizon];
     var endC = endBar ? endBar.c : 0;
     var x = endC > 0 ? (Math.exp(Math.log(endC / base) - removed * horizon) - 1) * 100 : 0;
-    return { tP: 0, sP: 0, oP: 1, x: x, sRet: -stopPct };
+    return { tP: 0, sP: 0, oP: 1, x: x, sRet: (Math.exp(lvl) - 1) * 100, mae: (Math.exp(minLow) - 1) * 100 };
   }
 
   /* Value of one window outcome for a trade with target T, costs c (percent). */
@@ -286,13 +372,40 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
+  /* weighted quantile of (value, weight) pairs; q in [0,1] */
+  function wQuantile(pairs, q) {
+    if (!pairs.length) return 0;
+    var arr = pairs.slice().sort(function (a, b) { return a[0] - b[0]; });
+    var tot = 0, k;
+    for (k = 0; k < arr.length; k++) tot += arr[k][1];
+    var acc = 0, target = q * tot;
+    for (k = 0; k < arr.length; k++) { acc += arr[k][1]; if (acc >= target) return arr[k][0]; }
+    return arr[arr.length - 1][0];
+  }
+  /* weighted mean of the lowest `share` of total weight (expected shortfall) */
+  function wTailMean(pairs, share) {
+    if (!pairs.length) return 0;
+    var arr = pairs.slice().sort(function (a, b) { return a[0] - b[0]; });
+    var tot = 0, k;
+    for (k = 0; k < arr.length; k++) tot += arr[k][1];
+    var lim = share * tot, acc = 0, s = 0;
+    for (k = 0; k < arr.length && acc < lim; k++) {
+      var take = Math.min(arr[k][1], lim - acc);
+      s += arr[k][0] * take; acc += take;
+    }
+    return acc > 0 ? s / acc : arr[0][0];
+  }
+
   /* ── Triple-barrier study on the stock's own history ─────────────────────
      Every historical start bar is walked forward "horizon" bars (see
      windowOutcome). The stock's own average daily log-drift is partly removed
      (1 - driftKeep) from every path so a prior rally is not mistaken for an edge.
-     Per-window after-cost (and after-tax) values give the EV, its standard
-     error, and the older-half / newer-half means used for the selection test. */
-  function tripleBarrierWindows(daily, horizon, targetPct, stopPct, cfg, costPct) {
+     Each window carries a weight (recency x regime match, see buildWindowWeights;
+     1 when no weights are given). Per-window after-cost (and after-tax) values
+     give the weighted EV, its standard error (using the effective sample size),
+     and the older-half / newer-half means used for the selection test. Tail and
+     adverse-excursion statistics describe the downside. */
+  function tripleBarrierWindows(daily, horizon, targetPct, stopPct, cfg, costPct, weights, mode) {
     if (!daily || !daily.length) return null;
     var n = daily.length, last = n - 1;
     var firstStart = Math.max(1, n - cfg.lookbackBars);
@@ -308,48 +421,67 @@ window.ExpectedValueEngine = (function () {
     var removed = (1 - clamp(num(cfg.driftKeep, 0.5), 0, 1)) * mu;
     var up = Math.log(1 + targetPct / 100);
     var dn = Math.log(1 - stopPct / 100);
+    var ex = exitOpts(cfg);
 
     var useAft = cfg.decideAfterTax !== false;
-    var vals = [];
-    var sT = 0, sS = 0, sO = 0, sRetW = 0, sAfS = 0, sX = 0, sAfO = 0, nPosO = 0;
+    var vals = [], ws = [], maes = [];
+    var W = 0, W2 = 0, sT = 0, sS = 0, sO = 0, sRetW = 0, sAfS = 0, sX = 0, sAfO = 0, nPosO = 0;
     for (var i = firstStart; i <= lastStart; i++) {
-      var o = windowOutcome(daily, i, horizon, up, dn, removed, stopPct);
+      var w = weights ? weights[i] : 1;
+      if (!(w > 0)) continue;
+      var o = windowOutcome(daily, i, horizon, up, dn, removed, stopPct, mode, ex);
       if (!o) continue;
       var v = outcomeValues(o, targetPct, costPct, cfg);
-      vals.push(useAft ? v.aft : v.pre);
-      sT += o.tP; sS += o.sP; sO += o.oP;
-      sRetW += o.sP * o.sRet; sAfS += o.sP * v.afS;
-      sX += o.oP * o.x; sAfO += o.oP * v.afO;
-      if (o.oP > 0 && o.x - costPct > 0) nPosO += o.oP;
+      vals.push(useAft ? v.aft : v.pre); ws.push(w); maes.push(o.mae == null ? 0 : o.mae);
+      W += w; W2 += w * w;
+      sT += w * o.tP; sS += w * o.sP; sO += w * o.oP;
+      sRetW += w * o.sP * o.sRet; sAfS += w * o.sP * v.afS;
+      sX += w * o.oP * o.x; sAfO += w * o.oP * v.afO;
+      if (o.oP > 0 && o.x - costPct > 0) nPosO += w * o.oP;
     }
     var m = vals.length;
-    if (m < cfg.minWindows) return null;
+    if (m < cfg.minWindows || !(W > 0)) return null;
 
     var mean = 0, i2;
-    for (i2 = 0; i2 < m; i2++) mean += vals[i2];
-    mean /= m;
+    for (i2 = 0; i2 < m; i2++) mean += ws[i2] * vals[i2];
+    mean /= W;
     var ss = 0;
-    for (i2 = 0; i2 < m; i2++) ss += (vals[i2] - mean) * (vals[i2] - mean);
-    var sd = Math.sqrt(ss / Math.max(1, m - 1));
-    var nEff = m / Math.max(1, horizon);          // overlapping windows are not independent
-    var half = Math.floor(m / 2), hA = 0, hB = 0;
-    for (i2 = 0; i2 < half; i2++) hA += vals[i2];
-    for (i2 = half; i2 < m; i2++) hB += vals[i2];
+    for (i2 = 0; i2 < m; i2++) ss += ws[i2] * (vals[i2] - mean) * (vals[i2] - mean);
+    var effW = W * W / W2;                            // Kish effective number of windows
+    var sd = Math.sqrt(ss / W * effW / Math.max(1, effW - 1));
+    var nEff = effW / Math.max(1, horizon);           // overlapping windows are not independent
+    var half = Math.floor(m / 2), hA = 0, hB = 0, wA = 0, wB = 0;
+    for (i2 = 0; i2 < half; i2++) { hA += ws[i2] * vals[i2]; wA += ws[i2]; }
+    for (i2 = half; i2 < m; i2++) { hB += ws[i2] * vals[i2]; wB += ws[i2]; }
+
+    var pairs = [], mp = [], worst = Infinity;
+    for (i2 = 0; i2 < m; i2++) {
+      pairs.push([vals[i2], ws[i2]]); mp.push([-maes[i2], ws[i2]]);
+      if (vals[i2] < worst) worst = vals[i2];
+    }
+    var maeMean = 0;
+    for (i2 = 0; i2 < m; i2++) maeMean += ws[i2] * maes[i2];
+    maeMean /= W;
 
     return {
-      pTarget: sT / m, pStop: sS / m, pTimeout: sO / m,
+      pTarget: sT / W, pStop: sS / W, pTimeout: sO / W,
       meanStopRet: sS > 0 ? sRetW / sS : -stopPct,
       meanAfStop: sS > 0 ? sAfS / sS : afterTax(-stopPct - costPct, cfg),
       meanTimeoutRet: sO > 0 ? sX / sO : 0,
       meanAfTimeout: sO > 0 ? sAfO / sO : 0,
       timeoutPosShare: sO > 0 ? nPosO / sO : 0.5,
-      n: m, nEff: nEff,
+      n: m, nEff: nEff, effWindows: effW,
       empEV: mean,
       stdErr: sd / Math.sqrt(Math.max(1, nEff)),
-      halfA: half > 0 ? hA / half : null,
-      halfB: m - half > 0 ? hB / (m - half) : null,
+      halfA: half > 0 && wA > 0 ? hA / wA : null,
+      halfB: m - half > 0 && wB > 0 ? hB / wB : null,
       driftPerDayPct: mu * 100,
-      removedDriftPerDayPct: removed * 100
+      removedDriftPerDayPct: removed * 100,
+      cvar5Pct: wTailMean(pairs, 0.05),
+      p5Pct: wQuantile(pairs, 0.05),
+      worstPct: worst,
+      meanMAEPct: maeMean,
+      p90MAEPct: -wQuantile(mp, 0.90)
     };
   }
 
@@ -447,6 +579,86 @@ window.ExpectedValueEngine = (function () {
     return { code: 'WATCH', label: 'WATCH', color: 'warn' };
   }
 
+
+  /* ── Window weights: recency x index-regime match ───────────────────────
+     Index regime at a date = (trend: close above its trendBars average) x
+     (volatility: recent realized vol above / below the index's own median).
+     A window whose regime differs from the CURRENT regime in one dimension is
+     weighted mismatchWeight, in both dimensions mismatchWeight^2. */
+  function indexRegimes(indexCandles, cfg) {
+    var rc = cfg.regime || {};
+    var tb = rc.trendBars || 50, vb = rc.volBars || 20;
+    var n = indexCandles ? indexCandles.length : 0;
+    if (!rc.enabled || n < (rc.minIndexBars || 80) || n <= tb) return null;
+    var close = [], i;
+    for (i = 0; i < n; i++) close.push(num(indexCandles[i].c, 0));
+    var trend = new Array(n), vol = new Array(n), volVals = [];
+    var sma = 0;
+    for (i = 0; i < n; i++) {
+      sma += close[i];
+      if (i >= tb) sma -= close[i - tb];
+      trend[i] = i >= tb - 1 && close[i] > 0 ? (close[i] > sma / tb ? 1 : 0) : null;
+      if (i >= vb) {
+        var s1 = 0, s2 = 0, c = 0;
+        for (var j = i - vb + 1; j <= i; j++) {
+          if (close[j] > 0 && close[j - 1] > 0) { var lr = Math.log(close[j] / close[j - 1]); s1 += lr; s2 += lr * lr; c++; }
+        }
+        vol[i] = c > 5 ? Math.sqrt(Math.max(0, s2 / c - Math.pow(s1 / c, 2))) : null;
+        if (vol[i] != null) volVals.push(vol[i]);
+      } else vol[i] = null;
+    }
+    if (volVals.length < 20) return null;
+    var sorted = volVals.slice().sort(function (a, b) { return a - b; });
+    var med = sorted[sorted.length >> 1];
+    var dates = indexCandles.map(function (c) { return String(c.t).slice(0, 10); });
+    return { n: n, trend: trend, hiVol: vol.map(function (v) { return v == null ? null : (v > med ? 1 : 0); }), dates: dates };
+  }
+  function buildWindowWeights(daily, indexCandles, cfg) {
+    var n = daily.length, w = new Array(n), last = n - 1, k;
+    var hl = num(cfg.recency && cfg.recency.halfLifeBars, 0);
+    for (k = 0; k < n; k++) w[k] = hl > 0 ? Math.pow(0.5, (last - k) / hl) : 1;
+    var info = null;
+    var reg = indexRegimes(indexCandles, cfg);
+    if (reg) {
+      var mm = clamp(num(cfg.regime.mismatchWeight, 0.6), 0.05, 1);
+      var state = new Array(n), p = -1;
+      for (k = 0; k < n; k++) {
+        var d = String(daily[k].t).slice(0, 10);
+        while (p + 1 < reg.n && reg.dates[p + 1] <= d) p++;
+        state[k] = p >= 0 && reg.trend[p] != null && reg.hiVol[p] != null ? [reg.trend[p], reg.hiVol[p]] : null;
+      }
+      var cur = [reg.trend[reg.n - 1], reg.hiVol[reg.n - 1]];
+      if (cur[0] != null && cur[1] != null) {
+        var matchW = 0, totW = 0;
+        for (k = 0; k < n; k++) {
+          if (!state[k]) continue;
+          var mism = (state[k][0] !== cur[0] ? 1 : 0) + (state[k][1] !== cur[1] ? 1 : 0);
+          var f = Math.pow(mm, mism);
+          w[k] *= f;
+          totW += w[k]; if (!mism) matchW += w[k];
+        }
+        info = { trend: cur[0] ? 'up' : 'down', volatility: cur[1] ? 'high' : 'low', matchedShare: totW > 0 ? matchW / totW : null };
+      }
+    }
+    return { weights: w, regime: info };
+  }
+
+  /* Per-side market-impact estimate (percent): coef x daily vol x sqrt(position / ADV). */
+  function liquidityCostPct(daily, atrPct, cfg) {
+    var lc = cfg.liquidity || {};
+    if (!lc.enabled) return { perSidePct: 0, participation: null, advRs: null };
+    var nb = lc.advBars || 20, s = 0, c = 0;
+    for (var i = Math.max(0, daily.length - nb); i < daily.length; i++) {
+      var b = daily[i];
+      if (b && b.v > 0 && b.c > 0) { s += b.v * b.c; c++; }
+    }
+    var pos = num(cfg.costs && cfg.costs.positionSizeRs, 0);
+    if (!c || !(pos > 0)) return { perSidePct: 0, participation: null, advRs: null };
+    var adv = s / c, part = pos / adv;
+    var imp = num(lc.impactCoef, 0.5) * (atrPct == null ? 2 : atrPct) * Math.sqrt(part);
+    return { perSidePct: clamp(imp, 0, num(lc.maxPerSidePct, 1)), participation: part, advRs: adv };
+  }
+
   /* ── Per-stock work that does NOT depend on the (horizon, target) plan ──── */
   function prepare(input, cfg, internal) {
     var daily = input.dailyCandles || [];
@@ -482,6 +694,9 @@ window.ExpectedValueEngine = (function () {
       (hourly.length >= 60 ? 0.35 : Math.min(hourly.length / 60, 0.35)) +
       (indexCandles.length >= 30 ? 0.20 : Math.min(indexCandles.length / 30, 0.20));
 
+    var ww = buildWindowWeights(daily, indexCandles, cfg);
+    var liq = liquidityCostPct(daily, atrPct, cfg);
+
     return {
       setup: setup,
       setupCalScore: setupCalScore,
@@ -491,18 +706,24 @@ window.ExpectedValueEngine = (function () {
       stopPct: stopFromAtr(atrPct, cfg),
       volClass: volClassOf(atrPct),
       dataCompleteness: dataCompleteness,
-      costs: totalRoundTripCost(cfg.costs)
+      costs: totalRoundTripCost(cfg.costs) + liq.perSidePct * 2,
+      liquidity: liq,
+      weights: ww.weights,
+      regime: ww.regime
     };
   }
 
   /* ── Stage 1: everything about one plan that is independent of selection ── */
-  function corePlan(pre, input, cfg, horizon, targetPct, internal) {
+  function corePlan(pre, input, cfg, horizon, targetPct, internal, mode) {
     var daily = input.dailyCandles || [];
     var hourly = input.hourlyCandles || [];
     var indexCandles = input.indexCandles || [];
-    var noHist = !!(internal && internal.noHist);
+    mode = mode || 'fixed';
+    /* Exit variants have no calibration history or ML probability for their own
+       exit rule, so they rely on the stock's own windows only. */
+    var noHist = !!(internal && internal.noHist) || mode !== 'fixed';
 
-    var tb = tripleBarrierWindows(daily, horizon, targetPct, pre.stopPct, cfg, pre.costs);
+    var tb = tripleBarrierWindows(daily, horizon, targetPct, pre.stopPct, cfg, pre.costs, pre.weights, mode);
     var touch = noHist ? null : statisticalTouch(hourly, daily, indexCandles, horizon, targetPct);
     var hist = noHist ? null : historicalProbability(horizon, targetPct, pre.setupCalScore, pre.volClass, cfg.calibrationKey);
     var ml = noHist ? null : mlProbability({
@@ -517,7 +738,7 @@ window.ExpectedValueEngine = (function () {
     }, cfg, pre.gapFactor);
 
     var core = {
-      horizonDays: horizon, targetPct: targetPct, tb: tb, touch: touch, hist: hist, ml: ml,
+      horizonDays: horizon, targetPct: targetPct, exitMode: mode, tb: tb, touch: touch, hist: hist, ml: ml,
       probability: probability, dist: null, ev: null, pReturnPositive: null
     };
     if (!tb || probability.p == null) return core;
@@ -572,7 +793,15 @@ window.ExpectedValueEngine = (function () {
       var pT0 = Sg / (Tg + Sg) * (1 - tb.pTimeout), pS0 = Tg / (Tg + Sg) * (1 - tb.pTimeout);
       var rate = cfg.decideAfterTax !== false ? num(cfg.taxRatePct, 0) / 100 : 0;
       var m0 = -cst - rate * pT0 * Math.max(0, Tg - cst) + rate * clamp(num(cfg.taxLossCredit, 0), 0, 1) * pS0 * (Sg + cst);
-      var shrunk = m0 + lam * (corrected - m0);
+      /* Pooled prior: similar setups across stocks (same plan, score band, vol class). */
+      var pp = cfg.pooledPrior || {};
+      var priorMean = m0, pooledMean = null, pooledW = 0;
+      if (pp.enabled && hist && hist.bucket && hist.bucket.nv >= num(pp.minN, 30)) {
+        pooledMean = hist.bucket.sv / hist.bucket.nv;
+        pooledW = Math.min(num(pp.maxWeight, 0.5), hist.bucket.nv / (hist.bucket.nv + num(pp.k, 60))) * pre.gapFactor;
+        priorMean = m0 + pooledW * (pooledMean - m0);
+      }
+      var shrunk = priorMean + lam * (corrected - priorMean);
       var postSd = Math.sqrt(tau * tau * s * s / (tau * tau + s * s));
       ev = {
         grossPct: core.ev.grossPct,
@@ -584,16 +813,30 @@ window.ExpectedValueEngine = (function () {
         rawBasisPct: core.basisEV,          // what the data say, no trust adjustment
         haircutPct: haircut,                // best-of-N selection inflation removed
         shrinkFactor: lam,
-        priorMeanPct: m0,
+        priorMeanPct: priorMean,
+        zeroEdgePriorPct: m0,
+        pooledMeanPct: pooledMean,
+        pooledWeight: pooledW,
         shrunkPct: shrunk,
         stdErrPct: s,
         postSdPct: postSd,
         pPositive: clamp(Phi(shrunk / postSd), 0, 1),   // P(true EV > 0)
-        netPct: shrunk                      // PRIMARY: trust-adjusted EV on the decision basis
+        netPct: shrunk,                     // PRIMARY: trust-adjusted EV on the decision basis
+        rangeLoPct: shrunk - 1.645 * postSd,    // 90% interval for the TRUE EV
+        rangeHiPct: shrunk + 1.645 * postSd,
+        evPerDayPct: shrunk / Math.max(1, core.horizonDays),
+        annualizedPct: shrunk * 252 / Math.max(1, core.horizonDays)   // simple (not compounded) EV x trades per year
       };
     }
 
     var decision = classify(ev ? ev.netPct : null, ev ? ev.pPositive : null, core.pReturnPositive, evidence, setup.score, cfg);
+    var be = core.dist ? breakEvenTargetProb(core.dist, tb, core.targetPct, pre.costs) : null;
+    var sizing = ev ? computeSizing(core.dist, tb, core.targetPct, pre.costs, pre.stopPct, ev, cfg) : null;
+    var downside = tb && core.dist ? {
+      pStop: core.dist.pStop, stopReturnPct: tb.meanStopRet,
+      expectedShortfall5Pct: tb.cvar5Pct, p5Pct: tb.p5Pct, worstWindowPct: tb.worstPct,
+      meanAdverseExcursionPct: tb.meanMAEPct, p90AdverseExcursionPct: tb.p90MAEPct
+    } : null;
 
     return {
       version: VERSION,
@@ -629,8 +872,100 @@ window.ExpectedValueEngine = (function () {
       evidenceConfidence: evidence,
       dataCompleteness: round(pre.dataCompleteness * 100, 1),
       decision: decision,
+      exitMode: core.exitMode || 'fixed',
+      exitRule: exitRuleText(core.exitMode, cfg),
+      eligibility: null,
+      regime: pre.regime,
+      liquidity: pre.liquidity && pre.liquidity.advRs != null ? pre.liquidity : null,
+      breakEvenTargetProb: be,
+      sizing: sizing,
+      downside: downside,
+      signalStrength: signalStrength(ev),
+      reasons: (core.dist && ev) ? plainReasons(core, pre, ev, evidence, be, haircut) : [],
       explanation: buildExplanation(setup, probability, ev, evidence, decision, tb, pre)
     };
+  }
+
+
+  /* ── Sizing, break-even, reasons, strength (presentation + risk) ─────────── */
+  function exitRuleText(mode, cfg) {
+    var ex = cfg.exit || {};
+    if (mode === 'breakeven') return 'Stop moves to entry once price is up ' + round(num(ex.armFrac, 0.5) * 100, 0) + '% of the way to target';
+    if (mode === 'trail') return 'After ' + round(num(ex.armFrac, 0.5) * 100, 0) + '% of the target, stop trails the peak (never below entry)';
+    return 'Fixed target / stop / time exit';
+  }
+
+  /* Fractional Kelly on the three modeled outcomes, scaled down by how much of
+     the raw edge survived shrinkage, then capped by risk per trade and size. */
+  function computeSizing(dist, tb, targetPct, cost, stopPct, ev, cfg) {
+    var sc = cfg.sizing || {};
+    var out = { fullKellyPct: 0, suggestedPct: 0, riskCapPct: null, binding: 'no edge', kellyScale: 0 };
+    if (!dist || !tb || !ev || !(ev.netPct > 0)) return out;
+    var outs = [
+      [dist.pTarget, afterTax(targetPct - cost, cfg) / 100],
+      [dist.pStop, afterTax(tb.meanStopRet - cost, cfg) / 100],
+      [dist.pTimeout, afterTax(tb.meanTimeoutRet - cost, cfg) / 100]
+    ];
+    var rawEdge = 0;
+    outs.forEach(function (o) { rawEdge += o[0] * o[1] * 100; });
+    var bestF = 0, bestG = 0;
+    for (var f = 0.005; f <= 1.0001; f += 0.005) {
+      var g = 0, ok = true;
+      for (var k = 0; k < outs.length; k++) {
+        var x = 1 + f * outs[k][1];
+        if (!(x > 0)) { ok = false; break; }
+        g += outs[k][0] * Math.log(x);
+      }
+      if (ok && g > bestG) { bestG = g; bestF = f; }
+    }
+    var scale = rawEdge > 1e-9 ? clamp(ev.netPct / rawEdge, 0, 1) : 0;
+    var kelly = bestF * 100 * num(sc.kellyFraction, 0.25) * scale;
+    var riskCap = stopPct > 0 ? num(sc.maxRiskPerTradePct, 1) / stopPct * 100 : null;
+    var cap = num(sc.maxPositionPct, 20);
+    var sug = kelly, binding = 'kelly';
+    if (riskCap != null && riskCap < sug) { sug = riskCap; binding = 'risk cap'; }
+    if (cap < sug) { sug = cap; binding = 'position cap'; }
+    return { fullKellyPct: bestF * 100, suggestedPct: sug, riskCapPct: riskCap, binding: binding, kellyScale: scale };
+  }
+
+  /* Target-first probability at which EV (before tax) is exactly zero, holding the
+     measured stop/timeout split and payoffs fixed. */
+  function breakEvenTargetProb(dist, tb, targetPct, cost) {
+    if (!dist || !tb) return null;
+    var rest = dist.pStop + dist.pTimeout;
+    var sh = rest > 0 ? dist.pStop / rest : 0.5;
+    var L = sh * (tb.meanStopRet - cost) + (1 - sh) * (tb.meanTimeoutRet - cost);
+    var T = targetPct - cost;
+    var d = T - L;
+    return d > 1e-9 ? clamp(-L / d, 0, 1) : null;
+  }
+
+  function signalStrength(ev) {
+    if (!ev) return { tier: 'none', color: 'neutral' };
+    var e = ev.netPct, p = ev.pPositive;
+    if (e > 0 && p >= 0.80) return { tier: 'strong', color: 'profit' };
+    if (e > 0 && p >= 0.60) return { tier: 'moderate', color: 'warn' };
+    if (e > 0) return { tier: 'weak', color: 'neutral' };
+    if (e > -0.10) return { tier: 'near-breakeven', color: 'neutral' };
+    return { tier: 'negative', color: 'loss' };
+  }
+
+  function plainReasons(core, pre, ev, evidence, be, haircut) {
+    var tb = core.tb, out = [];
+    var T = core.targetPct, S = Math.abs(tb.meanStopRet), pT = core.dist.pTarget;
+    if (be != null) {
+      var gap = (pT - be) * 100;
+      if (gap >= 0) out.push('Target-first chance ' + pct(pT) + '% is ' + round(gap, 1) + ' pts above the ' + pct(be) + '% needed to break even.');
+      else out.push('Needs ' + pct(be) + '% target-first to break even but history gives ' + pct(pT) + '%.');
+    }
+    if (S > T * 1.5) out.push('The ' + round(S, 1) + '% stop is much wider than the +' + round(T, 1) + '% target: one loss erases about ' + round(S / T, 1) + ' wins.');
+    if (core.ev.costPct > 0.25 * T) out.push('Costs of ' + round(core.ev.costPct, 2) + '% eat ' + round(core.ev.costPct / T * 100, 0) + '% of the +' + round(T, 1) + '% target.');
+    if (ev && ev.pPositive < 0.6) out.push('The edge is inside sampling noise (only ' + pct(ev.pPositive) + '% sure it is real).');
+    if (haircut > 0.15) out.push('About ' + round(haircut, 2) + '% of the raw EV was likely luck from picking the best of many plans.');
+    if (core.tb.timeoutPosShare != null && core.dist.pTimeout > 0.4) out.push('Many trades just time out (' + pct(core.dist.pTimeout) + '%), so the move needs to come within the horizon.');
+    if (evidence < 60) out.push('Evidence is thin (' + round(evidence, 0) + '/100): few similar setups measured.');
+    if (pre.regime && pre.regime.matchedShare != null && pre.regime.matchedShare < 0.35) out.push('Today\'s market regime (' + pre.regime.trend + 'trend, ' + pre.regime.volatility + ' vol) is uncommon in this stock\'s history.');
+    return out.slice(0, 4);
   }
 
   function analyze(input, overrides) {
@@ -649,6 +984,7 @@ window.ExpectedValueEngine = (function () {
     if (probability.p != null) items.push('target-first probability ' + pct(probability.p) + '%');
     if (tb) items.push('measured on ' + tb.n + ' historical windows (~' + round(tb.nEff, 0) + ' independent)');
     if (pre && pre.stopPct != null) items.push('stop ' + round(pre.stopPct, 1) + '% (' + round(pre.stopPct / Math.max(0.01, pre.atrPct || pre.stopPct), 1) + ' ATR-equivalent)');
+    if (pre && pre.regime && pre.regime.matchedShare != null) items.push('regime ' + pre.regime.trend + 'trend / ' + pre.regime.volatility + ' vol (' + round(pre.regime.matchedShare * 100, 0) + '% of weighted history matches)');
     if (ev) {
       items.push('trust-adjusted ' + ev.basis + ' EV ' + (ev.netPct >= 0 ? '+' : '') + round(ev.netPct, 2) + '% (data say ' + (ev.rawBasisPct >= 0 ? '+' : '') + round(ev.rawBasisPct, 2) +
         '%, minus ' + round(ev.haircutPct, 2) + '% selection inflation, pulled x' + round(ev.shrinkFactor, 2) + ' of the way from the zero-edge EV ' + round(ev.priorMeanPct, 2) + '% for +/-' + round(ev.stdErrPct, 2) + '% sampling error)');
@@ -721,6 +1057,12 @@ window.ExpectedValueEngine = (function () {
     else if (baseDecision === 'AVOID' || baseDecision === 'SELL') eligibility = 'EXCLUDED';
     else if (baseDecision) eligibility = 'WATCH_ONLY';
 
+    var cfg = getConfig(overrides);
+    var gateOpts = cfg.gate || {};
+    var ungated = false;                       // optimized although the base signal would not normally qualify
+    if (eligibility === 'EXCLUDED' && gateOpts.includeAvoid) { eligibility = 'ELIGIBLE'; ungated = true; }
+    else if (eligibility === 'WATCH_ONLY' && gateOpts.includeWatch) { eligibility = 'ELIGIBLE'; ungated = true; }
+
     if (eligibility === 'EXCLUDED') {
       return {
         best: null, baseline: null, candidates: [], qualified: [],
@@ -729,7 +1071,6 @@ window.ExpectedValueEngine = (function () {
       };
     }
 
-    var cfg = getConfig(overrides);
     input = input || {};
     var pre = prepare(input, cfg, internal);
 
@@ -740,12 +1081,17 @@ window.ExpectedValueEngine = (function () {
     if (targets.indexOf(3) < 0) targets.push(3);
     var gridCfg = { horizons: horizons, targets: targets };
 
+    var modes = (cfg.exitVariants || ['fixed']).filter(function (m) { return m === 'fixed' || m === 'breakeven' || m === 'trail'; });
+    if (modes.indexOf('fixed') < 0) modes.unshift('fixed');   // the base plan is always benchmarked
+
     var cores = [];
     horizons.forEach(function (h) {
       targets.forEach(function (t) {
-        var core = corePlan(pre, input, cfg, h, t, internal);
-        core.isBaseline = (h === 10 && t === 3);
-        if (core.ev) cores.push(core);
+        modes.forEach(function (mode) {
+          var core = corePlan(pre, input, cfg, h, t, internal, mode);
+          core.isBaseline = (h === 10 && t === 3 && mode === 'fixed');
+          if (core.ev) cores.push(core);
+        });
       });
     });
 
@@ -757,6 +1103,7 @@ window.ExpectedValueEngine = (function () {
       if (r.expectedValue && r.probability && r.probability.target != null) {
         r.optimizerUtility = optimizerUtility(r, gridCfg);
         r.isBaseModelPlan = !!core.isBaseline;
+        r.eligibility = ungated ? 'UNGATED' : eligibility;
         r.optimizerRankMetric = 'evidence-adjusted trust-adjusted net EV per sqrt(day), 3%/10d baseline guard';
         results.push(r);
       }
@@ -805,6 +1152,7 @@ window.ExpectedValueEngine = (function () {
       eligibility: eligibility,
       baseDecision: baseDecision,
       selectionHaircutPct: haircut,
+      ungated: ungated,
       reason: eligibility === 'WATCH_ONLY'
         ? 'Base StoX signal is not Buy/Strong Buy; EV results are diagnostic only.'
         : null,
@@ -826,6 +1174,10 @@ window.ExpectedValueEngine = (function () {
       var cell = all[b] || { n: 0, wins: 0 };
       cell.n++;
       cell.wins += clamp(w, 0, 1);     // fractional when a same-bar tie was split by the open
+      if (row.val != null && isFinite(Number(row.val))) {   // value of the plan on the decision basis (pooled prior)
+        cell.nv = (cell.nv || 0) + 1;
+        cell.sv = (cell.sv || 0) + Number(row.val);
+      }
       all[b] = cell;
       added++;
     });
@@ -840,9 +1192,29 @@ window.ExpectedValueEngine = (function () {
       localStorage.removeItem(key);
       localStorage.removeItem(key + '_meta');
       localStorage.removeItem(key + '_rel');
+      localStorage.removeItem(key + '_sig');
       return true;
     } catch (e) { return false; }
   }
+
+  /* The pooled EV and the reliability tally depend on the cost/tax model. When
+     that model changes, stored values from the old model are wrong, so the whole
+     calibration is cleared and rebuilt (win counts alone would be fine, but the
+     per-stock progress marker would stop the rest from being re-labeled). */
+  function calibrationSignature(cfg) {
+    return ['v5', round(totalRoundTripCost(cfg.costs), 4), num(cfg.taxRatePct, 0), num(cfg.taxLossCredit, 0), cfg.decideAfterTax !== false ? 1 : 0].join('|');
+  }
+  function refreshCalibrationSignature(key, cfg) {
+    try {
+      var sk = key + '_sig', sig = calibrationSignature(cfg), old = localStorage.getItem(sk);
+      if (old === sig) return false;
+      var changed = old != null;
+      if (changed) clearCalibration(key);
+      localStorage.setItem(sk, sig);
+      return changed;
+    } catch (e) { return false; }
+  }
+  try { refreshCalibrationSignature(DEFAULTS.calibrationKey, getConfig()); } catch (e) {}
 
   function calibrationStatus(key) {
     key = key || DEFAULTS.calibrationKey;
@@ -886,7 +1258,7 @@ window.ExpectedValueEngine = (function () {
       });
       added++;
     });
-    if (added) saveStore(rk, st);
+    if (added) { st.updated = Date.now(); saveStore(rk, st); }
     return added;
   }
   function summarizeAcc(g) {
@@ -904,18 +1276,268 @@ window.ExpectedValueEngine = (function () {
     if (verdict === 'consistent' && n >= 300 && sdPred >= 0.2 && slope != null && slope < 0.3) verdict = 'weak-ranking';
     return { n: n, meanPredicted: mp, meanRealized: mr, meanRawPredicted: g.sraw / n, bias: bias, stdErr: se, slope: slope, sdPredicted: sdPred, verdict: verdict };
   }
-  function reliabilityStatus(key) {
+  var BIN_LABELS = ['< -0.50%', '-0.50% to -0.25%', '-0.25% to 0%', '0% to +0.25%', '+0.25% to +0.50%', '>= +0.50%'];
+  function reliabilityCore(key) {
     key = key || DEFAULTS.calibrationKey;
     var st = loadStore(key + '_rel');
     function bins(arr) {
       return (arr || []).map(function (c, k) {
-        return c && c.n ? { bin: k, n: c.n, meanPredicted: c.sp / c.n, meanRealized: c.sr / c.n } : null;
+        if (!c || !c.n) return null;
+        var mp = c.sp / c.n, mr = c.sr / c.n, gap = mr - mp;
+        return {
+          bin: k, label: BIN_LABELS[k], n: c.n, meanPredicted: mp, meanRealized: mr, gap: gap,
+          verdict: c.n < 30 ? 'collecting' : (gap < -0.15 ? 'optimistic' : (gap > 0.15 ? 'conservative' : 'ok'))
+        };
       }).filter(Boolean);
     }
+    var be = bins(st.bins && st.bins.elig), ba = bins(st.bins && st.bins.all);
+    var useB = be.length && st.elig && st.elig.n >= 100 ? be : ba;
+    var top = null;
+    useB.forEach(function (b) { if (b.n >= 30 && (!top || b.bin > top.bin)) top = b; });
     return {
       all: summarizeAcc(st.all), elig: summarizeAcc(st.elig),
-      binsAll: bins(st.bins && st.bins.all), binsElig: bins(st.bins && st.bins.elig)
+      binsAll: ba, binsElig: be,
+      topBucket: top,                         // highest predicted-EV bucket with enough samples
+      updatedAt: st.updated || null,
+      ageDays: st.updated ? (Date.now() - st.updated) / 86400000 : null
     };
+  }
+  function reliabilityStatus(key) {
+    var out = reliabilityCore(key);
+    out.trust = buildTrust(out, key);
+    return out;
+  }
+
+  /* ── Does the Buy gate add value? Eligible vs not-eligible setups, same
+     optimizer, realized walk-forward on the decision basis. ──────────────── */
+  function gateReport(key) {
+    key = key || DEFAULTS.calibrationKey;
+    var st = loadStore(key + '_rel');
+    var A = st.all, E = st.elig;
+    if (!A || !E || !A.n) return { verdict: 'collecting', eligible: { n: E ? E.n : 0 }, notEligible: { n: 0 } };
+    var N = { n: A.n - E.n, sp: A.sp - E.sp, sr: A.sr - E.sr, srr: A.srr - E.srr };
+    function sm(g) {
+      if (!g || g.n < 1) return { n: 0 };
+      var mr = g.sr / g.n, v = Math.max(0, g.srr / g.n - mr * mr);
+      return { n: g.n, meanPredicted: g.sp / g.n, meanRealized: mr, varRealized: v };
+    }
+    var e = sm(E), nn = sm(N);
+    var out = { eligible: e, notEligible: nn, edge: null, z: null, verdict: 'collecting' };
+    if (e.n >= 100 && nn.n >= 100) {
+      out.edge = e.meanRealized - nn.meanRealized;
+      var se = Math.sqrt(e.varRealized / Math.max(1, e.n / 4) + nn.varRealized / Math.max(1, nn.n / 4));
+      out.z = se > 0 ? out.edge / se : 0;
+      out.verdict = out.z > 2 ? 'gate-adds-value' : (out.z < -2 ? 'gate-hurts' : 'gate-no-better');
+    }
+    return out;
+  }
+
+  /* ── Live tracking: log what the table predicted, settle it later on real bars ─ */
+  function liveKey(cfg) { return (cfg.live && cfg.live.key) || 'stox_ev_live_v1'; }
+  function loadLive(cfg) { var d = loadStore(liveKey(cfg)); if (!d.records) d.records = []; return d; }
+
+  function recordPrediction(best, opts) {
+    opts = opts || {};
+    var cfg = getConfig(opts.config);
+    var daily = opts.dailyCandles || [];
+    var symbol = opts.symbol || (best && best.symbol);
+    if (!best || !best.expectedValue || !symbol || !daily.length) return false;
+    var date = String(daily[daily.length - 1].t).slice(0, 10);
+    var id = [symbol, date, best.horizonDays, best.targetPct, best.exitMode || 'fixed'].join('|');
+    var st = loadLive(cfg);
+    for (var i = 0; i < st.records.length; i++) if (st.records[i].id === id) return false;   // already logged
+    st.records.push({
+      id: id, symbol: symbol, date: date, h: best.horizonDays, t: best.targetPct, stop: best.stopPct,
+      cost: best.costsPct, mode: best.exitMode || 'fixed',
+      pred: best.expectedValue.netPct, raw: best.expectedValue.rawBasisPct, pPos: best.expectedValue.pPositive,
+      evid: best.evidenceConfidence, score: best.setupQuality, status: 'open', ts: Date.now()
+    });
+    var max = num(cfg.live && cfg.live.maxRecords, 1500);
+    if (st.records.length > max) {
+      var open = st.records.filter(function (r) { return r.status === 'open'; });
+      var done = st.records.filter(function (r) { return r.status !== 'open'; }).slice(-(max - open.length));
+      st.records = done.concat(open);
+    }
+    return saveStore(liveKey(cfg), st);
+  }
+
+  /* Settle every open prediction of one stock using its (fresh) daily candles. */
+  function settlePredictions(symbol, dailyCandles, opts) {
+    opts = opts || {};
+    var cfg = getConfig(opts.config);
+    var st = loadLive(cfg), daily = dailyCandles || [], settled = 0, changed = false;
+    if (!daily.length) return { settled: 0 };
+    var byDate = {};
+    daily.forEach(function (b, k) { byDate[String(b.t).slice(0, 10)] = k; });
+    st.records.forEach(function (rec) {
+      if (rec.status !== 'open' || rec.symbol !== symbol) return;
+      var i = byDate[rec.date];
+      if (i == null) return;
+      var complete = i + rec.h <= daily.length - 1;
+      var o = windowOutcome(daily, i, rec.h, Math.log(1 + rec.t / 100), Math.log(1 - rec.stop / 100), 0, rec.stop, rec.mode, exitOpts(cfg));
+      if (!o) return;
+      if (!complete && o.oP > 0) return;                 // neither target nor stop yet and bars remain
+      var v = outcomeValues(o, rec.t, rec.cost, cfg);
+      rec.real = cfg.decideAfterTax !== false ? v.aft : v.pre;
+      rec.outcome = o.tP >= 0.5 ? 'target' : (o.sP >= 0.5 ? 'stop' : 'timeout');
+      rec.status = 'settled'; rec.settledAt = Date.now();
+      settled++; changed = true;
+    });
+    if (changed) saveStore(liveKey(cfg), st);
+    return { settled: settled };
+  }
+
+  function livePerformance(opts) {
+    opts = opts || {};
+    var cfg = getConfig(opts.config);
+    var st = loadLive(cfg);
+    var done = st.records.filter(function (r) { return r.status === 'settled' && isFinite(r.real); });
+    var openN = st.records.length - done.length;
+    var out = { open: openN, settled: done.length, verdict: 'collecting', buckets: {} };
+    if (!done.length) return out;
+    var sp = 0, sr = 0, sd = 0, sdd = 0;
+    done.forEach(function (r) { var d = r.real - r.pred; sp += r.pred; sr += r.real; sd += d; sdd += d * d; });
+    var n = done.length, bias = (sr - sp) / n;
+    var varD = Math.max(0, sdd / n - Math.pow(sd / n, 2));
+    var se = Math.sqrt(varD / Math.max(1, n / 2));
+    out.meanPredicted = sp / n; out.meanRealized = sr / n; out.bias = bias; out.stdErr = se;
+    out.z = se > 0 ? bias / se : 0;
+    out.verdict = n < 30 ? 'collecting' : (out.z < -2 ? 'overconfident' : (out.z > 2 ? 'conservative' : 'consistent'));
+    [['positiveEV', function (r) { return r.pred > 0; }], ['nonPositiveEV', function (r) { return r.pred <= 0; }]].forEach(function (g) {
+      var sub = done.filter(g[1]);
+      if (!sub.length) return;
+      var mp = 0, mr = 0, hit = 0;
+      sub.forEach(function (r) { mp += r.pred; mr += r.real; if (r.real > 0) hit++; });
+      out.buckets[g[0]] = { n: sub.length, meanPredicted: mp / sub.length, meanRealized: mr / sub.length, winRate: hit / sub.length };
+    });
+    return out;
+  }
+  function clearLive(opts) {
+    try { localStorage.removeItem(liveKey(getConfig(opts && opts.config))); return true; } catch (e) { return false; }
+  }
+
+  /* ── Trust flag: one place that says whether the EVs on screen can be believed ── */
+  function buildTrust(rel, key) {
+    var cfg = getConfig(), msgs = [], level = 'ok';
+    function raise(l, m) {
+      var rank = { ok: 0, collecting: 1, caution: 2, stale: 3 };
+      if (rank[l] > rank[level]) level = l;
+      msgs.push(m);
+    }
+    var g = rel.elig && rel.elig.n >= 100 ? rel.elig : rel.all;
+    if (!g || !g.n || g.verdict === 'collecting') raise('collecting', 'Walk-forward self-check is still collecting history.');
+    else if (g.verdict === 'overconfident') raise('stale', 'Self-check says the EVs have been optimistic (predicted ' + round(g.meanPredicted, 2) + '% vs realized ' + round(g.meanRealized, 2) + '%).');
+    else if (g.verdict === 'weak-ranking') raise('caution', 'Levels match, but higher-EV picks have not done better than lower-EV picks.');
+    if (rel.topBucket && rel.topBucket.verdict === 'optimistic') raise('caution', 'The top EV bucket (' + rel.topBucket.label + ') realized ' + round(rel.topBucket.gap, 2) + '% vs predicted.');
+    if (rel.ageDays != null && rel.ageDays > num(cfg.staleCalibrationDays, 21)) raise('stale', 'Calibration has not been refreshed for ' + Math.round(rel.ageDays) + ' days.');
+    var live = livePerformance();
+    if (live.settled >= 30 && live.verdict === 'overconfident') raise('stale', 'Live results are below what was predicted (' + round(live.meanRealized, 2) + '% vs ' + round(live.meanPredicted, 2) + '%, n=' + live.settled + ').');
+    var gate = gateReport(key);
+    if (gate.verdict === 'gate-hurts') raise('caution', 'Setups the Buy filter rejected did better than those it accepted.');
+    else if (gate.verdict === 'gate-no-better') raise('caution', 'The Buy filter shows no detectable advantage over rejected setups.');
+    return { level: level, messages: msgs };
+  }
+
+  /* ── "Is there anything worth trading today?" ─────────────────────────── */
+  function rankingVerdict(results, opts) {
+    opts = opts || {};
+    var cfg = getConfig(opts.config);
+    var list = (results || []).filter(function (r) { return r && r.expectedValue; });
+    var minP = num(cfg.noTrade && cfg.noTrade.minPPositive, 0.5);
+    var pos = list.filter(function (r) { return r.expectedValue.netPct > 0 && r.expectedValue.pPositive >= minP; });
+    var qual = list.filter(function (r) { return r.decision && (r.decision.code === 'HIGH_CONVICTION' || r.decision.code === 'QUALIFIED_TRADE'); });
+    var best = null;
+    list.forEach(function (r) { if (!best || r.expectedValue.netPct > best.expectedValue.netPct) best = r; });
+    var trust = reliabilityStatus(opts.key).trust;
+    var verdict, message;
+    if (!list.length) { verdict = 'NO_DATA'; message = 'No setups were evaluated.'; }
+    else if (qual.length) { verdict = 'TRADE'; message = qual.length + ' setup(s) pass every EV test.'; }
+    else if (pos.length) { verdict = 'WEAK'; message = pos.length + ' setup(s) have positive EV but none pass every test: small size or wait.'; }
+    else { verdict = 'NO_TRADE'; message = 'No setup has positive trust-adjusted EV after costs. Best: ' + (best ? best.symbol + ' ' + round(best.expectedValue.netPct, 2) + '%' : 'n/a') + '. Sitting out is the better trade today.'; }
+    if (trust.level === 'stale' && verdict !== 'NO_TRADE' && verdict !== 'NO_DATA') { message += ' But the engine\'s self-check is flagged stale: treat EVs with extra caution.'; }
+    return {
+      verdict: verdict, message: message,
+      counts: { ranked: list.length, positiveEV: pos.length, qualified: qual.length },
+      bestSymbol: best ? best.symbol : null, bestNetEVPct: best ? best.expectedValue.netPct : null,
+      trust: trust
+    };
+  }
+
+  /* ── Correlation-aware pick list ────────────────────────────────────────── */
+  function retSeries(daily, lookback) {
+    var m = {}, n = daily ? daily.length : 0;
+    for (var i = Math.max(1, n - lookback); i < n; i++) {
+      var a = daily[i - 1].c, b = daily[i].c;
+      if (a > 0 && b > 0) m[String(daily[i].t).slice(0, 10)] = Math.log(b / a);
+    }
+    return m;
+  }
+  function corrOf(ma, mb, minOverlap) {
+    var xs = [], ys = [];
+    Object.keys(ma).forEach(function (d) { if (mb[d] != null) { xs.push(ma[d]); ys.push(mb[d]); } });
+    var n = xs.length;
+    if (n < minOverlap) return null;
+    var mx = 0, my = 0, i;
+    for (i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; }
+    mx /= n; my /= n;
+    var sxy = 0, sxx = 0, syy = 0;
+    for (i = 0; i < n; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) * (xs[i] - mx); syy += (ys[i] - my) * (ys[i] - my); }
+    return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : null;
+  }
+  function groupOf(symbol, explicit, prefixes) {
+    if (explicit) return String(explicit).toUpperCase();
+    var u = String(symbol || '').toUpperCase();
+    for (var i = 0; i < (prefixes || []).length; i++) if (u.indexOf(prefixes[i]) === 0) return prefixes[i];
+    return null;
+  }
+
+  /* items: [{ symbol, result (the optimizer's best plan), dailyCandles, group? }]
+     Returns the items re-ordered so that picks highly correlated with a better
+     pick already chosen (or in the same group) are pushed down. */
+  function diversify(items, opts) {
+    opts = opts || {};
+    var cfg = getConfig(opts.config), cc = cfg.correlation || {};
+    var pool = (items || []).filter(function (it) { return it && it.result && it.result.expectedValue; }).map(function (it) {
+      return {
+        symbol: it.symbol || it.result.symbol, result: it.result,
+        utility: it.result.optimizerUtility != null ? Number(it.result.optimizerUtility) : Number(it.result.expectedValue.netPct),
+        series: retSeries(it.dailyCandles, num(cc.lookbackBars, 120)),
+        group: groupOf(it.symbol || it.result.symbol, it.group, cc.groupPrefixes)
+      };
+    });
+    var cache = {};
+    function corr(a, b) {
+      var k = a.symbol < b.symbol ? a.symbol + '|' + b.symbol : b.symbol + '|' + a.symbol;
+      if (!(k in cache)) cache[k] = corrOf(a.series, b.series, num(cc.minOverlap, 60));
+      return cache[k];
+    }
+    var chosen = [], out = [], thr = num(cc.threshold, 0.7), pen = num(cc.penalty, 0.5);
+    while (pool.length) {
+      var bestK = -1, bestAdj = -Infinity, bestInfo = null;
+      for (var k = 0; k < pool.length; k++) {
+        var it = pool[k], maxC = null, withSym = null, grpCount = 0;
+        for (var j = 0; j < chosen.length; j++) {
+          var c = corr(it, chosen[j]);
+          if (c != null && (maxC == null || c > maxC)) { maxC = c; withSym = chosen[j].symbol; }
+          if (it.group && chosen[j].group === it.group) { grpCount++; if (maxC == null || maxC < thr) { maxC = Math.max(maxC == null ? 0 : maxC, thr); withSym = chosen[j].symbol; } }
+        }
+        var adj = it.utility;
+        if (adj > 0 && maxC != null) adj = it.utility * (1 - pen * clamp((maxC - 0.5) / 0.5, 0, 1));
+        if (adj > bestAdj) { bestAdj = adj; bestK = k; bestInfo = { maxCorr: maxC, correlatedWith: withSym, groupCount: grpCount }; }
+      }
+      var pick = pool.splice(bestK, 1)[0];
+      var flags = [];
+      if (bestInfo.maxCorr != null && bestInfo.maxCorr >= thr) flags.push('highly correlated with ' + bestInfo.correlatedWith + ' (' + round(bestInfo.maxCorr, 2) + ')');
+      if (pick.group && bestInfo.groupCount >= num(cc.maxPerGroup, 1)) flags.push('same group as a better pick (' + pick.group + ')');
+      var selected = pick.result.expectedValue.netPct > 0 && !flags.length && chosen.filter(function (x) { return x.selected; }).length < num(cc.maxPicks, 5);
+      pick.selected = selected;
+      chosen.push(pick);
+      out.push({
+        rank: out.length + 1, symbol: pick.symbol, result: pick.result, utility: pick.utility, adjustedUtility: bestAdj,
+        maxCorr: bestInfo.maxCorr, correlatedWith: bestInfo.correlatedWith, group: pick.group, selected: selected, flags: flags
+      });
+    }
+    return out;
   }
 
   function dayOrdinal(t) {
@@ -957,6 +1579,7 @@ window.ExpectedValueEngine = (function () {
     var cfg = getConfig(opts.config);
     var key = opts.key || cfg.calibrationKey;
     var out = { symbol: symbol, processed: 0, rows: 0, remaining: 0, reason: 'ok' };
+    if (refreshCalibrationSignature(key, cfg)) out.reset = 'cost or tax model changed: calibration cleared and rebuilding';
     var TI = window.TechIndicators;
     if (!TI || !TI.computeEntryScore) { out.reason = 'technical_engine_unavailable'; return out; }
     var minStart = opts.minStart || 210;
@@ -1007,11 +1630,20 @@ window.ExpectedValueEngine = (function () {
       var vc = volClassOf(atrPct);
       if (r && r.entry_score != null) {
         var score = clamp(Number(r.entry_score), 0, 99.9);
+        /* Pooled-EV values drop part of the stock's PRIOR drift exactly as the live
+           model does (past data only), so a bull market is not mistaken for an edge. */
+        var mu = 0, mc = 0;
+        for (var q = Math.max(1, idx - cfg.lookbackBars + 1); q <= idx; q++) {
+          if (daily[q - 1].c > 0 && daily[q].c > 0) { mu += Math.log(daily[q].c / daily[q - 1].c); mc++; }
+        }
+        var removedC = (1 - clamp(num(cfg.driftKeep, 0.5), 0, 1)) * (mc ? mu / mc : 0);
         cfg.horizons.forEach(function (h) {
           cfg.targets.forEach(function (t) {
             var o = windowOutcome(daily, idx, h, Math.log(1 + t / 100), Math.log(1 - stopPct / 100), 0, stopPct);
             if (!o) return;
-            rows.push({ horizonDays: h, targetPct: t, setupScore: score, volClass: vc, win: o.tP });
+            var oV = windowOutcome(daily, idx, h, Math.log(1 + t / 100), Math.log(1 - stopPct / 100), removedC, stopPct) || o;
+            var ov = outcomeValues(oV, t, costPct, cfg);
+            rows.push({ horizonDays: h, targetPct: t, setupScore: score, volClass: vc, win: o.tP, val: cfg.decideAfterTax !== false ? ov.aft : ov.pre });
           });
         });
         if (doRel) {
@@ -1019,9 +1651,9 @@ window.ExpectedValueEngine = (function () {
             var res = optimize({ symbol: symbol, dailyCandles: slice, hourlyCandles: [], indexCandles: idxSlice }, opts.config, { setupScoreOverride: score, noHist: true });
             var b = res && res.best;
             if (b && b.expectedValue) {
-              var o2 = windowOutcome(daily, idx, b.horizonDays, Math.log(1 + b.targetPct / 100), Math.log(1 - b.stopPct / 100), 0, b.stopPct);
+              var o2 = windowOutcome(daily, idx, b.horizonDays, Math.log(1 + b.targetPct / 100), Math.log(1 - b.stopPct / 100), 0, b.stopPct, b.exitMode, exitOpts(cfg));
               if (o2) {
-                var rv = outcomeValues(o2, b.targetPct, costPct, cfg);
+                var rv = outcomeValues(o2, b.targetPct, b.costsPct != null ? b.costsPct : costPct, cfg);
                 relRows.push({
                   pred: b.expectedValue.netPct, raw: b.expectedValue.rawBasisPct,
                   real: cfg.decideAfterTax !== false ? rv.aft : rv.pre,
@@ -1055,7 +1687,14 @@ window.ExpectedValueEngine = (function () {
     calibrateFromHistory: calibrateFromHistory,
     calibrationStatus: calibrationStatus,
     reliabilityStatus: reliabilityStatus,
+    gateReport: gateReport,
+    recordPrediction: recordPrediction,
+    settlePredictions: settlePredictions,
+    livePerformance: livePerformance,
+    clearLive: clearLive,
+    rankingVerdict: rankingVerdict,
+    diversify: diversify,
     clearCalibration: clearCalibration,
-    _test: { windowOutcome: windowOutcome, afterTax: afterTax, outcomeValues: outcomeValues, Phi: Phi, tripleBarrierWindows: tripleBarrierWindows }
+    _test: { windowOutcome: windowOutcome, buildWindowWeights: buildWindowWeights, computeSizing: computeSizing, breakEvenTargetProb: breakEvenTargetProb, liquidityCostPct: liquidityCostPct, afterTax: afterTax, outcomeValues: outcomeValues, Phi: Phi, tripleBarrierWindows: tripleBarrierWindows }
   };
 })();
