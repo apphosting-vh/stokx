@@ -161,6 +161,9 @@ var fsaReadFile = async function(handle) {
       wlTracker: d.wlTracker || [],
       wlTrackerPrices: d.wlTrackerPrices || {},
       notes: d.notes || [],
+      sectorRRG: d.sectorRRG || null,
+      sectorRegimeMap: d.sectorRegimeMap || null,
+      sectorSteadyLeaders: d.sectorSteadyLeaders || null,
       scoreConfig: d.scoreConfig || null,
       evStores: d.evStores || null,
       patterns: d.patterns || null
@@ -304,6 +307,9 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
   var wlTracker = [];
   var wlTrackerPrices = {};
   var notes = [];
+  var sectorRRG = null;
+  var sectorRegimeMap = null;
+  var sectorSteadyLeaders = null;
   var scoreConfig = null;
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch (e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch (e) {}
@@ -318,6 +324,9 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
   try { wlTracker = (await dbGetSetting("stox_watchlist_tracker")) || []; } catch (e) {}
   try { wlTrackerPrices = (await dbGetSetting("stox_watchlist_tracker_prices")) || {}; } catch (e) {}
   try { notes = (await dbGetSetting("stox_notes")) || []; } catch (e) {}
+  try { sectorRRG = (await dbGetSetting("stox_sector_rrg")) || null; } catch (e) {}
+  try { sectorRegimeMap = (await dbGetSetting("stox_sector_regime_map")) || null; } catch (e) {}
+  try { sectorSteadyLeaders = (await dbGetSetting("stox_sector_steady_leaders")) || null; } catch (e) {}
   try {
     var saved = localStorage.getItem("stox_score_config");
     if (saved) scoreConfig = JSON.parse(saved);
@@ -368,6 +377,9 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
       wlTracker: wlTracker.length,
       wlTrackerPrices: Object.keys(wlTrackerPrices).length,
       notes: notes.length,
+      sectorRRG: sectorRRG && sectorRRG.sectors ? sectorRRG.sectors.length : 0,
+      sectorRegimeMap: sectorRegimeMap && sectorRegimeMap.data ? sectorRegimeMap.data.length : 0,
+      sectorSteadyLeaders: sectorSteadyLeaders && sectorSteadyLeaders.cache ? Object.keys(sectorSteadyLeaders.cache).length : 0,
       scoreConfig: !!scoreConfig,
       evStores: evStores ? Object.keys(evStores).length : 0,
       patterns: patterns ? patterns.patterns.length : 0,
@@ -392,6 +404,9 @@ window.__stoxBuildSyncPayload = async function(stateData, autoSave, opts) {
       wlTracker: wlTracker,
       wlTrackerPrices: wlTrackerPrices,
       notes: notes,
+      sectorRRG: sectorRRG,
+      sectorRegimeMap: sectorRegimeMap,
+      sectorSteadyLeaders: sectorSteadyLeaders,
       scoreConfig: scoreConfig,
       evStores: evStores,
       patterns: patterns
@@ -448,6 +463,20 @@ window.__stoxRestoreFromPayload = async function(data) {
     if (data.wlTracker) await dbSetSetting("stox_watchlist_tracker", data.wlTracker);
     if (data.wlTrackerPrices && typeof data.wlTrackerPrices === "object") await dbSetSetting("stox_watchlist_tracker_prices", data.wlTrackerPrices);
     if (data.notes) await dbSetSetting("stox_notes", data.notes);
+    /* Sector Rotation / Regime Map / Steady Leaders caches travel with the
+       backup so a restored device does not have to rebuild them from Yahoo. */
+    if (data.sectorRRG && typeof data.sectorRRG === "object") {
+      try { await dbSetSetting("stox_sector_rrg", data.sectorRRG); } catch (e) {}
+      try { localStorage.setItem("stox_sector_rrg", JSON.stringify(data.sectorRRG)); } catch (e) {}
+    }
+    if (data.sectorRegimeMap && typeof data.sectorRegimeMap === "object") {
+      try { await dbSetSetting("stox_sector_regime_map", data.sectorRegimeMap); } catch (e) {}
+      try { localStorage.setItem("stox_sector_regime_map", JSON.stringify(data.sectorRegimeMap)); } catch (e) {}
+    }
+    if (data.sectorSteadyLeaders && typeof data.sectorSteadyLeaders === "object") {
+      try { await dbSetSetting("stox_sector_steady_leaders", data.sectorSteadyLeaders); } catch (e) {}
+      try { localStorage.setItem("stox_sector_steady_leaders", JSON.stringify(data.sectorSteadyLeaders)); } catch (e) {}
+    }
     if (data.patterns && window.PatternStore && window.PatternStore.importAll) {
       try {
         await window.PatternStore.init();

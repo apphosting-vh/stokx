@@ -99,7 +99,7 @@ function _readFsaFile() {
             var parsed = JSON.parse(text);
             var d = parsed && parsed.data ? parsed.data : null;
             if (d) {
-              var keys = ["holdings", "soldShareSnapshots", "watchlist", "entryScores", "entrySnapshots", "entryPerfPrices", "screenerData", "screenerSnapshots", "screenerBookmarks", "screenerUnicorns", "singleStockSnapshots", "confTracker", "confTrackerPrices", "wlTracker", "wlTrackerPrices", "notes", "scoreConfig", "patterns"];
+              var keys = ["holdings", "soldShareSnapshots", "watchlist", "entryScores", "entrySnapshots", "entryPerfPrices", "screenerData", "screenerSnapshots", "screenerBookmarks", "screenerUnicorns", "singleStockSnapshots", "confTracker", "confTrackerPrices", "wlTracker", "wlTrackerPrices", "notes", "sectorRRG", "sectorRegimeMap", "sectorSteadyLeaders", "scoreConfig", "patterns"];
               var sections = [], secTotal = 0;
               keys.forEach(function(k) { var b = _estBytes(d[k]); sections.push({ key: k, bytes: b }); secTotal += b; });
               info.sections = sections;
@@ -129,6 +129,9 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   var wlTracker = [];
   var wlTrackerPrices = {};
   var notes = [];
+  var sectorRRG = null;
+  var sectorRegimeMap = null;
+  var sectorSteadyLeaders = null;
   var scoreConfig = null;
   try { entryScores = (await dbGetSetting("mm_entry_scores")) || []; } catch(e) {}
   try { entrySnapshots = (await dbGetSetting("mm_entry_score_snapshots")) || []; } catch(e) {}
@@ -143,6 +146,9 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
   try { wlTracker = (await dbGetSetting("stox_watchlist_tracker")) || []; } catch(e) {}
   try { wlTrackerPrices = (await dbGetSetting("stox_watchlist_tracker_prices")) || {}; } catch(e) {}
   try { notes = (await dbGetSetting("stox_notes")) || []; } catch(e) {}
+  try { sectorRRG = (await dbGetSetting("stox_sector_rrg")) || null; } catch(e) {}
+  try { sectorRegimeMap = (await dbGetSetting("stox_sector_regime_map")) || null; } catch(e) {}
+  try { sectorSteadyLeaders = (await dbGetSetting("stox_sector_steady_leaders")) || null; } catch(e) {}
   try {
     var saved = localStorage.getItem("stox_score_config");
     if (saved) scoreConfig = JSON.parse(saved);
@@ -175,6 +181,9 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       wlTracker: wlTracker.length,
       wlTrackerPrices: Object.keys(wlTrackerPrices).length,
       notes: notes.length,
+      sectorRRG: sectorRRG && sectorRRG.sectors ? sectorRRG.sectors.length : 0,
+      sectorRegimeMap: sectorRegimeMap && sectorRegimeMap.data ? sectorRegimeMap.data.length : 0,
+      sectorSteadyLeaders: sectorSteadyLeaders && sectorSteadyLeaders.cache ? Object.keys(sectorSteadyLeaders.cache).length : 0,
       scoreConfig: !!scoreConfig,
       patterns: patternData ? patternData.patterns.length : 0,
       patternFeatures: patternData && patternData.features ? patternData.features.length : 0,
@@ -198,6 +207,9 @@ async function buildStoxBackup(holdings, soldShareSnapshots, watchlist) {
       wlTracker: wlTracker,
       wlTrackerPrices: wlTrackerPrices,
       notes: notes,
+      sectorRRG: sectorRRG,
+      sectorRegimeMap: sectorRegimeMap,
+      sectorSteadyLeaders: sectorSteadyLeaders,
       scoreConfig: scoreConfig,
       patterns: patternData
     }
@@ -263,6 +275,18 @@ async function restoreStoxBackup(fileText) {
   if (d.wlTracker) { try { await dbSetSetting("stox_watchlist_tracker", d.wlTracker); } catch(e) {} }
   if (d.wlTrackerPrices && typeof d.wlTrackerPrices === "object") { try { await dbSetSetting("stox_watchlist_tracker_prices", d.wlTrackerPrices); } catch(e) {} }
   if (d.notes) { try { await dbSetSetting("stox_notes", d.notes); } catch(e) {} }
+  if (d.sectorRRG && typeof d.sectorRRG === "object") {
+    try { await dbSetSetting("stox_sector_rrg", d.sectorRRG); } catch(e) {}
+    try { localStorage.setItem("stox_sector_rrg", JSON.stringify(d.sectorRRG)); } catch(e) {}
+  }
+  if (d.sectorRegimeMap && typeof d.sectorRegimeMap === "object") {
+    try { await dbSetSetting("stox_sector_regime_map", d.sectorRegimeMap); } catch(e) {}
+    try { localStorage.setItem("stox_sector_regime_map", JSON.stringify(d.sectorRegimeMap)); } catch(e) {}
+  }
+  if (d.sectorSteadyLeaders && typeof d.sectorSteadyLeaders === "object") {
+    try { await dbSetSetting("stox_sector_steady_leaders", d.sectorSteadyLeaders); } catch(e) {}
+    try { localStorage.setItem("stox_sector_steady_leaders", JSON.stringify(d.sectorSteadyLeaders)); } catch(e) {}
+  }
   if (d.scoreConfig && typeof d.scoreConfig === "object") {
     var curVer = (window.TechIndicators && window.TechIndicators.getScoreConfigVersion) ? window.TechIndicators.getScoreConfigVersion() : null;
     if (curVer != null && d.scoreConfig._v !== curVer) {
@@ -575,7 +599,8 @@ function DataBackupSection(props) {
     screenerData: "Screener", screenerSnapshots: "Screener Snaps", screenerBookmarks: "Screener Bkmk", screenerUnicorns: "Unicorns",
     singleStockSnapshots: "Analysis Snaps", confTracker: "Conf Tracker", confTrackerPrices: "Conf Prices",
     wlTracker: "WL Tracker", wlTrackerPrices: "WL Prices",
-    notes: "Notes", patterns: "Patterns"
+    notes: "Notes", sectorRRG: "Sector RRG", sectorRegimeMap: "Regime Map",
+    sectorSteadyLeaders: "Steady Leaders", patterns: "Patterns"
   };
 
   var est = ss.est || null;

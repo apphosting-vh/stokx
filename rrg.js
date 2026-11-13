@@ -120,7 +120,65 @@ async function fetchSectorCandles(sec){
 var _s=null,_l=null,_u=[];
 function notify(){_u.slice().forEach(function(fn){try{fn(_s);}catch(e){}});}
 function onUpdate(fn){_u.push(fn);return function(){var i=_u.indexOf(fn);if(i>=0)_u.splice(i,1);};}
-async function load(opts){opts=opts||{};var force=!!opts.force;var DF=window.OHLCVFetcher;if(!DF)throw new Error("OHLCVFetcher not loaded");if(!force&&_s&&(Date.now()-_s.ts<TTL))return _s;if(_l&&!force)return _l;var pr=opts.onProgress||function(){};if(force)_bk={};_sec20Map={};_l=(async function(){try{pr(0,SEC.length+1,"Benchmark...");var bR=await DF.fetchOHLCVCached(BENCH,"daily");var b=bR&&bR.data?bR.data:null;if(!b||b.length<40)throw new Error("Benchmark data unavailable");var secs=[],tot=SEC.length+1,dn=1;for(var i=0;i<SEC.length;i++){var s=SEC[i];pr(dn,tot,"Fetching "+s.name);try{var c=await fetchSectorCandles(s);if(c&&c.length>=40){var cc=compute(c,b,s);if(cc)secs.push(cc);if(!s.basket&&c.length>=21){var _m20=c.length-1;if(c[_m20].c>0&&c[_m20-20].c>0){var _s20=(c[_m20].c-c[_m20-20].c)/c[_m20-20].c*100;_sec20Map[s.key]=Math.round(_s20*100)/100;}}}}catch(e){}dn++;await new Promise(function(r){setTimeout(r,30);});}pr(tot,tot,"Computed");_s={ts:Date.now(),sectors:secs,benchmark:b};notify();return _s;}finally{_l=null;}})();return _l;}
+
+/* ---- Persistence -----------------------------------------------------------
+   The computed RRG state used to live only in this module's memory, so a page
+   reload (or a device switch) threw it away and every sector chart had to start
+   from zero again. It is now mirrored to localStorage (instant boot paint),
+   IndexedDB (primary store) and, through the shared sync payload, the FSA /
+   Google Drive file. Only the last 260 benchmark candles are kept on disk:
+   getMarketRegime() needs SMA200 and nothing older is ever read. */
+var LS_RRG="stox_sector_rrg", IDB_RRG="stox_sector_rrg";
+function _persistRRG(){
+  if(!_s)return;
+  var b=_s.benchmark;
+  if(b&&b.length>260)b=b.slice(-260);
+  var payload={ts:_s.ts,sectors:_s.sectors,benchmark:b,sec20:_sec20Map};
+  try{localStorage.setItem(LS_RRG,JSON.stringify(payload));}catch(e){}
+  try{
+    if(typeof dbSetSetting==="function"){
+      dbSetSetting(IDB_RRG,payload).then(function(){
+        try{window.dispatchEvent(new CustomEvent("stox:data-changed",{detail:{derived:true}}));}catch(e){}
+      }).catch(function(){});
+    }
+  }catch(e){}
+}
+function _applyPersistedRRG(obj){
+  if(!obj||!obj.sectors||!obj.sectors.length||!(obj.ts>0))return false;
+  if(_s&&_s.ts>=obj.ts)return false;
+  _s={ts:obj.ts,sectors:obj.sectors,benchmark:obj.benchmark||[]};
+  if(obj.sec20&&typeof obj.sec20==="object")_sec20Map=obj.sec20;
+  notify();
+  return true;
+}
+function _readPersistedRRGLS(){
+  try{var raw=localStorage.getItem(LS_RRG);return raw?JSON.parse(raw):null;}catch(e){return null;}
+}
+var _rrgReady=(async function(){
+  var ls=_readPersistedRRGLS();
+  if(ls)_applyPersistedRRG(ls);
+  /* rrg.js is evaluated before app-core.js, so dbGetSetting may not exist yet.
+     Wait for it instead of firing a second full network load. */
+  for(var i=0;i<40;i++){
+    if(typeof dbGetSetting==="function")break;
+    await new Promise(function(r){setTimeout(r,150);});
+  }
+  var hadIdb=false;
+  try{
+    if(typeof dbGetSetting==="function"){
+      var stored=await dbGetSetting(IDB_RRG);
+      if(stored){
+        if(_applyPersistedRRG(stored)){try{localStorage.setItem(LS_RRG,JSON.stringify(stored));}catch(e){}}
+        hadIdb=true;
+      }
+    }
+  }catch(e){}
+  /* localStorage had data but IndexedDB did not (e.g. IndexedDB was cleared):
+     backfill the primary store so the FSA writer can see it. */
+  if(!hadIdb&&ls)_persistRRG();
+})();
+
+async function load(opts){opts=opts||{};var force=!!opts.force;var DF=window.OHLCVFetcher;if(!DF)throw new Error("OHLCVFetcher not loaded");await _rrgReady;if(!force&&_s&&(Date.now()-_s.ts<TTL))return _s;if(_l&&!force)return _l;var pr=opts.onProgress||function(){};if(force)_bk={};_sec20Map={};_l=(async function(){try{pr(0,SEC.length+1,"Benchmark...");var bR=await DF.fetchOHLCVCached(BENCH,"daily");var b=bR&&bR.data?bR.data:null;if(!b||b.length<40)throw new Error("Benchmark data unavailable");var secs=[],tot=SEC.length+1,dn=1;for(var i=0;i<SEC.length;i++){var s=SEC[i];pr(dn,tot,"Fetching "+s.name);try{var c=await fetchSectorCandles(s);if(c&&c.length>=40){var cc=compute(c,b,s);if(cc)secs.push(cc);if(!s.basket&&c.length>=21){var _m20=c.length-1;if(c[_m20].c>0&&c[_m20-20].c>0){var _s20=(c[_m20].c-c[_m20-20].c)/c[_m20-20].c*100;_sec20Map[s.key]=Math.round(_s20*100)/100;}}}}catch(e){}dn++;await new Promise(function(r){setTimeout(r,30);});}pr(tot,tot,"Computed");_s={ts:Date.now(),sectors:secs,benchmark:b};notify();_persistRRG();return _s;}finally{_l=null;}})();return _l;}
 function getState(){return _s;}
 function getSectorQuadrantForSymbol(sym){if(window.__stoxBacktestCtx&&window.__stoxBacktestCtx.depth>0)return null;if(!_s||!_s.sectors)return null;var k=GATE_MAP[norm(sym)];if(!k)return null;for(var i=0;i<_s.sectors.length;i++)if(_s.sectors[i].key===k)return _s.sectors[i];return null;}
 function getMarketRegime(){if(window.__stoxBacktestCtx&&window.__stoxBacktestCtx.depth>0)return null;if(!_s||!_s.benchmark)return null;var b=_s.benchmark;if(b.length<200)return{isDowntrend:false};var s=0;for(var i=b.length-200;i<b.length;i++)s+=b[i].c;var ma=s/200,last=b[b.length-1].c;return{isDowntrend:last<ma,benchmarkClose:Math.round(last*100)/100,benchmarkSMA200:Math.round(ma*100)/100,distancePct:Math.round((last/ma-1)*10000)/100};}

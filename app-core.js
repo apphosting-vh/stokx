@@ -12729,6 +12729,34 @@ function SingleStockAnalysis({ requestedTicker }) {
    PAGE: Pulse (Watchlist + Entry Score + Stock Screener)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
+/* ---- Shared persistence for the three sector tools -----------------------
+   Each tool keeps its computed result in IndexedDB (primary), mirrors it to
+   localStorage (instant paint after a reload) and relies on stox:data-changed
+   to get the same keys written into the FSA / Google Drive sync payload. */
+var SECTOR_REGIME_KEY = "stox_sector_regime_map";
+var SECTOR_STEADY_KEY = "stox_sector_steady_leaders";
+
+function sectorStoreGetLS(key) {
+  try {
+    var raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return null;
+}
+
+function sectorStoreSet(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+  try {
+    if (typeof dbSetSetting === "function") {
+      dbSetSetting(key, value).then(function () {
+        /* detail.derived: write the FSA file but do not mark the whole app as
+           locally edited — these caches are recomputed data, not user input. */
+        try { window.dispatchEvent(new CustomEvent("stox:data-changed", { detail: { derived: true } })); } catch (e) {}
+      }).catch(function () {});
+    }
+  } catch (e) {}
+}
+
 const SectorRotationPanel = React.memo(function () {
   var _s = useState(function () { return window.SectorRRG ? window.SectorRRG.getState() : null; });
   var state = _s[0], setState = _s[1];
@@ -12740,7 +12768,10 @@ const SectorRotationPanel = React.memo(function () {
   }, []);
   useEffect(function () {
     var unsub = window.SectorRRG.onUpdate(setState);
-    if (!state) doLoad(false);
+    /* Hydrated state paints immediately; only refresh it when it is stale
+       (the module keeps a 1-hour TTL, same as this check). */
+    var current = window.SectorRRG ? window.SectorRRG.getState() : null;
+    if (!current || !current.ts || Date.now() - current.ts > 3600000) doLoad(false);
     return unsub;
   }, []);
   var secs = state && state.sectors ? state.sectors : [];
@@ -12830,79 +12861,137 @@ const SectorRotationPanel = React.memo(function () {
   );
 });
 
+var REGIME_MAP_TTL = 6 * 3600000;
+var _regimeMapInflight = null;
+
+/* Recomputes the whole regime dataset. Kept outside the component so a second
+   mount while a computation is in flight joins the same promise instead of
+   firing ~20 more Yahoo requests. */
+async function computeRegimeMapData() {
+  if (!window.OHLCVFetcher || !window.TechIndicators) return [];
+
+  // Reuse the sector list from RRG
+  var sectors = window.SectorRRG ? window.SectorRRG.SECTORS : [];
+  var results = [];
+
+  for (var i = 0; i < sectors.length; i++) {
+    var sec = sectors[i];
+    try {
+      var c = (window.SectorRRG && window.SectorRRG.fetchSectorCandles) ? await window.SectorRRG.fetchSectorCandles(sec) : null;
+      if (!c || c.length < 30) continue;
+
+      var adxObj = window.TechIndicators.adx(c, 14);
+      var atrArr = window.TechIndicators.atr(c, 14);
+
+      var adx = adxObj && adxObj.adx ? adxObj.adx[adxObj.adx.length-1] : 20;
+      var atr = atrArr[atrArr.length-1] || 2;
+      var close = c[c.length-1].c;
+      var atrPct = (atr / close) * 100;
+
+      // Normalize ADX to 0-100 scale (ADX rarely goes above 60)
+      var trendScore = Math.min(100, Math.max(0, (adx / 60) * 100));
+      // Normalize ATR% to 0-100 scale (ATR > 4% is considered extremely high)
+      var volScore = Math.min(100, Math.max(0, (atrPct / 4) * 100));
+
+      var roc = c.length >= 21 ? ((close / c[c.length-21].c) - 1) * 100 : 0;
+      var momScore = Math.min(100, Math.max(0, (roc + 5) / 15 * 100));
+
+      var sum5 = 0, sum20 = 0;
+      var limit5 = Math.max(0, c.length - 5);
+      var limit20 = Math.max(0, c.length - 20);
+      for (var v = limit5; v < c.length; v++) sum5 += (c[v].v || 0);
+      for (var v = limit20; v < c.length; v++) sum20 += (c[v].v || 0);
+      var avg5 = sum5 / (c.length - limit5 || 1);
+      var avg20 = sum20 / (c.length - limit20 || 1);
+      var volRatio = avg20 > 0 ? avg5 / avg20 : 1;
+      var flowScore = Math.min(100, Math.max(0, (volRatio - 0.5) / 1.5 * 100));
+
+      results.push({ key: sec.key, name: sec.name, color: sec.color, trend: trendScore, vol: volScore, adx: adx, atrPct: atrPct, momentum: momScore, flow: flowScore, volRatio: volRatio, roc: roc });
+    } catch (e) {}
+    await new Promise(function(res) { setTimeout(res, 100); });
+  }
+  // Aggregate Screener scores per sector
+  var cachedScreener = null;
+  try { cachedScreener = await dbGetSetting("stox_screener_data"); } catch (e) {}
+  var sectorScoreMap = {};
+  if (cachedScreener && cachedScreener.results && window.SectorRRG) {
+    cachedScreener.results.forEach(function(r) {
+      var sym = r.s.t.replace(".NS", "");
+      var secKey = (window.SectorRRG.STOCK_SECTOR_ALL || window.SectorRRG.STOCK_SECTOR)[sym];
+      if (secKey) {
+        if (!sectorScoreMap[secKey]) sectorScoreMap[secKey] = { total: 0, count: 0 };
+        sectorScoreMap[secKey].total += (r.result ? r.result.finalScore : 0);
+        sectorScoreMap[secKey].count++;
+      }
+    });
+  }
+
+  results.forEach(function(d) {
+    var agg = sectorScoreMap[d.key];
+    d.avgScore = (agg && agg.count > 0) ? (agg.total / agg.count) : 0;
+  });
+
+  return results;
+}
+
 const RegimeMapPanel = React.memo(function () {
-  var _l = useState(true); var loading = _l[0], setLoading = _l[1];
-  var _d = useState([]); var data = _d[0], setData = _d[1];
+  var _seed = useState(function () { return sectorStoreGetLS(SECTOR_REGIME_KEY); });
+  var seed = _seed[0];
+  var _l = useState(function () { return !(seed && Array.isArray(seed.data) && seed.data.length); });
+  var loading = _l[0], setLoading = _l[1];
+  var _d = useState(function () { return (seed && Array.isArray(seed.data)) ? seed.data : []; });
+  var data = _d[0], setData = _d[1];
   var _h = useState(null); var hovered = _h[0], setHovered = _h[1];
 
   useEffect(function () {
+    var alive = true;
     (async function () {
-      if (!window.OHLCVFetcher || !window.TechIndicators) { setLoading(false); return; }
-      
-      // Reuse the sector list from RRG
-      var sectors = window.SectorRRG ? window.SectorRRG.SECTORS : [];
-      var results = [];
-      
-      for (var i = 0; i < sectors.length; i++) {
-        var sec = sectors[i];
+      var curData = (seed && Array.isArray(seed.data)) ? seed.data : [];
+      var curTs = (seed && seed.ts) ? seed.ts : 0;
+
+      /* localStorage was empty (cleared / another device): read the primary
+         IndexedDB copy before deciding to recompute. */
+      if (!curData.length && typeof dbGetSetting === "function") {
         try {
-          var c = (window.SectorRRG && window.SectorRRG.fetchSectorCandles) ? await window.SectorRRG.fetchSectorCandles(sec) : null;
-          if (!c || c.length < 30) continue;
-          
-          var adxObj = window.TechIndicators.adx(c, 14);
-          var atrArr = window.TechIndicators.atr(c, 14);
-          
-          var adx = adxObj && adxObj.adx ? adxObj.adx[adxObj.adx.length-1] : 20;
-          var atr = atrArr[atrArr.length-1] || 2;
-          var close = c[c.length-1].c;
-          var atrPct = (atr / close) * 100;
-          
-          // Normalize ADX to 0-100 scale (ADX rarely goes above 60)
-          var trendScore = Math.min(100, Math.max(0, (adx / 60) * 100));
-          // Normalize ATR% to 0-100 scale (ATR > 4% is considered extremely high)
-          var volScore = Math.min(100, Math.max(0, (atrPct / 4) * 100));
-          
-          var roc = c.length >= 21 ? ((close / c[c.length-21].c) - 1) * 100 : 0;
-          var momScore = Math.min(100, Math.max(0, (roc + 5) / 15 * 100));
-          
-          var sum5 = 0, sum20 = 0;
-          var limit5 = Math.max(0, c.length - 5);
-          var limit20 = Math.max(0, c.length - 20);
-          for (var v = limit5; v < c.length; v++) sum5 += (c[v].v || 0);
-          for (var v = limit20; v < c.length; v++) sum20 += (c[v].v || 0);
-          var avg5 = sum5 / (c.length - limit5 || 1);
-          var avg20 = sum20 / (c.length - limit20 || 1);
-          var volRatio = avg20 > 0 ? avg5 / avg20 : 1;
-          var flowScore = Math.min(100, Math.max(0, (volRatio - 0.5) / 1.5 * 100));
-          
-          results.push({ key: sec.key, name: sec.name, color: sec.color, trend: trendScore, vol: volScore, adx: adx, atrPct: atrPct, momentum: momScore, flow: flowScore, volRatio: volRatio, roc: roc });
-        } catch (e) {}
-        await new Promise(function(res) { setTimeout(res, 100); });
-      }
-      // Aggregate Screener scores per sector
-      var cachedScreener = null;
-      try { cachedScreener = await dbGetSetting("stox_screener_data"); } catch (e) {}
-      var sectorScoreMap = {};
-      if (cachedScreener && cachedScreener.results && window.SectorRRG) {
-        cachedScreener.results.forEach(function(r) {
-          var sym = r.s.t.replace(".NS", "");
-          var secKey = (window.SectorRRG.STOCK_SECTOR_ALL || window.SectorRRG.STOCK_SECTOR)[sym];
-          if (secKey) {
-            if (!sectorScoreMap[secKey]) sectorScoreMap[secKey] = { total: 0, count: 0 };
-            sectorScoreMap[secKey].total += (r.result ? r.result.finalScore : 0);
-            sectorScoreMap[secKey].count++;
+          var stored = await dbGetSetting(SECTOR_REGIME_KEY);
+          if (stored && Array.isArray(stored.data) && stored.data.length) {
+            curData = stored.data;
+            curTs = stored.ts || 0;
+            try { localStorage.setItem(SECTOR_REGIME_KEY, JSON.stringify(stored)); } catch (e2) {}
+            if (alive) { setData(curData); setLoading(false); }
           }
-        });
+        } catch (e) {}
+      }
+      if (!alive) return;
+      if (curData.length && curTs && Date.now() - curTs < REGIME_MAP_TTL) {
+        setLoading(false);
+        /* Hydrated from localStorage only (IndexedDB cleared, or the cache came
+           from another device). Backfill the primary store so the sync payload
+           and the FSA file include it without waiting for a recompute. */
+        try {
+          if (typeof dbGetSetting === "function") {
+            var have = await dbGetSetting(SECTOR_REGIME_KEY);
+            if (!have || (have.ts || 0) < curTs) sectorStoreSet(SECTOR_REGIME_KEY, { ts: curTs, data: curData });
+          }
+        } catch (e) {}
+        return;
       }
 
-      results.forEach(function(d) {
-        var agg = sectorScoreMap[d.key];
-        d.avgScore = (agg && agg.count > 0) ? (agg.total / agg.count) : 0;
-      });
-
-      setData(results);
-      setLoading(false);
+      /* Missing or stale. Keep the cached charts on screen while refreshing. */
+      if (!curData.length) setLoading(true);
+      var results;
+      try {
+        if (!_regimeMapInflight) {
+          _regimeMapInflight = computeRegimeMapData().finally(function () { _regimeMapInflight = null; });
+        }
+        results = await _regimeMapInflight;
+      } catch (e) { results = []; }
+      if (!results || !results.length) { if (alive) setLoading(false); return; }
+      var now = Date.now();
+      if (alive) { setData(results); setLoading(false); }
+      sectorStoreSet(SECTOR_REGIME_KEY, { ts: now, data: results });
     })();
+    return function () { alive = false; };
   }, []);
 
   if (loading) return React.createElement("div", { style: { padding: 40, textAlign: "center", color: "var(--text5)" } }, "Calculating Regimes...");
@@ -13344,22 +13433,56 @@ function slExplainer(what, how, rows, tip, live) {
 
 var SteadyLeadersPanel = React.memo(function () {
   var sectors = (window.SectorRRG && window.SectorRRG.SECTORS) ? window.SectorRRG.SECTORS : [];
-  var _k = useState(sectors.length ? sectors[0].key : ""); var selKey = _k[0], setSelKey = _k[1];
-  var _c = useState({}); var cache = _c[0], setCache = _c[1];
+  var _seed = useState(function () { return sectorStoreGetLS(SECTOR_STEADY_KEY); });
+  var seed = _seed[0];
+  var seedTs = (seed && seed.ts) ? seed.ts : 0;
+
+  var _k = useState(function () {
+    var saved = seed && seed.selKey;
+    if (saved && sectors.some(function (s) { return s.key === saved; })) return saved;
+    return sectors.length ? sectors[0].key : "";
+  });
+  var selKey = _k[0], setSelKey = _k[1];
+
+  var _c = useState(function () {
+    var saved = (seed && seed.cache && typeof seed.cache === "object") ? seed.cache : {};
+    var clean = {};
+    Object.keys(saved).forEach(function (k) {
+      if (saved[k] && Array.isArray(saved[k].rows)) clean[k] = saved[k];
+    });
+    return clean;
+  });
+  var cache = _c[0], setCache = _c[1];
+
   var _l = useState(false); var loading = _l[0], setLoading = _l[1];
   var _e = useState({}); var errs = _e[0], setErrs = _e[1];
   var _h = useState(null); var hovered = _h[0], setHovered = _h[1];
   var _s = useState(null); var scan = _s[0], setScan = _s[1];
   var alive = React.useRef(true);
   var cancelScan = React.useRef(false);
-  var cacheRef = React.useRef({});
+  var cacheRef = React.useRef(cache);
+  var selKeyRef = React.useRef(selKey);
+  var persistTimer = React.useRef(null);
   var inflight = React.useRef({});
+
+  var persistNow = function () {
+    if (persistTimer.current) { clearTimeout(persistTimer.current); persistTimer.current = null; }
+    if (!Object.keys(cacheRef.current || {}).length) return;
+    sectorStoreSet(SECTOR_STEADY_KEY, { ts: Date.now(), selKey: selKeyRef.current, cache: cacheRef.current });
+  };
+  var persistSoon = function () {
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    persistTimer.current = setTimeout(function () { persistTimer.current = null; persistNow(); }, 800);
+  };
 
   var ensureSector = function (sec) {
     if (cacheRef.current[sec.key]) return Promise.resolve(cacheRef.current[sec.key]);
     if (inflight.current[sec.key]) return inflight.current[sec.key];
     var pr = slLoadSector(sec).then(function (res) {
       cacheRef.current[sec.key] = res;
+      /* Persist even if the panel was unmounted mid-load (tab switch): the
+         fetched work should survive instead of being thrown away. */
+      persistSoon();
       if (alive.current) {
         setCache(Object.assign({}, cacheRef.current));
         setErrs(function (p) { var n = Object.assign({}, p); delete n[sec.key]; return n; });
@@ -13375,8 +13498,52 @@ var SteadyLeadersPanel = React.memo(function () {
 
   useEffect(function () {
     alive.current = true;
-    return function () { alive.current = false; cancelScan.current = true; };
+    return function () {
+      alive.current = false;
+      cancelScan.current = true;
+      if (persistTimer.current) persistNow();   /* flush pending write on tab switch */
+    };
   }, []);
+
+  /* Reconcile with IndexedDB: adopt a newer copy, or backfill the primary
+     store when this mount only had the localStorage copy. */
+  useEffect(function () {
+    if (typeof dbGetSetting !== "function") return;
+    var cancelled = false;
+    (async function () {
+      try {
+        var stored = await dbGetSetting(SECTOR_STEADY_KEY);
+        if (cancelled) return;
+        if (!stored || !stored.cache || !Object.keys(stored.cache).length) {
+          /* IndexedDB empty but we hydrated from localStorage: backfill so the
+             sync payload / FSA file carry this cache too. */
+          if (Object.keys(cacheRef.current).length) persistNow();
+          return;
+        }
+        if (seedTs && (stored.ts || 0) <= seedTs) return;
+        var clean = {};
+        Object.keys(stored.cache).forEach(function (k) {
+          if (stored.cache[k] && Array.isArray(stored.cache[k].rows)) clean[k] = stored.cache[k];
+        });
+        if (!Object.keys(clean).length) return;
+        try { localStorage.setItem(SECTOR_STEADY_KEY, JSON.stringify(stored)); } catch (e2) {}
+        cacheRef.current = clean;
+        setCache(clean);
+        if (stored.selKey && sectors.some(function (s) { return s.key === stored.selKey; })) {
+          selKeyRef.current = stored.selKey;
+          setSelKey(stored.selKey);
+        }
+      } catch (e) {}
+    })();
+    return function () { cancelled = true; };
+  }, []);
+
+  useEffect(function () {
+    if (selKeyRef.current !== selKey) {
+      selKeyRef.current = selKey;
+      persistSoon();
+    }
+  }, [selKey]);
 
   useEffect(function () {
     var sec = sectors.filter(function (x) { return x.key === selKey; })[0];
@@ -13394,6 +13561,7 @@ var SteadyLeadersPanel = React.memo(function () {
       if (alive.current) setScan({ running: true, done: i, total: sectors.length, label: sectors[i].name });
       try { await ensureSector(sectors[i]); } catch (e) {}
     }
+    persistNow();
     if (alive.current) setScan({ running: false, done: sectors.length, total: sectors.length, cancelled: cancelScan.current });
   };
 
@@ -14257,14 +14425,18 @@ function App() {
   // Auto-write FSA when screener/entry-score data changes (outside main state)
   const _fsaExternalRef = React.useRef(null);
   useEffect(() => {
-    const handler = () => {
+    const handler = (e) => {
       if (_fsaExternalRef.current) clearTimeout(_fsaExternalRef.current);
       _fsaExternalRef.current = setTimeout(() => {
         if (window.__fsa && window.__fsa.writeNow) {
           window.__fsa.writeNow().catch(function() {});
         }
       }, 2000);
-      if (window._syncSaveLocalEdit) window._syncSaveLocalEdit(new Date().toISOString());
+      // Derived caches (sector charts) still need an FSA save, but they must
+      // not make this device look newer than Drive — that would block a pull.
+      if (!(e && e.detail && e.detail.derived) && window._syncSaveLocalEdit) {
+        window._syncSaveLocalEdit(new Date().toISOString());
+      }
     };
     window.addEventListener("stox:data-changed", handler);
     return () => { window.removeEventListener("stox:data-changed", handler); if (_fsaExternalRef.current) clearTimeout(_fsaExternalRef.current); };
