@@ -118,7 +118,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.2.1';
+  var VERSION = 'EV-4.3.0';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -197,7 +197,7 @@ window.ExpectedValueEngine = (function () {
     liquidity: { enabled: false, impactCoef: 0.5, maxPerSidePct: 1.0, advBars: 20 },
     sizing: { kellyFraction: 0.25, maxPositionPct: 20, maxRiskPerTradePct: 1.0 },
     correlation: { lookbackBars: 120, minOverlap: 60, threshold: 0.7, penalty: 0.5, maxPicks: 5, maxPerGroup: 1, groupPrefixes: ['ADANI', 'TATA', 'BAJAJ'] },
-    live: { key: 'stox_ev_live_v3', maxRecords: 4000 },
+    live: { key: 'stox_ev_live_v4', maxRecords: 4000 },
     staleCalibrationDays: 21,
     noTrade: { minPPositive: 0.5 },
     upside: { horizons: [3, 5, 10, 15, 20], targets: [2, 3, 4, 5, 6], shrinkK: 8 }
@@ -215,6 +215,7 @@ window.ExpectedValueEngine = (function () {
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v7' + sfx); });  // v7 was shared with EV-4.1-REV2 (different bucket-key format + raw-realized rel rows)
     localStorage.removeItem('stox_ev_live_v1');               // settled on a different (raw) realized basis and close entry
     localStorage.removeItem('stox_ev_live_v2');               // v2 shared with EV-4.1-REV2: close-entry records, no decision snapshots
+    localStorage.removeItem('stox_ev_live_v3');               // V4.2.1 fixed-Beta historical probabilities are not comparable with V4.3 hierarchical priors
   } catch (e) {}
 
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
@@ -609,13 +610,80 @@ window.ExpectedValueEngine = (function () {
   }
   function loadCalibration(key) { return loadStore(key || DEFAULTS.calibrationKey); }
 
+  /* ── V4.3 hierarchical empirical-Bayes historical probability ───────────
+     Exact bucket: h + t + score band + volatility + stop width.
+     Priors: H_T_V_P -> H_T_P -> H_T -> GLOBAL.
+     The exact bucket is excluded from prior aggregation so its observations
+     are not counted twice. Stop width remains in the closest priors. */
+  function calibrationKeyPart(bucketKey, prefix) {
+    var parts = String(bucketKey || '').split('|');
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].indexOf(prefix) === 0) return parts[i];
+    }
+    return null;
+  }
+
+  function calibrationPriorStats(all, predicate, excludeKey) {
+    var totalN = 0, totalWins = 0;
+    Object.keys(all || {}).forEach(function (bucketKey) {
+      if (bucketKey === excludeKey || !predicate(bucketKey)) return;
+      var b = all[bucketKey];
+      if (!b) return;
+      var n = num(b.n, 0), wins = num(b.wins, 0);
+      if (!isFinite(n) || n <= 0 || !isFinite(wins)) return;
+      totalN += n;
+      totalWins += clamp(wins, 0, n);
+    });
+    if (totalN <= 0) return null;
+    return { n: totalN, wins: totalWins, p: clamp(totalWins / totalN, 0.01, 0.99) };
+  }
+
+  function hierarchicalCalibrationPrior(all, horizon, targetPct, volClass, stopPct, exactKey) {
+    var h = 'h' + horizon;
+    var t = 't' + round(targetPct, 1);
+    var v = 'v' + (volClass || 'M');
+    var ps = stopPct == null ? 'x' : round(Math.round(num(stopPct, 0) * 2) / 2, 1);
+    var p = 'p' + ps;
+    var candidates = [
+      { level: 'H_T_V_P', minN: 40, predicate: function (k) { return calibrationKeyPart(k,'h')===h && calibrationKeyPart(k,'t')===t && calibrationKeyPart(k,'v')===v && calibrationKeyPart(k,'p')===p; } },
+      { level: 'H_T_P', minN: 60, predicate: function (k) { return calibrationKeyPart(k,'h')===h && calibrationKeyPart(k,'t')===t && calibrationKeyPart(k,'p')===p; } },
+      { level: 'H_T', minN: 100, predicate: function (k) { return calibrationKeyPart(k,'h')===h && calibrationKeyPart(k,'t')===t; } },
+      { level: 'GLOBAL', minN: 1, predicate: function () { return true; } }
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      var c = candidates[i], stats = calibrationPriorStats(all, c.predicate, exactKey);
+      if (stats && stats.n >= c.minN) return { level: c.level, n: stats.n, p: stats.p };
+    }
+    return { level: 'DEFAULT', n: 0, p: 0.50 };
+  }
+
+  function calibrationPriorStrength(exactN) {
+    var n = num(exactN, 0);
+    if (n < 30) return 40;
+    if (n < 60) return 30;
+    if (n < 120) return 20;
+    return 10;
+  }
+
   function historicalProbability(horizon, targetPct, setupScore, volClass, stopPct, key) {
     var all = loadCalibration(key);
-    var b = all[calibrationBucket(horizon, targetPct, setupScore, volClass, stopPct)];
-    if (!b || !b.n || b.n < 20) return null;
-    // Beta(1,1) shrinkage prevents small samples from producing extreme probabilities.
-    var p = (num(b.wins, 0) + 1) / (num(b.n, 0) + 2);
-    return { p: clamp(p, 0.01, 0.99), n: b.n, bucket: b };
+    if (!all) return null;
+    var exactKey = calibrationBucket(horizon, targetPct, setupScore, volClass, stopPct);
+    var b = all[exactKey];
+    var exactN = b ? num(b.n, 0) : 0;
+    if (!b || exactN < 20) return null;
+    var exactWins = clamp(num(b.wins, 0), 0, exactN);
+    var prior = hierarchicalCalibrationPrior(all, horizon, targetPct, volClass, stopPct, exactKey);
+    var priorStrength = calibrationPriorStrength(exactN);
+    var p = (exactWins + priorStrength * prior.p) / (exactN + priorStrength);
+    return {
+      p: clamp(p, 0.01, 0.99), n: exactN, bucket: b,
+      rawP: exactN > 0 ? clamp(exactWins / exactN, 0.01, 0.99) : null,
+      priorP: prior.p, priorN: prior.n, priorLevel: prior.level,
+      priorStrength: priorStrength,
+      evidenceWeight: exactN / (exactN + priorStrength),
+      exactKey: exactKey
+    };
   }
 
   function mlProbability(context) {
@@ -1943,6 +2011,6 @@ window.ExpectedValueEngine = (function () {
     upsideBaseline: upsideBaseline,
     returnSeries: function (daily, lookback) { return retSeries(daily, lookback || 90); },
     clearCalibration: clearCalibration,
-    _test: { windowOutcome: windowOutcome, buildWindowWeights: buildWindowWeights, computeSizing: computeSizing, breakEvenTargetProb: breakEvenTargetProb, liquidityCostPct: liquidityCostPct, afterTax: afterTax, outcomeValues: outcomeValues, Phi: Phi, tripleBarrierWindows: tripleBarrierWindows, calibrationBucket: calibrationBucket, historicalProbability: historicalProbability }
+    _test: { windowOutcome: windowOutcome, buildWindowWeights: buildWindowWeights, computeSizing: computeSizing, breakEvenTargetProb: breakEvenTargetProb, liquidityCostPct: liquidityCostPct, afterTax: afterTax, outcomeValues: outcomeValues, Phi: Phi, tripleBarrierWindows: tripleBarrierWindows, calibrationBucket: calibrationBucket, calibrationKeyPart: calibrationKeyPart, calibrationPriorStats: calibrationPriorStats, hierarchicalCalibrationPrior: hierarchicalCalibrationPrior, calibrationPriorStrength: calibrationPriorStrength, historicalProbability: historicalProbability }
   };
 })();
