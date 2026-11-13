@@ -546,17 +546,39 @@ const fetchHistoricalPrices = async (rawTicker, fromDate) => {
             const result = payload?.chart?.result?.[0];
             if (!result) continue;
             const timestamps = result.timestamp || [];
-            const closes = result.indicators?.quote?.[0]?.close || [];
+            const quotes = result.indicators?.quote?.[0] || {};
+            const closes = quotes.close || [];
             if (timestamps.length < 2) continue;
-            const pts = [];
+            /* Build full OHLCV bars so YahooValidation can actually validate
+               them. This series is consumed as {date, close}, but sanitize()
+               only understands {t,o,h,l,c,v} - handing it close-only points
+               made it drop every bar as a null close. */
+            const candles = [];
+            const _r2 = function (x) { return Math.round(x * 100) / 100; };
             for (let i = 0; i < timestamps.length; i++) {
               const c = closes[i];
               if (c == null || isNaN(c) || c <= 0) continue;
               const istMs = timestamps[i] * 1000 + (5.5 * 60 * 60 * 1000);
               const istDate = new Date(istMs).toISOString().split("T")[0];
-              pts.push({ date: istDate, close: Math.round(c * 100) / 100 });
+              const o = quotes.open?.[i], h = quotes.high?.[i], l = quotes.low?.[i], v = quotes.volume?.[i];
+              candles.push({
+                t: istDate,
+                o: _r2(o != null && isFinite(o) && o > 0 ? o : c),
+                h: _r2(h != null && isFinite(h) && h > 0 ? h : c),
+                l: _r2(l != null && isFinite(l) && l > 0 ? l : c),
+                c: _r2(c),
+                v: v != null && isFinite(v) && v >= 0 ? v : 0,
+              });
             }
-            if (pts.length >= 2) { var _clean = window.YahooValidation ? window.YahooValidation.sanitize(pts).candles : pts; if (_clean.length >= 2) { _resolve(_clean); return _clean; } }
+            if (candles.length >= 2) {
+              var _clean = candles;
+              if (window.YahooValidation) {
+                var _san = window.YahooValidation.sanitize(candles);
+                if (_san && _san.candles && _san.candles.length >= 2) _clean = _san.candles;
+              }
+              var pts = _clean.map(function (b) { return { date: b.t, close: b.c }; });
+              if (pts.length >= 2) { _resolve(pts); return pts; }
+            }
           } catch {}
         }
       }
@@ -5950,6 +5972,9 @@ const ConfidenceTracker = () => {
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const LS_WL_TRACKER = "stox_watchlist_tracker";
 const LS_WL_PRICES = "stox_watchlist_tracker_prices";
+/* Cooldown after a failed target scan so a flaky proxy is not hammered on
+   every remount, while still allowing a retry later the same day. */
+const WL_TARGET_RETRY_MS = 15 * 60 * 1000;
 
 /* â”€â”€ Watchlist target-hit tracking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    The target is the same +N% net-change goal the Score Tuner drives
@@ -6444,12 +6469,16 @@ const WatchlistTracker = () => {
     }
   };
 
-  /* Rescan conditions: never scanned today, target changed in the Score Tuner,
-     or a live-price hit whose live price has since moved. Failures still stamp
-     targetScanDay so a bad fetch is retried tomorrow instead of in a loop. */
+  /* Rescan conditions: never successfully scanned today, target changed in
+     the Score Tuner, or a live-price hit whose live price has since moved.
+     A failed fetch gets a short cooldown instead of stamping a successful scan
+     and blocking the row until tomorrow. */
   var needsTargetScan = function (r, tp, today) {
     if (!r || r.id == null) return false;
-    if (r.targetScanDay !== today) return true;
+    if (r.targetScanFailedAt && Date.now() - r.targetScanFailedAt < WL_TARGET_RETRY_MS) return false;
+    /* targetScanOkDay only exists on scans that actually fetched history;
+       rows stamped by an older/failed scan are re-checked once today. */
+    if (r.targetScanOkDay !== today) return true;
     if (r.targetPct !== tp) return true;
     if (r.targetHitLive && r.targetLivePx != null) {
       var cur = prices[r.ticker] || 0;
@@ -6469,10 +6498,12 @@ const WatchlistTracker = () => {
       for (var i = 0; i < queue.length; i++) {
         if (!targetAliveRef.current) return;
         var r = queue[i];
-        var stamp = { targetScanDay: today, targetPct: tp, targetHitDate: null, targetHitDays: null, targetHitPct: null, targetHitLive: false, targetLivePx: null };
+        var stamp = { targetScanDay: today, targetScanOkDay: today, targetPct: tp, targetHitDate: null, targetHitDays: null, targetHitPct: null, targetHitLive: false, targetLivePx: null };
+        var built = null, scanOk = false;
         try {
-          var built = await fetchMovementData(r);
-          var hit = wlTargetHit(built, built.live || prices[r.ticker] || 0, tp);
+          built = await fetchMovementData(r);
+          scanOk = !!(built && !built.err);
+          var hit = scanOk ? wlTargetHit(built, built.live || prices[r.ticker] || 0, tp) : null;
           if (hit) {
             stamp.targetHitDate = hit.date;
             stamp.targetHitDays = hit.days;
@@ -6481,7 +6512,7 @@ const WatchlistTracker = () => {
             stamp.targetLivePx = hit.live ? (built.live || prices[r.ticker] || 0) : null;
           }
           var rid = r.id, mBuilt = built;
-          setMovement(function (prev) {
+          if (mBuilt) setMovement(function (prev) {
             var next = Object.assign({}, prev);
             next[rid] = mBuilt;
             return next;
@@ -6492,7 +6523,16 @@ const WatchlistTracker = () => {
         for (var j = 0; j < curArr.length; j++) { if (curArr[j].id === r.id) { idx = j; break; } }
         if (idx < 0) continue;
         var arr = curArr.slice();
-        arr[idx] = Object.assign({}, arr[idx], stamp);
+        var nextRow = Object.assign({}, arr[idx]);
+        if (scanOk) {
+          Object.assign(nextRow, stamp);
+          delete nextRow.targetScanFailedAt;
+        } else {
+          /* Keep any previous hit data; apply the retry cooldown only. */
+          nextRow.targetScanDay = today;
+          nextRow.targetScanFailedAt = Date.now();
+        }
+        arr[idx] = nextRow;
         setTracked(arr);
         dbSetSetting(LS_WL_TRACKER, arr);
       }
