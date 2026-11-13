@@ -1072,6 +1072,11 @@ const THEMES = [
   { id: "yellow-dark", name: "Yellow Dark",   desc: "Dark amber glow",      dark: true,  preview: ["#100c04","#facc15","#4e462a","#eab308"] },
   { id: "orange-dark", name: "Orange Dark",   desc: "Ember orange night",   dark: true,  preview: ["#120a04","#fb923c","#523e24","#f97316"] },
   { id: "red-dark",    name: "Red Dark",      desc: "Dark blood red",       dark: true,  preview: ["#140606","#f87171","#582828","#ef4444"] },
+  { id: "obsidian",    name: "Obsidian",      desc: "Pure OLED black",      dark: true,  preview: ["#000000","#b7c0cc","#2a2d33","#8b95a7"] },
+  { id: "midnight",    name: "Midnight",      desc: "Blue-black night",     dark: true,  preview: ["#030711","#22d3ee","#123047","#06b6d4"] },
+  { id: "charcoal",    name: "Charcoal",      desc: "Warm graphite",        dark: true,  preview: ["#0a0a0b","#e6b17e","#3a3028","#cf9257"] },
+  { id: "slate",       name: "Slate",         desc: "Cool slate gray",      dark: true,  preview: ["#080b10","#f472b6","#3a2436","#ec4899"] },
+  { id: "abyss",       name: "Abyss",         desc: "Deep teal black",      dark: true,  preview: ["#020a0a","#2dd4bf","#0d3b37","#14b8a6"] },
 ];
 const FONTS = [
   { id: "dm-sans",            name: "DM Sans",            stack: "'DM Sans', sans-serif" },
