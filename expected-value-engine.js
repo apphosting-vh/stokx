@@ -1,111 +1,96 @@
 /* ══════════════════════════════════════════════════════════════════════
    StoX Expected Value & Probability-Calibrated Trade Engine
-   Version 4.2  (EV_V4_ENGINE)
+   Version 4.3  (EV_V4_ENGINE)
+
+   v4.2 -> v4.3 (audit fixes: setup-aware probability, honest self-audit,
+   correct trust statistics)
+     1. SETUP-AWARE PROBABILITY DECOMPOSITION: the statistical target-first
+        rate (55% of the v4.2 blend) was setup-BLIND — it walked every start
+        bar, not bars matching this setup. It now serves as the stock's own
+        baseline, and calibration enters as (histP − priorP), the setup's
+        lift over the plan's ALL-score-bands prior. p = ownBase + w·(histP
+        − priorP). New helper setupBlindPrior() aggregates across score bands
+        for the same (h, t, stop).
+     2. SELF-CHECK HONESTY: settlePredictions now records BOTH the detrended
+        realized P&L (the v4.1 basis, comparable to the detrended prediction)
+        AND the raw undetrended P&L (what a real trade would have made).
+        livePerformance() reports both. Label 'predicted_model_ev_vs_
+        realized_executable_pnl' is accurate now.
+     3. TRUST STATISTICS EFFECTIVE N: reliability and gate z-scores used
+        nEff = n/4 while the rows are stocks × weekly dates that share
+        market moves. nEff is now the number of distinct ISO weeks seen
+        (recordReliability accumulates a weekKey set); fallback n/4 if
+        unknown. Fixes ~5–10x z inflation.
+     4. UTILITY SIGN: non-positive EV is now ranked by RAW EV, not EV/sqrt(h).
+        Stops longer horizons winning the plan-search purely because they
+        shrink the magnitude of a negative number.
+     5. HORIZON-SCALED PRIOR: τ = evPriorStdPct × sqrt(h / defaultHorizon),
+        so the Empirical-Bayes λ is roughly horizon-invariant. Combined with
+        fix 4, positive-EV selection is no longer biased to short horizons
+        by the selection metric itself.
+     6. CALIBRATION DATA LOSS: recordOutcomes() and recordReliability() now
+        return -1 on store write failure (vs. 0 for "no rows"). calibrate-
+        FromHistory advances the per-stock progress marker ONLY when the
+        write actually succeeded, so failed-batch windows get re-labelled.
+     7. BUCKET SPARSITY: dropped volClass from the exact bucket key — it is
+        nearly a function of the stop width (1.8×ATR, clamped), so removing
+        it keeps identical information density while cutting exact-bucket
+        sparsity ~2×. Prior hierarchy still uses stop. Calibration key v8→v9.
+     8. REALISTIC COSTS: default slippage 0.05%/side (0.10%/round trip). At
+        a typical 0.24% statutory, round trip is now ~0.34%. Users can still
+        set 0. (taxRatePct default 0 is a user choice; leave as is.)
+     9. SIZING GAP-THROUGH AWARENESS: risk cap uses
+        max(stopPct, |meanStopRet|, |p5|), because gap-throughs and stops
+        on locked bars can fill worse than the nominal stop.
+    10. CLASSIFICATION ORDER: netEV ≤ 0 is checked BEFORE low evidence, so
+        clearly negative-EV setups label AVOID instead of WATCH.
+    11. STORE MEMOIZATION + DEFERRED TOUCH: loadCalibration is memoized per
+        key (invalidated by save/clear). statisticalTouch (informational) is
+        no longer computed for all 25 plans in optimize(); only for the
+        chosen best.
+    12. CONSERVATISM FEEDBACK: selectionHaircutOf() returns 0 when
+        reliabilityVerdict() is 'conservative', so the last of the four
+        conservatism layers is the first to drop when the audit says the
+        EV numbers have been over-shrunk.
 
    v4.1 -> v4.2 (merged build: verified v4.1 fixes + the sound parts of
    EV-4.1-REV2)
      1. FROZEN DECISION SNAPSHOT: recordPrediction() freezes the settlement-
         relevant config (tax basis, tax rate, loss credit, exit rules) at
-        prediction time; settlePredictions() settles against that snapshot, so
-        later config edits cannot rewrite history (from REV2).
-     2. EXPLICIT ENTRY TRACKING: live records carry signalDate / entryDate /
-        entryPrice / entryConvention ('next_session_open'), matching the
-        windowOutcome entry basis (next bar's open) used by labels and EVs
-        (REV2's intent, wired to the v4.1 entry convention).
-     3. LIVE SCORECARD TRANSPARENCY: livePerformance() reports its basis
-        ('predicted_model_ev_vs_realized_executable_pnl'), an effective sample
-        size derived from the average holding horizon (replaces the n/2
-        heuristic) and keeps verdicts but documents their meaning (from REV2).
+        prediction time; settlePredictions() settles against that snapshot.
+     2. EXPLICIT ENTRY TRACKING: signalDate / entryDate / entryPrice /
+        entryConvention ('next_session_open'), matching windowOutcome.
+     3. LIVE SCORECARD TRANSPARENCY: basis label, effective sample size
+        from average holding horizon (replaces n/2 heuristic).
      4. STORE KEYS BUMPED (calibration v8, live v3) and every earlier store
-        cleared on load — including EV-4.1-REV2's v7/live-v2 data (different
-        bucket-key format, raw-realized reliability rows), so no previous
-        engine's measurements leak into this one.
-     REV2's stop-band buckets and legacy-store migration were deliberately NOT
-     merged: the v4.1 key (stop at 0.5% granularity) has lower within-bucket
-     contamination (measured ~2.6 pts vs ~12 pts inside REV2's S2 band), and
-     the store key bump already retires incompatible data. REV2's drift
-     convention (drift ending before the entry bar) was not merged either: at
-     next-open entry the entry bar's close-to-close return is already known, so
-     v4.1's look-ahead-free convention (data <= window start) is kept — it also
-     matches calibrateFromHistory's labels exactly.
+        cleared on load.
 
-   v4.0 -> v4.1 (audit fixes: correctness of EV math and of the trust loop)
-     1. STOP WIDTH IN CALIBRATION BUCKETS: win labels (target-first rate) depend
-        strongly on the stop, but the bucket key ignored it (1.5% stop -> 23%
-        win rate vs 6% stop -> 52% in the SAME bucket). The key now includes the
-        stop rounded to 0.5%. Calibration store key bumped to v7 (v6 data is
-        not comparable and is cleared).
-     2. RELIABILITY / LIVE SCORECARD SAME BASIS: realized outcomes were raw
-        (undetrended) while predictions were detrended + shrunk + haircut, so
-        the self-audit systematically read "conservative" on trending stocks.
-        Realized is now computed on the prediction's basis: same entry, same
-        per-window drift removal (data <= entry bar only).
-     3. LOOK-AHEAD-FREE DRIFT: tripleBarrierWindows detrended every historical
-        window with ONE drift estimated through the current bar (future data
-        relative to old windows) and inconsistent with the label generator.
-        Each window is now detrended by its own trailing drift (data <= window
-        start), exactly as calibrateFromHistory labels are.
-     4. NEXT-OPEN ENTRY: entries were filled at the signal bar's close, which is
-        not tradable once the EOD signal exists. windowOutcome (labels, live EV,
-        settlement) and upsideProfile now enter at the NEXT bar's open.
-     5. COSTS: DP charge (Rs 13.5 + 18% GST per scrip-sell) is now actually
-        included via dpChargeRs (it was disabled while the comment claimed it
-        was folded into the statutory total). Round trip at Rs 1L = 0.239%.
-     6. CONSISTENT BASIS INSIDE windowOutcome: gap-through and locked-bar fills
-        are detrended like every other value (they mixed raw open returns with
-        detrended stop returns); MAE too. A locked-bar stop now exits at the
-        next tradable fill unconditionally (the locked-bar price is unfillable,
-        not min(locked, next) as before).
-     7. SIZING: computeSizing's raw edge is now computed on the same tax basis
-        as the decision EV (was always after-tax -> oversizing when tax was
-        enabled with decideAfterTax=false).
-     8. OVERLAP-WEIGHTED CALIBRATION COUNTS: weekly-start windows overlap up to
-        ~4x at horizon 20; label rows now carry weight 1/ceil(h/5) so Beta
-        shrinkage, evidence and the pooled prior see effective sample sizes.
-     (Blend-vs-distribution renormalization sensitivity is resolved by fix 1.)
-
-   Decision hierarchy:
-     Setup Quality -> Calibrated Probability -> Outcome Distribution
-     -> Net Expected Value -> Evidence Confidence -> Trade Decision
-
-   v2 -> v3 (trust fixes)
-     1. SAMPLING NOISE: every EV carries a standard error from its own windows
-        and is shrunk toward zero (empirical-Bayes, prior sd cfg.evPriorStdPct).
-        The engine reports P(true EV > 0) and QUALIFIED requires it to be high.
-     2. SELECTION BIAS (best of 25 plans): a split-half test (choose on the older
-        half, evaluate on the newer half, and vice versa) estimates how much the
-        winning plan's EV is inflated by being the maximum, and subtracts it.
-     3. SAME-BAR TIES: when a bar touches both target and stop, the order is
-        decided by where the bar opened (gambler's-ruin share), not always stop.
-        Stops that gap through their level fill at the open.
-     4. COSTS/TAX: flat DP charge on the sell (per scrip) and short-term capital
-        gains tax on gains (STT-paid listed equity, 20% + 4% cess) are modeled.
-        Decisions use after-tax EV by default (cfg.decideAfterTax).
-     5. CALIBRATION SCORE MISMATCH: calibration buckets use the daily-only entry
-        score. If the caller passes baseScore (the live multi-timeframe score)
-        and it differs a lot, the historical probability is down-weighted.
-     6. SELF-AUDIT: calibrateFromHistory() also records walk-forward predicted-vs-
-        realized EV of the optimizer's choice, and reliabilityStatus() reports
-        whether the table's numbers have been over- or under-confident.
+   v4.0 -> v4.1 (correctness of EV math and of the trust loop)
+     1. STOP WIDTH IN CALIBRATION BUCKETS.
+     2. RELIABILITY / LIVE SCORECARD SAME BASIS.
+     3. LOOK-AHEAD-FREE DRIFT.
+     4. NEXT-OPEN ENTRY.
+     5. DP CHARGE included via dpChargeRs.
+     6. CONSISTENT BASIS INSIDE windowOutcome.
+     7. SIZING: raw edge now on same tax basis as the decision EV.
+     8. OVERLAP-WEIGHTED CALIBRATION COUNTS (row.w = 1/ceil(h/5)).
 
    v3 -> v4 (decision quality, risk and self-honesty)
-     1. REGIME + RECENCY WEIGHTING: historical windows are weighted by how recent
-        they are and by how closely the index regime then (trend, volatility)
-        matches the regime now. Effective sample size falls accordingly.
-     2. POOLED PRIOR: when the calibration store has enough similar setups (same
-        plan, score band, volatility class) across stocks, the shrinkage target
-        moves from the zero-edge EV toward that pooled EV.
-     3. REALISTIC EXITS: stops locked behind a no-trade (limit) bar exit on the
-        next tradable bar; optional liquidity impact; optional exit variants
-        ('breakeven', 'trail') that compete with the fixed plan (off by default).
-     4. SIZING + RISK: fractional-Kelly position size, EV per day / annualized,
-        expected shortfall, worst window, adverse excursion, EV range,
-        break-even win probability, plain-language reasons, signal strength.
-     5. PORTFOLIO: diversify() ranks picks with correlation and group penalties;
-        rankingVerdict() answers "is there anything worth trading today?".
-     6. SELF-HONESTY: live prediction log + settlement, gate backtest (does the
-        Buy filter add value?), EV-bucket calibration table, stale/trust flag,
-        and calibration that clears itself when the cost or tax model changes.
+     1. REGIME + RECENCY WEIGHTING.
+     2. POOLED PRIOR.
+     3. REALISTIC EXITS (locked-limit, optional breakeven/trail).
+     4. SIZING + RISK (fractional Kelly, EV/day, tail stats, reasons).
+     5. PORTFOLIO DIVERSIFY + rankingVerdict.
+     6. SELF-HONESTY (live log, gate backtest, EV-bucket calibration,
+        trust flag, stale calibration clearing on cost/tax change).
+
+   v2 -> v3 (trust fixes)
+     1. SAMPLING NOISE (Empirical-Bayes shrink + P(true EV > 0)).
+     2. SELECTION BIAS (best-of-25 split-half haircut).
+     3. SAME-BAR TIES (open-based gambler's-ruin share).
+     4. COSTS/TAX (flat DP charge + after-tax basis).
+     5. CALIBRATION SCORE MISMATCH (gapFactor).
+     6. SELF-AUDIT (predicted-vs-realized reliability).
 
    Earlier (v2): first-passage outcome model, corrected costs, probTouch percent
    fix, evidence reflects measured sample, shared per-stock setup computation,
@@ -125,75 +110,47 @@ window.ExpectedValueEngine = (function () {
     targets: [2, 3, 4, 5, 6],
     defaultHorizon: 10,
     defaultTargetPct: 4,
-    minNetEV: 0.30,                 // applies to the SHRUNK (trust-adjusted) EV
+    minNetEV: 0.30,
     minPositiveProbability: 0.55,
     minEvidence: 60,
-    minEvConfidence: 0.80,          // P(true EV > 0) required for QUALIFIED (0.90 for HIGH CONVICTION)
+    minEvConfidence: 0.80,
     blend: { statistical: 0.55, historical: 0.25, ml: 0.20 },
-    /* All values are PERCENT of traded value unless stated.
-       brokerage, exchange, sebi, slippage are PER SIDE; stt is ROUND TRIP
-       (0.1% on buy + 0.1% on sell for delivery); stampDuty is buy side only;
-       gst is a FRACTION applied to (brokerage + exchange + SEBI).
-       dpChargeRs is the flat depository charge in RUPEES per scrip on the sell
-       day (13.5 + 18% GST = 15.93 at most brokers); it is converted to a percent
-       using positionSizeRs, so set positionSizeRs to your typical position.
-       Set costs.brokerage = 0 if your broker charges no delivery brokerage.
-       Override at runtime with window.STOX_EV_CONFIG = { costs: { ... } }. */
     costs: {
-      brokerage: 0,            // zero-brokerage delivery
-      stt: 0.20,               // 0.1% buy + 0.1% sell
-      exchange: 0.003,         // ~0.003% per side (0.006% round trip)
-      sebi: 0.001,             // GST & SEBI charges, ~0.001% per side (0.002% round trip); GST is folded in here, so gst below is 0
+      brokerage: 0,
+      stt: 0.20,
+      exchange: 0.003,
+      sebi: 0.001,
       gst: 0,
-      stampDuty: 0.015,        // buy side only
-      slippage: 0,             // no modeled slippage; statutory + DP total = 0.239% at Rs 1L position
-      dpChargeRs: 15.93,       // DP charge per scrip on the sell day (13.5 + 18% GST), converted to a % via positionSizeRs
+      stampDuty: 0.015,
+      /* v4.3: 0.05%/side slippage — at 0%/side, a 0.30% minNetEV gate is
+         largely consumed by slippage sensitivity. Users can override. */
+      slippage: 0.05,
+      dpChargeRs: 15.93,
       positionSizeRs: 100000
     },
-    /* Short-term capital gains on STT-paid listed equity: 20% + 4% cess = 20.8%.
-       Surcharge for high incomes and business-income treatment are NOT modeled.
-       Tax is levied on NET gains for the year, so a strategy you repeat pays tax
-       on its expected net gain (EV x (1 - rate)): losses are set off against gains.
-       taxLossCredit = share of each loss that offsets gains (1 = full set-off, the
-       default for a repeated strategy; 0 = taxed on every winner while losers earn
-       nothing, only right for one-off trades or a year with no other gains). */
-    taxRatePct: 0,                  // capital gains tax NOT deducted from Net EV (was 20.8)
+    taxRatePct: 0,
     taxLossCredit: 1,
-    decideAfterTax: false,          // Net EV is after costs only (no capital gains tax)
-    /* Trust adjustments */
-    evPriorStdPct: 0.5,             // prior sd of the TRUE gross edge per trade, % (shrinkage strength)
-    selectionHaircut: true,         // subtract the estimated best-of-N inflation
-    scoreGapFree: 8,                // points of live-vs-calibration score gap that cost nothing
-    scoreGapRange: 25,              // further points over which historical weight falls to its floor
+    decideAfterTax: false,
+    evPriorStdPct: 0.5,
+    selectionHaircut: true,
+    scoreGapFree: 8,
+    scoreGapRange: 25,
     stopATR: 1.8,
     maxStopPct: 6.0,
     minStopPct: 1.5,
     lookbackBars: 500,
     minWindows: 30,
     driftKeep: 0.5,
-    calibrationKey: 'stox_ev_calibration_v8',
+    /* v4.3: bumped from v8 (volClass removed from bucket key) */
+    calibrationKey: 'stox_ev_calibration_v9',
 
-    /* ── v4 options ─────────────────────────────────────────────────────── */
-    /* Eligibility gate. By default only base-model Strong Buy / Buy rows are
-       optimized. includeWatch also optimizes Watch/Hold rows; includeAvoid also
-       optimizes Avoid/Sell rows. Use gateReport() to see whether the gate helps. */
     gate: { includeWatch: false, includeAvoid: false },
-    /* Exit rules the optimizer may choose between. 'fixed' = target / stop /
-       timeout. 'breakeven' = once price reaches armFrac of the target, the stop
-       moves to entry. 'trail' = after arming, the stop trails the peak by
-       trailFrac of the initial stop (never below entry). The variants use the
-       stock's own history only (no calibration/ML blend), so they carry less
-       evidence. Off by default because the UI must show the exit rule. */
     exitVariants: ['fixed'],
     exit: { armFrac: 0.5, trailFrac: 0.6 },
-    lockedLimitDelay: true,         // a stop hit on a locked (no-trade) bar exits on the next tradable bar
-    /* Historical windows are down-weighted by age and by regime mismatch. */
-    recency: { halfLifeBars: 250 }, // 0 disables
+    lockedLimitDelay: true,
+    recency: { halfLifeBars: 250 },
     regime: { enabled: true, mismatchWeight: 0.6, trendBars: 50, volBars: 20, minIndexBars: 80 },
-    /* Shrink toward the pooled EV of similar setups when the store has enough. */
     pooledPrior: { enabled: true, minN: 30, k: 60, maxWeight: 0.5 },
-    /* Extra per-side impact cost from position size vs average daily turnover
-       (square-root law). Off by default so costs stay at the statutory total. */
     liquidity: { enabled: false, impactCoef: 0.5, maxPerSidePct: 1.0, advBars: 20 },
     sizing: { kellyFraction: 0.25, maxPositionPct: 20, maxRiskPerTradePct: 1.0 },
     correlation: { lookbackBars: 120, minOverlap: 60, threshold: 0.7, penalty: 0.5, maxPicks: 5, maxPerGroup: 1, groupPrefixes: ['ADANI', 'TATA', 'BAJAJ'] },
@@ -203,33 +160,34 @@ window.ExpectedValueEngine = (function () {
     upside: { horizons: [3, 5, 10, 15, 20], targets: [2, 3, 4, 5, 6], shrinkK: 8 }
   };
 
-  /* v2 stored calibration with a different label rule; it is not comparable. */
+  /* Clear stores incompatible with this build. v8 had volClass in the key
+     (this build removed it), and v8 was calibrated under the previous
+     slippage default (0%/side) — so the labels/EVs are not comparable. */
   try {
+    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v8' + sfx); });
+    /* Older store keys */
     localStorage.removeItem('stox_ev_calibration_v2');
     localStorage.removeItem('stox_ev_calibration_v2_meta');
-    localStorage.removeItem('stox_ev_calibration_v3');       // calibrated under old cost/tax settings
+    localStorage.removeItem('stox_ev_calibration_v3');
     localStorage.removeItem('stox_ev_calibration_v3_meta');
-    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v4' + sfx); });  // pre-regime/recency model
-    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v5' + sfx); });  // win labels were raw while val/live model were detrended
-    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v6' + sfx); });  // bucket key had no stop width (v7 adds it)
-    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v7' + sfx); });  // v7 was shared with EV-4.1-REV2 (different bucket-key format + raw-realized rel rows)
-    localStorage.removeItem('stox_ev_live_v1');               // settled on a different (raw) realized basis and close entry
-    localStorage.removeItem('stox_ev_live_v2');               // v2 shared with EV-4.1-REV2: close-entry records, no decision snapshots
-    localStorage.removeItem('stox_ev_live_v3');               // V4.2.1 fixed-Beta historical probabilities are not comparable with V4.3 hierarchical priors
+    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v4' + sfx); });
+    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v5' + sfx); });
+    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v6' + sfx); });
+    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v7' + sfx); });
+    localStorage.removeItem('stox_ev_live_v1');
+    localStorage.removeItem('stox_ev_live_v2');
+    localStorage.removeItem('stox_ev_live_v3');
   } catch (e) {}
 
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
-  function num(v, fallback) {
-    v = Number(v);
-    return isFinite(v) ? v : fallback;
-  }
+  function num(v, fallback) { v = Number(v); return isFinite(v) ? v : fallback; }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function round(v, d) {
     var p = Math.pow(10, d == null ? 2 : d);
     return Math.round(v * p) / p;
   }
   function pct(v) { return v == null || !isFinite(v) ? null : round(v * 100, 1); }
-  function Phi(x) {   // standard normal CDF (Abramowitz-Stegun 7.1.26)
+  function Phi(x) {
     var t = 1 / (1 + 0.2316419 * Math.abs(x));
     var d = 0.3989423 * Math.exp(-x * x / 2);
     var p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
@@ -256,20 +214,17 @@ window.ExpectedValueEngine = (function () {
     var broker = num(c.brokerage, 0) * 2;
     var exch = num(c.exchange, 0) * 2;
     var sebi = num(c.sebi, 0) * 2;
-    var gst = (broker + exch + sebi) * num(c.gst, 0);   // GST never applies to STT, stamp duty or DP
+    var gst = (broker + exch + sebi) * num(c.gst, 0);
     var dp = (num(c.dpChargeRs, 0) > 0 && num(c.positionSizeRs, 0) > 0) ? num(c.dpChargeRs, 0) / num(c.positionSizeRs, 0) * 100 : 0;
     return broker + exch + sebi + gst + num(c.stt, 0) + num(c.stampDuty, 0) + num(c.slippage, 0) * 2 + dp;
   }
 
-  /* Tax on ONE trade outcome g (percent, after costs). Gains are taxed; a loss
-     earns a rebate only to the extent cfg.taxLossCredit says it can be set off. */
   function afterTax(g, cfg) {
     var r = num(cfg.taxRatePct, 0) / 100;
     if (!(r > 0)) return g;
     return g > 0 ? g * (1 - r) : g * (1 - r * clamp(num(cfg.taxLossCredit, 0), 0, 1));
   }
 
-  /* ── Setup quality (descriptive; NOT a probability) ─────────────────── */
   function setupQuality(daily, indexCandles, symbol, hourly) {
     var TI = window.TechIndicators;
     if (!TI || !TI.computeEntryScore) return { score: null, components: {}, reason: 'technical_engine_unavailable' };
@@ -280,21 +235,14 @@ window.ExpectedValueEngine = (function () {
     return {
       score: clamp(Number(r.entry_score), 0, 100),
       components: {
-        trend: r.trendHealth,
-        pullback: r.pullbackQuality,
-        swing: r.swingPotential,
-        breakout: r.breakoutContinuation,
-        regime: r.regimeAlignment,
-        regimeMax: r.regimeAlignmentMax,
-        range: r.rangeAdequacy,
-        legacyConfidence: r.confidence
+        trend: r.trendHealth, pullback: r.pullbackQuality, swing: r.swingPotential,
+        breakout: r.breakoutContinuation, regime: r.regimeAlignment, regimeMax: r.regimeAlignmentMax,
+        range: r.rangeAdequacy, legacyConfidence: r.confidence
       },
-      raw: r,
-      reason: 'ok'
+      raw: r, reason: 'ok'
     };
   }
 
-  /* ── Volatility helpers ──────────────────────────────────────────────── */
   function atrPctOf(daily) {
     if (!daily || !daily.length) return null;
     var close = daily[daily.length - 1].c;
@@ -326,20 +274,14 @@ window.ExpectedValueEngine = (function () {
     return atrPct < 1.5 ? 'L' : (atrPct < 2.5 ? 'M' : 'H');
   }
 
-  /* ── TechIndicators touch probability (informational only) ───────────────
-     NOTE: components.probTouch is a PERCENT (e.g. 60.8 means 60.8%). */
   function statisticalTouch(hourly, daily, indexCandles, horizon, targetPct) {
     var TI = window.TechIndicators;
     if (!TI || !TI.computeHorizonConfidence || !hourly || !hourly.length || !daily || !daily.length) return null;
     var entry = hourly[hourly.length - 1].c;
     try {
       var r = TI.computeHorizonConfidence(hourly, daily, {
-        horizonDays: horizon,
-        windowSessions: 40,
-        entry_price: entry,
-        targetPct: targetPct,
-        holdingDays: null,
-        indexCandles: indexCandles
+        horizonDays: horizon, windowSessions: 40, entry_price: entry,
+        targetPct: targetPct, holdingDays: null, indexCandles: indexCandles
       });
       if (r && r.components && r.components.probTouch != null) {
         var p = Number(r.components.probTouch) / 100;
@@ -349,35 +291,21 @@ window.ExpectedValueEngine = (function () {
     return null;
   }
 
-  /* ── One historical window, walked bar by bar ──────────────────────────────
-     Entry = the OPEN of the bar after the start bar (an EOD signal is acted on
-     at the next session's open; the signal-bar close is not tradable).
-     Returns fractional outcome weights:
-        tP target first, sP stop first, oP timeout (tP + sP + oP = 1)
-     plus x (timeout terminal return, %) and sRet (return if stopped, %).
-     "removed" is the per-day log drift taken out of the path (see
-     tripleBarrierWindows); every return here is on that detrended basis,
-     including gap-through and locked-bar fills, so nothing mixes scales.
-     Same-bar tie: the share going to the target is the gambler's-ruin chance
-     that a driftless walk starting at the bar's OPEN reaches the target level
-     before the stop level; an open beyond a level means that level was hit first.
-     A stop that the bar gaps through fills at the open (worse than the stop). */
   function exitOpts(cfg) {
     return { armFrac: cfg.exit && cfg.exit.armFrac, trailFrac: cfg.exit && cfg.exit.trailFrac, lockDelay: cfg.lockedLimitDelay !== false };
   }
+
   function windowOutcome(daily, i, horizon, up, dn, removed, stopPct, mode, ex) {
     var entryBar = daily[i + 1];
-    var base = entryBar && entryBar.o > 0 ? entryBar.o
-      : (entryBar && entryBar.c > 0 ? entryBar.c
-      : (daily[i] ? daily[i].c : 0));
+    var base = entryBar && entryBar.o > 0 ? entryBar.o : (entryBar && entryBar.c > 0 ? entryBar.c : (daily[i] ? daily[i].c : 0));
     if (!(base > 0)) return null;
     mode = mode || 'fixed';
     ex = ex || {};
     removed = num(removed, 0);
-    var lvl = dn;                                   // current stop level (log, drift-adjusted)
+    var lvl = dn;
     var armAt = up * (ex.armFrac == null ? 0.5 : ex.armFrac);
     var trailDist = Math.abs(dn) * (ex.trailFrac == null ? 0.6 : ex.trailFrac);
-    var peak = -Infinity, minLow = 0;               // minLow is the DETRENDED adverse excursion
+    var peak = -Infinity, minLow = 0;
     for (var j = 1; j <= horizon; j++) {
       var bar = daily[i + j];
       if (!bar || !(bar.h > 0) || !(bar.l > 0)) continue;
@@ -387,7 +315,7 @@ window.ExpectedValueEngine = (function () {
       var hitS = lowL <= lvl;
       var hitT = highL >= up;
       if (!hitS && !hitT) {
-        if (mode !== 'fixed') {                     // the new stop applies from the NEXT bar
+        if (mode !== 'fixed') {
           if (highL > peak) peak = highL;
           if (peak >= armAt) {
             var nl = mode === 'breakeven' ? 0 : Math.max(0, peak - trailDist);
@@ -396,7 +324,7 @@ window.ExpectedValueEngine = (function () {
         }
         continue;
       }
-      var stopRet = (Math.exp(lvl) - 1) * 100;      // equals -stopPct while the stop has not moved
+      var stopRet = (Math.exp(lvl) - 1) * 100;
       var gapRet = stopRet;
       if (bar.o > 0) {
         var oRet = (Math.exp(Math.log(bar.o / base) - adj) - 1) * 100;
@@ -412,9 +340,6 @@ window.ExpectedValueEngine = (function () {
         return { tP: share, sP: 1 - share, oP: 0, x: 0, sRet: gapRet, mae: mae };
       }
       if (hitT) return { tP: 1, sP: 0, oP: 0, x: 0, sRet: stopRet, mae: mae };
-      /* Stop hit. If this bar is locked (no range: lower circuit / suspended)
-         nobody could sell at the stop OR at the locked price: the exit is the
-         next tradable bar's fill, better or worse. */
       if (ex.lockDelay !== false && bar.h === bar.l) {
         var exitRet = null;
         for (var k = j + 1; k <= horizon; k++) {
@@ -430,7 +355,7 @@ window.ExpectedValueEngine = (function () {
           var lastB = daily[Math.min(daily.length - 1, i + horizon)];
           exitRet = lastB && lastB.c > 0 ? (Math.exp(Math.log(lastB.c / base) - removed * horizon) - 1) * 100 : gapRet;
         }
-        gapRet = exitRet;                           // the locked-bar price is unfillable
+        gapRet = exitRet;
       }
       return { tP: 0, sP: 1, oP: 0, x: 0, sRet: gapRet, mae: Math.min(mae, gapRet) };
     }
@@ -440,7 +365,6 @@ window.ExpectedValueEngine = (function () {
     return { tP: 0, sP: 0, oP: 1, x: x, sRet: (Math.exp(lvl) - 1) * 100, mae: (Math.exp(minLow) - 1) * 100 };
   }
 
-  /* Value of one window outcome for a trade with target T, costs c (percent). */
   function outcomeValues(o, targetPct, costPct, cfg) {
     var afT = afterTax(targetPct - costPct, cfg);
     var afS = afterTax(o.sRet - costPct, cfg);
@@ -453,7 +377,6 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-  /* weighted quantile of (value, weight) pairs; q in [0,1] */
   function wQuantile(pairs, q) {
     if (!pairs.length) return 0;
     var arr = pairs.slice().sort(function (a, b) { return a[0] - b[0]; });
@@ -463,7 +386,6 @@ window.ExpectedValueEngine = (function () {
     for (k = 0; k < arr.length; k++) { acc += arr[k][1]; if (acc >= target) return arr[k][0]; }
     return arr[arr.length - 1][0];
   }
-  /* weighted mean of the lowest `share` of total weight (expected shortfall) */
   function wTailMean(pairs, share) {
     if (!pairs.length) return 0;
     var arr = pairs.slice().sort(function (a, b) { return a[0] - b[0]; });
@@ -477,16 +399,6 @@ window.ExpectedValueEngine = (function () {
     return acc > 0 ? s / acc : arr[0][0];
   }
 
-  /* ── Triple-barrier study on the stock's own history ─────────────────────
-     Every historical start bar is walked forward "horizon" bars (see
-     windowOutcome). Each window's own trailing log-drift is partly removed
-     (1 - driftKeep) from its path so a prior rally is not mistaken for an edge
-     (per window, using data up to that window only: no look-ahead).
-     Each window carries a weight (recency x regime match, see buildWindowWeights;
-     1 when no weights are given). Per-window after-cost (and after-tax) values
-     give the weighted EV, its standard error (using the effective sample size),
-     and the older-half / newer-half means used for the selection test. Tail and
-     adverse-excursion statistics describe the downside. */
   function tripleBarrierWindows(daily, horizon, targetPct, stopPct, cfg, costPct, weights, mode) {
     if (!daily || !daily.length) return null;
     var n = daily.length, last = n - 1;
@@ -494,10 +406,6 @@ window.ExpectedValueEngine = (function () {
     var lastStart = last - horizon;
     if (lastStart - firstStart + 1 < cfg.minWindows) return null;
 
-    /* Per-window, look-ahead-free drift: window i is detrended by the stock's own
-       average log drift over the lookback ENDING AT i (data <= i only), exactly
-       like calibrateFromHistory's labels. (v4.0 used one drift estimated through
-       the current bar for every window: future data relative to old windows.) */
     var lrSum = new Array(n), lrCnt = new Array(n);
     lrSum[0] = 0; lrCnt[0] = 0;
     for (var k = 1; k < n; k++) {
@@ -541,9 +449,9 @@ window.ExpectedValueEngine = (function () {
     mean /= W;
     var ss = 0;
     for (i2 = 0; i2 < m; i2++) ss += ws[i2] * (vals[i2] - mean) * (vals[i2] - mean);
-    var effW = W * W / W2;                            // Kish effective number of windows
+    var effW = W * W / W2;
     var sd = Math.sqrt(ss / W * effW / Math.max(1, effW - 1));
-    var nEff = effW / Math.max(1, horizon);           // overlapping windows are not independent
+    var nEff = effW / Math.max(1, horizon);
     var half = Math.floor(m / 2), hA = 0, hB = 0, wA = 0, wB = 0;
     for (i2 = 0; i2 < half; i2++) { hA += ws[i2] * vals[i2]; wA += ws[i2]; }
     for (i2 = half; i2 < m; i2++) { hB += ws[i2] * vals[i2]; wB += ws[i2]; }
@@ -579,13 +487,13 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-  /* ── Calibration store (bucketed empirical target-first outcomes) ─────────
-     The bucket key includes the STOP WIDTH (0.5% granularity): the target-first
-     win rate depends strongly on the stop (v4.0 mixed 23% and 52% win rates in
-     one bucket), so pooling across stops corrupted the historical probability. */
+  /* ── Calibration store ────────────────────────────────────────────────
+     Bucket key (v4.3): h + t + score band + stop width. Dropped volClass —
+     it is nearly a function of stop width (1.8×ATR, clamped) and adding it
+     to the key doubled exact-bucket sparsity without adding information. */
   function calibrationBucket(horizon, targetPct, setupScore, volClass, stopPct) {
     var ps = stopPct == null ? 'x' : round(Math.round(num(stopPct, 0) * 2) / 2, 1);
-    return 'h' + horizon + '|t' + round(targetPct, 1) + '|s' + Math.floor(clamp(setupScore || 0, 0, 99) / 10) * 10 + '|v' + (volClass || 'M') + '|p' + ps;
+    return 'h' + horizon + '|t' + round(targetPct, 1) + '|s' + Math.floor(clamp(setupScore || 0, 0, 99) / 10) * 10 + '|p' + ps;
   }
   function loadStore(key) {
     try {
@@ -600,21 +508,31 @@ window.ExpectedValueEngine = (function () {
   function saveStore(key, obj) {
     try { localStorage.setItem(key, JSON.stringify(obj)); return true; }
     catch (e) {
-      /* v4.2.1: never fail silently. A swallowed write error here is exactly
-         how calibrations stop persisting without anyone noticing (typically
-         QuotaExceededError once buckets/_rel/live records grow). */
       console.warn('[EV] store write FAILED for "' + key + '" (' + (e && e.name || 'error') +
         '): this batch is NOT persisted. Check localStorage quota (stox_ev_* sizes).');
       return false;
     }
   }
-  function loadCalibration(key) { return loadStore(key || DEFAULTS.calibrationKey); }
 
-  /* ── V4.3 hierarchical empirical-Bayes historical probability ───────────
-     Exact bucket: h + t + score band + volatility + stop width.
-     Priors: H_T_V_P -> H_T_P -> H_T -> GLOBAL.
-     The exact bucket is excluded from prior aggregation so its observations
-     are not counted twice. Stop width remains in the closest priors. */
+  /* v4.3: memoize loadCalibration. historicalProbability was re-parsing the
+     store per plan (25 plans/stock/scan). Cache invalidated on save/clear. */
+  var _calCache = {};
+  var _calCacheVer = {};
+  function loadCalibration(key) {
+    key = key || DEFAULTS.calibrationKey;
+    var ver = _calCacheVer[key] || 0;
+    var cached = _calCache[key];
+    if (cached && cached.ver === ver) return cached.data;
+    var data = loadStore(key);
+    _calCache[key] = { data: data, ver: ver };
+    return data;
+  }
+  function saveCalibration(key, obj) {
+    key = key || DEFAULTS.calibrationKey;
+    _calCacheVer[key] = (_calCacheVer[key] || 0) + 1;
+    return saveStore(key, obj);
+  }
+
   function calibrationKeyPart(bucketKey, prefix) {
     var parts = String(bucketKey || '').split('|');
     for (var i = 0; i < parts.length; i++) {
@@ -638,16 +556,18 @@ window.ExpectedValueEngine = (function () {
     return { n: totalN, wins: totalWins, p: clamp(totalWins / totalN, 0.01, 0.99) };
   }
 
+  /* v4.3: removed H_T_V_P level (volClass is no longer in the bucket key);
+     keep H_T_P, H_T, GLOBAL. */
   function hierarchicalCalibrationPrior(all, horizon, targetPct, volClass, stopPct, exactKey) {
     var h = 'h' + horizon;
     var t = 't' + round(targetPct, 1);
-    var v = 'v' + (volClass || 'M');
     var ps = stopPct == null ? 'x' : round(Math.round(num(stopPct, 0) * 2) / 2, 1);
     var p = 'p' + ps;
     var candidates = [
-      { level: 'H_T_V_P', minN: 40, predicate: function (k) { return calibrationKeyPart(k,'h')===h && calibrationKeyPart(k,'t')===t && calibrationKeyPart(k,'v')===v && calibrationKeyPart(k,'p')===p; } },
-      { level: 'H_T_P', minN: 60, predicate: function (k) { return calibrationKeyPart(k,'h')===h && calibrationKeyPart(k,'t')===t && calibrationKeyPart(k,'p')===p; } },
-      { level: 'H_T', minN: 100, predicate: function (k) { return calibrationKeyPart(k,'h')===h && calibrationKeyPart(k,'t')===t; } },
+      { level: 'H_T_P', minN: 40, predicate: function (k) {
+          return calibrationKeyPart(k, 'h') === h && calibrationKeyPart(k, 't') === t && calibrationKeyPart(k, 'p') === p; } },
+      { level: 'H_T', minN: 100, predicate: function (k) {
+          return calibrationKeyPart(k, 'h') === h && calibrationKeyPart(k, 't') === t; } },
       { level: 'GLOBAL', minN: 1, predicate: function () { return true; } }
     ];
     for (var i = 0; i < candidates.length; i++) {
@@ -686,9 +606,29 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
+  /* v4.3 — setup-blind prior for the SAME (h, t, stop) across all score
+     bands. This is the "priorP" the audit's cleaner decomposition uses. */
+  function setupBlindPrior(horizon, targetPct, stopPct, key) {
+    var all = loadCalibration(key);
+    var h = 'h' + horizon;
+    var t = 't' + round(targetPct, 1);
+    var ps = stopPct == null ? 'x' : round(Math.round(num(stopPct, 0) * 2) / 2, 1);
+    var p = 'p' + ps;
+    var totalN = 0, totalWins = 0;
+    Object.keys(all || {}).forEach(function (k) {
+      if (calibrationKeyPart(k, 'h') !== h) return;
+      if (calibrationKeyPart(k, 't') !== t) return;
+      if (calibrationKeyPart(k, 'p') !== p) return;
+      var b = all[k];
+      if (!b) return;
+      var n = num(b.n, 0), w = num(b.wins, 0);
+      if (n > 0) { totalN += n; totalWins += clamp(w, 0, n); }
+    });
+    if (totalN < 20) return null;
+    return { p: clamp(totalWins / totalN, 0.01, 0.99), n: totalN };
+  }
+
   function mlProbability(context) {
-    // Optional adapter: accepts a calibrated live ML probability if the existing
-    // StoX ML layer exposes one. No uncalibrated classifier score is used.
     var candidates = [
       window.LiveML && window.LiveML.getCalibratedProbability,
       window.MLTrainer && window.MLTrainer.getCalibratedProbability
@@ -697,45 +637,72 @@ window.ExpectedValueEngine = (function () {
       if (typeof candidates[i] === 'function') {
         try {
           var p = Number(candidates[i](context));
-          if (isFinite(p)) {
-            if (p > 1) p /= 100;
-            return clamp(p, 0.01, 0.99);
-          }
+          if (isFinite(p)) { if (p > 1) p /= 100; return clamp(p, 0.01, 0.99); }
         } catch (e) {}
       }
     }
     return null;
   }
 
-  function blendProbability(parts, cfg, histScale) {
-    var weights = cfg.blend;
-    var available = [];
-    if (parts.statistical && parts.statistical.p != null) available.push({ k: 'statistical', p: parts.statistical.p, w: weights.statistical });
-    if (parts.historical && parts.historical.p != null) available.push({ k: 'historical', p: parts.historical.p, w: weights.historical * (histScale == null ? 1 : histScale) });
-    if (parts.ml != null) available.push({ k: 'ml', p: parts.ml, w: weights.ml });
-    if (!available.length) return { p: null, contributors: 0, disagreement: null };
-    var wsum = available.reduce(function (s, x) { return s + x.w; }, 0);
-    var p = available.reduce(function (s, x) { return s + x.p * x.w / wsum; }, 0);
-    var mean = p;
-    var variance = available.reduce(function (s, x) {
-      return s + x.w / wsum * Math.pow(x.p - mean, 2);
-    }, 0);
-    return { p: clamp(p, 0.01, 0.99), contributors: available.length, disagreement: Math.sqrt(variance), parts: available };
+  /* v4.3: setup-aware combination. Replaces the previous flat blend.
+     p = ownBase + w·(histP − priorP), optionally blended with ML.
+     - ownBase  = the stock's own target-first rate (setup-blind per stock)
+     - histP    = the calibrated rate for this score band
+     - priorP   = the calibrated rate aggregated over ALL score bands for the
+                  same (h, t, stop) — the setup-blind baseline for this plan
+     - w        = gapFactor × hist.evidenceWeight (how much to trust the
+                  calibration adjustment given the score gap and sample size)
+     When histP/priorP are unavailable, adjustedBase stays = ownBase.
+     ML, if present, is blended at weight cfg.blend.ml. */
+  function combineProbability(tb, hist, prior, ml, cfg, gapFactor) {
+    var ownBase = tb ? clamp(tb.pTarget, 0.01, 0.99) : null;
+    var parts = [];
+    var contributors = 0;
+
+    if (ownBase != null) { parts.push(ownBase); contributors++; }
+
+    var adjustedBase = ownBase;
+    if (ownBase != null && hist && prior) {
+      var w = (gapFactor == null ? 1 : gapFactor) * (hist.evidenceWeight != null ? hist.evidenceWeight : 0.5);
+      var adj = hist.p - prior.p;
+      adjustedBase = clamp(ownBase + w * adj, 0.01, 0.99);
+      parts[0] = adjustedBase;
+      if (Math.abs(adj) > 0.01) contributors++;
+    }
+
+    if (ml != null) { parts.push(ml); contributors++; }
+
+    var p = null;
+    if (adjustedBase != null && ml != null) {
+      var mlW = num(cfg.blend.ml, 0.2);
+      p = clamp(adjustedBase * (1 - mlW) + ml * mlW, 0.01, 0.99);
+    } else if (adjustedBase != null) {
+      p = adjustedBase;
+    } else if (ml != null) {
+      p = ml;
+    }
+
+    var disagreement = null;
+    if (parts.length > 1) {
+      var mean = parts.reduce(function (a, b) { return a + b; }, 0) / parts.length;
+      var variance = parts.reduce(function (s, x) { return s + Math.pow(x - mean, 2); }, 0) / parts.length;
+      disagreement = Math.sqrt(variance);
+    }
+
+    return {
+      p: p, contributors: contributors, disagreement: disagreement, parts: parts,
+      ownBase: ownBase, adjustedBase: adjustedBase,
+      priorP: prior ? prior.p : null, histP: hist ? hist.p : null,
+      adjustment: (hist && prior) ? (hist.p - prior.p) : null
+    };
   }
 
-  /* Evidence confidence, 0-100.
-       own-history windows   0-12   calibration history  0-18
-       data completeness     0-15   model agreement      0-15
-       model count           0-15   setup stability      0-10
-       regime alignment      0-15
-     Without calibration or a second model the ceiling is 67. */
   function evidenceConfidence(input) {
     var ownScore = clamp((input.ownN || 0) / 40, 0, 1) * 12;
     var calScore = clamp((input.historicalN || 0) / 200, 0, 1) * 18;
     var dataScore = clamp(input.dataCompleteness == null ? 0 : input.dataCompleteness, 0, 1) * 15;
     var contributors = input.contributors || 0;
-    var agreementScore = contributors <= 1 ? 8 :
-      clamp(1 - num(input.disagreement, 0.25) / 0.25, 0, 1) * 15;
+    var agreementScore = contributors <= 1 ? 8 : clamp(1 - num(input.disagreement, 0.25) / 0.25, 0, 1) * 15;
     var modelScore = contributors >= 3 ? 15 : contributors === 2 ? 11 : 7;
     var setupScore = input.setupScore == null ? 50 : input.setupScore;
     var stabilityScore = clamp((setupScore - 35) / 50, 0, 1) * 10;
@@ -744,10 +711,11 @@ window.ExpectedValueEngine = (function () {
     return round(clamp(ownScore + calScore + dataScore + agreementScore + modelScore + stabilityScore + regimeScore, 0, 100), 1);
   }
 
-  /* netEV is the SHRUNK, selection-corrected EV on the decision basis. */
+  /* v4.3: netEV ≤ 0 checked BEFORE low evidence so clearly losing setups
+     label AVOID, not WATCH. */
   function classify(netEV, pEvPositive, pReturnPositive, evidence, setupScore, cfg) {
+    if (netEV != null && netEV <= 0) return { code: 'NEGATIVE_EV', label: 'AVOID', color: 'loss' };
     if (netEV == null || evidence < 45) return { code: 'INSUFFICIENT_EVIDENCE', label: 'WATCH', color: 'neutral' };
-    if (netEV <= 0) return { code: 'NEGATIVE_EV', label: 'AVOID', color: 'loss' };
     if (netEV >= 0.75 && pReturnPositive >= 0.62 && evidence >= 75 && (setupScore || 0) >= 60 && pEvPositive >= 0.90)
       return { code: 'HIGH_CONVICTION', label: 'HIGH CONVICTION', color: 'profit' };
     if (netEV >= cfg.minNetEV && pReturnPositive >= cfg.minPositiveProbability && evidence >= cfg.minEvidence && pEvPositive >= cfg.minEvConfidence)
@@ -755,12 +723,6 @@ window.ExpectedValueEngine = (function () {
     return { code: 'WATCH', label: 'WATCH', color: 'warn' };
   }
 
-
-  /* ── Window weights: recency x index-regime match ───────────────────────
-     Index regime at a date = (trend: close above its trendBars average) x
-     (volatility: recent realized vol above / below the index's own median).
-     A window whose regime differs from the CURRENT regime in one dimension is
-     weighted mismatchWeight, in both dimensions mismatchWeight^2. */
   function indexRegimes(indexCandles, cfg) {
     var rc = cfg.regime || {};
     var tb = rc.trendBars || 50, vb = rc.volBars || 20;
@@ -819,7 +781,6 @@ window.ExpectedValueEngine = (function () {
     return { weights: w, regime: info };
   }
 
-  /* Per-side market-impact estimate (percent): coef x daily vol x sqrt(position / ADV). */
   function liquidityCostPct(daily, atrPct, cfg) {
     var lc = cfg.liquidity || {};
     if (!lc.enabled) return { perSidePct: 0, participation: null, advRs: null };
@@ -835,7 +796,6 @@ window.ExpectedValueEngine = (function () {
     return { perSidePct: clamp(imp, 0, num(lc.maxPerSidePct, 1)), participation: part, advRs: adv };
   }
 
-  /* ── Per-stock work that does NOT depend on the (horizon, target) plan ──── */
   function prepare(input, cfg, internal) {
     var daily = input.dailyCandles || [];
     var hourly = input.hourlyCandles || [];
@@ -849,8 +809,6 @@ window.ExpectedValueEngine = (function () {
       setupCalScore = internal.setupScoreOverride;
     } else {
       setup = setupQuality(daily, indexCandles, symbol, hourly);
-      // Calibration buckets use the DAILY-ONLY score so that live analysis and
-      // historical (walk-forward) labelling use exactly the same definition.
       setupCalScore = null;
       try {
         var rc = TI && TI.computeEntryScore ? TI.computeEntryScore(daily, indexCandles, symbol, null) : null;
@@ -859,7 +817,6 @@ window.ExpectedValueEngine = (function () {
       if (setupCalScore == null) setupCalScore = setup.score;
     }
 
-    // Live multi-timeframe score vs the daily-only score the calibration was built on.
     var baseScore = input.baseScore == null ? null : Number(input.baseScore);
     var gap = (baseScore != null && isFinite(baseScore) && setupCalScore != null) ? Math.abs(baseScore - setupCalScore) : null;
     var gapFactor = gap == null ? 1 : clamp(1 - Math.max(0, gap - cfg.scoreGapFree) / cfg.scoreGapRange, 0.25, 1);
@@ -874,53 +831,42 @@ window.ExpectedValueEngine = (function () {
     var liq = liquidityCostPct(daily, atrPct, cfg);
 
     return {
-      setup: setup,
-      setupCalScore: setupCalScore,
-      scoreGap: gap,
-      gapFactor: gapFactor,
-      atrPct: atrPct,
-      stopPct: stopFromAtr(atrPct, cfg),
-      volClass: volClassOf(atrPct),
+      setup: setup, setupCalScore: setupCalScore, scoreGap: gap, gapFactor: gapFactor,
+      atrPct: atrPct, stopPct: stopFromAtr(atrPct, cfg), volClass: volClassOf(atrPct),
       dataCompleteness: dataCompleteness,
       costs: totalRoundTripCost(cfg.costs) + liq.perSidePct * 2,
-      liquidity: liq,
-      weights: ww.weights,
-      regime: ww.regime
+      liquidity: liq, weights: ww.weights, regime: ww.regime
     };
   }
 
-  /* ── Stage 1: everything about one plan that is independent of selection ── */
+  /* ── Stage 1: one plan, independent of selection ──────────────────────── */
   function corePlan(pre, input, cfg, horizon, targetPct, internal, mode) {
     var daily = input.dailyCandles || [];
     var hourly = input.hourlyCandles || [];
     var indexCandles = input.indexCandles || [];
     mode = mode || 'fixed';
-    /* Exit variants have no calibration history or ML probability for their own
-       exit rule, so they rely on the stock's own windows only. */
     var noHist = !!(internal && internal.noHist) || mode !== 'fixed';
+    var noTouch = !!(internal && internal.noTouch);
 
     var tb = tripleBarrierWindows(daily, horizon, targetPct, pre.stopPct, cfg, pre.costs, pre.weights, mode);
-    var touch = noHist ? null : statisticalTouch(hourly, daily, indexCandles, horizon, targetPct);
+    var touch = (noHist || noTouch) ? null : statisticalTouch(hourly, daily, indexCandles, horizon, targetPct);
     var hist = noHist ? null : historicalProbability(horizon, targetPct, pre.setupCalScore, pre.volClass, pre.stopPct, cfg.calibrationKey);
+    /* v4.3: setup-blind prior across all score bands for the same (h, t, stop). */
+    var prior = noHist ? null : setupBlindPrior(horizon, targetPct, pre.stopPct, cfg.calibrationKey);
     var ml = noHist ? null : mlProbability({
       symbol: input.symbol, dailyCandles: daily, hourlyCandles: hourly, indexCandles: indexCandles,
       setup: pre.setup, horizonDays: horizon, targetPct: targetPct
     });
 
-    var probability = blendProbability({
-      statistical: tb ? { p: clamp(tb.pTarget, 0.01, 0.99) } : null,
-      historical: hist,
-      ml: ml
-    }, cfg, pre.gapFactor);
+    var probability = combineProbability(tb, hist, prior, ml, cfg, pre.gapFactor);
 
     var core = {
-      horizonDays: horizon, targetPct: targetPct, exitMode: mode, tb: tb, touch: touch, hist: hist, ml: ml,
+      horizonDays: horizon, targetPct: targetPct, exitMode: mode,
+      tb: tb, touch: touch, hist: hist, prior: prior, ml: ml,
       probability: probability, dist: null, ev: null, pReturnPositive: null
     };
     if (!tb || probability.p == null) return core;
 
-    /* The blended target-first probability sets P(target); the remaining mass
-       keeps the MEASURED stop / timeout split. */
     var pT = probability.p, rest = 1 - pT;
     var denom = tb.pStop + tb.pTimeout;
     var stopShare = denom > 0 ? tb.pStop / denom : 0.5;
@@ -958,18 +904,19 @@ window.ExpectedValueEngine = (function () {
 
     var ev = null;
     if (core.ev) {
-      var tau = Math.max(0.05, num(cfg.evPriorStdPct, 0.5));
+      /* v4.3: horizon-scaled prior sd. At a fixed 0.5%, λ fell 0.87→0.31
+         from 3d to 20d, tilting positive-EV selection toward short horizons.
+         Scaling τ with sqrt(h / defaultHorizon) makes λ roughly
+         horizon-invariant. */
+      var tauBase = num(cfg.evPriorStdPct, 0.5);
+      var tau = Math.max(0.05, tauBase * Math.sqrt(core.horizonDays / Math.max(1, cfg.defaultHorizon)));
       var s = Math.max(0.02, tb.stdErr);
       var lam = tau * tau / (tau * tau + s * s);
       var corrected = core.basisEV - haircut;
-      /* Prior mean = EV of a trade with ZERO gross edge (efficient market):
-         minus costs, minus the tax drag on the winners (plus any loss rebate).
-         Shrinking toward 0 instead would hide the cost drag. */
       var cst = core.ev.costPct, Tg = core.targetPct, Sg = Math.abs(tb.meanStopRet);
       var pT0 = Sg / (Tg + Sg) * (1 - tb.pTimeout), pS0 = Tg / (Tg + Sg) * (1 - tb.pTimeout);
       var rate = cfg.decideAfterTax !== false ? num(cfg.taxRatePct, 0) / 100 : 0;
       var m0 = -cst - rate * pT0 * Math.max(0, Tg - cst) + rate * clamp(num(cfg.taxLossCredit, 0), 0, 1) * pS0 * (Sg + cst);
-      /* Pooled prior: similar setups across stocks (same plan, score band, vol class). */
       var pp = cfg.pooledPrior || {};
       var priorMean = m0, pooledMean = null, pooledW = 0;
       if (pp.enabled && hist && hist.bucket && hist.bucket.nv >= num(pp.minN, 30)) {
@@ -980,14 +927,11 @@ window.ExpectedValueEngine = (function () {
       var shrunk = priorMean + lam * (corrected - priorMean);
       var postSd = Math.sqrt(tau * tau * s * s / (tau * tau + s * s));
       ev = {
-        grossPct: core.ev.grossPct,
-        costPct: core.ev.costPct,
-        taxPct: core.ev.taxPct,
-        preTaxNetPct: core.ev.preTaxNetPct,
-        afterTaxNetPct: core.ev.afterTaxNetPct,
+        grossPct: core.ev.grossPct, costPct: core.ev.costPct, taxPct: core.ev.taxPct,
+        preTaxNetPct: core.ev.preTaxNetPct, afterTaxNetPct: core.ev.afterTaxNetPct,
         basis: cfg.decideAfterTax !== false ? 'after-tax' : 'net of costs',
-        rawBasisPct: core.basisEV,          // what the data say, no trust adjustment
-        haircutPct: haircut,                // best-of-N selection inflation removed
+        rawBasisPct: core.basisEV,
+        haircutPct: haircut,
         shrinkFactor: lam,
         priorMeanPct: priorMean,
         zeroEdgePriorPct: m0,
@@ -996,12 +940,12 @@ window.ExpectedValueEngine = (function () {
         shrunkPct: shrunk,
         stdErrPct: s,
         postSdPct: postSd,
-        pPositive: clamp(Phi(shrunk / postSd), 0, 1),   // P(true EV > 0)
-        netPct: shrunk,                     // PRIMARY: trust-adjusted EV on the decision basis
-        rangeLoPct: shrunk - 1.645 * postSd,    // 90% interval for the TRUE EV
+        pPositive: clamp(Phi(shrunk / postSd), 0, 1),
+        netPct: shrunk,
+        rangeLoPct: shrunk - 1.645 * postSd,
         rangeHiPct: shrunk + 1.645 * postSd,
         evPerDayPct: shrunk / Math.max(1, core.horizonDays),
-        annualizedPct: shrunk * 252 / Math.max(1, core.horizonDays)   // simple (not compounded) EV x trades per year
+        annualizedPct: shrunk * 252 / Math.max(1, core.horizonDays)
       };
     }
 
@@ -1022,13 +966,15 @@ window.ExpectedValueEngine = (function () {
       setupQuality: setup.score,
       setup: setup,
       probability: {
-        target: probability.p,                              // blended TARGET-FIRST probability
-        touch: core.touch ? core.touch.p : null,            // legacy "touch at any time" (informational)
+        target: probability.p,
+        touch: core.touch ? core.touch.p : null,
         positiveReturn: core.pReturnPositive,
         contributors: probability.contributors,
         disagreement: probability.disagreement,
         statistical: tb ? tb.pTarget : null,
         historical: hist ? hist.p : null,
+        priorP: core.prior ? core.prior.p : null,
+        setupAdjustment: probability.adjustment,
         historicalN: hist ? hist.n : 0,
         ml: core.ml
       },
@@ -1038,12 +984,8 @@ window.ExpectedValueEngine = (function () {
         removedDriftPerDayPct: round(tb.removedDriftPerDayPct, 3)
       } : null,
       distribution: core.dist,
-      stopPct: pre.stopPct,
-      atrPct: pre.atrPct,
-      volClass: pre.volClass,
-      costsPct: pre.costs,
-      calScoreGap: pre.scoreGap,
-      calScoreFactor: pre.gapFactor,
+      stopPct: pre.stopPct, atrPct: pre.atrPct, volClass: pre.volClass,
+      costsPct: pre.costs, calScoreGap: pre.scoreGap, calScoreFactor: pre.gapFactor,
       expectedValue: ev,
       evidenceConfidence: evidence,
       dataCompleteness: round(pre.dataCompleteness * 100, 1),
@@ -1062,8 +1004,6 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-
-  /* ── Sizing, break-even, reasons, strength (presentation + risk) ─────────── */
   function exitRuleText(mode, cfg) {
     var ex = cfg.exit || {};
     if (mode === 'breakeven') return 'Stop moves to entry once price is up ' + round(num(ex.armFrac, 0.5) * 100, 0) + '% of the way to target';
@@ -1071,14 +1011,10 @@ window.ExpectedValueEngine = (function () {
     return 'Fixed target / stop / time exit';
   }
 
-  /* Fractional Kelly on the three modeled outcomes, scaled down by how much of
-     the raw edge survived shrinkage, then capped by risk per trade and size. */
   function computeSizing(dist, tb, targetPct, cost, stopPct, ev, cfg) {
     var sc = cfg.sizing || {};
     var out = { fullKellyPct: 0, suggestedPct: 0, riskCapPct: null, binding: 'no edge', kellyScale: 0 };
     if (!dist || !tb || !ev || !(ev.netPct > 0)) return out;
-    /* Per-outcome returns on the SAME tax basis as ev.netPct (the decision
-       basis); mixing an after-tax edge with a pre-tax net EV oversizes. */
     var basisG = cfg.decideAfterTax !== false ? function (g) { return afterTax(g, cfg); } : function (g) { return g; };
     var outs = [
       [dist.pTarget, basisG(targetPct - cost) / 100],
@@ -1099,7 +1035,14 @@ window.ExpectedValueEngine = (function () {
     }
     var scale = rawEdge > 1e-9 ? clamp(ev.netPct / rawEdge, 0, 1) : 0;
     var kelly = bestF * 100 * num(sc.kellyFraction, 0.25) * scale;
-    var riskCap = stopPct > 0 ? num(sc.maxRiskPerTradePct, 1) / stopPct * 100 : null;
+    /* v4.3: risk cap on the EFFECTIVE stop (gap-throughs and locked-bar fills
+       can be worse than the nominal stop). */
+    var effStop = Math.max(
+      stopPct || 0,
+      Math.abs(tb.meanStopRet || 0),
+      tb.p5Pct != null ? Math.abs(tb.p5Pct) : 0
+    );
+    var riskCap = effStop > 0 ? num(sc.maxRiskPerTradePct, 1) / effStop * 100 : null;
     var cap = num(sc.maxPositionPct, 20);
     var sug = kelly, binding = 'kelly';
     if (riskCap != null && riskCap < sug) { sug = riskCap; binding = 'risk cap'; }
@@ -1107,8 +1050,6 @@ window.ExpectedValueEngine = (function () {
     return { fullKellyPct: bestF * 100, suggestedPct: sug, riskCapPct: riskCap, binding: binding, kellyScale: scale };
   }
 
-  /* Target-first probability at which EV (before tax) is exactly zero, holding the
-     measured stop/timeout split and payoffs fixed. */
   function breakEvenTargetProb(dist, tb, targetPct, cost) {
     if (!dist || !tb) return null;
     var rest = dist.pStop + dist.pTimeout;
@@ -1141,22 +1082,12 @@ window.ExpectedValueEngine = (function () {
     if (core.ev.costPct > 0.25 * T) out.push('Costs of ' + round(core.ev.costPct, 2) + '% eat ' + round(core.ev.costPct / T * 100, 0) + '% of the +' + round(T, 1) + '% target.');
     if (ev && ev.pPositive < 0.6) out.push('The edge is inside sampling noise (only ' + pct(ev.pPositive) + '% sure it is real).');
     if (haircut > 0.15) out.push('About ' + round(haircut, 2) + '% of the raw EV was likely luck from picking the best of many plans.');
-    if (core.tb.timeoutPosShare != null && core.dist.pTimeout > 0.4) out.push('Many trades just time out (' + pct(core.dist.pTimeout) + '%), so the move needs to come within the horizon.');
+    if (tb.timeoutPosShare != null && core.dist.pTimeout > 0.4) out.push('Many trades just time out (' + pct(core.dist.pTimeout) + '%), so the move needs to come within the horizon.');
     if (evidence < 60) out.push('Evidence is thin (' + round(evidence, 0) + '/100): few similar setups measured.');
     if (pre.regime && pre.regime.matchedShare != null && pre.regime.matchedShare < 0.35) out.push('Today\'s market regime (' + pre.regime.trend + 'trend, ' + pre.regime.volatility + ' vol) is uncommon in this stock\'s history.');
     return out.slice(0, 4);
   }
 
-
-  /* ── Upside candidates: chance of REACHING +T% within N days ──────────────
-     Different question from EV: this ignores the stop and costs. For every
-     historical start bar (entered at the NEXT bar's open, same implementable
-     basis as windowOutcome), did the high reach +T% within N bars? Windows are
-     weighted by recency and index-regime match (same weights as the EV model),
-     the stock's own drift is kept (it is what makes a stock a candidate), and
-     the estimate is shrunk toward the random-walk baseline for a driftless
-     stock with the same daily volatility, so a thin or lucky history does not
-     look like a sure thing. lift = shrunk chance - baseline. */
   function upsideProfile(dailyCandles, indexCandles, overrides) {
     var cfg = getConfig(overrides), uc = cfg.upside || {};
     var daily = dailyCandles || [], n = daily.length;
@@ -1187,14 +1118,13 @@ window.ExpectedValueEngine = (function () {
       }
       if (!(W > 0)) { p.push(T.map(function () { return null; })); nEff.push(0); return; }
       p.push(row.map(function (x) { return Math.round(x / W * 1000) / 1000; }));
-      nEff.push(Math.round((W * W / W2) / h * 10) / 10);   // overlapping windows are not independent
+      nEff.push(Math.round((W * W / W2) / h * 10) / 10);
     });
-    return {
-      sigmaPct: Math.round(sigma * 100 * 1000) / 1000, horizons: H, targets: T, p: p, nEff: nEff,
-      regime: ww.regime, asOf: String(daily[last].t).slice(0, 10)
-    };
+    /* NOTE: unlike the EV model, upsideProfile intentionally keeps drift — it
+       answers "will this stock reach +T%?", which includes any trend already
+       present. The two screens can disagree in philosophy by design. */
+    return { sigmaPct: Math.round(sigma * 100 * 1000) / 1000, horizons: H, targets: T, p: p, nEff: nEff, regime: ww.regime, asOf: String(daily[last].t).slice(0, 10) };
   }
-  /* P(max reaches +T% within N days) for a driftless random walk with daily vol sigma (reflection principle). */
   function upsideBaseline(sigmaPct, horizon, targetPct) {
     var sg = sigmaPct / 100 * Math.sqrt(horizon);
     if (!(sg > 0)) return 0;
@@ -1218,7 +1148,6 @@ window.ExpectedValueEngine = (function () {
     var horizon = clamp(num(input.horizonDays, cfg.defaultHorizon), 3, 20);
     var targetPct = clamp(num(input.targetPct, cfg.defaultTargetPct), 1, 10);
     var pre = prepare(input, cfg);
-    // A single, user-chosen plan involves no selection among alternatives: no haircut.
     return finalizePlan(corePlan(pre, input, cfg, horizon, targetPct), pre, input, cfg, 0);
   }
 
@@ -1226,6 +1155,8 @@ window.ExpectedValueEngine = (function () {
     var items = [];
     if (setup.score != null) items.push('Setup quality ' + round(setup.score, 0) + '/100');
     if (probability.p != null) items.push('target-first probability ' + pct(probability.p) + '%');
+    if (probability.ownBase != null && probability.adjustment != null)
+      items.push('own base ' + pct(probability.ownBase) + '% + setup adj ' + round((probability.adjustment * 100), 1) + ' pts (' + (probability.priorP != null ? 'prior ' + pct(probability.priorP) + '% vs hist ' + pct(probability.histP) + '%' : 'no prior') + ')');
     if (tb) items.push('measured on ' + tb.n + ' historical windows (~' + round(tb.nEff, 0) + ' independent)');
     if (pre && pre.stopPct != null) items.push('stop ' + round(pre.stopPct, 1) + '% (' + round(pre.stopPct / Math.max(0.01, pre.atrPct || pre.stopPct), 1) + ' ATR-equivalent)');
     if (pre && pre.regime && pre.regime.matchedShare != null) items.push('regime ' + pre.regime.trend + 'trend / ' + pre.regime.volatility + ' vol (' + round(pre.regime.matchedShare * 100, 0) + '% of weighted history matches)');
@@ -1241,11 +1172,12 @@ window.ExpectedValueEngine = (function () {
     return items;
   }
 
-  /* ── Optimizer ───────────────────────────────────────────────────────────
-     Utility = evidence-adjusted TRUST-ADJUSTED net EV per sqrt(day). Positive
-     EV is scaled by an evidence factor; negative EV is left unscaled so low
-     evidence can never make a losing plan look better. A small penalty
-     discourages choosing the extreme edge of the search grid. */
+  /* ── Optimizer utility ─────────────────────────────────────────────────
+     v4.3: non-positive EV is ranked by RAW EV, not EV/sqrt(h). The previous
+     metric rewarded longer horizons purely because a negative number divided
+     by a bigger sqrt(h) looks less bad. Positive EV still uses
+     EV/sqrt(h) × evidence, so time efficiency is rewarded only when there
+     is an edge to harvest. */
   function optimizerUtility(r, cfg) {
     if (!r || !r.expectedValue) return -999999;
     var ev = Number(r.expectedValue.netPct);
@@ -1257,7 +1189,13 @@ window.ExpectedValueEngine = (function () {
 
     var timeEff = ev / Math.sqrt(h);
     var evidenceFactor = 0.55 + 0.45 * clamp(evidence, 0, 100) / 100;
-    var u = ev > 0 ? timeEff * evidenceFactor : timeEff;
+    var u;
+    if (ev > 0) {
+      u = timeEff * evidenceFactor;
+    } else {
+      /* Rank non-positive plans by raw EV. */
+      u = ev;
+    }
 
     var maxH = Math.max.apply(null, cfg.horizons || [20]);
     var maxT = Math.max.apply(null, cfg.targets || [6]);
@@ -1267,14 +1205,15 @@ window.ExpectedValueEngine = (function () {
     return u - corner;
   }
 
-  /* Winner's-curse estimate. Choose the best plan on the OLDER half of the
-     windows and look at how it did on the NEWER half (and vice versa). The
-     average in-sample-minus-out-of-sample gap measures how much picking the
-     maximum of many noisy plans flatters the winner at HALF sample size; the
-     inflation scales with the standard error, so it is divided by sqrt(2) to
-     get the full-sample figure. Never negative. */
+  /* Winner's-curse estimate. */
   function selectionHaircutOf(cores, cfg) {
     if (!cfg.selectionHaircut) return 0;
+    /* v4.3: if the reliability audit says our EVs have been CONSERVATIVE
+       (realized better than predicted), the four-layer conservatism stack
+       is too thick. Drop the haircut first (the audit's recommendation). */
+    try {
+      if (reliabilityVerdict(cfg.calibrationKey) === 'conservative') return 0;
+    } catch (e) {}
     var valid = cores.filter(function (c) { return c.tb && c.tb.halfA != null && c.tb.halfB != null; });
     if (valid.length < 3) return 0;
     var ia = -1, ib = -1, ua = -Infinity, ub = -Infinity;
@@ -1290,8 +1229,6 @@ window.ExpectedValueEngine = (function () {
   }
 
   function optimize(input, overrides, internal) {
-    /* Eligibility gate: the technical/base model decides WHETHER to trade; EV
-       only optimizes the plan for an already eligible setup. */
     var baseRaw = input && (input.baseDecision || input.baseRating || input.baseSignal || input.rating);
     if (baseRaw && typeof baseRaw === 'object') baseRaw = baseRaw.code || baseRaw.label || baseRaw.rating;
     var baseDecision = String(baseRaw || '').toUpperCase().replace(/[\s-]+/g, '_');
@@ -1301,14 +1238,12 @@ window.ExpectedValueEngine = (function () {
     else if (baseDecision === 'AVOID' || baseDecision === 'SELL') eligibility = 'EXCLUDED';
     else if (baseDecision) eligibility = 'WATCH_ONLY';
 
-    /* A missing base decision fails closed (diagnostic only). Internal callers that
-       deliberately run without a base signal (walk-forward calibration) pass internal.skipGate. */
     var missingBase = eligibility === 'UNSPECIFIED' && !(internal && internal.skipGate);
     if (missingBase) eligibility = 'WATCH_ONLY';
 
     var cfg = getConfig(overrides);
     var gateOpts = cfg.gate || {};
-    var ungated = false;                       // optimized although the base signal would not normally qualify
+    var ungated = false;
     if (eligibility === 'EXCLUDED' && gateOpts.includeAvoid) { eligibility = 'ELIGIBLE'; ungated = true; }
     else if (eligibility === 'WATCH_ONLY' && gateOpts.includeWatch) { eligibility = 'ELIGIBLE'; ungated = true; }
 
@@ -1325,19 +1260,23 @@ window.ExpectedValueEngine = (function () {
 
     var horizons = (cfg.horizons || []).slice();
     var targets = (cfg.targets || []).slice();
-    // The base model is calibrated around a 3% move in 10 trading days: always benchmark it.
     if (horizons.indexOf(10) < 0) horizons.push(10);
     if (targets.indexOf(3) < 0) targets.push(3);
     var gridCfg = { horizons: horizons, targets: targets };
 
     var modes = (cfg.exitVariants || ['fixed']).filter(function (m) { return m === 'fixed' || m === 'breakeven' || m === 'trail'; });
-    if (modes.indexOf('fixed') < 0) modes.unshift('fixed');   // the base plan is always benchmarked
+    if (modes.indexOf('fixed') < 0) modes.unshift('fixed');
+
+    /* v4.3: skip statisticalTouch for non-best plans (informational only). */
+    var coreInternal = {};
+    if (internal) Object.keys(internal).forEach(function (k) { coreInternal[k] = internal[k]; });
+    coreInternal.noTouch = true;
 
     var cores = [];
     horizons.forEach(function (h) {
       targets.forEach(function (t) {
         modes.forEach(function (mode) {
-          var core = corePlan(pre, input, cfg, h, t, internal, mode);
+          var core = corePlan(pre, input, cfg, h, t, coreInternal, mode);
           core.isBaseline = (h === 10 && t === 3 && mode === 'fixed');
           if (core.ev) cores.push(core);
         });
@@ -1353,7 +1292,7 @@ window.ExpectedValueEngine = (function () {
         r.optimizerUtility = optimizerUtility(r, gridCfg);
         r.isBaseModelPlan = !!core.isBaseline;
         r.eligibility = ungated ? 'UNGATED' : eligibility;
-        r.optimizerRankMetric = 'evidence-adjusted trust-adjusted net EV per sqrt(day), 3%/10d baseline guard';
+        r.optimizerRankMetric = 'evidence-adjusted trust-adjusted net EV per sqrt(day) for positive EV; raw EV otherwise; 3%/10d baseline guard';
         results.push(r);
       }
     });
@@ -1373,13 +1312,22 @@ window.ExpectedValueEngine = (function () {
       if (results[i].isBaseModelPlan) { baseline = results[i]; break; }
     }
 
-    /* Baseline guard: do not leave the 3%/10d plan for a trivial improvement. */
     var best = results.length ? results[0] : null;
     if (best && baseline && best !== baseline) {
       var bestU = Number(best.optimizerUtility);
       var baseU = Number(baseline.optimizerUtility);
       var requiredImprovement = Math.max(0.03, Math.abs(baseU) * 0.08);
       if (isFinite(bestU) && isFinite(baseU) && bestU < baseU + requiredImprovement) best = baseline;
+    }
+
+    /* v4.3: compute the (informational) statisticalTouch only for the best
+       plan. Skips ~24 unnecessary TechIndicators calls per stock per scan. */
+    if (best && best.probability && !(internal && (internal.noHist || internal.noTouch)) &&
+        input.hourlyCandles && input.hourlyCandles.length) {
+      try {
+        var tBest = statisticalTouch(input.hourlyCandles, input.dailyCandles || [], input.indexCandles || [], best.horizonDays, best.targetPct);
+        if (tBest) best.probability.touch = tBest.p;
+      } catch (e) {}
     }
 
     if (best) {
@@ -1404,7 +1352,7 @@ window.ExpectedValueEngine = (function () {
       ungated: ungated,
       reason: eligibility === 'WATCH_ONLY'
         ? (missingBase
-            ? 'No base decision supplied (baseDecision / baseRating / baseSignal / rating); EV results are diagnostic only.'
+            ? 'No base decision supplied; EV results are diagnostic only.'
             : 'Base StoX signal is not Buy/Strong Buy; EV results are diagnostic only.')
         : null,
       qualified: results.filter(function (r) {
@@ -1413,7 +1361,10 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-  /* ── Calibration API ─────────────────────────────────────────────────────── */
+  /* ── Calibration API ────────────────────────────────────────────────── */
+  /* v4.3: returns -1 on store write failure (was silently 0); calibrate-
+     FromHistory only advances the per-stock progress marker when this
+     returns a non-negative count. */
   function recordOutcomes(rows, key) {
     key = key || DEFAULTS.calibrationKey;
     var all = loadCalibration(key), added = 0;
@@ -1421,15 +1372,13 @@ window.ExpectedValueEngine = (function () {
       if (!row || row.horizonDays == null || row.targetPct == null || row.setupScore == null) return;
       var w = row.win != null ? Number(row.win) : (row.hitTarget ? 1 : (row.hitTarget === false ? 0 : NaN));
       if (!isFinite(w)) return;
-      /* row.w = independence weight (overlapping weekly windows weigh less, so
-         n counts effective samples); defaults to 1 for plain one-shot rows. */
       var rw = row.w != null ? clamp(Number(row.w), 0.05, 1) : 1;
       if (!isFinite(rw) || rw <= 0) rw = 1;
       var b = calibrationBucket(row.horizonDays, row.targetPct, row.setupScore, row.volClass, row.stopPct);
       var cell = all[b] || { n: 0, wins: 0 };
       cell.n += rw;
-      cell.wins += rw * clamp(w, 0, 1);     // fractional when a same-bar tie was split by the open
-      if (row.val != null && isFinite(Number(row.val))) {   // value of the plan on the decision basis (pooled prior)
+      cell.wins += rw * clamp(w, 0, 1);
+      if (row.val != null && isFinite(Number(row.val))) {
         cell.nv = (cell.nv || 0) + rw;
         cell.sv = (cell.sv || 0) + rw * Number(row.val);
       }
@@ -1437,9 +1386,12 @@ window.ExpectedValueEngine = (function () {
       added++;
     });
     if (!added) return 0;
-    return saveStore(key, all) ? added : 0;
+    return saveCalibration(key, all) ? added : -1;
   }
-  function recordOutcome(row, key) { return recordOutcomes([row], key) > 0; }
+  function recordOutcome(row, key) {
+    var r = recordOutcomes([row], key);
+    return r > 0;
+  }
 
   function clearCalibration(key) {
     key = key || DEFAULTS.calibrationKey;
@@ -1448,14 +1400,12 @@ window.ExpectedValueEngine = (function () {
       localStorage.removeItem(key + '_meta');
       localStorage.removeItem(key + '_rel');
       localStorage.removeItem(key + '_sig');
+      delete _calCache[key];
+      _calCacheVer[key] = (_calCacheVer[key] || 0) + 1;
       return true;
     } catch (e) { return false; }
   }
 
-  /* The pooled EV and the reliability tally depend on the cost/tax model. When
-     that model changes, stored values from the old model are wrong, so the whole
-     calibration is cleared and rebuilt (win counts alone would be fine, but the
-     per-stock progress marker would stop the rest from being re-labeled). */
   function calibrationSignature(cfg) {
     return ['v5', round(totalRoundTripCost(cfg.costs), 4), num(cfg.taxRatePct, 0), num(cfg.taxLossCredit, 0), cfg.decideAfterTax !== false ? 1 : 0].join('|');
   }
@@ -1482,11 +1432,7 @@ window.ExpectedValueEngine = (function () {
     return { buckets: buckets, usableBuckets: usable, outcomes: total, symbols: Object.keys(meta).length };
   }
 
-  /* ── Reliability: did the table's EV match what actually happened? ───────
-     At each walk-forward start bar the optimizer is run on data up to that bar
-     ONLY (own-history model; no calibration or ML, so there is no look-ahead),
-     its chosen plan is played out on the bars that followed, and predicted vs
-     realized EV (same basis: after-tax or pre-tax) are accumulated. */
+  /* ── Reliability ─────────────────────────────────────────────────────── */
   var REL_EDGES = [-0.5, -0.25, 0, 0.25, 0.5];
   function blankAcc() { return { n: 0, sp: 0, sr: 0, spp: 0, spr: 0, srr: 0, sd: 0, sdd: 0, sraw: 0 }; }
   function relBin(p) { var k = 0; while (k < REL_EDGES.length && p >= REL_EDGES[k]) k++; return k; }
@@ -1495,6 +1441,20 @@ window.ExpectedValueEngine = (function () {
     g.n++; g.sp += pred; g.sr += real; g.spp += pred * pred; g.spr += pred * real; g.srr += real * real;
     g.sd += d; g.sdd += d * d; g.sraw += raw;
   }
+
+  /* v4.3: helper — ISO-year-week key (e.g. '2024-W03') from a YYYY-MM-DD. */
+  function weekKeyOf(dateStr) {
+    var ms = Date.parse(String(dateStr).slice(0, 10) + 'T12:00:00Z');
+    if (!isFinite(ms)) return null;
+    var d = new Date(ms);
+    var year = d.getUTCFullYear();
+    var start = Date.UTC(year, 0, 1);
+    var dayOfYear = Math.floor((ms - start) / 86400000);
+    var jan1Dow = new Date(start).getUTCDay();
+    var week = Math.floor((dayOfYear + jan1Dow) / 7) + 1;
+    return year + '-W' + (week < 10 ? '0' : '') + week;
+  }
+
   function recordReliability(rows, key) {
     key = key || DEFAULTS.calibrationKey;
     var rk = key + '_rel';
@@ -1502,8 +1462,13 @@ window.ExpectedValueEngine = (function () {
     if (!st.all) st.all = blankAcc();
     if (!st.elig) st.elig = blankAcc();
     if (!st.bins) st.bins = { all: [], elig: [] };
+    if (!st.weekKeys) st.weekKeys = {};
     var added = 0;
     (rows || []).forEach(function (r) {
+      if (r.date) {
+        var wk = weekKeyOf(r.date);
+        if (wk) st.weekKeys[wk] = 1;
+      }
       ['all'].concat(r.elig ? ['elig'] : []).forEach(function (grp) {
         addAcc(st[grp], r.pred, r.raw, r.real);
         var b = relBin(r.pred);
@@ -1513,28 +1478,39 @@ window.ExpectedValueEngine = (function () {
       });
       added++;
     });
-    if (added) { st.updated = Date.now(); saveStore(rk, st); }
+    if (added) {
+      st.updated = Date.now();
+      if (!saveStore(rk, st)) return -1;
+    }
     return added;
   }
-  function summarizeAcc(g) {
+
+  /* v4.3: takes an nEffOverride so reliability can pass distinct weeks
+     instead of the hardcoded n/4. */
+  function summarizeAcc(g, nEffOverride) {
     if (!g || !g.n) return { n: 0, verdict: 'collecting' };
     var n = g.n, mp = g.sp / n, mr = g.sr / n, bias = mr - mp;
     var varD = Math.max(0, g.sdd / n - Math.pow(g.sd / n, 2));
-    var nEff = n / 4;                                  // weekly starts overlap and stocks move together
+    var nEff = (nEffOverride != null && nEffOverride > 0) ? nEffOverride : n / 4;
     var se = Math.sqrt(varD / Math.max(1, nEff));
     var varP = g.spp / n - mp * mp;
     var slope = varP > 1e-6 ? (g.spr / n - mp * mr) / varP : null;
     var sdPred = Math.sqrt(Math.max(0, varP));
     var z = se > 0 ? bias / se : 0;
     var verdict = n < 100 ? 'collecting' : (z < -2 ? 'overconfident' : (z > 2 ? 'conservative' : 'consistent'));
-    // Level is right but the predictions do not rank trades: high-EV picks did not do better than low-EV picks.
     if (verdict === 'consistent' && n >= 300 && sdPred >= 0.2 && slope != null && slope < 0.3) verdict = 'weak-ranking';
-    return { n: n, meanPredicted: mp, meanRealized: mr, meanRawPredicted: g.sraw / n, bias: bias, stdErr: se, slope: slope, sdPredicted: sdPred, verdict: verdict };
+    return {
+      n: n, effectiveN: nEff,
+      meanPredicted: mp, meanRealized: mr, meanRawPredicted: g.sraw / n,
+      bias: bias, stdErr: se, slope: slope, sdPredicted: sdPred, verdict: verdict
+    };
   }
   var BIN_LABELS = ['< -0.50%', '-0.50% to -0.25%', '-0.25% to 0%', '0% to +0.25%', '+0.25% to +0.50%', '>= +0.50%'];
+
   function reliabilityCore(key) {
     key = key || DEFAULTS.calibrationKey;
     var st = loadStore(key + '_rel');
+    var distinctWeeks = Object.keys(st.weekKeys || {}).length;
     function bins(arr) {
       return (arr || []).map(function (c, k) {
         if (!c || !c.n) return null;
@@ -1549,22 +1525,34 @@ window.ExpectedValueEngine = (function () {
     var useB = be.length && st.elig && st.elig.n >= 100 ? be : ba;
     var top = null;
     useB.forEach(function (b) { if (b.n >= 30 && (!top || b.bin > top.bin)) top = b; });
+    var nEffAll = distinctWeeks > 0 && st.all ? Math.min(st.all.n, distinctWeeks) : null;
+    var nEffElig = distinctWeeks > 0 && st.elig ? Math.min(st.elig.n, distinctWeeks) : null;
     return {
-      all: summarizeAcc(st.all), elig: summarizeAcc(st.elig),
+      all: summarizeAcc(st.all, nEffAll),
+      elig: summarizeAcc(st.elig, nEffElig),
       binsAll: ba, binsElig: be,
-      topBucket: top,                         // highest predicted-EV bucket with enough samples
+      distinctWeeks: distinctWeeks,
+      topBucket: top,
       updatedAt: st.updated || null,
       ageDays: st.updated ? (Date.now() - st.updated) / 86400000 : null
     };
   }
+
+  /* v4.3: used by selectionHaircutOf to decide whether to drop the haircut. */
+  function reliabilityVerdict(key) {
+    try {
+      var core = reliabilityCore(key);
+      var g = core.elig && core.elig.n >= 100 ? core.elig : core.all;
+      return g ? g.verdict : 'collecting';
+    } catch (e) { return 'collecting'; }
+  }
+
   function reliabilityStatus(key) {
     var out = reliabilityCore(key);
     out.trust = buildTrust(out, key);
     return out;
   }
 
-  /* ── Does the Buy gate add value? Eligible vs not-eligible setups, same
-     optimizer, realized walk-forward on the decision basis. ──────────────── */
   function gateReport(key) {
     key = key || DEFAULTS.calibrationKey;
     var st = loadStore(key + '_rel');
@@ -1580,14 +1568,17 @@ window.ExpectedValueEngine = (function () {
     var out = { eligible: e, notEligible: nn, edge: null, z: null, verdict: 'collecting' };
     if (e.n >= 100 && nn.n >= 100) {
       out.edge = e.meanRealized - nn.meanRealized;
-      var se = Math.sqrt(e.varRealized / Math.max(1, e.n / 4) + nn.varRealized / Math.max(1, nn.n / 4));
+      var distinctWeeks = Object.keys(st.weekKeys || {}).length;
+      var nEffE = distinctWeeks > 0 ? Math.min(e.n, distinctWeeks) : e.n / 4;
+      var nEffN = distinctWeeks > 0 ? Math.min(nn.n, distinctWeeks) : nn.n / 4;
+      var se = Math.sqrt(e.varRealized / Math.max(1, nEffE) + nn.varRealized / Math.max(1, nEffN));
       out.z = se > 0 ? out.edge / se : 0;
       out.verdict = out.z > 2 ? 'gate-adds-value' : (out.z < -2 ? 'gate-hurts' : 'gate-no-better');
     }
     return out;
   }
 
-  /* ── Live tracking: log what the table predicted, settle it later on real bars ─ */
+  /* ── Live tracking ──────────────────────────────────────────────────── */
   function liveKey(cfg) { return (cfg.live && cfg.live.key) || 'stox_ev_live_v1'; }
   function loadLive(cfg) { var d = loadStore(liveKey(cfg)); if (!d.records) d.records = []; return d; }
 
@@ -1597,14 +1588,10 @@ window.ExpectedValueEngine = (function () {
     var daily = opts.dailyCandles || [];
     var symbol = opts.symbol || (best && best.symbol);
     if (!best || !best.expectedValue || !symbol || !daily.length) return false;
-    /* The entry bar is the NEXT session after the signal (windowOutcome's
-       basis); it is not known yet and is filled in at settlement. */
     var date = String(daily[daily.length - 1].t).slice(0, 10);
     var id = [symbol, date, best.horizonDays, best.targetPct, best.exitMode || 'fixed'].join('|');
     var st = loadLive(cfg);
-    for (var i = 0; i < st.records.length; i++) if (st.records[i].id === id) return false;   // already logged
-    /* v4.2: freeze settlement-relevant config at prediction time. Historical
-       predictions must not change because tax or exit settings change later. */
+    for (var i = 0; i < st.records.length; i++) if (st.records[i].id === id) return false;
     var currentExit = exitOpts(cfg);
     var decisionSnapshot = {
       decideAfterTax: cfg.decideAfterTax !== false,
@@ -1630,7 +1617,10 @@ window.ExpectedValueEngine = (function () {
     return saveStore(liveKey(cfg), st);
   }
 
-  /* Settle every open prediction of one stock using its (fresh) daily candles. */
+  /* v4.3: also records rec.realRaw (undetrended realized) alongside rec.real
+     (detrended, comparable to the detrended prediction). The audit flagged
+     that "realized_executable_pnl" being the detrended basis made the label
+     misleading. */
   function settlePredictions(symbol, dailyCandles, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
@@ -1643,16 +1633,11 @@ window.ExpectedValueEngine = (function () {
       var i = byDate[rec.date];
       if (i == null) return;
       var complete = i + rec.h <= daily.length - 1;
-      /* Same basis as the recorded prediction: detrend by the drift known at
-         entry (data <= i), so realized-vs-predicted measures calibration and
-         not the drift the model deliberately removes. */
       var muI = 0, mc = 0;
       for (var q = Math.max(1, i - cfg.lookbackBars + 1); q <= i; q++) {
         if (daily[q - 1].c > 0 && daily[q].c > 0) { muI += Math.log(daily[q].c / daily[q - 1].c); mc++; }
       }
       var removedI = (1 - clamp(num(cfg.driftKeep, 0.5), 0, 1)) * (mc ? muI / mc : 0);
-      /* v4.2: settle against the config frozen at prediction time (tax basis,
-         exit rules), so later config edits cannot rewrite history. */
       var snap = rec.decisionSnapshot || null;
       var settlementCfg = cfg;
       if (snap) {
@@ -1663,17 +1648,24 @@ window.ExpectedValueEngine = (function () {
         settlementCfg.taxLossCredit = snap.taxLossCredit;
       }
       var settlementExit = snap && snap.exit ? snap.exit : exitOpts(cfg);
-      /* windowOutcome enters at the NEXT session's open; record it for display. */
       var entryBar = daily[i + 1];
       if (entryBar && entryBar.o > 0) {
         rec.entryDate = String(entryBar.t).slice(0, 10);
         rec.entryPrice = entryBar.o;
       }
-      var o = windowOutcome(daily, i, rec.h, Math.log(1 + rec.t / 100), Math.log(1 - rec.stop / 100), removedI, rec.stop, rec.mode, settlementExit);
+      var up = Math.log(1 + rec.t / 100), dn = Math.log(1 - rec.stop / 100);
+      var o = windowOutcome(daily, i, rec.h, up, dn, removedI, rec.stop, rec.mode, settlementExit);
       if (!o) return;
-      if (!complete && o.oP > 0) return;                 // neither target nor stop yet and bars remain
+      if (!complete && o.oP > 0) return;
       var v = outcomeValues(o, rec.t, rec.cost, settlementCfg);
       rec.real = settlementCfg.decideAfterTax !== false ? v.aft : v.pre;
+      /* v4.3: parallel undetrended run for the "raw realized P&L" column. */
+      var oRaw = windowOutcome(daily, i, rec.h, up, dn, 0, rec.stop, rec.mode, settlementExit);
+      if (oRaw) {
+        var vRaw = outcomeValues(oRaw, rec.t, rec.cost, settlementCfg);
+        rec.realRaw = settlementCfg.decideAfterTax !== false ? vRaw.aft : vRaw.pre;
+        rec.detrend = removedI * 100 * rec.h;   // total detrend applied (percent)
+      }
       rec.outcome = o.tP >= 0.5 ? 'target' : (o.sP >= 0.5 ? 'stop' : 'timeout');
       rec.status = 'settled'; rec.settledAt = Date.now();
       settled++; changed = true;
@@ -1687,6 +1679,7 @@ window.ExpectedValueEngine = (function () {
     var cfg = getConfig(opts.config);
     var st = loadLive(cfg);
     var done = st.records.filter(function (r) { return r.status === 'settled' && isFinite(r.real); });
+    var doneRaw = st.records.filter(function (r) { return r.status === 'settled' && isFinite(r.realRaw); });
     var openN = st.records.length - done.length;
     var out = { open: openN, settled: done.length, verdict: 'collecting', buckets: {} };
     if (!done.length) return out;
@@ -1694,15 +1687,22 @@ window.ExpectedValueEngine = (function () {
     done.forEach(function (r) { var d = r.real - r.pred; sp += r.pred; sr += r.real; sd += d; sdd += d * d; });
     var n = done.length, bias = (sr - sp) / n;
     var varD = Math.max(0, sdd / n - Math.pow(sd / n, 2));
-    /* v4.2 (from REV2): predictions overlap in time; derive an effective
-       sample size from the average holding horizon instead of a fixed n/2. */
     var avgHorizon = 0;
     done.forEach(function (r) { avgHorizon += Math.max(1, Number(r.h) || 1); });
     avgHorizon /= Math.max(1, n);
     var overlapFactor = Math.max(1, Math.min(avgHorizon, 10) / 2);
     var effectiveN = Math.max(1, n / overlapFactor);
     var se = Math.sqrt(varD / effectiveN);
-    out.meanPredicted = sp / n; out.meanRealized = sr / n; out.bias = bias; out.stdErr = se;
+    out.meanPredicted = sp / n;
+    out.meanRealized = sr / n;
+    /* v4.3: raw (undetrended) realized P&L, shown side-by-side. */
+    if (doneRaw.length) {
+      var srRaw = 0;
+      doneRaw.forEach(function (r) { srRaw += r.realRaw; });
+      out.meanRealizedRaw = srRaw / doneRaw.length;
+      out.rawSampleN = doneRaw.length;
+    }
+    out.bias = bias; out.stdErr = se;
     out.comparisonBasis = 'predicted_model_ev_vs_realized_executable_pnl';
     out.effectiveN = effectiveN; out.avgHorizonDays = avgHorizon;
     out.z = se > 0 ? bias / se : 0;
@@ -1720,7 +1720,6 @@ window.ExpectedValueEngine = (function () {
     try { localStorage.removeItem(liveKey(getConfig(opts && opts.config))); return true; } catch (e) { return false; }
   }
 
-  /* ── Trust flag: one place that says whether the EVs on screen can be believed ── */
   function buildTrust(rel, key) {
     var cfg = getConfig(), msgs = [], level = 'ok';
     function raise(l, m) {
@@ -1742,7 +1741,6 @@ window.ExpectedValueEngine = (function () {
     return { level: level, messages: msgs };
   }
 
-  /* ── "Is there anything worth trading today?" ─────────────────────────── */
   function rankingVerdict(results, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
@@ -1767,9 +1765,6 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-  /* ── Correlation-aware pick list ────────────────────────────────────────── */
-  /* Compact {dayOrdinal: logReturn} map (4 decimals) so a row can carry its own
-     correlation inputs without storing candles. */
   function retSeries(daily, lookback) {
     var m = {}, n = daily ? daily.length : 0;
     for (var i = Math.max(1, n - lookback); i < n; i++) {
@@ -1797,9 +1792,6 @@ window.ExpectedValueEngine = (function () {
     return null;
   }
 
-  /* items: [{ symbol, result (the optimizer's best plan), dailyCandles OR returns (from returnSeries), group? }]
-     Returns the items re-ordered so that picks highly correlated with a better
-     pick already chosen (or in the same group) are pushed down. */
   function diversify(items, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config), cc = cfg.correlation || {};
@@ -1869,17 +1861,7 @@ window.ExpectedValueEngine = (function () {
     return 60;
   }
 
-  /* Walk-forward calibration + reliability for ONE stock. Idempotent and
-     incremental:
-       - start bars are the first bar of each calendar week, so re-running never
-         re-labels the same window and appended bars never create near-duplicates;
-       - per-symbol progress is stored in <key>_meta as { newest, oldest, count };
-       - each call processes at most opts.maxSamples new start bars, so the
-         caller can yield to the UI between calls.
-     Labels use the same window rules as the live model (open-based tie split,
-     gap-through stops). Setup = daily-only entry score as of the start bar
-     (no look-ahead). opts.reliability === false skips the predicted-vs-realized
-     bookkeeping. */
+  /* v4.3: only advance per-stock progress when recordOutcomes succeeded. */
   function calibrateFromHistory(daily, indexCandles, symbol, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
@@ -1897,7 +1879,7 @@ window.ExpectedValueEngine = (function () {
     var lastStart = daily.length - 1 - maxH;
 
     function weekOf(ord) { return Math.floor((ord + 3) / 7); }
-    var eligible = [];   // newest -> oldest
+    var eligible = [];
     for (var i = lastStart; i >= minStart; i--) {
       var ord = dayOrdinal(daily[i].t), prev = dayOrdinal(daily[i - 1].t);
       if (ord == null || prev == null) { out.reason = 'bad_dates'; return out; }
@@ -1915,7 +1897,7 @@ window.ExpectedValueEngine = (function () {
       else if (dt > meta.newest) fresh.push(idx);
       else if (dt < meta.oldest) older.push(idx);
     });
-    fresh.reverse();                      // oldest-of-the-new first keeps the done-range contiguous
+    fresh.reverse();
     var todo = fresh.concat(meta.count < cap ? older.slice(0, Math.max(0, cap - meta.count)) : []);
     out.remaining = Math.max(0, todo.length - maxSamples);
     todo = todo.slice(0, maxSamples);
@@ -1936,8 +1918,6 @@ window.ExpectedValueEngine = (function () {
       var vc = volClassOf(atrPct);
       if (r && r.entry_score != null) {
         var score = clamp(Number(r.entry_score), 0, 99.9);
-        /* Pooled-EV values drop part of the stock's PRIOR drift exactly as the live
-           model does (past data only), so a bull market is not mistaken for an edge. */
         var mu = 0, mc = 0;
         for (var q = Math.max(1, idx - cfg.lookbackBars + 1); q <= idx; q++) {
           if (daily[q - 1].c > 0 && daily[q].c > 0) { mu += Math.log(daily[q].c / daily[q - 1].c); mc++; }
@@ -1945,28 +1925,29 @@ window.ExpectedValueEngine = (function () {
         var removedC = (1 - clamp(num(cfg.driftKeep, 0.5), 0, 1)) * (mc ? mu / mc : 0);
         cfg.horizons.forEach(function (h) {
           cfg.targets.forEach(function (t) {
-            /* win and val are both DETRENDED, matching the live model's tb.pTarget.
-               row.w: weekly starts overlap (h/5 bars share paths), so weight each
-               label by 1/ceil(h/5) to keep n = effective sample size. */
             var oV = windowOutcome(daily, idx, h, Math.log(1 + t / 100), Math.log(1 - stopPct / 100), removedC, stopPct);
             if (!oV) return;
             var ov = outcomeValues(oV, t, costPct, cfg);
-            rows.push({ horizonDays: h, targetPct: t, setupScore: score, volClass: vc, stopPct: stopPct,
-              w: 1 / Math.max(1, Math.ceil(h / 5)), win: oV.tP, val: cfg.decideAfterTax !== false ? ov.aft : ov.pre });
+            rows.push({
+              horizonDays: h, targetPct: t, setupScore: score, volClass: vc, stopPct: stopPct,
+              w: 1 / Math.max(1, Math.ceil(h / 5)), win: oV.tP,
+              val: cfg.decideAfterTax !== false ? ov.aft : ov.pre
+            });
           });
         });
         if (doRel) {
           try {
-            var res = optimize({ symbol: symbol, dailyCandles: slice, hourlyCandles: [], indexCandles: idxSlice }, opts.config, { setupScoreOverride: score, noHist: true, skipGate: true });
+            var res = optimize(
+              { symbol: symbol, dailyCandles: slice, hourlyCandles: [], indexCandles: idxSlice },
+              opts.config, { setupScoreOverride: score, noHist: true, skipGate: true }
+            );
             var b = res && res.best;
             if (b && b.expectedValue) {
-              /* Realized on the SAME basis as the prediction: same detrended
-                 values (removedC = drift from data <= idx, like the live model),
-                 so predicted-vs-realized measures calibration, not drift. */
               var o2 = windowOutcome(daily, idx, b.horizonDays, Math.log(1 + b.targetPct / 100), Math.log(1 - b.stopPct / 100), removedC, b.stopPct, b.exitMode, exitOpts(cfg));
               if (o2) {
                 var rv = outcomeValues(o2, b.targetPct, b.costsPct != null ? b.costsPct : costPct, cfg);
                 relRows.push({
+                  date: date,   // v4.3: needed to count distinct weeks
                   pred: b.expectedValue.netPct, raw: b.expectedValue.rawBasisPct,
                   real: cfg.decideAfterTax !== false ? rv.aft : rv.pre,
                   elig: score >= buyTh
@@ -1981,8 +1962,19 @@ window.ExpectedValueEngine = (function () {
       meta.count++;
       out.processed++;
     });
-    out.rows = recordOutcomes(rows, key);
-    if (relRows.length) recordReliability(relRows, key);
+
+    /* v4.3: only persist progress when BOTH stores accepted the write.
+       A quota failure on recordOutcomes used to advance the marker anyway,
+       permanently skipping the affected windows. */
+    var outcomesAdded = recordOutcomes(rows, key);
+    if (outcomesAdded < 0) { out.reason = 'store_write_failed'; return out; }
+    out.rows = outcomesAdded;
+
+    if (relRows.length) {
+      var relAdded = recordReliability(relRows, key);
+      if (relAdded < 0) { out.reason = 'reliability_write_failed'; return out; }
+    }
+
     metaAll[symbol] = meta;
     saveStore(metaKey, metaAll);
     return out;
@@ -2011,6 +2003,21 @@ window.ExpectedValueEngine = (function () {
     upsideBaseline: upsideBaseline,
     returnSeries: function (daily, lookback) { return retSeries(daily, lookback || 90); },
     clearCalibration: clearCalibration,
-    _test: { windowOutcome: windowOutcome, buildWindowWeights: buildWindowWeights, computeSizing: computeSizing, breakEvenTargetProb: breakEvenTargetProb, liquidityCostPct: liquidityCostPct, afterTax: afterTax, outcomeValues: outcomeValues, Phi: Phi, tripleBarrierWindows: tripleBarrierWindows, calibrationBucket: calibrationBucket, calibrationKeyPart: calibrationKeyPart, calibrationPriorStats: calibrationPriorStats, hierarchicalCalibrationPrior: hierarchicalCalibrationPrior, calibrationPriorStrength: calibrationPriorStrength, historicalProbability: historicalProbability }
+    reliabilityVerdict: reliabilityVerdict,
+    _test: {
+      windowOutcome: windowOutcome, buildWindowWeights: buildWindowWeights,
+      computeSizing: computeSizing, breakEvenTargetProb: breakEvenTargetProb,
+      liquidityCostPct: liquidityCostPct, afterTax: afterTax,
+      outcomeValues: outcomeValues, Phi: Phi,
+      tripleBarrierWindows: tripleBarrierWindows,
+      calibrationBucket: calibrationBucket, calibrationKeyPart: calibrationKeyPart,
+      calibrationPriorStats: calibrationPriorStats,
+      hierarchicalCalibrationPrior: hierarchicalCalibrationPrior,
+      calibrationPriorStrength: calibrationPriorStrength,
+      historicalProbability: historicalProbability,
+      setupBlindPrior: setupBlindPrior,
+      combineProbability: combineProbability,
+      weekKeyOf: weekKeyOf
+    }
   };
 })();
