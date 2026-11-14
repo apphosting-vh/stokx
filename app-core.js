@@ -9724,9 +9724,44 @@ function StockScreener(props) {
       var ex = best.expectedValue, pr = best.probability || {}, dist = best.distribution || {};
       /* Live scorecard: settle earlier predictions for this stock on the fresh bars,
          then log today's prediction (every eligible row, so the check is unbiased). */
+      var episodeState = null;
       try {
-        if (typeof EVX.settlePredictions === "function") EVX.settlePredictions(symbol, dailyCandles);
-        if (typeof EVX.recordPrediction === "function") EVX.recordPrediction(best, { symbol: symbol, dailyCandles: dailyCandles });
+        if (typeof EVX.settlePredictions === 'function') EVX.settlePredictions(symbol, dailyCandles);
+        /* v4.4.1 UI integration: capture per-row open-episode state so the table
+           can show an OPEN / CHG badge without re-reading localStorage per row
+           at render time. */
+        if (typeof EVX.recordPredictionDetailed === 'function') {
+          var _rec = EVX.recordPredictionDetailed(best, { symbol: symbol, dailyCandles: dailyCandles });
+          if (_rec && _rec.reason === 'already_open') {
+            var _tip = '';
+            if (_rec.changes) {
+              var _parts = [];
+              if (_rec.changes.planChanged) _parts.push('plan now ' + best.horizonDays + 'd/+' + best.targetPct + '%');
+              if (_rec.changes.predDelta != null && Math.abs(_rec.changes.predDelta) > 0.05) {
+                _parts.push('EV ' + (_rec.changes.predDelta > 0 ? '+' : '') + _rec.changes.predDelta.toFixed(2) + 'pts');
+              }
+              if (_rec.changes.scoreDelta != null && Math.abs(_rec.changes.scoreDelta) >= 5) {
+                _parts.push('score ' + (_rec.changes.scoreDelta > 0 ? '+' : '') + Math.round(_rec.changes.scoreDelta));
+              }
+              _tip = _parts.join(', ');
+            }
+            episodeState = {
+              open: true,
+              signalDate: _rec.existing && (_rec.existing.signalDate || _rec.existing.date),
+              changed: !!_rec.anyChange,
+              changes: _rec.changes || null,
+              tooltip: _tip
+            };
+          } else if (_rec && _rec.reason === 'created') {
+            episodeState = {
+              open: true,
+              signalDate: _rec.record ? (_rec.record.signalDate || _rec.record.date) : null,
+              changed: false, changes: null, tooltip: ''
+            };
+          }
+        } else if (typeof EVX.recordPrediction === 'function') {
+          EVX.recordPrediction(best, { symbol: symbol, dailyCandles: dailyCandles });
+        }
       } catch (_liveErr) {}
       return {
         version: best.version,
@@ -9777,7 +9812,8 @@ function StockScreener(props) {
         regime: best.regime || null,
         exitMode: best.exitMode || "fixed",
         exitRule: best.exitRule || null,
-        rets: typeof EVX.returnSeries === "function" ? EVX.returnSeries(dailyCandles, 90) : null
+        rets: typeof EVX.returnSeries === "function" ? EVX.returnSeries(dailyCandles, 90) : null,
+        episode: episodeState   /* v4.4.1 UI integration */
       };
     } catch (_evErr) { return null; }
   };
@@ -11190,6 +11226,27 @@ function StockScreener(props) {
                     if (dv.flags && dv.flags.length) return React.createElement("span",{title:dv.flags.join("; "),style:{marginLeft:5,fontSize:8,fontWeight:800,color:"#d97706"}},"CORR");
                     return null;
                   })(),
+                /* v4.4.1 UI integration: open-episode badge. Shows OPEN when a
+                   live prediction for this symbol is still unsettled; CHG (with
+                   detail in the tooltip) when the rescan detected a material
+                   change vs the episode's first prediction. Absent when the
+                   symbol has no open episode. */
+                (function() {
+                  var ep = r.ev && r.ev.episode;
+                  if (!ep || !ep.open) return null;
+                  if (ep.changed) {
+                    var title = 'Signal changed since open episode began on ' + (ep.signalDate || 'earlier');
+                    if (ep.tooltip) title += '\n' + ep.tooltip;
+                    return React.createElement("span", {
+                      title: title,
+                      style: { marginLeft: 5, fontSize: 8, fontWeight: 800, color: "#b45309", background: "rgba(245,158,11,0.18)", border: "1px solid rgba(245,158,11,0.45)", padding: "1px 4px", borderRadius: 3, cursor: "help" }
+                    }, "CHG");
+                  }
+                  return React.createElement("span", {
+                    title: 'Open episode since ' + (ep.signalDate || 'earlier') + ' \u2014 no material change on the latest scan',
+                    style: { marginLeft: 5, fontSize: 8, fontWeight: 700, color: "var(--text5)", background: "var(--bg5)", border: "1px solid var(--border2)", padding: "1px 4px", borderRadius: 3, cursor: "help" }
+                  }, "OPEN");
+                })(),
                   ev.reasons && ev.reasons.length ? React.createElement("div",{title:ev.reasons.join("\n"),style:{fontSize:8,fontWeight:500,color:"var(--text6)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:1}},ev.reasons[0]) : null
                 ),
                 React.createElement("td",{style:{padding:"5px 10px",whiteSpace:"nowrap",textAlign:"left"}},
