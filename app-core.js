@@ -13920,6 +13920,7 @@ function PulsePage({ holdings }) {
 function InfoPage() {
   var TI = window.TechIndicators;
   var _m = React.useState(null), openM = _m[0], setOpenM = _m[1];
+  var _e = React.useState(null), openE = _e[0], setOpenE = _e[1];
   var subH = { fontSize: 13, fontWeight: 700, color: "var(--text)", marginTop: 10, marginBottom: 4 };
   var subSub = { fontSize: 12, fontWeight: 600, color: "var(--text2)", marginTop: 8, marginBottom: 2 };
   var secStyle = { fontSize: 12, color: "var(--text4)", lineHeight: 1.7, padding: "8px 0 0 0" };
@@ -14237,6 +14238,381 @@ function InfoPage() {
         )
       )
     ),
+
+    /* EV-First Ranking explainer (Expected Value Engine) */
+    (function() {
+      var EVE = window.ExpectedValueEngine || null;
+      var cfgL = {};
+      try { cfgL = (EVE && EVE.getConfig && EVE.getConfig()) || {}; } catch (_e) { cfgL = {}; }
+      function cv(path, fb) {
+        var o = cfgL, ks = path.split(".");
+        for (var i = 0; i < ks.length; i++) { if (o == null || typeof o !== "object") return fb; o = o[ks[i]]; }
+        return (o === undefined || o === null || (typeof o === "number" && !isFinite(o))) ? fb : o;
+      }
+      function pc(v) { return Math.round(Number(v) * 100) + "%"; }
+      function sg(v, d) { v = Number(v); return (v >= 0 ? "+" : "\u2212") + Math.abs(v).toFixed(d == null ? 2 : d) + "%"; }
+      function Phi(x) {
+        var t = 1 / (1 + 0.2316419 * Math.abs(x));
+        var d = 0.3989423 * Math.exp(-x * x / 2);
+        var p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+        return x > 0 ? 1 - p : p;
+      }
+
+      /* Live config values (fall back to engine defaults when the engine is absent) */
+      var horizons = cv("horizons", [3, 5, 10, 15, 20]), targets = cv("targets", [2, 3, 4, 5, 6]);
+      var nPlans = horizons.length * targets.length;
+      var defH = cv("defaultHorizon", 10);
+      var minNet = cv("minNetEV", 0.30), minPPos = cv("minPositiveProbability", 0.55);
+      var minEvid = cv("minEvidence", 60), minEvC = cv("minEvConfidence", 0.80);
+      var tauBase = cv("evPriorStdPct", 0.5);
+      var stopATR = cv("stopATR", 1.8), minStop = cv("minStopPct", 1.5), maxStop = cv("maxStopPct", 6);
+      var lookback = cv("lookbackBars", 500), minWin = cv("minWindows", 30), driftKeep = cv("driftKeep", 0.5);
+      var halfLife = cv("recency.halfLifeBars", 250), mism = cv("regime.mismatchWeight", 0.6);
+      var gapFree = cv("scoreGapFree", 8), gapRange = cv("scoreGapRange", 25);
+      var ppMin = cv("pooledPrior.minN", 30), ppK = cv("pooledPrior.k", 60), ppMax = cv("pooledPrior.maxWeight", 0.5);
+      var kellyFr = cv("sizing.kellyFraction", 0.25), maxPos = cv("sizing.maxPositionPct", 20), maxRisk = cv("sizing.maxRiskPerTradePct", 1);
+      var cLook = cv("correlation.lookbackBars", 120), cOv = cv("correlation.minOverlap", 60), cThr = cv("correlation.threshold", 0.7);
+      var cPen = cv("correlation.penalty", 0.5), cMaxPicks = cv("correlation.maxPicks", 5), cMaxGrp = cv("correlation.maxPerGroup", 1);
+      var cGroups = cv("correlation.groupPrefixes", ["ADANI", "TATA", "BAJAJ"]);
+      var upK = cv("upside.shrinkK", 8);
+      var staleDays = cv("staleCalibrationDays", 21);
+      var taxRate = cv("taxRatePct", 0), afterTax = cv("decideAfterTax", false) !== false;
+      var rtCost = 0.34;
+      try { if (EVE && EVE.totalRoundTripCost) rtCost = EVE.totalRoundTripCost(cfgL.costs); } catch (_c) {}
+      var evVer = (EVE && EVE.version) ? EVE.version : "EV-4.5";
+
+      /* Worked example, computed with the live cost and prior settings */
+      var exGross = 0.45 * 4 + 0.35 * (-3) + 0.20 * 0.5;
+      var exNet = exGross - rtCost;
+      var exTau = tauBase * Math.sqrt(10 / Math.max(1, defH)), exS = 0.30;
+      var exLam = exTau * exTau / (exTau * exTau + exS * exS);
+      var exPrior = -rtCost, exHair = 0.10;
+      var exShr = exPrior + exLam * (exNet - exPrior) - exHair;
+      var exPost = Math.sqrt(exTau * exTau * exS * exS / (exTau * exTau + exS * exS));
+      var exPPos = Phi(exShr / exPost);
+
+      /* Local presentation helpers */
+      function P(extra) { var kids = Array.prototype.slice.call(arguments, 1); return React.createElement.apply(null, ["p", { style: Object.assign({ marginTop: 6 }, extra || {}) }].concat(kids)); }
+      function Bd(t) { return React.createElement("strong", { style: { color: "var(--text2)" } }, t); }
+      function Sp(k, x) { return React.createElement.apply(null, ["span", { key: k }].concat(x)); }
+      function Ul(items) {
+        return React.createElement("ul", { style: { margin: "6px 0 6px 0", paddingLeft: 18, listStyle: "disc" } },
+          items.map(function(it, i) { return React.createElement("li", { key: "li" + i, style: { marginBottom: 3 } }, it); }));
+      }
+      function Ol(items) {
+        return React.createElement("ol", { style: { margin: "6px 0 6px 0", paddingLeft: 20, listStyle: "decimal" } },
+          items.map(function(it, i) { return React.createElement("li", { key: "ol" + i, style: { marginBottom: 3 } }, it); }));
+      }
+      function Fx(text) {
+        return React.createElement("div", { style: { margin: "6px 0 8px", padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.65, color: "var(--text3)", whiteSpace: "pre-wrap", overflowX: "auto" } }, text);
+      }
+      function Box(title, body, warn) {
+        return React.createElement("div", { style: { margin: "8px 0", padding: "10px 14px", borderRadius: 10, background: warn ? "rgba(245,158,11,.10)" : "linear-gradient(135deg, var(--accentbg), var(--bg4))", border: "1px solid " + (warn ? "rgba(245,158,11,.35)" : "var(--border)") } },
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 3 } }, title),
+          React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65 } }, body));
+      }
+      function Tbl(head, rows) {
+        var th = { textAlign: "left", padding: "5px 8px", fontSize: 10, fontWeight: 700, color: "var(--text5)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+        var td = { padding: "6px 8px", fontSize: 11, color: "var(--text4)", borderBottom: "1px solid var(--border)", verticalAlign: "top", lineHeight: 1.55 };
+        var tdF = Object.assign({}, td, { fontWeight: 700, color: "var(--text2)", whiteSpace: "nowrap" });
+        return React.createElement("div", { style: { overflowX: "auto", margin: "6px 0 8px" } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 460 } },
+            React.createElement("thead", null, React.createElement("tr", null, head.map(function(h, i) { return React.createElement("th", { key: "h" + i, style: th }, h); }))),
+            React.createElement("tbody", null, rows.map(function(r, ri) {
+              return React.createElement("tr", { key: "r" + ri }, r.map(function(c, ci) { return React.createElement("td", { key: "c" + ci, style: ci === 0 ? tdF : td }, c); }));
+            }))));
+      }
+      function evSec(key, label) {
+        var isOpen = openE === key;
+        return React.createElement("button", {
+          key: "s-" + key,
+          style: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text)", background: "var(--cardbg2)", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" },
+          onClick: function() { setOpenE(isOpen ? null : key); }
+        }, React.createElement("span", null, label), React.createElement("span", null, isOpen ? "\u25BC" : "\u25B6"));
+      }
+      function evBody(key) {
+        if (openE !== key) return null;
+        var kids = Array.prototype.slice.call(arguments, 1);
+        return React.createElement.apply(null, ["div", { key: "b-" + key, style: secStyle }].concat(kids));
+      }
+
+      var sections = [
+
+        /* 1. Gate */
+        evSec("evGate", "1. Eligibility Gate \u2014 who gets an EV plan"),
+        evBody("evGate",
+          P(null, "EV is a trade-plan optimizer layered on top of the StoX signal; it does not replace it. Only stocks whose base decision is ", Bd("Strong Buy or Buy"), " are optimized and shown in the EV-First Trade Ranking table. The gate is deliberate: EV is computed from a stock\u2019s own price history, and without a setup filter it would happily recommend any stock that happened to drift upward."),
+          Tbl(["Base decision", "What EV does"], [
+            ["Strong Buy / Buy", "ELIGIBLE \u2014 all " + nPlans + " plans are evaluated, the best one is shown and can be sized."],
+            ["Watchlist / Neutral", "WATCH ONLY \u2014 results are diagnostic; no trade plan is surfaced."],
+            ["Avoid", "EXCLUDED \u2014 not optimized at all."]
+          ]),
+          P(null, "A stock needs enough data to get a row: at least 50 daily bars, 60 hourly bars and ", minWin, " usable historical windows. Otherwise the EV columns show \u201c\u2014\u201d.")
+        ),
+
+        /* 2. Plan grid */
+        evSec("evGrid", "2. The Trade-Plan Grid \u2014 " + nPlans + " candidate plans per stock"),
+        evBody("evGrid",
+          P(null, "Instead of assuming one fixed trade, the engine tries every combination of ", Bd("target"), " (" + targets.map(function(t) { return "+" + t + "%"; }).join(", ") + ") and ", Bd("time horizon"), " (" + horizons.join(", ") + " trading days) \u2014 " + nPlans + " plans. A 3% target in 10 days is always included as the ", Bd("baseline plan"), "."),
+          P(null, Bd("Stop-loss. "), "Each plan carries a volatility-based stop: " + stopATR + " \u00d7 ATR(14)% of price, clamped between " + minStop + "% and " + maxStop + "%. A calm stock gets a tighter stop, a wild one a wider stop \u2014 so the risk is comparable across stocks."),
+          P(null, Bd("Entry & exit. "), "The signal is end-of-day, so the model assumes you buy at the ", Bd("next day\u2019s open"), ". A plan ends at whichever comes first: the target, the stop, or the last day of the horizon (a \u201ctime-out\u201d, exited at that day\u2019s close). Break-even and trailing-stop variants exist in the engine but the default is the fixed target / stop / time exit.")
+        ),
+
+        /* 3. Outcome replay */
+        evSec("evOutcome", "3. Outcome Replay \u2014 what happened to this plan before"),
+        evBody("evOutcome",
+          P(null, "For every historical start day in the stock\u2019s last " + lookback + " bars, the engine replays the plan using daily highs and lows (a \u201ctriple-barrier\u201d test) and records which barrier was touched first. This yields three probabilities \u2014 ", Bd("P(target first)"), ", ", Bd("P(stop first)"), " and ", Bd("P(time-out)"), " \u2014 plus the average loss when stopped and the average return when timed out."),
+          P(null, Bd("Realism rules built into the replay:")),
+          Ul([
+            "If one day\u2019s range covers both target and stop, the open decides: past either level it settles the matter, otherwise the outcome is split according to where the open sits between stop and target.",
+            "A gap through the stop fills at the open, not at the stop price \u2014 so gap-downs hurt, as they do in real life.",
+            "A locked limit day (high = low) delays the exit to the next tradable day.",
+            "Detrending: " + pc(1 - driftKeep) + " of the stock\u2019s own trailing average drift is removed from every window (measured before the window starts, so no look-ahead). A stock that rallied for a year will not look like a money machine just because it rallied."
+          ]),
+          P(null, Bd("Weighting. "), "Recent windows count more (half-life " + halfLife + " bars). Windows from a market regime unlike today\u2019s \u2014 index above/below its " + cv("regime.trendBars", 50) + "-day average, and high/low volatility versus its own median \u2014 are down-weighted by \u00d7" + mism + " per mismatch. The share of history that matches today\u2019s regime appears in the Net EV tooltip."),
+          P(null, Bd("Independent samples. "), "Overlapping windows are not independent, so the engine reports an ", Bd("effective sample size"), " (weighted windows \u00f7 horizon) and uses it for every error bar. At least " + minWin + " usable windows are required.")
+        ),
+
+        /* 4. Probability */
+        evSec("evProb", "4. Win Probability \u2014 own history plus a setup adjustment"),
+        evBody("evProb",
+          P(null, "The replay above is setup-blind: it walks every start day, good or bad. What makes today special is how the ", Bd("current setup"), " compares with the average setup. The engine therefore builds the final target-first probability like this:"),
+          Fx("p = ownBase + gapFactor \u00d7 (histP \u2212 priorP)"),
+          Ul([
+            [Bd("ownBase"), " \u2014 the stock\u2019s own setup-blind target-first rate from the replay."],
+            [Bd("histP"), " \u2014 win rate of past setups across the screened stocks in the same Entry-Score band (deciles), with the same target, horizon and stop width. It comes from a walk-forward calibration store and needs at least 20 weighted observations."],
+            [Bd("priorP"), " \u2014 the average win rate for the same target / horizon / stop across all score bands (with the exact band excluded, so it is not counted twice). histP is itself shrunk toward a hierarchical prior; the more observations in the exact band, the less shrinkage."],
+            [Bd("gapFactor"), " \u2014 if the live Entry Score differs from the score used at calibration by more than " + gapFree + " points, the setup adjustment is dialled down (floor \u00d70.25)."]
+          ].map(function(x, i) { return Sp("pb" + i, x); })),
+          P(null, "In plain English: start from how often this stock hit the target, then add or subtract the amount by which a setup like today\u2019s has historically beaten or lagged the average setup. If an optional ML model is available it contributes " + pc(cv("blend.ml", 0.2)) + " of the final number. Until the calibration store has data, the lift is zero and the evidence score says so."),
+          P(null, "Calibration is built in the background after scans: each sampled start day (one per week per stock) records the outcome of all " + nPlans + " plans, with long horizons down-weighted so they do not dominate. The store lives in this browser only.")
+        ),
+
+        /* 5. EV math */
+        evSec("evMath", "5. Expected Value \u2014 the arithmetic"),
+        evBody("evMath",
+          P(null, "With the three outcome probabilities and the average result of each outcome, the engine computes:"),
+          Fx("Gross EV = P(target) \u00d7 target + P(stop) \u00d7 avg stop loss + P(time-out) \u00d7 avg time-out return\nNet EV   = Gross EV \u2212 round-trip costs"),
+          P(null, "Because the probabilities add to 100%, costs come off every outcome and Net EV is simply Gross EV minus costs. The result is a ", Bd("percentage per trade over the plan\u2019s horizon"), " \u2014 not a daily or annual figure."),
+          P(null, Bd("Round-trip costs used: "), React.createElement("span", { style: { fontFamily: "var(--font-mono)" } }, rtCost.toFixed(2) + "%"), " of traded value, built from:"),
+          Ul([
+            "STT " + Number(cv("costs.stt", 0.20)).toFixed(2) + "% round trip (delivery, " + (Number(cv("costs.stt", 0.20)) / 2).toFixed(2) + "% each side)",
+            "Exchange charges " + Number(cv("costs.exchange", 0.003)).toFixed(3) + "% and SEBI/GST " + Number(cv("costs.sebi", 0.001)).toFixed(3) + "% per side",
+            "Stamp duty " + Number(cv("costs.stampDuty", 0.015)).toFixed(3) + "% (buy side only)",
+            "Modelled slippage " + Number(cv("costs.slippage", 0.05)).toFixed(2) + "% per side (an end-of-day signal is executed at the next open)",
+            "Depository charge \u20b9" + Number(cv("costs.dpChargeRs", 15.93)).toFixed(2) + " per scrip on the sell day, converted to % using a \u20b9" + Number(cv("costs.positionSizeRs", 100000)).toLocaleString("en-IN") + " position",
+            "Brokerage " + Number(cv("costs.brokerage", 0)).toFixed(2) + "% (zero-brokerage delivery assumed)"
+          ]),
+          P(null, Bd("Tax. "), (afterTax && taxRate > 0)
+            ? "Net EV is after capital-gains tax at " + taxRate + "% (losses are assumed to offset gains)."
+            : "Capital-gains tax is NOT deducted from Net EV. If your gains are taxed as business income or you want an after-tax view, set a tax rate in the EV configuration \u2014 the calibration store then rebuilds itself automatically."),
+          Box("Worked example (illustrative numbers, before trust adjustments)",
+            React.createElement("div", null,
+              "Plan: +4% target, \u22123% average stop loss, +0.5% average time-out return.",
+              Fx("P(target) 45%   P(stop) 35%   P(time-out) 20%\nGross EV = 0.45\u00d74.0 + 0.35\u00d7(\u22123.0) + 0.20\u00d70.5 = " + sg(exGross) + "\nNet EV   = " + exGross.toFixed(2) + "% \u2212 " + rtCost.toFixed(2) + "% costs = " + sg(exNet)),
+              "The next section shows why this raw " + sg(exNet) + " will not survive as the displayed number."))
+        ),
+
+        /* 6. Trust adjustments */
+        evSec("evTrust", "6. Trust Adjustments \u2014 why the displayed EV is smaller than the raw EV"),
+        evBody("evTrust",
+          P(null, "A backtest EV is an estimate with error, and the plan you are looking at was chosen as the best of " + nPlans + ". Both facts bias the raw number upward, so two corrections are applied before anything is displayed."),
+          P({ marginTop: 8 }, Bd("a) Shrinkage toward \u201cno edge\u201d (sampling noise)")),
+          Fx("\u03c4 = " + tauBase + "% \u00d7 \u221a(horizon / " + defH + ")     s = standard error of the backtest EV\n\u03bb = \u03c4\u00b2 / (\u03c4\u00b2 + s\u00b2)\nShrunk EV = prior + \u03bb \u00d7 (raw EV \u2212 prior) \u2212 haircut"),
+          P(null, "\u03c4 is the assumed typical size (standard deviation) of a genuine edge per trade, in % at the default horizon. The prior is the zero-edge EV: with no real edge you simply lose the costs. When many comparable setups across stocks exist (at least " + ppMin + " observations), the prior leans on their pooled EV by up to " + pc(ppMax) + ". A noisy estimate (large s) is pulled hard toward the prior; a well-measured one barely moves."),
+          P({ marginTop: 8 }, Bd("b) Selection haircut (best-of-" + nPlans + " luck)")),
+          P(null, "Choosing the winner out of " + nPlans + " plans inflates its apparent EV. The engine estimates the inflation by split-half testing: pick the best plan on the first half of history and score it on the second half (and vice versa). The average optimism, capped at 3%, is subtracted ", Bd("after"), " shrinkage. If the self-check has shown the engine to be conservative, the haircut is waived."),
+          P({ marginTop: 8 }, Bd("c) Uncertainty that remains")),
+          Fx("posterior sd = \u221a(\u03c4\u00b2 s\u00b2 / (\u03c4\u00b2 + s\u00b2))\nEV Conf. = P(true EV > 0) = \u03a6(Net EV / posterior sd)\n90% range = Net EV \u00b1 1.645 \u00d7 posterior sd"),
+          Box("Worked example, continued",
+            React.createElement("div", null,
+              "Assume a 10-day plan, standard error s = 0.30%, zero-edge prior " + sg(exPrior) + ", selection haircut 0.10%.",
+              Fx("\u03c4 = " + exTau.toFixed(2) + "%   \u03bb = " + exLam.toFixed(2) + "\nShrunk EV = " + exPrior.toFixed(2) + " + " + exLam.toFixed(2) + " \u00d7 (" + exNet.toFixed(2) + " \u2212 (" + exPrior.toFixed(2) + ")) \u2212 0.10 = " + sg(exShr) + "\nposterior sd = " + exPost.toFixed(2) + "%   EV Conf. = " + pc(exPPos)),
+              "A raw " + sg(exNet) + " becomes a displayed " + sg(exShr) + " with only about " + pc(exPPos) + " confidence that the edge is real \u2014 below the " + minNet.toFixed(2) + "% minimum Net EV and " + pc(minEvC) + " confidence a Qualified Trade needs. That is the intended behaviour: attractive-looking but noisy edges are demoted.")),
+          P(null, "The tooltip on every Net EV cell lists each of these steps for that stock: the data\u2019s EV, the haircut, the shrinkage target, costs, tax, EV Conf. and the 90% range.")
+        ),
+
+        /* 7. Evidence */
+        evSec("evEvidence", "7. Evidence Confidence (0\u2013100)"),
+        evBody("evEvidence",
+          P(null, "Net EV says how big the edge looks; Evidence says how much solid information stands behind it. It is a 0\u2013100 score that does not depend on the EV itself:"),
+          Tbl(["Component", "Max", "Rewards"], [
+            ["Own-history sample", "12", "Effective independent windows (full marks at 40)"],
+            ["Calibration depth", "18", "Observations in the exact setup bucket, all screened stocks pooled (full marks at 200, scaled by the score-gap factor)"],
+            ["Data completeness", "15", "50+ daily bars, 60+ hourly bars, 30+ index bars"],
+            ["Source agreement", "15", "Low disagreement between own history, calibration and ML"],
+            ["Number of models", "15", "3 contributing sources 15, two 11, one 7"],
+            ["Setup quality", "10", "Entry Score above 35, full marks at 85"],
+            ["Regime alignment", "15", "The Market/RS pillar of the Entry Score"]
+          ]),
+          P(null, "Evidence below 45 forces the decision to WATCH regardless of EV. Thin evidence also shows up as a plain-English reason under the stock name (for example \u201cfew similar setups measured\u201d).")
+        ),
+
+        /* 8. Decision */
+        evSec("evDecision", "8. Decision Classification and Signal Strength"),
+        evBody("evDecision",
+          P(null, "Each plan is classified in this order (the first matching rule wins):"),
+          Tbl(["Class", "Conditions"], [
+            ["AVOID (negative EV)", "Net EV \u2264 0"],
+            ["WATCH (insufficient evidence)", "Evidence < 45"],
+            ["HIGH CONVICTION", "Net EV \u2265 0.75%, P(positive return) \u2265 62%, Evidence \u2265 75, Setup \u2265 60 and EV Conf. \u2265 90%"],
+            ["QUALIFIED TRADE", "Net EV \u2265 " + minNet.toFixed(2) + "%, P(positive return) \u2265 " + pc(minPPos) + ", Evidence \u2265 " + minEvid + " and EV Conf. \u2265 " + pc(minEvC)],
+            ["WATCH", "Positive EV but at least one test above is not met"]
+          ]),
+          P(null, Bd("Colour of the Net EV number "), "(signal strength): ", Bd("strong"), " = EV > 0 with EV Conf. \u2265 80%; ", Bd("moderate"), " = EV > 0 with EV Conf. \u2265 60%; ", Bd("weak"), " = EV > 0 but low confidence; ", Bd("near break-even"), " = between \u22120.10% and 0; ", Bd("negative"), " = below that."),
+          P(null, Bd("P(positive return) vs Win %. "), "Win % is the chance the ", Bd("target"), " is hit first. P(positive return) also counts time-outs that end in profit, so it can be higher.")
+        ),
+
+        /* 9. Ranking */
+        evSec("evRank", "9. The EV-First Ranking Metric \u2014 how stocks are ordered"),
+        evBody("evRank",
+          P(null, "Choosing the best plan for a stock and ordering stocks against each other use the same yardstick, the ", Bd("optimizer utility"), ":"),
+          Fx("if Net EV > 0:   utility = (Net EV / \u221ahorizon) \u00d7 (0.55 + 0.45 \u00d7 Evidence / 100)\notherwise:        utility = Net EV\nminus 0.02 if the plan uses the longest horizon, minus 0.02 if it uses the largest target"),
+          Ul([
+            [Bd("Why \u221ahorizon? "), "Dividing by the number of days would over-reward very short plans; ignoring time would over-reward long ones. Because uncertainty grows roughly with \u221atime, EV per \u221aday is a fairer speed-adjusted comparison than EV per day."],
+            [Bd("Why the evidence factor? "), "It scales utility between \u00d70.55 (no evidence) and \u00d71.00 (full evidence), so a modest edge with strong support can outrank a bigger edge built on little data."],
+            [Bd("Why only positives are scaled: "), "a negative EV must never look better because it is spread over a longer horizon, so negatives are ranked by their raw EV."],
+            [Bd("Corner penalties: "), "a small deduction for plans at the edge of the grid (longest horizon, largest target), so such a plan has to win clearly."]
+          ].map(function(x, i) { return Sp("rk" + i, x); })),
+          P(null, Bd("Baseline guard. "), "The best plan is only shown if it beats the 3% / 10-day baseline plan by at least max(0.03, 8% of the baseline\u2019s utility). Otherwise the baseline is shown. This stops the grid search from picking an exotic plan on a marginal, probably-lucky improvement."),
+          P(null, Bd("Across stocks. "), "Eligible stocks are sorted by utility, highest first; ties go to the higher Entry Score. Note the ", Bd("EV/day"), " column (Net EV \u00f7 days) is shown for information only \u2014 it is not the sort key, so a row with a larger EV/day can sit below one with a larger utility."),
+          P(null, "The table subtitle refers to \u201cEV per day\u201d in a general sense; the exact sort is the utility above, followed by the correlation-aware reordering below.")
+        ),
+
+        /* 10. Diversify */
+        evSec("evDiv", "10. Correlation-Aware Ordering \u2014 PICK and CORR badges"),
+        evBody("evDiv",
+          P(null, "Two stocks that move together are one bet, not two. After ranking, the engine re-orders the list greedily: it takes the highest-utility stock, then for each remaining candidate it measures the correlation of daily returns (last " + cLook + " bars, at least " + cOv + " overlapping days) with the stocks already chosen. A positive-utility candidate\u2019s utility is reduced by up to " + pc(cPen) + " as that correlation rises from 0.5 to 1.0, and the best adjusted candidate is chosen next."),
+          Ul([
+            [Bd("PICK"), " \u2014 positive EV, not flagged, and among the first " + cMaxPicks + " such stocks: it adds a genuinely new bet."],
+            [Bd("CORR"), " \u2014 flagged because it is highly correlated (\u2265 " + cThr + ") with a better-ranked stock, or belongs to the same group (" + (cGroups || []).join(", ") + "; maximum " + cMaxGrp + " per group). Hover for the reason."],
+            [Bd("No badge"), " \u2014 positive EV but beyond the pick limit, or EV \u2264 0."]
+          ].map(function(x, i) { return Sp("dv" + i, x); }))
+        ),
+
+        /* 11. Sizing */
+        evSec("evSize", "11. Position Size \u2014 fractional Kelly with risk caps"),
+        evBody("evSize",
+          P(null, "The Size column is a suggested position as a percentage of capital. It is built in three steps:"),
+          Ol([
+            "Full Kelly: the fraction that maximises long-run growth given the plan\u2019s three outcomes (target, stop, time-out), after costs.",
+            "Fractional Kelly: " + pc(kellyFr) + " of full Kelly, further scaled by how much of the raw edge survived the trust adjustments (Net EV \u00f7 raw edge, at most 1). Betting full Kelly on an estimated edge is dangerous; fractional Kelly is the standard guard.",
+            "Caps: risk per trade of " + maxRisk + "% of capital divided by the effective stop (the larger of the planned stop, the average stop loss and the 5th-percentile outcome), and a hard maximum position of " + maxPos + "%."
+          ]),
+          P(null, "The lowest of the three limits is shown, and the tooltip names the binding one (Kelly, risk cap or position cap). A stock with no positive trust-adjusted EV gets a size of zero. Treat Size as a ", Bd("ceiling"), ", not a target.")
+        ),
+
+        /* 12. Reading the table */
+        evSec("evRead", "12. Reading the EV-First Trade Ranking Table"),
+        evBody("evRead",
+          Tbl(["Column", "What it means", "How to read it"], [
+            ["Stock", "Ticker with badges (PICK, CORR, OPEN, CHG) and the top plain-English reasons for the plan.", "Click to open the stock. Reasons are the engine\u2019s own warnings (thin evidence, wide stop, costs eating the target, edge inside noise)."],
+            ["Signal", "The base Entry-Score decision (Strong Buy / Buy).", "EV never overrides this gate."],
+            ["Net EV", "Trust-adjusted expected % return per trade over the plan\u2019s horizon, after costs. The 90% range is shown below it.", "Average of many similar trades, not a forecast for one. If the range\u2019s lower end is below 0, the edge is not proven."],
+            ["EV Conf.", "Probability the true EV is above zero after shrinkage.", "Qualified Trade needs \u2265 " + pc(minEvC) + "; High Conviction \u2265 90%."],
+            ["Win %", "Chance the target is hit before the stop and before time runs out.", "Compare with the break-even win chance in the tooltip. A 40% win rate can still be profitable with a favourable payoff."],
+            ["Evidence", "0\u2013100 reliability of the numbers (section 7).", "Below " + minEvid + " the plan cannot be Qualified."],
+            ["Setup", "The Entry Score (setup quality) behind the plan.", "Higher is better but EV, not score, orders the table."],
+            ["Target / Days", "The chosen plan, e.g. +4% within 10d.", "A suffix marks a break-even or trailing exit when one is used."],
+            ["Size", "Suggested % of capital (section 11).", "Upper limit; \u2018\u2014\u2019 or 0 means no positive edge."],
+            ["EV/day", "Net EV \u00f7 holding days.", "Speed of earning the edge. Informational; not the sort key."],
+            ["Worst 5%", "Average result of the worst 5% of historical trades for this plan (expected shortfall).", "Your realistic bad case. Hover for the typical dip before exit and the 90th-percentile dip."],
+            ["Price", "Last close.", "Reference only."]
+          ]),
+          Box("A practical reading order", Ol([
+            "Check the banner first (section 13). If it says NO TRADE, sitting out is a valid, data-backed result.",
+            "Read Net EV together with its 90% range, then EV Conf. and Evidence.",
+            "Look at the stop width and Worst 5%: can you actually tolerate that loss?",
+            "Prefer PICK rows. A CORR row repeats a bet you can already take through a better-ranked stock.",
+            "Respect Size as a maximum, and treat the target / horizon pair as the plan the numbers were built for.",
+            "OPEN means an earlier prediction for this stock is still running; CHG means the latest scan differs materially from it (hover for details)."
+          ])),
+          Box("Common misreadings", Ul([
+            "Net EV is not an annual return. The annualised figure in the tooltip is simple and uncompounded and assumes you can repeat the trade perfectly.",
+            "Win % is not the chance of profit; it is the chance of reaching the target first.",
+            "A high Entry Score does not guarantee a positive EV; a modest score with a good payoff can rank above it."
+          ]), true)
+        ),
+
+        /* 13. Banner & health */
+        evSec("evHealth", "13. Banner Verdict and Self-Audit Lines"),
+        evBody("evHealth",
+          P(null, Bd("Verdict banner "), "(\u201canything worth trading today?\u201d):"),
+          Tbl(["Banner", "Meaning"], [
+            ["TRADES AVAILABLE", "At least one setup passes every EV test (Qualified or High Conviction)."],
+            ["WEAK DAY", "Some setups have positive EV with EV Conf. \u2265 " + pc(cv("noTrade.minPPositive", 0.5)) + ", but none pass every test: trade small or wait."],
+            ["NO TRADE TODAY", "No setup has positive trust-adjusted EV after costs. The banner names the least-bad stock for reference."]
+          ]),
+          P(null, "If the engine\u2019s own trust level is STALE, the banner appends a warning to treat the EVs with extra caution."),
+          P({ marginTop: 8 }, Bd("The EV self-check (walk-forward). "), "After scans, the engine replays its own plan choices on past start days (one per week per stock), using only data available then, and compares predicted Net EV with what the chosen plan realised, detrended the same way. Verdicts need at least 100 observations:"),
+          Ul([
+            [Bd("consistent"), " \u2014 predictions and results agree within noise."],
+            [Bd("overconfident"), " \u2014 results are significantly below predictions (z < \u22122): treat displayed EVs as optimistic."],
+            [Bd("conservative"), " \u2014 results beat predictions (z > 2): the EVs are cautious."],
+            [Bd("weak-ranking"), " \u2014 levels match, but higher-EV picks have not done better than lower-EV ones."]
+          ].map(function(x, i) { return Sp("hl" + i, x); })),
+          P(null, "Statistics are week-clustered: stocks signalled in the same week share market moves, so each week counts as one observation. This keeps the verdict from being fooled by 100 stocks that all moved with the index. The walk-forward uses the own-history layer only (no calibration or ML), so it validates that layer, not the full blend."),
+          P({ marginTop: 8 }, Bd("Live scorecard. "), "Every Buy-grade prediction shown is logged on this device \u2014 one open episode per stock, so a persistent Buy is not counted twice \u2014 and settled automatically on a later refresh, once the plan\u2019s horizon has fully played out. Settlement uses the frozen first prediction; later rescans only update the OPEN / CHG badge. A verdict appears after 30 settled predictions."),
+          P(null, Bd("Buy-filter check. "), "Compares realised results of Buy-grade setups against those the filter rejected. \u201cBuy filter adds value\u201d means the gate is helping; \u201cno detectable edge\u201d or \u201crejected setups did better\u201d means it is not."),
+          P(null, Bd("Trust level. "), "Rolls everything into ok / collecting / caution / stale. It turns stale if the self-check or live scorecard is overconfident, or the calibration has not been refreshed for more than " + staleDays + " days; it raises caution if the top EV bucket has under-delivered or the Buy filter shows no edge.")
+        ),
+
+        /* 14. Upside */
+        evSec("evUpside", "14. Companion Table: Upside Candidates"),
+        evBody("evUpside",
+          P(null, "A separate table ranks every screened stock \u2014 any signal, no EV gate \u2014 by the chance its ", Bd("high"), " reaches +T% within N days. You pick T (" + targets.join(", ") + "%) and N (" + horizons.join(", ") + " days)."),
+          Fx("raw      = share of the stock\u2019s own (recency- and regime-weighted, detrended) windows whose high reached the target\nbaseline = chance for a driftless stock with the same volatility\nchance   = baseline + (raw \u2212 baseline) \u00d7 nEff / (nEff + " + upK + ")\nlift     = chance \u2212 baseline"),
+          P(null, "The shrinkage means a stock with few independent windows is pulled toward the random-walk baseline. ", Bd("Lift"), " shows how much of the chance is genuine stock-specific behaviour. This table measures the chance of ", Bd("touching"), " the target only \u2014 it ignores the stop, costs and horizon exits \u2014 so use it to discover candidates and the EV table to judge them.")
+        ),
+
+        /* 15. Limits */
+        evSec("evLimits", "15. Limitations and Good Practice"),
+        evBody("evLimits",
+          Ul([
+            "Everything is estimated from each stock\u2019s own past. Regimes change, and a pattern that worked for a year can stop working; the self-audit is there to catch this, but only after the fact.",
+            "Execution is modelled as a next-open entry on end-of-day data with fixed slippage. Real fills in illiquid names will be worse (the optional liquidity-impact model is off by default). Data from Yahoo Finance can be delayed.",
+            "The plan\u2019s stop is part of the model. If you hold without a stop, the stop-loss outcomes in the EV do not describe your trade.",
+            "Tax is off by default. If your gains are taxed as business income at slab rates, the displayed EV overstates what you keep.",
+            "The calibration, self-check and live scorecard are stored in this browser. They rebuild in the background, are reset if cost or tax settings change, and start empty on a new device; until they fill, the evidence score is lower and probabilities lean on the stock\u2019s own history.",
+            "Results move whenever prices, the calibration or the Entry Score change. Treat a row as today\u2019s best estimate, not a standing instruction.",
+            "This is a decision-support tool, not financial advice. Position sizes and plans are statistical outputs, not recommendations for your circumstances."
+          ])
+        )
+      ];
+
+      return React.createElement("div", { className: "stx-card", style: { marginBottom: 20 } },
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" } },
+          React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, margin: 0, color: "var(--text)" } }, "EV-First Ranking \u2014 Expected Value Engine"),
+          React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, evVer)
+        ),
+        React.createElement("p", { style: { fontSize: 11, color: "var(--text5)", lineHeight: 1.6, marginBottom: 12 } },
+          "The Entry Score tells you how good a setup looks. The Expected Value (EV) engine asks the next question: if you took this trade many times, with real costs and a real stop, how much would you expect to make per trade \u2014 and how sure are we the number is real? The EV-First Trade Ranking on the Screener is ordered by that answer rather than by score."),
+
+        React.createElement("div", { style: { padding: "10px 14px", borderRadius: 10, background: "linear-gradient(135deg, var(--accentbg), var(--bg4))", border: "1px solid var(--border)", marginBottom: 12 } },
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 4 } }, "Why rank by EV instead of score?"),
+          React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65, margin: 0 } },
+            "A stock can score 80 and still be a poor trade: a +3% target against a 6% stop needs a win rate above two in three just to break even, and costs of about " + rtCost.toFixed(2) + "% quietly take a slice of every trade. EV puts target, stop, time-outs, costs and sampling noise into one number, so a setup with a modest score but a favourable payoff and solid evidence can rightly rank above a flashier one.")
+        ),
+
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 2 } }, "The pipeline at a glance"),
+        React.createElement("div", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.7, marginBottom: 12 } },
+          Ol([
+            [Bd("Gate"), " \u2014 only Strong Buy / Buy stocks are optimized."],
+            [Bd("Plan grid"), " \u2014 " + nPlans + " target \u00d7 horizon plans, each with a volatility-based stop."],
+            [Bd("Outcome replay"), " \u2014 each plan is replayed on the stock\u2019s own history (recency- and regime-weighted)."],
+            [Bd("Probability"), " \u2014 own-history odds adjusted for how today\u2019s setup compares with the average setup."],
+            [Bd("Expected value"), " \u2014 outcomes \u00d7 probabilities, minus costs."],
+            [Bd("Trust adjustments"), " \u2014 shrink noisy edges toward zero and subtract best-of-" + nPlans + " selection luck."],
+            [Bd("Evidence & decision"), " \u2014 0\u2013100 evidence score and the Qualified / High Conviction tests."],
+            [Bd("Best plan & rank"), " \u2014 utility = Net EV per \u221aday \u00d7 an evidence factor; stocks sorted by it."],
+            [Bd("Diversify"), " \u2014 correlated names are pushed down; PICK / CORR badges."],
+            [Bd("Self-audit"), " \u2014 walk-forward and live scorecards check whether past EVs came true."]
+          ].map(function(x, i) { return Sp("pl" + i, x); }))),
+
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 6 } }, "Select a section for full detail"),
+        React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } }, sections)
+      );
+    })(),
 
     /* Data sources note */
     React.createElement("div", { className: "stx-card", style: { marginTop: 0, marginBottom: 20, padding: "14px 18px" } },
