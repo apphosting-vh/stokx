@@ -1,6 +1,53 @@
 /* ══════════════════════════════════════════════════════════════════════
    StoX Expected Value & Probability-Calibrated Trade Engine
-   Version 4.4.1  (EV_V4_ENGINE)
+   Version 4.5  (EV_V4_ENGINE)
+
+   v4.4.1 -> v4.5 (merged build: the audit fix set completed, keeping the
+   v4.4.1 open-episode API and the v4.4 cluster statistics)
+     1. SETUP LIFT REPAIRED (audit F1): the adjustment multiplied the
+        already-shrunk (histP - priorP) by evidenceWeight AGAIN — effective
+        lift = evidenceWeight^2 x (rawP - priorP), ~11% of the raw bucket gap
+        at exactN=20 — and measured it against a setup-blind prior that
+        INCLUDED the exact bucket. The lift is now single-shrunk and measured
+        against hist.priorP (the H_T_P prior with the exact bucket EXCLUDED):
+            p = ownBase + gapFactor * (histP - priorP)
+        Verified: a seeded always-winning score band produces a probability
+        gap of ~0.8 between score 85 and 45 (was 0.005) and can reach a
+        positive-EV sized plan (was structurally impossible).
+     2. HAIRCUT AFTER SHRINKAGE (audit F2): the plan-independent best-of-N
+        haircut was still subtracted BEFORE shrinkage (multiplied by lambda,
+        stronger at short horizons). It is now subtracted at full strength
+        after shrinkage.
+     3. HONEST LIVE LABELS + WEEK-CLUSTERED LIVE nEff (audit F3):
+        comparisonBasis now states the detrended basis (the old string
+        claimed "executable_pnl" for a detrended number), rawBasis added,
+        and the live effective n is the number of distinct signal weeks
+        (the v4.2 horizon heuristic remains as fallback).
+     4. RAW REALIZED IN THE RELIABILITY SELF-CHECK (audit F4): walk-forward
+        rows now also carry the undetrended realized P&L, so meanRealizedRaw
+        is reported next to the detrended meanRealized.
+     5. calibrationStatus().byHorizon (audit F5): usable buckets per horizon,
+        so pooled-prior fallbacks at long horizons are visible.
+     6. UPSIDE DRIFT CONSISTENCY (audit F6): upsideProfile removes the same
+        trailing drift as the EV model ((1 - driftKeep) x trailing mean log
+        drift, no look-ahead); the two screens no longer disagree.
+     7. HIST-ONLY FALLBACK (audit F7): with no own-history windows but a
+        usable calibration bucket, the probability falls back to hist.p
+        instead of dropping the plan.
+     8. SIGN-AWARE HALF SELECTION (audit F8): the split-half winner's-curse
+        halves rank non-positive EV by raw EV, like the optimizer does.
+     9. OPEN-EPISODE TRANSPARENCY FOR SAME-DAY RESCANS (audit F9): a same-day
+        rescan now populates latest/latestDelta (it was a silent no-op), and
+        episode blocking is window-aware: a record whose holding window is
+        over no longer blocks a new episode when settlement lags.
+    10. DOCS (audit F10): restored hierarchical-prior changelog note (below),
+        the business-income tax caveat and the DEFAULTS cost documentation.
+     Store keys BUMPED: calibration v10 -> v11 and live v5 -> v6. The v10
+     reliability accumulator predates the raw-realized sum (srw) and the v5
+     settled records predate rec.realRaw, so keeping them would silently bias
+     meanRealizedRaw (partial sums over the full n / subset samples). All
+     earlier stores are cleared on load and the walk-forward rebuilds itself
+     in the background.
 
    v4.4 -> v4.4.1 (open-episode transparency)
      1. recordPredictionDetailed() returns structured info even when the
@@ -71,6 +118,15 @@
     11. STORE MEMOIZATION + DEFERRED TOUCH.
     12. CONSERVATISM FEEDBACK (drop haircut when reliability = conservative).
 
+   RESTORED HISTORY NOTE (audit feedback item 10e — the entry that was never
+   written): the v4.2 -> v4.3 engine upgrade (VERSION 4.3.0) shipped the
+   HIERARCHICAL EMPIRICAL-BAYES PRIOR for historicalProbability (exact bucket
+   shrunk toward H_T_P -> H_T -> GLOBAL, exact bucket excluded from prior
+   aggregation so its observations are not counted twice; prior strength
+   40 -> 10 as the exact bucket fills), pooled-EV bucket accumulators (nv/sv)
+   feeding the pooled prior, and the store bumps to calibration v8 / live v4.
+   This is that changelog entry.
+
    v4.1 -> v4.2: frozen decision snapshot, explicit entry tracking,
    live scorecard transparency, store keys bumped.
 
@@ -94,7 +150,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.4.1';
+  var VERSION = 'EV-4.5.0';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -105,22 +161,47 @@ window.ExpectedValueEngine = (function () {
     minPositiveProbability: 0.55,
     minEvidence: 60,
     minEvConfidence: 0.80,
+    /* v4.4+: not a dilution blend any more (see combineProbability). The
+       historical layer contributes its setup-specific lift at full strength;
+       these weights now only set the ML share against the combined model
+       (statistical + historical = 0.80 vs ml = 0.20 when ML fires). */
     blend: { statistical: 0.55, historical: 0.25, ml: 0.20 },
+    /* All values are PERCENT of traded value unless stated.
+       brokerage, exchange, sebi, slippage are PER SIDE; stt is ROUND TRIP
+       (0.1% on buy + 0.1% on sell for delivery); stampDuty is buy side only;
+       gst is a FRACTION applied to (brokerage + exchange + SEBI) and NEVER to
+       STT, stamp duty or DP.
+       dpChargeRs is the flat depository charge in RUPEES per scrip on the sell
+       day (13.5 + 18% GST = 15.93 at most brokers), converted to a percent via
+       positionSizeRs — set positionSizeRs to your typical position.
+       Set costs.brokerage = 0 if your broker charges no delivery brokerage.
+       Override at runtime with window.STOX_EV_CONFIG = { costs: { ... } }. */
     costs: {
-      brokerage: 0,
-      stt: 0.20,
-      exchange: 0.003,
-      sebi: 0.001,
+      brokerage: 0,            // zero-brokerage delivery
+      stt: 0.20,               // 0.1% buy + 0.1% sell
+      exchange: 0.003,         // ~0.003% per side (0.006% round trip)
+      sebi: 0.001,             // GST & SEBI charges, ~0.001% per side; GST folded in, so gst below is 0
       gst: 0,
-      stampDuty: 0.015,
-      slippage: 0.05,
-      dpChargeRs: 15.93,
+      stampDuty: 0.015,        // buy side only
+      slippage: 0.05,          // 0.05%/side modeled slippage (next-open entry of an EOD signal). Zero slippage overstated the shrunk EV by ~0.1-0.25%/trade against the 0.30% minNetEV gate; set 0 only if your fills are consistently at the open.
+      dpChargeRs: 15.93,       // DP charge per scrip on the sell day (13.5 + 18% GST), converted to a % via positionSizeRs
       positionSizeRs: 100000
     },
-    taxRatePct: 0,
+    /* Short-term capital gains on STT-paid listed equity: 20% + 4% cess = 20.8%.
+       Surcharge for high incomes and business-income treatment are NOT modeled.
+       WARNING: if your gains are taxed as BUSINESS INCOME (slab rates, up to
+       30%+ cess, no 20% equity rate), taxRatePct = 0 is optimistic — set it to
+       your effective slab rate or the EV will overstate what you keep.
+       Tax is levied on NET gains for the year, so a strategy you repeat pays tax
+       on its expected net gain (EV x (1 - rate)): losses are set off against gains.
+       taxLossCredit = share of each loss that offsets gains (1 = full set-off,
+       the default for a repeated strategy; 0 = taxed on every winner while
+       losers earn nothing, only right for one-off trades or a year with no
+       other gains). */
+    taxRatePct: 0,                  // capital gains tax NOT deducted from Net EV (was 20.8)
     taxLossCredit: 1,
-    decideAfterTax: false,
-    evPriorStdPct: 0.5,
+    decideAfterTax: false,          // Net EV is after costs only (no capital gains tax)
+    evPriorStdPct: 0.5,             // prior sd of the TRUE gross edge per trade at h=defaultHorizon, % (shrinkage strength); scales with sqrt(h/defaultHorizon) so lambda is horizon-neutral
     selectionHaircut: true,
     scoreGapFree: 8,
     scoreGapRange: 25,
@@ -132,7 +213,7 @@ window.ExpectedValueEngine = (function () {
     driftKeep: 0.5,
     /* v4.4: v9 cleared — reliability store gains per-week aggregates that
        cannot be reconstructed from v9's week-key set. */
-    calibrationKey: 'stox_ev_calibration_v10',
+    calibrationKey: 'stox_ev_calibration_v11',
 
     gate: { includeWatch: false, includeAvoid: false },
     exitVariants: ['fixed'],
@@ -146,7 +227,7 @@ window.ExpectedValueEngine = (function () {
     correlation: { lookbackBars: 120, minOverlap: 60, threshold: 0.7, penalty: 0.5, maxPicks: 5, maxPerGroup: 1, groupPrefixes: ['ADANI', 'TATA', 'BAJAJ'] },
     /* v4.4: v4 cleared — record id changes from symbol|date|h|t|mode
        to symbol|signalDate, incompatible with existing rows. */
-    live: { key: 'stox_ev_live_v5', maxRecords: 4000 },
+    live: { key: 'stox_ev_live_v6', maxRecords: 4000 },
     staleCalibrationDays: 21,
     noTrade: { minPPositive: 0.5 },
     upside: { horizons: [3, 5, 10, 15, 20], targets: [2, 3, 4, 5, 6], shrinkK: 8 }
@@ -154,8 +235,10 @@ window.ExpectedValueEngine = (function () {
 
   /* Clear stores incompatible with this build. */
   try {
+    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v10' + sfx); });  // v10 _rel accumulator has no srw (raw realized sum); v11 rebuilds it
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v9' + sfx); });
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v8' + sfx); });
+    localStorage.removeItem('stox_ev_live_v5');               // v5 settled rows have no realRaw / outcomeRaw; v6 scorecard rebuilds
     localStorage.removeItem('stox_ev_live_v4');
     localStorage.removeItem('stox_ev_live_v3');
     localStorage.removeItem('stox_ev_live_v2');
@@ -625,46 +708,62 @@ window.ExpectedValueEngine = (function () {
     return null;
   }
 
+  /* v4.5: setup-aware decomposition (audit F1/F7).
+     The statistical layer walks every start bar (setup-blind), so the
+     calibration's only unique information is how TODAY'S setup differs from
+     the average setup with the same h/t/stop:
+         p = ownBase + gapFactor * (histP - priorP)
+     histP   = shrunk win rate of this setup's exact score band.
+     priorP  = hist.priorP — the H_T_P prior with the exact bucket EXCLUDED
+     (the `prior` argument pools WITH the exact bucket and would shrink the
+     lift by the bucket's own share; it is kept only as a fallback).
+     The lift is SINGLE-shrunk: hist.p already embeds the evidenceWeight
+     shrinkage toward priorP, so multiplying by evidenceWeight again (v4.3/
+     v4.4.1 behaviour) squared the shrinkage and left ~11% of the raw bucket
+     gap at n=20 — the dilution the audit was about. ML (when it fires) is an
+     independent estimate of the same quantity and keeps its configured share
+     (cfg.blend.ml) against the combined model. */
   function combineProbability(tb, hist, prior, ml, cfg, gapFactor) {
     var ownBase = tb ? clamp(tb.pTarget, 0.01, 0.99) : null;
-    var parts = [];
-    var contributors = 0;
+    var w = gapFactor == null ? 1 : gapFactor;
+    var priorP = hist
+      ? (hist.priorP != null ? hist.priorP : (prior ? prior.p : null))
+      : (prior ? prior.p : null);
+    var lift = (hist && priorP != null) ? w * (hist.p - priorP) : 0;
 
-    if (ownBase != null) { parts.push(ownBase); contributors++; }
-
-    var adjustedBase = ownBase;
-    if (ownBase != null && hist && prior) {
-      var w = (gapFactor == null ? 1 : gapFactor) * (hist.evidenceWeight != null ? hist.evidenceWeight : 0.5);
-      var adj = hist.p - prior.p;
-      adjustedBase = clamp(ownBase + w * adj, 0.01, 0.99);
-      parts[0] = adjustedBase;
-      if (Math.abs(adj) > 0.01) contributors++;
+    /* Contributors and disagreement describe the RAW sources (own history,
+       calibration, ML) so the evidence-score semantics are unchanged. */
+    var sources = [];
+    if (ownBase != null) sources.push(ownBase);
+    if (hist) sources.push(hist.p);
+    if (ml != null) sources.push(ml);
+    var disagreement = null;
+    if (sources.length > 1) {
+      var mean = sources.reduce(function (a, b) { return a + b; }, 0) / sources.length;
+      var variance = sources.reduce(function (s, x) { return s + Math.pow(x - mean, 2); }, 0) / sources.length;
+      disagreement = Math.sqrt(variance);
     }
 
-    if (ml != null) { parts.push(ml); contributors++; }
-
+    /* v4.5 (F7): with no own-history windows but a usable calibration bucket,
+       fall back to hist.p instead of dropping the plan. */
+    var model = ownBase != null ? clamp(ownBase + lift, 0.01, 0.99) : (hist ? hist.p : null);
     var p = null;
-    if (adjustedBase != null && ml != null) {
+    if (model != null && ml != null) {
       var mlW = num(cfg.blend.ml, 0.2);
-      p = clamp(adjustedBase * (1 - mlW) + ml * mlW, 0.01, 0.99);
-    } else if (adjustedBase != null) {
-      p = adjustedBase;
+      p = clamp(model * (1 - mlW) + ml * mlW, 0.01, 0.99);
+    } else if (model != null) {
+      p = model;
     } else if (ml != null) {
       p = ml;
     }
 
-    var disagreement = null;
-    if (parts.length > 1) {
-      var mean = parts.reduce(function (a, b) { return a + b; }, 0) / parts.length;
-      var variance = parts.reduce(function (s, x) { return s + Math.pow(x - mean, 2); }, 0) / parts.length;
-      disagreement = Math.sqrt(variance);
-    }
-
     return {
-      p: p, contributors: contributors, disagreement: disagreement, parts: parts,
-      ownBase: ownBase, adjustedBase: adjustedBase,
-      priorP: prior ? prior.p : null, histP: hist ? hist.p : null,
-      adjustment: (hist && prior) ? (hist.p - prior.p) : null
+      p: p, contributors: sources.length, disagreement: disagreement, parts: sources,
+      method: 'own_base_plus_setup_lift',
+      ownBase: ownBase, adjustedBase: model,
+      statisticalBase: ownBase, setupLift: lift,
+      priorP: priorP, histP: hist ? hist.p : null,
+      adjustment: (hist && priorP != null) ? (hist.p - priorP) : null
     };
   }
 
@@ -874,7 +973,10 @@ window.ExpectedValueEngine = (function () {
       var tau = Math.max(0.05, tauBase * Math.sqrt(core.horizonDays / Math.max(1, cfg.defaultHorizon)));
       var s = Math.max(0.02, tb.stdErr);
       var lam = tau * tau / (tau * tau + s * s);
-      var corrected = core.basisEV - haircut;
+      /* v4.5 (F2): the best-of-N selection haircut is plan-independent and is
+         subtracted AFTER shrinkage. Subtracting it before shrink multiplied it
+         by lambda (bigger effect at short horizons), stacking a conservatism
+         layer unevenly across the grid. */
       var cst = core.ev.costPct, Tg = core.targetPct, Sg = Math.abs(tb.meanStopRet);
       var pT0 = Sg / (Tg + Sg) * (1 - tb.pTimeout), pS0 = Tg / (Tg + Sg) * (1 - tb.pTimeout);
       var rate = cfg.decideAfterTax !== false ? num(cfg.taxRatePct, 0) / 100 : 0;
@@ -886,7 +988,7 @@ window.ExpectedValueEngine = (function () {
         pooledW = Math.min(num(pp.maxWeight, 0.5), hist.bucket.nv / (hist.bucket.nv + num(pp.k, 60))) * pre.gapFactor;
         priorMean = m0 + pooledW * (pooledMean - m0);
       }
-      var shrunk = priorMean + lam * (corrected - priorMean);
+      var shrunk = priorMean + lam * (core.basisEV - priorMean) - haircut;
       var postSd = Math.sqrt(tau * tau * s * s / (tau * tau + s * s));
       ev = {
         grossPct: core.ev.grossPct, costPct: core.ev.costPct, taxPct: core.ev.taxPct,
@@ -935,8 +1037,11 @@ window.ExpectedValueEngine = (function () {
         disagreement: probability.disagreement,
         statistical: tb ? tb.pTarget : null,
         historical: hist ? hist.p : null,
-        priorP: core.prior ? core.prior.p : null,
+        priorP: probability.priorP,                       // v4.5: H_T_P prior, exact bucket excluded (the lift baseline)
         setupAdjustment: probability.adjustment,
+        method: probability.method,                       // own_base_plus_setup_lift
+        statisticalBase: probability.statisticalBase,     // setup-blind own-history rate
+        setupLift: probability.setupLift,                 // gapFactor x (histP - priorP)
         historicalN: hist ? hist.n : 0,
         ml: core.ml
       },
@@ -1007,7 +1112,7 @@ window.ExpectedValueEngine = (function () {
     var sug = kelly, binding = 'kelly';
     if (riskCap != null && riskCap < sug) { sug = riskCap; binding = 'risk cap'; }
     if (cap < sug) { sug = cap; binding = 'position cap'; }
-    return { fullKellyPct: bestF * 100, suggestedPct: sug, riskCapPct: riskCap, binding: binding, kellyScale: scale };
+    return { fullKellyPct: bestF * 100, suggestedPct: sug, riskCapPct: riskCap, riskBasisPct: effStop, binding: binding, kellyScale: scale };
   }
 
   function breakEvenTargetProb(dist, tb, targetPct, cost) {
@@ -1048,6 +1153,11 @@ window.ExpectedValueEngine = (function () {
     return out.slice(0, 4);
   }
 
+  /* v4.5 (F6): each window is detrended by its own trailing drift exactly like
+     the EV model's windowOutcome ((1 - driftKeep) x mean log drift over the
+     lookback ending at the window start, no look-ahead). v4.4.1 kept the drift
+     here while the EV engine removed it, so the two screens disagreed in
+     philosophy. */
   function upsideProfile(dailyCandles, indexCandles, overrides) {
     var cfg = getConfig(overrides), uc = cfg.upside || {};
     var daily = dailyCandles || [], n = daily.length;
@@ -1056,10 +1166,19 @@ window.ExpectedValueEngine = (function () {
     var ww = buildWindowWeights(daily, indexCandles || [], cfg);
     var last = n - 1, firstStart = Math.max(1, n - cfg.lookbackBars);
     var s1 = 0, s2 = 0, c = 0, k;
-    for (k = firstStart; k <= last; k++) {
-      if (daily[k - 1].c > 0 && daily[k].c > 0) { var lr = Math.log(daily[k].c / daily[k - 1].c); s1 += lr; s2 += lr * lr; c++; }
+    /* Per-window, look-ahead-free trailing drift (same convention as
+       tripleBarrierWindows / calibrateFromHistory labels). */
+    var lrSum = new Array(n), lrCnt = new Array(n);
+    lrSum[0] = 0; lrCnt[0] = 0;
+    for (k = 1; k < n; k++) {
+      var aC = daily[k - 1].c, bC = daily[k].c;
+      var okC = (aC > 0 && bC > 0);
+      lrSum[k] = lrSum[k - 1] + (okC ? Math.log(bC / aC) : 0);
+      lrCnt[k] = lrCnt[k - 1] + (okC ? 1 : 0);
+      if (okC && k >= firstStart) { var lr = Math.log(bC / aC); s1 += lr; s2 += lr * lr; c++; }
     }
     if (c < 30) return null;
+    var driftKeep = clamp(num(cfg.driftKeep, 0.5), 0, 1);
     var sigma = Math.sqrt(Math.max(0, s2 / c - Math.pow(s1 / c, 2)));
     var p = [], nEff = [];
     H.forEach(function (h) {
@@ -1070,17 +1189,25 @@ window.ExpectedValueEngine = (function () {
         var entryBar = daily[i + 1];
         var base = entryBar && entryBar.o > 0 ? entryBar.o : (entryBar && entryBar.c > 0 ? entryBar.c : daily[i].c);
         if (!(base > 0) || !(w > 0)) continue;
-        var mx = 0;
-        for (var j = 1; j <= h; j++) { var hi = daily[i + j] && daily[i + j].h; if (hi > mx) mx = hi; }
-        var up = mx / base - 1;
+        var lbFrom = Math.max(1, i - cfg.lookbackBars + 1);
+        var cntI = lrCnt[i] - lrCnt[lbFrom - 1];
+        var muI = cntI > 0 ? (lrSum[i] - lrSum[lbFrom - 1]) / cntI : 0;
+        var removedI = (1 - driftKeep) * muI;
+        var mxL = -Infinity;                     // max DETRENDED log high
+        for (var j = 1; j <= h; j++) {
+          var bar = daily[i + j], hi = bar && bar.h;
+          if (!(hi > 0)) continue;
+          var hiL = Math.log(hi / base) - removedI * j;
+          if (hiL > mxL) mxL = hiL;
+        }
+        if (!(mxL > -Infinity)) continue;
         W += w; W2 += w * w;
-        for (var t = 0; t < T.length; t++) if (up >= T[t] / 100) row[t] += w;
+        for (var t = 0; t < T.length; t++) if (mxL >= Math.log(1 + T[t] / 100)) row[t] += w;
       }
       if (!(W > 0)) { p.push(T.map(function () { return null; })); nEff.push(0); return; }
       p.push(row.map(function (x) { return Math.round(x / W * 1000) / 1000; }));
       nEff.push(Math.round((W * W / W2) / h * 10) / 10);
     });
-    /* NOTE: unlike the EV model, upsideProfile intentionally keeps drift. */
     return { sigmaPct: Math.round(sigma * 100 * 1000) / 1000, horizons: H, targets: T, p: p, nEff: nEff, regime: ww.regime, asOf: String(daily[last].t).slice(0, 10) };
   }
   function upsideBaseline(sigmaPct, horizon, targetPct) {
@@ -1120,7 +1247,7 @@ window.ExpectedValueEngine = (function () {
     if (pre && pre.regime && pre.regime.matchedShare != null) items.push('regime ' + pre.regime.trend + 'trend / ' + pre.regime.volatility + ' vol (' + round(pre.regime.matchedShare * 100, 0) + '% of weighted history matches)');
     if (ev) {
       items.push('trust-adjusted ' + ev.basis + ' EV ' + (ev.netPct >= 0 ? '+' : '') + round(ev.netPct, 2) + '% (data say ' + (ev.rawBasisPct >= 0 ? '+' : '') + round(ev.rawBasisPct, 2) +
-        '%, minus ' + round(ev.haircutPct, 2) + '% selection inflation, pulled x' + round(ev.shrinkFactor, 2) + ' of the way from the zero-edge EV ' + round(ev.priorMeanPct, 2) + '% for +/-' + round(ev.stdErrPct, 2) + '% sampling error)');
+        '%, pulled x' + round(ev.shrinkFactor, 2) + ' of the way from the zero-edge EV ' + round(ev.priorMeanPct, 2) + '% for +/-' + round(ev.stdErrPct, 2) + '% sampling error, minus ' + round(ev.haircutPct, 2) + '% selection inflation)');
       items.push('P(true EV > 0) = ' + pct(ev.pPositive) + '%; costs ' + round(ev.costPct, 2) + '%, tax ' + round(ev.taxPct, 2) + '%');
     }
     items.push('evidence confidence ' + round(evidence, 0) + '/100');
@@ -1164,9 +1291,13 @@ window.ExpectedValueEngine = (function () {
     var valid = cores.filter(function (c) { return c.tb && c.tb.halfA != null && c.tb.halfB != null; });
     if (valid.length < 3) return 0;
     var ia = -1, ib = -1, ua = -Infinity, ub = -Infinity;
+    /* v4.5 (F8): the halves are ranked with the same sign-aware rule as the
+       optimizer (ev/sqrt(h) only for positive EV), so negative-EV grids do
+       not pick their "winner" through the long-horizon sign artifact. */
     valid.forEach(function (c, k) {
       var h = Math.sqrt(Math.max(1, c.horizonDays));
-      var a = c.tb.halfA / h, b = c.tb.halfB / h;
+      var a = c.tb.halfA > 0 ? c.tb.halfA / h : c.tb.halfA;
+      var b = c.tb.halfB > 0 ? c.tb.halfB / h : c.tb.halfB;
       if (a > ua) { ua = a; ia = k; }
       if (b > ub) { ub = b; ib = k; }
     });
@@ -1364,22 +1495,37 @@ window.ExpectedValueEngine = (function () {
   function calibrationStatus(key) {
     key = key || DEFAULTS.calibrationKey;
     var all = loadCalibration(key), buckets = 0, usable = 0, total = 0;
+    var byHorizon = {};
     Object.keys(all).forEach(function (k) {
       buckets++; total += all[k].n || 0;
-      if ((all[k].n || 0) >= 20) usable++;
+      var ok = (all[k].n || 0) >= 20;
+      if (ok) usable++;
+      /* v4.5 (F5): usable buckets PER HORIZON — long horizons weigh each
+         label 1/ceil(h/5), so their exact buckets often fall back to the
+         pooled prior; this makes that visible. */
+      var hk = calibrationKeyPart(k, 'h');
+      if (hk) {
+        var row = byHorizon[hk] || (byHorizon[hk] = { buckets: 0, usableBuckets: 0, outcomes: 0 });
+        row.buckets++; row.outcomes += all[k].n || 0;
+        if (ok) row.usableBuckets++;
+      }
     });
     var meta = loadStore(key + '_meta');
-    return { buckets: buckets, usableBuckets: usable, outcomes: total, symbols: Object.keys(meta).length };
+    return { buckets: buckets, usableBuckets: usable, outcomes: total, symbols: Object.keys(meta).length, byHorizon: byHorizon };
   }
 
   /* ── Reliability ─────────────────────────────────────────────────────── */
   var REL_EDGES = [-0.5, -0.25, 0, 0.25, 0.5];
-  function blankAcc() { return { n: 0, sp: 0, sr: 0, spp: 0, spr: 0, srr: 0, sd: 0, sdd: 0, sraw: 0 }; }
+  function blankAcc() { return { n: 0, sp: 0, sr: 0, spp: 0, spr: 0, srr: 0, sd: 0, sdd: 0, sraw: 0, srw: 0 }; }
   function relBin(p) { var k = 0; while (k < REL_EDGES.length && p >= REL_EDGES[k]) k++; return k; }
-  function addAcc(g, pred, raw, real) {
+  /* v4.5 (F4): realRaw = undetrended realized P&L of the same plan, so the
+     self-check can report actual money next to the detrended number. srw is
+     accumulated defensively (v10 stores predate the field). */
+  function addAcc(g, pred, raw, real, realRaw) {
     var d = real - pred;
     g.n++; g.sp += pred; g.sr += real; g.spp += pred * pred; g.spr += pred * real; g.srr += real * real;
     g.sd += d; g.sdd += d * d; g.sraw += raw;
+    g.srw = (g.srw || 0) + (isFinite(realRaw) ? realRaw : real);
   }
 
   /* v4.4: TRUE ISO-8601 week. Thursday-shift algorithm; handles year-
@@ -1412,7 +1558,7 @@ window.ExpectedValueEngine = (function () {
     var added = 0;
     (rows || []).forEach(function (r) {
       ['all'].concat(r.elig ? ['elig'] : []).forEach(function (grp) {
-        addAcc(st[grp], r.pred, r.raw, r.real);
+        addAcc(st[grp], r.pred, r.raw, r.real, r.realRaw);
         var b = relBin(r.pred);
         var cell = st.bins[grp][b] || { n: 0, sp: 0, sr: 0 };
         cell.n++; cell.sp += r.pred; cell.sr += r.real;
@@ -1476,7 +1622,13 @@ window.ExpectedValueEngine = (function () {
     var result = {
       n: n,
       meanPredicted: mp, meanRealized: mr, meanRawPredicted: g.sraw / n,
-      slope: slope, sdPredicted: sdPred
+      meanRealizedRaw: g.srw != null ? g.srw / n : null,   // v4.5 (F4): raw, undetrended realized P&L
+      slope: slope, sdPredicted: sdPred,
+      /* "consistent" means INTERNALLY COHERENT: predicted and realized are
+         detrended by the same drift. meanRealizedRaw answers "did it make
+         money". The walk-forward uses the own-history layer only (no
+         calibration / ML), so it validates that layer, not the blend. */
+      basis: 'predicted_own_history_ev_vs_realized_detrended_pnl'
     };
     var cluster = clusterSummary(weeks, mode);
     if (cluster) {
@@ -1501,6 +1653,9 @@ window.ExpectedValueEngine = (function () {
     var verdict = n < 100 ? 'collecting' : (result.z < -2 ? 'overconfident' : (result.z > 2 ? 'conservative' : 'consistent'));
     if (verdict === 'consistent' && n >= 300 && sdPred >= 0.2 && slope != null && slope < 0.3) verdict = 'weak-ranking';
     result.verdict = verdict;
+    /* compat aliases */
+    result.nEff = result.effectiveN;
+    result.weeks = result.nWeeks != null ? result.nWeeks : null;
     return result;
   }
 
@@ -1626,39 +1781,68 @@ window.ExpectedValueEngine = (function () {
     var id = symbol + '|' + signalDate;
     var st = loadLive(cfg);
 
-    /* Same-day rescan of the same symbol: silent no-op. */
+    /* v4.5 (F9): attach the latest assessment + change flags to an existing
+       record (shared by the same-day and open-episode paths). Settlement is
+       unchanged: rec.pred / rec.h / rec.t / rec.mode stay frozen at the first
+       prediction — the latest sub-object only INFORMS the caller. */
+    function attachLatest(rec) {
+      var latest = {
+        date: signalDate,
+        pred: best.expectedValue.netPct,
+        decision: best.decision ? best.decision.code : null,
+        score: best.setupQuality,
+        h: best.horizonDays,
+        t: best.targetPct,
+        stop: best.stopPct,
+        mode: best.exitMode || 'fixed',
+        ts: Date.now()
+      };
+      var planChanged = rec.h !== latest.h || rec.t !== latest.t || (rec.mode || 'fixed') !== latest.mode;
+      var predDelta = (rec.pred != null && latest.pred != null) ? latest.pred - rec.pred : null;
+      var scoreDelta = (rec.score != null && latest.score != null) ? latest.score - rec.score : null;
+      var anyChange = planChanged ||
+        (predDelta != null && Math.abs(predDelta) > 0.05) ||
+        (scoreDelta != null && Math.abs(scoreDelta) >= 5);
+      rec.latest = latest;
+      rec.latestChanged = anyChange;
+      rec.latestDelta = { planChanged: planChanged, predDelta: predDelta, scoreDelta: scoreDelta };
+      return anyChange;
+    }
+
+    /* Same-day rescan of the same symbol: never a second record. v4.5 (F9):
+       also record the latest assessment so the caller can warn that the signal
+       changed since the episode opened (this used to be a silent no-op). */
     for (var i = 0; i < st.records.length; i++) {
       if (st.records[i].id === id) {
-        return { recorded: false, reason: 'same_day', existing: st.records[i] };
+        var anyC = attachLatest(st.records[i]);
+        saveStore(liveKey(cfg), st);
+        return {
+          recorded: false, reason: 'same_day', existing: st.records[i],
+          changes: st.records[i].latestDelta, anyChange: anyC
+        };
       }
     }
 
-    /* Persistent Buy while an open episode exists: do NOT create a second
-       record. DO record the latest assessment on the open one. Settlement
-       still uses the frozen first prediction. */
+    /* Persistent Buy while the open episode's holding window still covers
+       today's signal bar: do NOT create a second (overlapping) record — the
+       trade is already on. DO record the latest assessment on the open one;
+       settlement still uses the frozen first prediction.
+       v4.5 (F9): blocking is window-aware — once the holding window is over
+       (settlement lagging), a new episode may start instead of being blocked
+       indefinitely. */
     for (var j = 0; j < st.records.length; j++) {
       if (st.records[j].symbol === symbol && st.records[j].status === 'open') {
         var rec = st.records[j];
-        var latest = {
-          date: signalDate,
-          pred: best.expectedValue.netPct,
-          decision: best.decision ? best.decision.code : null,
-          score: best.setupQuality,
-          h: best.horizonDays,
-          t: best.targetPct,
-          stop: best.stopPct,
-          mode: best.exitMode || 'fixed',
-          ts: Date.now()
-        };
-        var planChanged = rec.h !== latest.h || rec.t !== latest.t || (rec.mode || 'fixed') !== latest.mode;
-        var predDelta = (rec.pred != null && latest.pred != null) ? latest.pred - rec.pred : null;
-        var scoreDelta = (rec.score != null && latest.score != null) ? latest.score - rec.score : null;
-        var anyChange = planChanged ||
-          (predDelta != null && Math.abs(predDelta) > 0.05) ||
-          (scoreDelta != null && Math.abs(scoreDelta) >= 5);
-        rec.latest = latest;
-        rec.latestChanged = anyChange;
-        rec.latestDelta = { planChanged: planChanged, predDelta: predDelta, scoreDelta: scoreDelta };
+        var elapsed = null, kNow = daily.length - 1, q;
+        for (q = 0; q < daily.length; q++) {
+          if (String(daily[q].t).slice(0, 10) === rec.date) { elapsed = kNow - q; break; }
+        }
+        if (elapsed == null) {
+          var oA = dayOrdinal(signalDate), oB = dayOrdinal(rec.date);
+          if (oA != null && oB != null) elapsed = oA - oB;
+        }
+        if (elapsed != null && elapsed >= Math.max(1, num(rec.h, 1))) continue;   // window over: not blocking
+        var anyChange = attachLatest(rec);
         saveStore(liveKey(cfg), st);   /* best-effort; not required for scorecard integrity */
         return {
           recorded: false, reason: 'already_open', existing: rec,
@@ -1772,6 +1956,7 @@ window.ExpectedValueEngine = (function () {
       if (oRaw) {
         var vRaw = outcomeValues(oRaw, rec.t, rec.cost, settlementCfg);
         rec.realRaw = settlementCfg.decideAfterTax !== false ? vRaw.aft : vRaw.pre;
+        rec.outcomeRaw = oRaw.tP >= 0.5 ? 'target' : (oRaw.sP >= 0.5 ? 'stop' : 'timeout');
         rec.detrend = removedI * 100 * rec.h;
       }
       rec.outcome = o.tP >= 0.5 ? 'target' : (o.sP >= 0.5 ? 'stop' : 'timeout');
@@ -1797,8 +1982,11 @@ window.ExpectedValueEngine = (function () {
       meanPredicted: 'Predicted model EV (detrended, after costs)',
       meanRealized: 'Model-basis realized P&L (detrended, comparable to prediction)',
       meanRealizedRaw: 'Raw realized trading P&L (undetrended)',
-      comparisonBasis: 'predicted_model_ev_vs_realized_executable_pnl',
-      note: 'meanRealized is on the same detrended basis as meanPredicted, so it validates the model. meanRealizedRaw shows what an actual trade would have made; the difference is the drift the model deliberately removes.'
+      /* v4.5 (F3): the old string claimed "executable_pnl" for the DETRENDED
+         number — exactly what the audit flagged. Both bases are now named. */
+      comparisonBasis: 'predicted_model_ev_vs_realized_detrended_pnl',
+      rawBasis: 'predicted_model_ev_vs_realized_raw_executable_pnl',
+      note: 'meanRealized is on the same detrended basis as meanPredicted, so it validates the model ("consistent" = internally coherent). meanRealizedRaw shows what an actual trade would have made; the difference is the drift the model deliberately removes.'
     };
     if (!done.length) return out;
     var sp = 0, sr = 0, sd = 0, sdd = 0;
@@ -1808,9 +1996,14 @@ window.ExpectedValueEngine = (function () {
     var avgHorizon = 0;
     done.forEach(function (r) { avgHorizon += Math.max(1, Number(r.h) || 1); });
     avgHorizon /= Math.max(1, n);
-    var overlapFactor = Math.max(1, Math.min(avgHorizon, 10) / 2);
-    var effectiveN = Math.max(1, n / overlapFactor);
-    var se = Math.sqrt(varD / effectiveN);
+    /* v4.5 (F3): effective n = distinct SIGNAL WEEKS (same-week rows across
+       symbols share market moves; the v4.2 horizon heuristic overcounted).
+       Fallback to the horizon heuristic when dates are missing. */
+    var weekSet = {};
+    done.forEach(function (r) { var wk = r.date != null ? weekKeyOf(r.date) : null; if (wk) weekSet[wk] = 1; });
+    var nWeeks = Object.keys(weekSet).length;
+    var effectiveN = nWeeks || Math.max(1, n / Math.max(1, Math.min(avgHorizon, 10) / 2));
+    var se = Math.sqrt(varD / Math.max(1, effectiveN));
     out.meanPredicted = sp / n;
     out.meanRealized = sr / n;
     if (doneRaw.length) {
@@ -1821,8 +2014,9 @@ window.ExpectedValueEngine = (function () {
       out.rawVsModelGap = out.meanRealizedRaw - out.meanRealized;
     }
     out.bias = bias; out.stdErr = se;
-    out.comparisonBasis = 'predicted_model_ev_vs_realized_executable_pnl';
-    out.effectiveN = effectiveN; out.avgHorizonDays = avgHorizon;
+    out.comparisonBasis = 'predicted_model_ev_vs_realized_detrended_pnl';
+    out.rawBasis = 'predicted_model_ev_vs_realized_raw_executable_pnl';
+    out.effectiveN = effectiveN; out.weeks = nWeeks; out.avgHorizonDays = avgHorizon;
     out.z = se > 0 ? bias / se : 0;
     out.verdict = n < 30 ? 'collecting' : (out.z < -2 ? 'overconfident' : (out.z > 2 ? 'conservative' : 'consistent'));
     [['positiveEV', function (r) { return r.pred > 0; }], ['nonPositiveEV', function (r) { return r.pred <= 0; }]].forEach(function (g) {
@@ -2063,10 +2257,15 @@ window.ExpectedValueEngine = (function () {
               var o2 = windowOutcome(daily, idx, b.horizonDays, Math.log(1 + b.targetPct / 100), Math.log(1 - b.stopPct / 100), removedC, b.stopPct, b.exitMode, exitOpts(cfg));
               if (o2) {
                 var rv = outcomeValues(o2, b.targetPct, b.costsPct != null ? b.costsPct : costPct, cfg);
+                /* v4.5 (F4): parallel undetrended run — the raw money P&L of
+                   the same plan, reported next to the detrended realized. */
+                var o2r = windowOutcome(daily, idx, b.horizonDays, Math.log(1 + b.targetPct / 100), Math.log(1 - b.stopPct / 100), 0, b.stopPct, b.exitMode, exitOpts(cfg));
+                var rvr = o2r ? outcomeValues(o2r, b.targetPct, b.costsPct != null ? b.costsPct : costPct, cfg) : null;
                 relRows.push({
                   date: date,
                   pred: b.expectedValue.netPct, raw: b.expectedValue.rawBasisPct,
                   real: cfg.decideAfterTax !== false ? rv.aft : rv.pre,
+                  realRaw: rvr ? (cfg.decideAfterTax !== false ? rvr.aft : rvr.pre) : null,
                   elig: score >= buyTh
                 });
               }
