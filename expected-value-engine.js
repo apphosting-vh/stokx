@@ -1,6 +1,23 @@
 /* ══════════════════════════════════════════════════════════════════════
    StoX Expected Value & Probability-Calibrated Trade Engine
-   Version 4.4  (EV_V4_ENGINE)
+   Version 4.4.1  (EV_V4_ENGINE)
+
+   v4.4 -> v4.4.1 (open-episode transparency)
+     1. recordPredictionDetailed() returns structured info even when the
+        prediction is deduplicated (same-day rescan or open episode), so
+        the caller can warn the user that the signal has changed since
+        the open episode began. recordPrediction() is kept as a boolean
+        wrapper for backward compatibility.
+     2. On an open-episode rescan, the existing record gets a 'latest'
+        sub-object (latest pred / decision / score / plan) and two
+        flags: latestChanged (any material change) and latestDelta
+        (planChanged / predDelta / scoreDelta). Settlement is unchanged:
+        rec.pred, rec.h, rec.t, rec.mode stay frozen at first prediction.
+     3. getOpenEpisode(symbol) is a pure read for the UI: returns the
+        open episode with its latest assessment (or null).
+     4. Exports added: recordPredictionDetailed, getOpenEpisode.
+     No store key bumps, no schema migrations, no behavioural change to
+     the scorecard.
 
    v4.3 -> v4.4 (audit fixes for remaining stat / logging defects)
      1. WEEK-CLUSTERED RELIABILITY (proper):
@@ -77,7 +94,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.4.0';
+  var VERSION = 'EV-4.4.1';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -1592,31 +1609,65 @@ window.ExpectedValueEngine = (function () {
   function liveKey(cfg) { return (cfg.live && cfg.live.key) || 'stox_ev_live_v1'; }
   function loadLive(cfg) { var d = loadStore(liveKey(cfg)); if (!d.records) d.records = []; return d; }
 
-  /* v4.4: STABLE ID + EPISODE DEDUP.
-       id = 'symbol|signalDate' (was symbol|date|h|t|mode; a rescan that
-       picked a different best plan used to create a second record for
-       the same signal day).
-       Additionally, refuse to open a new record while ANY record for the
-       same symbol is still open — a persistent Buy does not start a
-       second overlapping episode. A new episode can begin only after the
-       prior one has settled (target / stop / timeout). */
-  function recordPrediction(best, opts) {
+  /* v4.4.1: expose the "latest assessment" of an open episode so the caller
+   can warn the user that the signal/plan changed since the episode opened,
+   WITHOUT creating a second record and WITHOUT changing the scorecard
+   settlement. recordPrediction() below is a boolean wrapper for backward
+   compatibility. */
+  function recordPredictionDetailed(best, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
     var daily = opts.dailyCandles || [];
     var symbol = opts.symbol || (best && best.symbol);
-    if (!best || !best.expectedValue || !symbol || !daily.length) return false;
+    if (!best || !best.expectedValue || !symbol || !daily.length) {
+      return { recorded: false, reason: 'invalid_input' };
+    }
     var signalDate = String(daily[daily.length - 1].t).slice(0, 10);
     var id = symbol + '|' + signalDate;
     var st = loadLive(cfg);
-    /* Same-day rescan of the same symbol: skip. */
+
+    /* Same-day rescan of the same symbol: silent no-op. */
     for (var i = 0; i < st.records.length; i++) {
-      if (st.records[i].id === id) return false;
+      if (st.records[i].id === id) {
+        return { recorded: false, reason: 'same_day', existing: st.records[i] };
+      }
     }
-    /* Persistent Buy: skip while a previous episode is still open. */
+
+    /* Persistent Buy while an open episode exists: do NOT create a second
+       record. DO record the latest assessment on the open one. Settlement
+       still uses the frozen first prediction. */
     for (var j = 0; j < st.records.length; j++) {
-      if (st.records[j].symbol === symbol && st.records[j].status === 'open') return false;
+      if (st.records[j].symbol === symbol && st.records[j].status === 'open') {
+        var rec = st.records[j];
+        var latest = {
+          date: signalDate,
+          pred: best.expectedValue.netPct,
+          decision: best.decision ? best.decision.code : null,
+          score: best.setupQuality,
+          h: best.horizonDays,
+          t: best.targetPct,
+          stop: best.stopPct,
+          mode: best.exitMode || 'fixed',
+          ts: Date.now()
+        };
+        var planChanged = rec.h !== latest.h || rec.t !== latest.t || (rec.mode || 'fixed') !== latest.mode;
+        var predDelta = (rec.pred != null && latest.pred != null) ? latest.pred - rec.pred : null;
+        var scoreDelta = (rec.score != null && latest.score != null) ? latest.score - rec.score : null;
+        var anyChange = planChanged ||
+          (predDelta != null && Math.abs(predDelta) > 0.05) ||
+          (scoreDelta != null && Math.abs(scoreDelta) >= 5);
+        rec.latest = latest;
+        rec.latestChanged = anyChange;
+        rec.latestDelta = { planChanged: planChanged, predDelta: predDelta, scoreDelta: scoreDelta };
+        saveStore(liveKey(cfg), st);   /* best-effort; not required for scorecard integrity */
+        return {
+          recorded: false, reason: 'already_open', existing: rec,
+          changes: rec.latestDelta, anyChange: anyChange
+        };
+      }
     }
+
+    /* Fresh episode. */
     var currentExit = exitOpts(cfg);
     var decisionSnapshot = {
       decideAfterTax: cfg.decideAfterTax !== false,
@@ -1639,7 +1690,43 @@ window.ExpectedValueEngine = (function () {
       var done = st.records.filter(function (r) { return r.status !== 'open'; }).slice(-(max - open.length));
       st.records = done.concat(open);
     }
-    return saveStore(liveKey(cfg), st);
+    var ok = saveStore(liveKey(cfg), st);
+    return {
+      recorded: ok, reason: ok ? 'created' : 'write_failed',
+      record: ok ? st.records[st.records.length - 1] : null
+    };
+  }
+
+  /* Backward-compatible boolean wrapper. The app-core.js call site can stay
+     as-is; callers that want the rich info can switch to
+     recordPredictionDetailed. */
+  function recordPrediction(best, opts) {
+    try {
+      return recordPredictionDetailed(best, opts).recorded === true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /* Pure read for the UI: is this symbol in an open episode, and has the
+     signal changed since the episode opened? Returns null if not open. */
+  function getOpenEpisode(symbol, opts) {
+    var cfg = getConfig(opts && opts.config);
+    var st = loadLive(cfg);
+    for (var i = 0; i < st.records.length; i++) {
+      if (st.records[i].symbol === symbol && st.records[i].status === 'open') {
+        return {
+          id: st.records[i].id,
+          signalDate: st.records[i].signalDate,
+          h: st.records[i].h, t: st.records[i].t,
+          pred: st.records[i].pred, score: st.records[i].score,
+          latest: st.records[i].latest || null,
+          latestChanged: !!st.records[i].latestChanged,
+          latestDelta: st.records[i].latestDelta || null
+        };
+      }
+    }
+    return null;
   }
 
   function settlePredictions(symbol, dailyCandles, opts) {
@@ -2020,6 +2107,8 @@ window.ExpectedValueEngine = (function () {
     reliabilityStatus: reliabilityStatus,
     gateReport: gateReport,
     recordPrediction: recordPrediction,
+    recordPredictionDetailed: recordPredictionDetailed,
+    getOpenEpisode: getOpenEpisode,
     settlePredictions: settlePredictions,
     livePerformance: livePerformance,
     clearLive: clearLive,
