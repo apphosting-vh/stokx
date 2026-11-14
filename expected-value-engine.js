@@ -1,109 +1,83 @@
 /* ══════════════════════════════════════════════════════════════════════
    StoX Expected Value & Probability-Calibrated Trade Engine
-   Version 4.3  (EV_V4_ENGINE)
+   Version 4.4  (EV_V4_ENGINE)
 
-   v4.2 -> v4.3 (audit fixes: setup-aware probability, honest self-audit,
-   correct trust statistics)
-     1. SETUP-AWARE PROBABILITY DECOMPOSITION: the statistical target-first
-        rate (55% of the v4.2 blend) was setup-BLIND — it walked every start
-        bar, not bars matching this setup. It now serves as the stock's own
-        baseline, and calibration enters as (histP − priorP), the setup's
-        lift over the plan's ALL-score-bands prior. p = ownBase + w·(histP
-        − priorP). New helper setupBlindPrior() aggregates across score bands
-        for the same (h, t, stop).
-     2. SELF-CHECK HONESTY: settlePredictions now records BOTH the detrended
-        realized P&L (the v4.1 basis, comparable to the detrended prediction)
-        AND the raw undetrended P&L (what a real trade would have made).
-        livePerformance() reports both. Label 'predicted_model_ev_vs_
-        realized_executable_pnl' is accurate now.
-     3. TRUST STATISTICS EFFECTIVE N: reliability and gate z-scores used
-        nEff = n/4 while the rows are stocks × weekly dates that share
-        market moves. nEff is now the number of distinct ISO weeks seen
-        (recordReliability accumulates a weekKey set); fallback n/4 if
-        unknown. Fixes ~5–10x z inflation.
-     4. UTILITY SIGN: non-positive EV is now ranked by RAW EV, not EV/sqrt(h).
-        Stops longer horizons winning the plan-search purely because they
-        shrink the magnitude of a negative number.
-     5. HORIZON-SCALED PRIOR: τ = evPriorStdPct × sqrt(h / defaultHorizon),
-        so the Empirical-Bayes λ is roughly horizon-invariant. Combined with
-        fix 4, positive-EV selection is no longer biased to short horizons
-        by the selection metric itself.
-     6. CALIBRATION DATA LOSS: recordOutcomes() and recordReliability() now
-        return -1 on store write failure (vs. 0 for "no rows"). calibrate-
-        FromHistory advances the per-stock progress marker ONLY when the
-        write actually succeeded, so failed-batch windows get re-labelled.
-     7. BUCKET SPARSITY: dropped volClass from the exact bucket key — it is
-        nearly a function of the stop width (1.8×ATR, clamped), so removing
-        it keeps identical information density while cutting exact-bucket
-        sparsity ~2×. Prior hierarchy still uses stop. Calibration key v8→v9.
-     8. REALISTIC COSTS: default slippage 0.05%/side (0.10%/round trip). At
-        a typical 0.24% statutory, round trip is now ~0.34%. Users can still
-        set 0. (taxRatePct default 0 is a user choice; leave as is.)
-     9. SIZING GAP-THROUGH AWARENESS: risk cap uses
-        max(stopPct, |meanStopRet|, |p5|), because gap-throughs and stops
-        on locked bars can fill worse than the nominal stop.
-    10. CLASSIFICATION ORDER: netEV ≤ 0 is checked BEFORE low evidence, so
-        clearly negative-EV setups label AVOID instead of WATCH.
-    11. STORE MEMOIZATION + DEFERRED TOUCH: loadCalibration is memoized per
-        key (invalidated by save/clear). statisticalTouch (informational) is
-        no longer computed for all 25 plans in optimize(); only for the
-        chosen best.
-    12. CONSERVATISM FEEDBACK: selectionHaircutOf() returns 0 when
-        reliabilityVerdict() is 'conservative', so the last of the four
-        conservatism layers is the first to drop when the audit says the
-        EV numbers have been over-shrunk.
+   v4.3 -> v4.4 (audit fixes for remaining stat / logging defects)
+     1. WEEK-CLUSTERED RELIABILITY (proper):
+        v4.3 divided ROW-level variance by the number of distinct weeks.
+        That is still wrong — 100 stocks in one bad week still enter the
+        numerator of the row variance, so cross-sectional correlation is
+        only partly removed. The reliability store now keeps per-week
+        aggregates {n, sp, sr, eN, eSP, eSR}; the bias and SE used for
+        the verdict are computed from ONE observation per week:
+            bias = mean_w( r̄_w − p̄_w )
+            SE   = sd_w( r̄_w − p̄_w ) / sqrt(N_weeks)
+        Row-weighted pooled means are still shown for display continuity,
+        and the fallback (n/4) path is kept for stores with too few
+        weeks to cluster.
+        gateReport() uses the same cluster estimator (per-week eligible
+        vs non-eligible mean difference).
+     2. LIVE RECORD DEDUPLICATION (one episode per symbol):
+        Record id is now 'symbol|signalDate' (was symbol|date|h|t|mode,
+        which let a rescan that picked a different best plan log a
+        second row). recordPrediction() also refuses to create a new
+        record while any OPEN record exists for the same symbol — a
+        persistent Buy does not start a second overlapping episode.
+        Live key bumped v4→v5 (id scheme incompatible with v4 rows).
+     3. EXPLICIT RAW-vs-MODEL LABELS: livePerformance() now returns
+        `labels` metadata (meanPredicted / meanRealized / meanRealizedRaw)
+        and `rawVsModelGap` (meanRealizedRaw − meanRealized), so the UI
+        can label the two P&L numbers explicitly. meanRealized and
+        meanRealizedRaw were both already in v4.3; this adds the
+        metadata the UI needs to distinguish them.
+     4. ISO-8601 WEEK KEYS: weekKeyOf() is now the standard
+        Thursday-shift algorithm. Handles year-boundary spillover
+        correctly (2024-12-31 → '2025-W01').
+     5. Reliable key bumps: calibrationKey v9→v10 and live.key v4→v5.
+        v9 calibration is cleared because the reliability store gained
+        per-week aggregates that cannot be reconstructed from v9's
+        week-key set; v4 live rows are cleared because the id scheme
+        changed.
 
-   v4.1 -> v4.2 (merged build: verified v4.1 fixes + the sound parts of
-   EV-4.1-REV2)
-     1. FROZEN DECISION SNAPSHOT: recordPrediction() freezes the settlement-
-        relevant config (tax basis, tax rate, loss credit, exit rules) at
-        prediction time; settlePredictions() settles against that snapshot.
-     2. EXPLICIT ENTRY TRACKING: signalDate / entryDate / entryPrice /
-        entryConvention ('next_session_open'), matching windowOutcome.
-     3. LIVE SCORECARD TRANSPARENCY: basis label, effective sample size
-        from average holding horizon (replaces n/2 heuristic).
-     4. STORE KEYS BUMPED (calibration v8, live v3) and every earlier store
-        cleared on load.
+   v4.2 -> v4.3 (audit fixes: setup-aware probability, self-audit honesty,
+   correct utility sign, horizon-scaled prior, write-failure detection)
+     1. SETUP-AWARE PROBABILITY DECOMPOSITION.
+     2. SELF-CHECK HONESTY (rec.real + rec.realRaw).
+     3. TRUST STATISTICS distinct weeks (partial — superseded by 4.4 #1).
+     4. UTILITY SIGN (raw EV for non-positive plans).
+     5. HORIZON-SCALED PRIOR (τ ∝ √h).
+     6. CALIBRATION DATA LOSS (-1 on write failure).
+     7. BUCKET SPARSITY (volClass dropped from key).
+     8. REALISTIC COSTS (slippage 0.05%/side default).
+     9. SIZING gap-through awareness.
+    10. CLASSIFICATION ORDER (netEV ≤ 0 checked first).
+    11. STORE MEMOIZATION + DEFERRED TOUCH.
+    12. CONSERVATISM FEEDBACK (drop haircut when reliability = conservative).
 
-   v4.0 -> v4.1 (correctness of EV math and of the trust loop)
-     1. STOP WIDTH IN CALIBRATION BUCKETS.
-     2. RELIABILITY / LIVE SCORECARD SAME BASIS.
-     3. LOOK-AHEAD-FREE DRIFT.
-     4. NEXT-OPEN ENTRY.
-     5. DP CHARGE included via dpChargeRs.
-     6. CONSISTENT BASIS INSIDE windowOutcome.
-     7. SIZING: raw edge now on same tax basis as the decision EV.
-     8. OVERLAP-WEIGHTED CALIBRATION COUNTS (row.w = 1/ceil(h/5)).
+   v4.1 -> v4.2: frozen decision snapshot, explicit entry tracking,
+   live scorecard transparency, store keys bumped.
 
-   v3 -> v4 (decision quality, risk and self-honesty)
-     1. REGIME + RECENCY WEIGHTING.
-     2. POOLED PRIOR.
-     3. REALISTIC EXITS (locked-limit, optional breakeven/trail).
-     4. SIZING + RISK (fractional Kelly, EV/day, tail stats, reasons).
-     5. PORTFOLIO DIVERSIFY + rankingVerdict.
-     6. SELF-HONESTY (live log, gate backtest, EV-bucket calibration,
-        trust flag, stale calibration clearing on cost/tax change).
+   v4.0 -> v4.1: stop width in calibration buckets, same-basis reliability,
+   look-ahead-free drift, next-open entry, DP charge, consistent basis
+   inside windowOutcome, sizing on the decision tax basis, overlap-weighted
+   calibration counts.
 
-   v2 -> v3 (trust fixes)
-     1. SAMPLING NOISE (Empirical-Bayes shrink + P(true EV > 0)).
-     2. SELECTION BIAS (best-of-25 split-half haircut).
-     3. SAME-BAR TIES (open-based gambler's-ruin share).
-     4. COSTS/TAX (flat DP charge + after-tax basis).
-     5. CALIBRATION SCORE MISMATCH (gapFactor).
-     6. SELF-AUDIT (predicted-vs-realized reliability).
+   v3 -> v4: regime + recency weighting, pooled prior, realistic exits,
+   sizing + risk, portfolio diversify, self-honesty.
 
-   Earlier (v2): first-passage outcome model, corrected costs, probTouch percent
-   fix, evidence reflects measured sample, shared per-stock setup computation,
-   idempotent walk-forward calibration.
+   v2 -> v3: sampling noise, selection bias, same-bar ties, costs/tax,
+   calibration score mismatch, self-audit.
+
+   v2: first-passage outcome model, corrected costs, probTouch percent
+   fix, evidence reflects measured sample, shared per-stock setup
+   computation, idempotent walk-forward calibration.
 
    This module deliberately does NOT replace the existing technical engine.
-   It consumes existing StoX calculations and separates descriptive scoring
-   from predictive probability and economic expectancy.
    ══════════════════════════════════════════════════════════════════════ */
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.3.0';
+  var VERSION = 'EV-4.4.0';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -122,8 +96,6 @@ window.ExpectedValueEngine = (function () {
       sebi: 0.001,
       gst: 0,
       stampDuty: 0.015,
-      /* v4.3: 0.05%/side slippage — at 0%/side, a 0.30% minNetEV gate is
-         largely consumed by slippage sensitivity. Users can override. */
       slippage: 0.05,
       dpChargeRs: 15.93,
       positionSizeRs: 100000
@@ -141,8 +113,9 @@ window.ExpectedValueEngine = (function () {
     lookbackBars: 500,
     minWindows: 30,
     driftKeep: 0.5,
-    /* v4.3: bumped from v8 (volClass removed from bucket key) */
-    calibrationKey: 'stox_ev_calibration_v9',
+    /* v4.4: v9 cleared — reliability store gains per-week aggregates that
+       cannot be reconstructed from v9's week-key set. */
+    calibrationKey: 'stox_ev_calibration_v10',
 
     gate: { includeWatch: false, includeAvoid: false },
     exitVariants: ['fixed'],
@@ -154,18 +127,22 @@ window.ExpectedValueEngine = (function () {
     liquidity: { enabled: false, impactCoef: 0.5, maxPerSidePct: 1.0, advBars: 20 },
     sizing: { kellyFraction: 0.25, maxPositionPct: 20, maxRiskPerTradePct: 1.0 },
     correlation: { lookbackBars: 120, minOverlap: 60, threshold: 0.7, penalty: 0.5, maxPicks: 5, maxPerGroup: 1, groupPrefixes: ['ADANI', 'TATA', 'BAJAJ'] },
-    live: { key: 'stox_ev_live_v4', maxRecords: 4000 },
+    /* v4.4: v4 cleared — record id changes from symbol|date|h|t|mode
+       to symbol|signalDate, incompatible with existing rows. */
+    live: { key: 'stox_ev_live_v5', maxRecords: 4000 },
     staleCalibrationDays: 21,
     noTrade: { minPPositive: 0.5 },
     upside: { horizons: [3, 5, 10, 15, 20], targets: [2, 3, 4, 5, 6], shrinkK: 8 }
   };
 
-  /* Clear stores incompatible with this build. v8 had volClass in the key
-     (this build removed it), and v8 was calibrated under the previous
-     slippage default (0%/side) — so the labels/EVs are not comparable. */
+  /* Clear stores incompatible with this build. */
   try {
+    ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v9' + sfx); });
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v8' + sfx); });
-    /* Older store keys */
+    localStorage.removeItem('stox_ev_live_v4');
+    localStorage.removeItem('stox_ev_live_v3');
+    localStorage.removeItem('stox_ev_live_v2');
+    localStorage.removeItem('stox_ev_live_v1');
     localStorage.removeItem('stox_ev_calibration_v2');
     localStorage.removeItem('stox_ev_calibration_v2_meta');
     localStorage.removeItem('stox_ev_calibration_v3');
@@ -174,9 +151,6 @@ window.ExpectedValueEngine = (function () {
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v5' + sfx); });
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v6' + sfx); });
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v7' + sfx); });
-    localStorage.removeItem('stox_ev_live_v1');
-    localStorage.removeItem('stox_ev_live_v2');
-    localStorage.removeItem('stox_ev_live_v3');
   } catch (e) {}
 
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
@@ -487,10 +461,6 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-  /* ── Calibration store ────────────────────────────────────────────────
-     Bucket key (v4.3): h + t + score band + stop width. Dropped volClass —
-     it is nearly a function of stop width (1.8×ATR, clamped) and adding it
-     to the key doubled exact-bucket sparsity without adding information. */
   function calibrationBucket(horizon, targetPct, setupScore, volClass, stopPct) {
     var ps = stopPct == null ? 'x' : round(Math.round(num(stopPct, 0) * 2) / 2, 1);
     return 'h' + horizon + '|t' + round(targetPct, 1) + '|s' + Math.floor(clamp(setupScore || 0, 0, 99) / 10) * 10 + '|p' + ps;
@@ -514,8 +484,6 @@ window.ExpectedValueEngine = (function () {
     }
   }
 
-  /* v4.3: memoize loadCalibration. historicalProbability was re-parsing the
-     store per plan (25 plans/stock/scan). Cache invalidated on save/clear. */
   var _calCache = {};
   var _calCacheVer = {};
   function loadCalibration(key) {
@@ -556,8 +524,6 @@ window.ExpectedValueEngine = (function () {
     return { n: totalN, wins: totalWins, p: clamp(totalWins / totalN, 0.01, 0.99) };
   }
 
-  /* v4.3: removed H_T_V_P level (volClass is no longer in the bucket key);
-     keep H_T_P, H_T, GLOBAL. */
   function hierarchicalCalibrationPrior(all, horizon, targetPct, volClass, stopPct, exactKey) {
     var h = 'h' + horizon;
     var t = 't' + round(targetPct, 1);
@@ -606,8 +572,6 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-  /* v4.3 — setup-blind prior for the SAME (h, t, stop) across all score
-     bands. This is the "priorP" the audit's cleaner decomposition uses. */
   function setupBlindPrior(horizon, targetPct, stopPct, key) {
     var all = loadCalibration(key);
     var h = 'h' + horizon;
@@ -644,16 +608,6 @@ window.ExpectedValueEngine = (function () {
     return null;
   }
 
-  /* v4.3: setup-aware combination. Replaces the previous flat blend.
-     p = ownBase + w·(histP − priorP), optionally blended with ML.
-     - ownBase  = the stock's own target-first rate (setup-blind per stock)
-     - histP    = the calibrated rate for this score band
-     - priorP   = the calibrated rate aggregated over ALL score bands for the
-                  same (h, t, stop) — the setup-blind baseline for this plan
-     - w        = gapFactor × hist.evidenceWeight (how much to trust the
-                  calibration adjustment given the score gap and sample size)
-     When histP/priorP are unavailable, adjustedBase stays = ownBase.
-     ML, if present, is blended at weight cfg.blend.ml. */
   function combineProbability(tb, hist, prior, ml, cfg, gapFactor) {
     var ownBase = tb ? clamp(tb.pTarget, 0.01, 0.99) : null;
     var parts = [];
@@ -711,8 +665,6 @@ window.ExpectedValueEngine = (function () {
     return round(clamp(ownScore + calScore + dataScore + agreementScore + modelScore + stabilityScore + regimeScore, 0, 100), 1);
   }
 
-  /* v4.3: netEV ≤ 0 checked BEFORE low evidence so clearly losing setups
-     label AVOID, not WATCH. */
   function classify(netEV, pEvPositive, pReturnPositive, evidence, setupScore, cfg) {
     if (netEV != null && netEV <= 0) return { code: 'NEGATIVE_EV', label: 'AVOID', color: 'loss' };
     if (netEV == null || evidence < 45) return { code: 'INSUFFICIENT_EVIDENCE', label: 'WATCH', color: 'neutral' };
@@ -839,7 +791,6 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-  /* ── Stage 1: one plan, independent of selection ──────────────────────── */
   function corePlan(pre, input, cfg, horizon, targetPct, internal, mode) {
     var daily = input.dailyCandles || [];
     var hourly = input.hourlyCandles || [];
@@ -851,7 +802,6 @@ window.ExpectedValueEngine = (function () {
     var tb = tripleBarrierWindows(daily, horizon, targetPct, pre.stopPct, cfg, pre.costs, pre.weights, mode);
     var touch = (noHist || noTouch) ? null : statisticalTouch(hourly, daily, indexCandles, horizon, targetPct);
     var hist = noHist ? null : historicalProbability(horizon, targetPct, pre.setupCalScore, pre.volClass, pre.stopPct, cfg.calibrationKey);
-    /* v4.3: setup-blind prior across all score bands for the same (h, t, stop). */
     var prior = noHist ? null : setupBlindPrior(horizon, targetPct, pre.stopPct, cfg.calibrationKey);
     var ml = noHist ? null : mlProbability({
       symbol: input.symbol, dailyCandles: daily, hourlyCandles: hourly, indexCandles: indexCandles,
@@ -886,7 +836,6 @@ window.ExpectedValueEngine = (function () {
     return core;
   }
 
-  /* ── Stage 2: shrink, correct for selection, classify ──────────────────── */
   function finalizePlan(core, pre, input, cfg, haircut) {
     var setup = pre.setup, tb = core.tb, probability = core.probability;
     var hist = core.hist;
@@ -904,10 +853,6 @@ window.ExpectedValueEngine = (function () {
 
     var ev = null;
     if (core.ev) {
-      /* v4.3: horizon-scaled prior sd. At a fixed 0.5%, λ fell 0.87→0.31
-         from 3d to 20d, tilting positive-EV selection toward short horizons.
-         Scaling τ with sqrt(h / defaultHorizon) makes λ roughly
-         horizon-invariant. */
       var tauBase = num(cfg.evPriorStdPct, 0.5);
       var tau = Math.max(0.05, tauBase * Math.sqrt(core.horizonDays / Math.max(1, cfg.defaultHorizon)));
       var s = Math.max(0.02, tb.stdErr);
@@ -1035,8 +980,6 @@ window.ExpectedValueEngine = (function () {
     }
     var scale = rawEdge > 1e-9 ? clamp(ev.netPct / rawEdge, 0, 1) : 0;
     var kelly = bestF * 100 * num(sc.kellyFraction, 0.25) * scale;
-    /* v4.3: risk cap on the EFFECTIVE stop (gap-throughs and locked-bar fills
-       can be worse than the nominal stop). */
     var effStop = Math.max(
       stopPct || 0,
       Math.abs(tb.meanStopRet || 0),
@@ -1120,9 +1063,7 @@ window.ExpectedValueEngine = (function () {
       p.push(row.map(function (x) { return Math.round(x / W * 1000) / 1000; }));
       nEff.push(Math.round((W * W / W2) / h * 10) / 10);
     });
-    /* NOTE: unlike the EV model, upsideProfile intentionally keeps drift — it
-       answers "will this stock reach +T%?", which includes any trend already
-       present. The two screens can disagree in philosophy by design. */
+    /* NOTE: unlike the EV model, upsideProfile intentionally keeps drift. */
     return { sigmaPct: Math.round(sigma * 100 * 1000) / 1000, horizons: H, targets: T, p: p, nEff: nEff, regime: ww.regime, asOf: String(daily[last].t).slice(0, 10) };
   }
   function upsideBaseline(sigmaPct, horizon, targetPct) {
@@ -1172,12 +1113,6 @@ window.ExpectedValueEngine = (function () {
     return items;
   }
 
-  /* ── Optimizer utility ─────────────────────────────────────────────────
-     v4.3: non-positive EV is ranked by RAW EV, not EV/sqrt(h). The previous
-     metric rewarded longer horizons purely because a negative number divided
-     by a bigger sqrt(h) looks less bad. Positive EV still uses
-     EV/sqrt(h) × evidence, so time efficiency is rewarded only when there
-     is an edge to harvest. */
   function optimizerUtility(r, cfg) {
     if (!r || !r.expectedValue) return -999999;
     var ev = Number(r.expectedValue.netPct);
@@ -1193,7 +1128,6 @@ window.ExpectedValueEngine = (function () {
     if (ev > 0) {
       u = timeEff * evidenceFactor;
     } else {
-      /* Rank non-positive plans by raw EV. */
       u = ev;
     }
 
@@ -1205,12 +1139,8 @@ window.ExpectedValueEngine = (function () {
     return u - corner;
   }
 
-  /* Winner's-curse estimate. */
   function selectionHaircutOf(cores, cfg) {
     if (!cfg.selectionHaircut) return 0;
-    /* v4.3: if the reliability audit says our EVs have been CONSERVATIVE
-       (realized better than predicted), the four-layer conservatism stack
-       is too thick. Drop the haircut first (the audit's recommendation). */
     try {
       if (reliabilityVerdict(cfg.calibrationKey) === 'conservative') return 0;
     } catch (e) {}
@@ -1267,7 +1197,6 @@ window.ExpectedValueEngine = (function () {
     var modes = (cfg.exitVariants || ['fixed']).filter(function (m) { return m === 'fixed' || m === 'breakeven' || m === 'trail'; });
     if (modes.indexOf('fixed') < 0) modes.unshift('fixed');
 
-    /* v4.3: skip statisticalTouch for non-best plans (informational only). */
     var coreInternal = {};
     if (internal) Object.keys(internal).forEach(function (k) { coreInternal[k] = internal[k]; });
     coreInternal.noTouch = true;
@@ -1320,8 +1249,6 @@ window.ExpectedValueEngine = (function () {
       if (isFinite(bestU) && isFinite(baseU) && bestU < baseU + requiredImprovement) best = baseline;
     }
 
-    /* v4.3: compute the (informational) statisticalTouch only for the best
-       plan. Skips ~24 unnecessary TechIndicators calls per stock per scan. */
     if (best && best.probability && !(internal && (internal.noHist || internal.noTouch)) &&
         input.hourlyCandles && input.hourlyCandles.length) {
       try {
@@ -1361,10 +1288,6 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-  /* ── Calibration API ────────────────────────────────────────────────── */
-  /* v4.3: returns -1 on store write failure (was silently 0); calibrate-
-     FromHistory only advances the per-stock progress marker when this
-     returns a non-negative count. */
   function recordOutcomes(rows, key) {
     key = key || DEFAULTS.calibrationKey;
     var all = loadCalibration(key), added = 0;
@@ -1442,19 +1365,25 @@ window.ExpectedValueEngine = (function () {
     g.sd += d; g.sdd += d * d; g.sraw += raw;
   }
 
-  /* v4.3: helper — ISO-year-week key (e.g. '2024-W03') from a YYYY-MM-DD. */
+  /* v4.4: TRUE ISO-8601 week. Thursday-shift algorithm; handles year-
+     boundary spillover (2024-12-31 -> 2025-W01). */
   function weekKeyOf(dateStr) {
     var ms = Date.parse(String(dateStr).slice(0, 10) + 'T12:00:00Z');
     if (!isFinite(ms)) return null;
     var d = new Date(ms);
-    var year = d.getUTCFullYear();
-    var start = Date.UTC(year, 0, 1);
-    var dayOfYear = Math.floor((ms - start) / 86400000);
-    var jan1Dow = new Date(start).getUTCDay();
-    var week = Math.floor((dayOfYear + jan1Dow) / 7) + 1;
-    return year + '-W' + (week < 10 ? '0' : '') + week;
+    var dow = d.getUTCDay() || 7;   // Mon=1..Sun=7
+    var thursday = new Date(d.getTime() + (4 - dow) * 86400000);
+    var isoYear = thursday.getUTCFullYear();
+    var yearStart = Date.UTC(isoYear, 0, 1);
+    var daysIn = Math.floor((thursday.getTime() - yearStart) / 86400000);
+    var week = Math.floor(daysIn / 7) + 1;
+    return isoYear + '-W' + (week < 10 ? '0' : '') + week;
   }
 
+  /* v4.4: store per-week AGGREGATES alongside the row-level accumulators
+     used for the bucket display. The verdict is computed from one
+     observation per week (clusterSummary), not from row-level variance
+     divided by week count. */
   function recordReliability(rows, key) {
     key = key || DEFAULTS.calibrationKey;
     var rk = key + '_rel';
@@ -1462,13 +1391,9 @@ window.ExpectedValueEngine = (function () {
     if (!st.all) st.all = blankAcc();
     if (!st.elig) st.elig = blankAcc();
     if (!st.bins) st.bins = { all: [], elig: [] };
-    if (!st.weekKeys) st.weekKeys = {};
+    if (!st.weeks) st.weeks = {};
     var added = 0;
     (rows || []).forEach(function (r) {
-      if (r.date) {
-        var wk = weekKeyOf(r.date);
-        if (wk) st.weekKeys[wk] = 1;
-      }
       ['all'].concat(r.elig ? ['elig'] : []).forEach(function (grp) {
         addAcc(st[grp], r.pred, r.raw, r.real);
         var b = relBin(r.pred);
@@ -1476,6 +1401,15 @@ window.ExpectedValueEngine = (function () {
         cell.n++; cell.sp += r.pred; cell.sr += r.real;
         st.bins[grp][b] = cell;
       });
+      if (r.date) {
+        var wk = weekKeyOf(r.date);
+        if (wk) {
+          var wa = st.weeks[wk];
+          if (!wa) wa = st.weeks[wk] = { n: 0, sp: 0, sr: 0, eN: 0, eSP: 0, eSR: 0 };
+          wa.n++; wa.sp += r.pred; wa.sr += r.real;
+          if (r.elig) { wa.eN++; wa.eSP += r.pred; wa.eSR += r.real; }
+        }
+      }
       added++;
     });
     if (added) {
@@ -1485,32 +1419,79 @@ window.ExpectedValueEngine = (function () {
     return added;
   }
 
-  /* v4.3: takes an nEffOverride so reliability can pass distinct weeks
-     instead of the hardcoded n/4. */
-  function summarizeAcc(g, nEffOverride) {
+  /* v4.4: clusterSummary — one observation per week. Returns null if fewer
+     than 3 usable weeks (too few for a cluster SE). */
+  function clusterSummary(weeks, mode) {
+    if (!weeks) return null;
+    var keys = Object.keys(weeks);
+    var weekResiduals = [];   // one entry per usable week
+    for (var i = 0; i < keys.length; i++) {
+      var w = weeks[keys[i]];
+      var nw = mode === 'elig' ? (w.eN || 0) : (w.n || 0);
+      if (!(nw > 0)) continue;
+      var swP = mode === 'elig' ? (w.eSP || 0) : (w.sp || 0);
+      var swR = mode === 'elig' ? (w.eSR || 0) : (w.sr || 0);
+      weekResiduals.push((swR - swP) / nw);
+    }
+    var nW = weekResiduals.length;
+    if (nW < 3) return null;
+    var sum = 0, k;
+    for (k = 0; k < nW; k++) sum += weekResiduals[k];
+    var bias = sum / nW;
+    var ss = 0;
+    for (k = 0; k < nW; k++) ss += Math.pow(weekResiduals[k] - bias, 2);
+    var sd = Math.sqrt(ss / (nW - 1));
+    var se = sd / Math.sqrt(nW);
+    return { bias: bias, se: se, z: se > 0 ? bias / se : 0, nWeeks: nW };
+  }
+
+  /* v4.4: summarizeAcc now prefers clusterSummary. Row-level accumulators
+     still feed the pooled display means, which is what the UI shows. The
+     verdict uses cluster bias and SE. Falls back to row-level + n/4 when
+     the cluster has too few weeks (e.g. legacy stores or a very new
+     calibration run). */
+  function summarizeAcc(g, weeks, mode) {
     if (!g || !g.n) return { n: 0, verdict: 'collecting' };
-    var n = g.n, mp = g.sp / n, mr = g.sr / n, bias = mr - mp;
-    var varD = Math.max(0, g.sdd / n - Math.pow(g.sd / n, 2));
-    var nEff = (nEffOverride != null && nEffOverride > 0) ? nEffOverride : n / 4;
-    var se = Math.sqrt(varD / Math.max(1, nEff));
+    var n = g.n, mp = g.sp / n, mr = g.sr / n;
     var varP = g.spp / n - mp * mp;
     var slope = varP > 1e-6 ? (g.spr / n - mp * mr) / varP : null;
     var sdPred = Math.sqrt(Math.max(0, varP));
-    var z = se > 0 ? bias / se : 0;
-    var verdict = n < 100 ? 'collecting' : (z < -2 ? 'overconfident' : (z > 2 ? 'conservative' : 'consistent'));
-    if (verdict === 'consistent' && n >= 300 && sdPred >= 0.2 && slope != null && slope < 0.3) verdict = 'weak-ranking';
-    return {
-      n: n, effectiveN: nEff,
+    var result = {
+      n: n,
       meanPredicted: mp, meanRealized: mr, meanRawPredicted: g.sraw / n,
-      bias: bias, stdErr: se, slope: slope, sdPredicted: sdPred, verdict: verdict
+      slope: slope, sdPredicted: sdPred
     };
+    var cluster = clusterSummary(weeks, mode);
+    if (cluster) {
+      result.bias = cluster.bias;
+      result.stdErr = cluster.se;
+      result.z = cluster.z;
+      result.nWeeks = cluster.nWeeks;
+      result.effectiveN = cluster.nWeeks;
+      result.method = 'cluster';
+      result.rowBias = mr - mp;
+    } else {
+      var bias = mr - mp;
+      var varD = Math.max(0, g.sdd / n - Math.pow(g.sd / n, 2));
+      var nEff = n / 4;
+      var se = Math.sqrt(varD / Math.max(1, nEff));
+      result.bias = bias;
+      result.stdErr = se;
+      result.z = se > 0 ? bias / se : 0;
+      result.effectiveN = nEff;
+      result.method = 'row';
+    }
+    var verdict = n < 100 ? 'collecting' : (result.z < -2 ? 'overconfident' : (result.z > 2 ? 'conservative' : 'consistent'));
+    if (verdict === 'consistent' && n >= 300 && sdPred >= 0.2 && slope != null && slope < 0.3) verdict = 'weak-ranking';
+    result.verdict = verdict;
+    return result;
   }
+
   var BIN_LABELS = ['< -0.50%', '-0.50% to -0.25%', '-0.25% to 0%', '0% to +0.25%', '+0.25% to +0.50%', '>= +0.50%'];
 
   function reliabilityCore(key) {
     key = key || DEFAULTS.calibrationKey;
     var st = loadStore(key + '_rel');
-    var distinctWeeks = Object.keys(st.weekKeys || {}).length;
     function bins(arr) {
       return (arr || []).map(function (c, k) {
         if (!c || !c.n) return null;
@@ -1525,20 +1506,17 @@ window.ExpectedValueEngine = (function () {
     var useB = be.length && st.elig && st.elig.n >= 100 ? be : ba;
     var top = null;
     useB.forEach(function (b) { if (b.n >= 30 && (!top || b.bin > top.bin)) top = b; });
-    var nEffAll = distinctWeeks > 0 && st.all ? Math.min(st.all.n, distinctWeeks) : null;
-    var nEffElig = distinctWeeks > 0 && st.elig ? Math.min(st.elig.n, distinctWeeks) : null;
     return {
-      all: summarizeAcc(st.all, nEffAll),
-      elig: summarizeAcc(st.elig, nEffElig),
+      all: summarizeAcc(st.all, st.weeks, 'all'),
+      elig: summarizeAcc(st.elig, st.weeks, 'elig'),
       binsAll: ba, binsElig: be,
-      distinctWeeks: distinctWeeks,
+      weeksStored: st.weeks ? Object.keys(st.weeks).length : 0,
       topBucket: top,
       updatedAt: st.updated || null,
       ageDays: st.updated ? (Date.now() - st.updated) / 86400000 : null
     };
   }
 
-  /* v4.3: used by selectionHaircutOf to decide whether to drop the haircut. */
   function reliabilityVerdict(key) {
     try {
       var core = reliabilityCore(key);
@@ -1553,6 +1531,11 @@ window.ExpectedValueEngine = (function () {
     return out;
   }
 
+  /* v4.4: gateReport uses the same cluster estimator as the reliability
+     bias. For each week with BOTH eligible and non-eligible rows, the
+     week's eligible-minus-non-eligible mean gap is one observation;
+     aggregate = mean, SE = sd/sqrt(N_weeks). Fallback to the old row
+     path when fewer than 4 usable weeks. */
   function gateReport(key) {
     key = key || DEFAULTS.calibrationKey;
     var st = loadStore(key + '_rel');
@@ -1566,32 +1549,74 @@ window.ExpectedValueEngine = (function () {
     }
     var e = sm(E), nn = sm(N);
     var out = { eligible: e, notEligible: nn, edge: null, z: null, verdict: 'collecting' };
-    if (e.n >= 100 && nn.n >= 100) {
+
+    var weekDiffs = [];
+    if (st.weeks) {
+      var keys = Object.keys(st.weeks);
+      for (var i = 0; i < keys.length; i++) {
+        var w = st.weeks[keys[i]];
+        var nE = w.eN || 0;
+        var nNE = (w.n || 0) - nE;
+        if (!(nE > 0) || !(nNE > 0)) continue;
+        var meanE = (w.eSR || 0) / nE;
+        var meanNE = ((w.sr || 0) - (w.eSR || 0)) / nNE;
+        weekDiffs.push(meanE - meanNE);
+      }
+    }
+
+    if (weekDiffs.length >= 4 && e.n >= 50 && nn.n >= 50) {
+      var s = 0, k;
+      for (k = 0; k < weekDiffs.length; k++) s += weekDiffs[k];
+      var bias = s / weekDiffs.length;
+      var ss = 0;
+      for (k = 0; k < weekDiffs.length; k++) ss += Math.pow(weekDiffs[k] - bias, 2);
+      var sd = Math.sqrt(ss / (weekDiffs.length - 1));
+      var se = sd / Math.sqrt(weekDiffs.length);
+      out.edge = bias;
+      out.z = se > 0 ? bias / se : 0;
+      out.nWeeks = weekDiffs.length;
+      out.method = 'cluster';
+    } else if (e.n >= 100 && nn.n >= 100) {
       out.edge = e.meanRealized - nn.meanRealized;
-      var distinctWeeks = Object.keys(st.weekKeys || {}).length;
-      var nEffE = distinctWeeks > 0 ? Math.min(e.n, distinctWeeks) : e.n / 4;
-      var nEffN = distinctWeeks > 0 ? Math.min(nn.n, distinctWeeks) : nn.n / 4;
-      var se = Math.sqrt(e.varRealized / Math.max(1, nEffE) + nn.varRealized / Math.max(1, nEffN));
-      out.z = se > 0 ? out.edge / se : 0;
+      var se2 = Math.sqrt(e.varRealized / Math.max(1, e.n / 4) + nn.varRealized / Math.max(1, nn.n / 4));
+      out.z = se2 > 0 ? out.edge / se2 : 0;
+      out.method = 'row';
+    }
+    if (out.z != null) {
       out.verdict = out.z > 2 ? 'gate-adds-value' : (out.z < -2 ? 'gate-hurts' : 'gate-no-better');
     }
     return out;
   }
 
-  /* ── Live tracking ──────────────────────────────────────────────────── */
+  /* ── Live tracking ───────────────────────────────────────────────────── */
   function liveKey(cfg) { return (cfg.live && cfg.live.key) || 'stox_ev_live_v1'; }
   function loadLive(cfg) { var d = loadStore(liveKey(cfg)); if (!d.records) d.records = []; return d; }
 
+  /* v4.4: STABLE ID + EPISODE DEDUP.
+       id = 'symbol|signalDate' (was symbol|date|h|t|mode; a rescan that
+       picked a different best plan used to create a second record for
+       the same signal day).
+       Additionally, refuse to open a new record while ANY record for the
+       same symbol is still open — a persistent Buy does not start a
+       second overlapping episode. A new episode can begin only after the
+       prior one has settled (target / stop / timeout). */
   function recordPrediction(best, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
     var daily = opts.dailyCandles || [];
     var symbol = opts.symbol || (best && best.symbol);
     if (!best || !best.expectedValue || !symbol || !daily.length) return false;
-    var date = String(daily[daily.length - 1].t).slice(0, 10);
-    var id = [symbol, date, best.horizonDays, best.targetPct, best.exitMode || 'fixed'].join('|');
+    var signalDate = String(daily[daily.length - 1].t).slice(0, 10);
+    var id = symbol + '|' + signalDate;
     var st = loadLive(cfg);
-    for (var i = 0; i < st.records.length; i++) if (st.records[i].id === id) return false;
+    /* Same-day rescan of the same symbol: skip. */
+    for (var i = 0; i < st.records.length; i++) {
+      if (st.records[i].id === id) return false;
+    }
+    /* Persistent Buy: skip while a previous episode is still open. */
+    for (var j = 0; j < st.records.length; j++) {
+      if (st.records[j].symbol === symbol && st.records[j].status === 'open') return false;
+    }
     var currentExit = exitOpts(cfg);
     var decisionSnapshot = {
       decideAfterTax: cfg.decideAfterTax !== false,
@@ -1600,7 +1625,7 @@ window.ExpectedValueEngine = (function () {
       exit: { armFrac: currentExit.armFrac, trailFrac: currentExit.trailFrac, lockDelay: currentExit.lockDelay }
     };
     st.records.push({
-      id: id, symbol: symbol, date: date, signalDate: date,
+      id: id, symbol: symbol, date: signalDate, signalDate: signalDate,
       entryDate: null, entryPrice: null, entryConvention: 'next_session_open',
       h: best.horizonDays, t: best.targetPct, stop: best.stopPct,
       cost: best.costsPct, mode: best.exitMode || 'fixed',
@@ -1617,10 +1642,6 @@ window.ExpectedValueEngine = (function () {
     return saveStore(liveKey(cfg), st);
   }
 
-  /* v4.3: also records rec.realRaw (undetrended realized) alongside rec.real
-     (detrended, comparable to the detrended prediction). The audit flagged
-     that "realized_executable_pnl" being the detrended basis made the label
-     misleading. */
   function settlePredictions(symbol, dailyCandles, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
@@ -1659,12 +1680,12 @@ window.ExpectedValueEngine = (function () {
       if (!complete && o.oP > 0) return;
       var v = outcomeValues(o, rec.t, rec.cost, settlementCfg);
       rec.real = settlementCfg.decideAfterTax !== false ? v.aft : v.pre;
-      /* v4.3: parallel undetrended run for the "raw realized P&L" column. */
+      /* Parallel undetrended run for the "raw realized P&L" column. */
       var oRaw = windowOutcome(daily, i, rec.h, up, dn, 0, rec.stop, rec.mode, settlementExit);
       if (oRaw) {
         var vRaw = outcomeValues(oRaw, rec.t, rec.cost, settlementCfg);
         rec.realRaw = settlementCfg.decideAfterTax !== false ? vRaw.aft : vRaw.pre;
-        rec.detrend = removedI * 100 * rec.h;   // total detrend applied (percent)
+        rec.detrend = removedI * 100 * rec.h;
       }
       rec.outcome = o.tP >= 0.5 ? 'target' : (o.sP >= 0.5 ? 'stop' : 'timeout');
       rec.status = 'settled'; rec.settledAt = Date.now();
@@ -1674,6 +1695,9 @@ window.ExpectedValueEngine = (function () {
     return { settled: settled };
   }
 
+  /* v4.4: explicit basis labels. The UI should use `labels` to render
+     meanPredicted / meanRealized / meanRealizedRaw unambiguously;
+     `rawVsModelGap` quantifies how much detrending shifted the number. */
   function livePerformance(opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
@@ -1682,6 +1706,13 @@ window.ExpectedValueEngine = (function () {
     var doneRaw = st.records.filter(function (r) { return r.status === 'settled' && isFinite(r.realRaw); });
     var openN = st.records.length - done.length;
     var out = { open: openN, settled: done.length, verdict: 'collecting', buckets: {} };
+    out.labels = {
+      meanPredicted: 'Predicted model EV (detrended, after costs)',
+      meanRealized: 'Model-basis realized P&L (detrended, comparable to prediction)',
+      meanRealizedRaw: 'Raw realized trading P&L (undetrended)',
+      comparisonBasis: 'predicted_model_ev_vs_realized_executable_pnl',
+      note: 'meanRealized is on the same detrended basis as meanPredicted, so it validates the model. meanRealizedRaw shows what an actual trade would have made; the difference is the drift the model deliberately removes.'
+    };
     if (!done.length) return out;
     var sp = 0, sr = 0, sd = 0, sdd = 0;
     done.forEach(function (r) { var d = r.real - r.pred; sp += r.pred; sr += r.real; sd += d; sdd += d * d; });
@@ -1695,12 +1726,12 @@ window.ExpectedValueEngine = (function () {
     var se = Math.sqrt(varD / effectiveN);
     out.meanPredicted = sp / n;
     out.meanRealized = sr / n;
-    /* v4.3: raw (undetrended) realized P&L, shown side-by-side. */
     if (doneRaw.length) {
       var srRaw = 0;
       doneRaw.forEach(function (r) { srRaw += r.realRaw; });
       out.meanRealizedRaw = srRaw / doneRaw.length;
       out.rawSampleN = doneRaw.length;
+      out.rawVsModelGap = out.meanRealizedRaw - out.meanRealized;
     }
     out.bias = bias; out.stdErr = se;
     out.comparisonBasis = 'predicted_model_ev_vs_realized_executable_pnl';
@@ -1861,7 +1892,6 @@ window.ExpectedValueEngine = (function () {
     return 60;
   }
 
-  /* v4.3: only advance per-stock progress when recordOutcomes succeeded. */
   function calibrateFromHistory(daily, indexCandles, symbol, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
@@ -1947,7 +1977,7 @@ window.ExpectedValueEngine = (function () {
               if (o2) {
                 var rv = outcomeValues(o2, b.targetPct, b.costsPct != null ? b.costsPct : costPct, cfg);
                 relRows.push({
-                  date: date,   // v4.3: needed to count distinct weeks
+                  date: date,
                   pred: b.expectedValue.netPct, raw: b.expectedValue.rawBasisPct,
                   real: cfg.decideAfterTax !== false ? rv.aft : rv.pre,
                   elig: score >= buyTh
@@ -1963,9 +1993,6 @@ window.ExpectedValueEngine = (function () {
       out.processed++;
     });
 
-    /* v4.3: only persist progress when BOTH stores accepted the write.
-       A quota failure on recordOutcomes used to advance the marker anyway,
-       permanently skipping the affected windows. */
     var outcomesAdded = recordOutcomes(rows, key);
     if (outcomesAdded < 0) { out.reason = 'store_write_failed'; return out; }
     out.rows = outcomesAdded;
@@ -2017,7 +2044,8 @@ window.ExpectedValueEngine = (function () {
       historicalProbability: historicalProbability,
       setupBlindPrior: setupBlindPrior,
       combineProbability: combineProbability,
-      weekKeyOf: weekKeyOf
+      weekKeyOf: weekKeyOf,
+      clusterSummary: clusterSummary
     }
   };
 })();
