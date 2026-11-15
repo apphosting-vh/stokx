@@ -35,7 +35,9 @@
         estimate). Optional extra shipped: row-level prediction store
         (unshrunk EV, stdErr, horizon, haircut; IndexedDB when available,
         capped in-memory otherwise) plus retuneTau(), which re-tunes the
-        prior offline in milliseconds without a replay.
+        prior offline in milliseconds without a replay. Live key bumped
+        v6 -> v7 so the live scorecard never mixes predictions frozen
+        under different shrinkage regimes.
      E. SIGNIFICANCE-BASED FLAGS (feedback E): per-bin weekly aggregates
         give the EV-bucket verdicts a week-clustered z-score (the raw gap
         threshold is only a legacy fallback); summarizeAcc reports a slope
@@ -277,8 +279,10 @@ window.ExpectedValueEngine = (function () {
     sizing: { kellyFraction: 0.25, maxPositionPct: 20, maxRiskPerTradePct: 1.0 },
     correlation: { lookbackBars: 120, minOverlap: 60, threshold: 0.7, penalty: 0.5, maxPicks: 5, maxPerGroup: 1, groupPrefixes: ['ADANI', 'TATA', 'BAJAJ'] },
     /* v4.4: v4 cleared — record id changes from symbol|date|h|t|mode
-       to symbol|signalDate, incompatible with existing rows. */
-    live: { key: 'stox_ev_live_v6', maxRecords: 4000 },
+       to symbol|signalDate, incompatible with existing rows.
+       v4.6 (feedback D): v6 cleared — v6 open episodes carry tau=0.5
+       predictions and would mix with the tau=0.3 retune in one scorecard. */
+    live: { key: 'stox_ev_live_v7', maxRecords: 4000 },
     staleCalibrationDays: 21,
     noTrade: { minPPositive: 0.5 },
     upside: { horizons: [3, 5, 10, 15, 20], targets: [2, 3, 4, 5, 6], shrinkK: 8 }
@@ -290,6 +294,7 @@ window.ExpectedValueEngine = (function () {
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v10' + sfx); });  // v10 _rel accumulator has no srw (raw realized sum); v11 rebuilds it
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v9' + sfx); });
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v8' + sfx); });
+    localStorage.removeItem('stox_ev_live_v6');               // v6 predictions were made with tau=0.5; v7 scorecard is uniformly tau=0.3
     localStorage.removeItem('stox_ev_live_v5');               // v5 settled rows have no realRaw / outcomeRaw; v6 scorecard rebuilds
     localStorage.removeItem('stox_ev_live_v4');
     localStorage.removeItem('stox_ev_live_v3');
