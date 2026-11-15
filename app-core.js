@@ -9869,12 +9869,29 @@ function StockScreener(props) {
       if (!g || !g.n) return { text: "EV self-check: collecting walk-forward history (builds in the background after each scan).", color: "var(--text6)", title: "The engine replays its own plan choices on past data you already have and compares predicted vs realized EV." };
       var f = function(v) { return (v >= 0 ? "+" : "") + Number(v).toFixed(2) + "%"; };
       var words = { collecting: "still collecting (needs n>=100)", consistent: "consistent", overconfident: "OVERCONFIDENT - treat EVs as optimistic", conservative: "conservative", "weak-ranking": "levels fine, but ranking among trades is weak" };
-      var color = g.verdict === "overconfident" ? "#dc2626" : (g.verdict === "weak-ranking" ? "#d97706" : ((g.verdict === "consistent" || g.verdict === "conservative") ? "#16a34a" : "var(--text6)"));
-      return {
-        text: "EV self-check (" + (useElig ? "Buy-grade setups" : "all setups") + ", n=" + g.n + "): predicted " + f(g.meanPredicted) + " vs realized " + f(g.meanRealized) + " - " + (words[g.verdict] || g.verdict),
+      var verdictText = words[g.verdict] || g.verdict;
+      /* v4.6 (feedback E3): the other population's verdict stays visible —
+         e.g. all-setups weak-ranking even when Buy-grade is the headline. */
+      var other = useElig ? rs.all : rs.elig;
+      if (other && other.n >= 100 && other.verdict !== g.verdict && (other.verdict === "weak-ranking" || g.verdict === "consistent")) {
+        verdictText += " (" + (useElig ? "Buy-grade" : "all") + ") / " + (words[other.verdict] || other.verdict) + " (" + (useElig ? "all setups" : "Buy-grade") + ")";
+      }
+      var color = g.verdict === "overconfident" ? "#dc2626" : ((g.verdict === "weak-ranking" || (other && other.verdict === "weak-ranking")) ? "#d97706" : ((g.verdict === "consistent" || g.verdict === "conservative") ? "#16a34a" : "var(--text6)"));
+      var out = {
+        text: "EV self-check (" + (useElig ? "Buy-grade setups" : "all setups") + ", n=" + g.n + "): predicted " + f(g.meanPredicted) + " vs realized " + f(g.meanRealized) + " - " + verdictText,
         color: color,
-        title: "Walk-forward replay of the optimizer's choices using only data available at each start date. Bias " + f(g.bias) + " +/-" + Number(g.stdErr).toFixed(2) + "%" + (g.slope != null ? "; slope of realized on predicted " + Number(g.slope).toFixed(2) : "") + ". Own-history model only (no calibration or ML), so there is no look-ahead."
+        title: "Walk-forward replay of the optimizer's choices using only data available at each start date. Bias " + f(g.bias) + " +/-" + Number(g.stdErr).toFixed(2) + "%" + (g.slope != null ? "; slope of realized on predicted " + Number(g.slope).toFixed(2) + (g.slopeSe != null ? " +/-" + Number(g.slopeSe).toFixed(2) : "") : "") + ". Own-history model only (no calibration or ML), so there is no look-ahead. This line is the DETRENDED comparison (model consistency); the raw-money line below is what a real trade would have earned."
       };
+      /* v4.6 (feedback C): the separate "does it make money" line — raw mean
+         with a week-clustered standard error, next to the detrended number. */
+      if (g.raw && g.raw.mean != null) {
+        out.extra = {
+          text: "EV self-check money (raw): " + f(g.raw.mean) + " per trade" + (g.raw.stdErr != null ? " +/-" + Number(g.raw.stdErr).toFixed(2) + "% (" + (g.raw.method === "cluster" ? g.raw.nWeeks + " week-clustered" : "row-level") + ")" : ""),
+          color: g.raw.mean > 0 ? "#16a34a" : "#d97706",
+          title: "Raw realized trading P&L (undetrended) of the same walk-forward plans: did the model make actual money? The self-check line above compares predicted vs realized on the DETRENDED basis (same drift removed from both) and tests model consistency; the difference between the two is the drift the model deliberately removes."
+        };
+      }
+      return out;
     } catch (_relErr) { return none; }
   };
 
@@ -9890,8 +9907,10 @@ function StockScreener(props) {
         if (lp && (lp.settled > 0 || lp.open > 0)) {
           if (lp.settled > 0) {
             var lc = lp.verdict === "overconfident" ? "#dc2626" : (lp.verdict === "collecting" ? "var(--text6)" : "#16a34a");
-            lines.push({ text: "Live scorecard (n=" + lp.settled + " settled, " + lp.open + " open): predicted " + f(lp.meanPredicted) + " vs realized " + f(lp.meanRealized) + " - " + lp.verdict, color: lc,
-              title: "Every Buy-grade prediction shown here is saved and compared with what the price actually did once the plan finished. Needs 30+ settled to judge." });
+            /* v4.6 (feedback C): raw realized next to the detrended number. */
+            var rawTxt = lp.meanRealizedRaw != null ? " | raw money " + f(lp.meanRealizedRaw) : "";
+            lines.push({ text: "Live scorecard (n=" + lp.settled + " settled, " + lp.open + " open): predicted " + f(lp.meanPredicted) + " vs realized " + f(lp.meanRealized) + rawTxt + " - " + lp.verdict, color: lc,
+              title: "Every Buy-grade prediction shown here is saved and compared with what the price actually did once the plan finished. Needs 30+ settled to judge. 'realized' is the DETRENDED model basis (comparable to the prediction); 'raw money' is the undetrended executable P&L — what an actual trade would have made." });
           } else {
             lines.push({ text: "Live scorecard: " + lp.open + " predictions logged, waiting for them to play out.", color: "var(--text6)", title: "Predictions are settled automatically on later refreshes." });
           }
@@ -9901,7 +9920,14 @@ function StockScreener(props) {
         var gr = EVX.gateReport();
         if (gr && gr.verdict && gr.verdict !== "collecting") {
           var gw = { "gate-adds-value": "Buy filter adds value", "gate-no-better": "Buy filter shows no detectable edge over rejected setups", "gate-hurts": "rejected setups did BETTER than Buy-rated ones" };
-          lines.push({ text: "Buy-filter check: " + (gw[gr.verdict] || gr.verdict) + " (realized " + f(gr.eligible.meanRealized) + " vs " + f(gr.notEligible.meanRealized) + ")", color: gr.verdict === "gate-adds-value" ? "#16a34a" : "#d97706", title: "Walk-forward comparison of the optimizer's realized EV on Buy-grade vs lower-grade setups." });
+          /* v4.6 (feedback C): verdict runs on RAW money; both gaps + z-scores
+             are shown so the detrended (model-consistency) view stays visible. */
+          var gapTxt = "";
+          if (gr.raw && gr.raw.edge != null) gapTxt += " | raw gap " + f(gr.raw.edge) + " (z=" + Number(gr.raw.z).toFixed(2) + ")";
+          if (gr.model && gr.model.edge != null) gapTxt += " | detrended gap " + f(gr.model.edge) + " (z=" + Number(gr.model.z).toFixed(2) + ")";
+          lines.push({ text: "Buy-filter check (" + (gr.verdictBasis === "raw" ? "raw money" : "detrended") + "): " + (gw[gr.verdict] || gr.verdict) + " (realized " + f(gr.eligible.meanRealized) + " vs " + f(gr.notEligible.meanRealized) + ")" + gapTxt,
+            color: gr.verdict === "gate-adds-value" ? "#16a34a" : "#d97706",
+            title: "Walk-forward comparison of the optimizer's realized EV on Buy-grade vs lower-grade setups. The verdict runs on RAW money (did the filter actually make money); the detrended gap is the model-consistency view (same drift removed from both sides). Z-scores are week-clustered." });
         }
       }
       if (typeof EVX.reliabilityStatus === "function") {
@@ -9911,7 +9937,7 @@ function StockScreener(props) {
           lines.push({ text: (tr.level === "stale" ? "Trust: STALE - " : (tr.level === "caution" ? "Trust: caution - " : "Trust: ")) + tr.messages[0] + (tr.messages.length > 1 ? " (+" + (tr.messages.length - 1) + " more)" : ""), color: tcol, title: tr.messages.join("\n") });
         }
         var tb = rs && rs.topBucket;
-        if (tb) lines.push({ text: "Top EV bucket (" + tb.label + ", n=" + tb.n + "): predicted " + f(tb.meanPredicted) + " vs realized " + f(tb.meanRealized), color: tb.verdict === "optimistic" ? "#d97706" : "var(--text6)", title: "Calibration by EV bucket: are the highest-EV picks really delivering?" });
+        if (tb) lines.push({ text: "Top EV bucket (" + tb.label + ", n=" + tb.n + "): predicted " + f(tb.meanPredicted) + " vs realized " + f(tb.meanRealized) + (tb.z != null ? " (z=" + Number(tb.z).toFixed(2) + ", " + tb.nWeeks + "w)" : ""), color: tb.verdict === "optimistic" ? "#d97706" : "var(--text6)", title: "Calibration by EV bucket: are the highest-EV picks really delivering? " + (tb.z != null ? "Verdict from the week-clustered z-score (a raw gap threshold alone is noisy)." : "Legacy gap threshold (this bucket has no per-week data).") });
       }
     } catch (_hErr) {}
     return { lines: lines };
@@ -11195,6 +11221,7 @@ function StockScreener(props) {
             React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginTop: 2 } }, "Base-model Strong Buy and Buy candidates only, ranked by trust-adjusted EV per day (after costs; shrunk for sampling noise, best-of-25 selection luck and market regime; correlated picks pushed down). EV optimizes the trade plan; it does not replace the StoX signal."),
             evVerdict ? React.createElement("div", { title: evVerdict.trust && evVerdict.trust.messages ? evVerdict.trust.messages.join("\n") : "", style: { fontSize: 10, fontWeight: 700, marginTop: 4, color: evVerdictColor } }, (evVerdict.verdict === "NO_TRADE" ? "NO TRADE TODAY - " : (evVerdict.verdict === "WEAK" ? "WEAK DAY - " : (evVerdict.verdict === "TRADE" ? "TRADES AVAILABLE - " : ""))) + evVerdict.message) : null,
             React.createElement("div", { title: evRel.title, style: { fontSize: 9, marginTop: 2, color: evRel.color } }, evRel.text),
+            evRel.extra ? React.createElement("div", { title: evRel.extra.title, style: { fontSize: 9, marginTop: 2, color: evRel.extra.color } }, evRel.extra.text) : null,
             evHealth.lines.map(function(ln, i) { return React.createElement("div", { key: "evh" + i, title: ln.title, style: { fontSize: 9, marginTop: 2, color: ln.color } }, ln.text); })
           ),
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, evTradeRows.length + " trade candidates")

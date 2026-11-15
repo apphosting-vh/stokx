@@ -1,6 +1,48 @@
 /* ══════════════════════════════════════════════════════════════════════
    StoX Expected Value & Probability-Calibrated Trade Engine
-   Version 4.5  (EV_V4_ENGINE)
+   Version 4.6  (EV_V4_ENGINE)
+
+   v4.5 -> v4.6 (audit feedback fix set A-E):
+     A. BASIS SIGNATURE (feedback A): the store signature now hashes a
+        canonical dump of every parameter that decides what is stored -
+        outcome labels (driftKeep, lookbackBars, stopATR, minStopPct,
+        maxStopPct, horizons, targets) plus the stored-prediction basis
+        (evPriorStdPct, defaultHorizon, selectionHaircut, minWindows,
+        recency, regime) plus the economics - together with a BASIS_REV
+        constant bumped by hand whenever replay/optimizer logic changes.
+        On ANY mismatch - or when no signature exists (unknown basis) -
+        the whole family (calibration, meta, reliability) is cleared and
+        rebuilds in the background. adoptCurrentBasis() keeps existing
+        data when nothing changed since the build. Live records snapshot
+        driftKeep + lookbackBars at prediction time and settlement uses
+        the snapshot (old records fall back to the current config).
+     B. ATOMIC BATCH COMMITS (feedback B): calibration + reliability + meta
+        now live in ONE envelope record committed with a single setItem
+        (atomic per setItem); any failure propagates and leaves every
+        store untouched, so a retry can no longer double-count dates. The
+        loadParts()/commitBatch() seam ports straight over to one IndexedDB
+        transaction across stores (the proper fix for the quota cost).
+     C. RAW-BASIS REPORTING (feedback C): per-week aggregates gain raw
+        realized sums (srw/eSRW); gateReport returns BOTH gaps (raw +
+        detrended) with z-scores and the verdict runs on RAW money; the
+        self-check keeps the detrended comparison and gains a separate
+        raw-money line with a week-clustered standard error.
+     D. SHRINKAGE STRENGTH (feedback D): evPriorStdPct 0.5 -> 0.3. The
+        Buy-grade slope of realized on predicted was 0.48; target
+        lambda' = 0.48*lambda solved back through tau'^2 = lambda'*s^2 /
+        (1-lambda') with a typical s~0.55 gives tau'~0.29 - 0.3 is the
+        partway move (rebuild and re-read the slope before trusting one
+        estimate). Optional extra shipped: row-level prediction store
+        (unshrunk EV, stdErr, horizon, haircut; IndexedDB when available,
+        capped in-memory otherwise) plus retuneTau(), which re-tunes the
+        prior offline in milliseconds without a replay.
+     E. SIGNIFICANCE-BASED FLAGS (feedback E): per-bin weekly aggregates
+        give the EV-bucket verdicts a week-clustered z-score (the raw gap
+        threshold is only a legacy fallback); summarizeAcc reports a slope
+        standard error and the trust line says so when the slope is
+        clearly below 1 ("predictions vary about Nx as much as outcomes");
+        the all-setups weak-ranking verdict stays visible even when
+        Buy-grade has 100 or more rows.
 
    v4.4.1 -> v4.5 (merged build: the audit fix set completed, keeping the
    v4.4.1 open-episode API and the v4.4 cluster statistics)
@@ -150,7 +192,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.5.0';
+  var VERSION = 'EV-4.6.0';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -201,7 +243,13 @@ window.ExpectedValueEngine = (function () {
     taxRatePct: 0,                  // capital gains tax NOT deducted from Net EV (was 20.8)
     taxLossCredit: 1,
     decideAfterTax: false,          // Net EV is after costs only (no capital gains tax)
-    evPriorStdPct: 0.5,             // prior sd of the TRUE gross edge per trade at h=defaultHorizon, % (shrinkage strength); scales with sqrt(h/defaultHorizon) so lambda is horizon-neutral
+    /* v4.6 (feedback D): 0.5 -> 0.3. Buy-grade realized-on-predicted slope
+       was 0.48 (predictions ~2x too dispersed); target lambda' = 0.48*lambda
+       solved back through tau'^2 = lambda'*s^2/(1-lambda') with a typical
+       s~0.55 gives tau'~0.29. 0.3 is the partway move - rebuild and re-read
+       the slope (now reported with its standard error) before tightening
+       further; retuneTau() + the row-level store re-tune this offline. */
+    evPriorStdPct: 0.3,             // prior sd of the TRUE gross edge per trade at h=defaultHorizon, % (shrinkage strength); scales with sqrt(h/defaultHorizon) so lambda is horizon-neutral
     selectionHaircut: true,
     scoreGapFree: 8,
     scoreGapRange: 25,
@@ -212,8 +260,11 @@ window.ExpectedValueEngine = (function () {
     minWindows: 30,
     driftKeep: 0.5,
     /* v4.4: v9 cleared — reliability store gains per-week aggregates that
-       cannot be reconstructed from v9's week-key set. */
-    calibrationKey: 'stox_ev_calibration_v11',
+       cannot be reconstructed from v9's week-key set.
+       v4.6 (feedback B): v12 — ONE atomic envelope (calibration +
+       reliability + meta under <key>_txn); legacy v11 keys are not
+       migrated (the basis-signature reset rebuilds the family anyway). */
+    calibrationKey: 'stox_ev_calibration_v12',
 
     gate: { includeWatch: false, includeAvoid: false },
     exitVariants: ['fixed'],
@@ -235,6 +286,7 @@ window.ExpectedValueEngine = (function () {
 
   /* Clear stores incompatible with this build. */
   try {
+    ['', '_meta', '_rel', '_sig', '_txn'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v11' + sfx); });  // v11 legacy separate keys; v12 is the atomic _txn envelope
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v10' + sfx); });  // v10 _rel accumulator has no srw (raw realized sum); v11 rebuilds it
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v9' + sfx); });
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v8' + sfx); });
@@ -584,6 +636,36 @@ window.ExpectedValueEngine = (function () {
     }
   }
 
+  /* v4.6 (feedback B): atomic batch commit. calibration + reliability + meta
+     live in ONE envelope record written with a single setItem (atomic per
+     setItem): a failed batch leaves EVERY store untouched and a retry cannot
+     double-count. loadParts()/commitBatch() are the only I/O seam - the
+     IndexedDB version (one transaction across three object stores) replaces
+     just these two functions. */
+  function blankRel() {
+    return { all: blankAcc(), elig: blankAcc(), bins: { all: [], elig: [] }, weeks: {} };
+  }
+  function loadParts(key) {
+    key = key || DEFAULTS.calibrationKey;
+    var env = loadStore(key + '_txn');
+    if (env && env.v === 2) {
+      if (!env.cal || typeof env.cal !== 'object') env.cal = {};
+      if (!env.rel || typeof env.rel !== 'object') env.rel = blankRel();
+      if (!env.meta || typeof env.meta !== 'object') env.meta = {};
+      return env;
+    }
+    return { v: 2, cal: {}, rel: blankRel(), meta: {} };
+  }
+  function commitBatch(key, parts) {
+    key = key || DEFAULTS.calibrationKey;
+    parts.v = 2;
+    parts.ts = Date.now();
+    /* Invalidate the calibration cache on EVERY attempt: a failed commit must
+       not leave a mutated in-memory object behind. */
+    _calCacheVer[key] = (_calCacheVer[key] || 0) + 1;
+    return saveStore(key + '_txn', parts);
+  }
+
   var _calCache = {};
   var _calCacheVer = {};
   function loadCalibration(key) {
@@ -591,14 +673,15 @@ window.ExpectedValueEngine = (function () {
     var ver = _calCacheVer[key] || 0;
     var cached = _calCache[key];
     if (cached && cached.ver === ver) return cached.data;
-    var data = loadStore(key);
+    var data = loadParts(key).cal;
     _calCache[key] = { data: data, ver: ver };
     return data;
   }
   function saveCalibration(key, obj) {
     key = key || DEFAULTS.calibrationKey;
-    _calCacheVer[key] = (_calCacheVer[key] || 0) + 1;
-    return saveStore(key, obj);
+    var parts = loadParts(key);
+    parts.cal = obj;
+    return commitBatch(key, parts);
   }
 
   function calibrationKeyPart(bucketKey, prefix) {
@@ -1436,9 +1519,8 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-  function recordOutcomes(rows, key) {
-    key = key || DEFAULTS.calibrationKey;
-    var all = loadCalibration(key), added = 0;
+  function applyOutcomeRows(all, rows) {
+    var added = 0;
     (rows || []).forEach(function (row) {
       if (!row || row.horizonDays == null || row.targetPct == null || row.setupScore == null) return;
       var w = row.win != null ? Number(row.win) : (row.hitTarget ? 1 : (row.hitTarget === false ? 0 : NaN));
@@ -1456,8 +1538,14 @@ window.ExpectedValueEngine = (function () {
       all[b] = cell;
       added++;
     });
+    return added;
+  }
+  function recordOutcomes(rows, key) {
+    key = key || DEFAULTS.calibrationKey;
+    var parts = loadParts(key);
+    var added = applyOutcomeRows(parts.cal, rows);
     if (!added) return 0;
-    return saveCalibration(key, all) ? added : -1;
+    return commitBatch(key, parts) ? added : -1;
   }
   function recordOutcome(row, key) {
     var r = recordOutcomes([row], key);
@@ -1471,23 +1559,75 @@ window.ExpectedValueEngine = (function () {
       localStorage.removeItem(key + '_meta');
       localStorage.removeItem(key + '_rel');
       localStorage.removeItem(key + '_sig');
+      localStorage.removeItem(key + '_txn');
       delete _calCache[key];
       _calCacheVer[key] = (_calCacheVer[key] || 0) + 1;
       return true;
     } catch (e) { return false; }
   }
 
+  /* v4.6 (feedback A): basis signature - a short hash of a canonical dump of
+     EVERY parameter that decides what is stored:
+       outcome labels:      driftKeep, lookbackBars, stopATR, minStopPct,
+                            maxStopPct, horizons, targets
+       stored predictions:  all of the above plus evPriorStdPct,
+                            defaultHorizon, selectionHaircut, minWindows,
+                            recency, regime
+       economics:           cost, tax, taxLossCredit, decideAfterTax
+     plus BASIS_REV, bumped by hand whenever replay or optimizer logic
+     changes. If it differs from the stored one - or no signature exists
+     (unknown basis) - the whole family is cleared and rebuilds. */
+  var BASIS_REV = '2';
+  function shortHash(str) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return ('0000000' + h.toString(16)).slice(-8);
+  }
   function calibrationSignature(cfg) {
-    return ['v5', round(totalRoundTripCost(cfg.costs), 4), num(cfg.taxRatePct, 0), num(cfg.taxLossCredit, 0), cfg.decideAfterTax !== false ? 1 : 0].join('|');
+    /* Fixed key order => deterministic JSON => stable hash. */
+    var canon = {
+      rev: BASIS_REV,
+      cost: round(totalRoundTripCost(cfg.costs), 4),
+      taxRatePct: num(cfg.taxRatePct, 0),
+      taxLossCredit: num(cfg.taxLossCredit, 0),
+      decideAfterTax: cfg.decideAfterTax !== false ? 1 : 0,
+      driftKeep: num(cfg.driftKeep, 0.5),
+      lookbackBars: num(cfg.lookbackBars, 500),
+      stopATR: num(cfg.stopATR, 1.8),
+      minStopPct: num(cfg.minStopPct, 1.5),
+      maxStopPct: num(cfg.maxStopPct, 6),
+      horizons: (cfg.horizons || []).slice().sort(function (a, b) { return a - b; }),
+      targets: (cfg.targets || []).slice().sort(function (a, b) { return a - b; }),
+      evPriorStdPct: num(cfg.evPriorStdPct, 0.5),
+      defaultHorizon: num(cfg.defaultHorizon, 10),
+      selectionHaircut: cfg.selectionHaircut !== false ? 1 : 0,
+      minWindows: num(cfg.minWindows, 30),
+      recency: cfg.recency || null,
+      regime: cfg.regime || null
+    };
+    return 'v6|' + shortHash(JSON.stringify(canon));
   }
   function refreshCalibrationSignature(key, cfg) {
     try {
       var sk = key + '_sig', sig = calibrationSignature(cfg), old = localStorage.getItem(sk);
       if (old === sig) return false;
-      var changed = old != null;
-      if (changed) clearCalibration(key);
+      /* Unknown basis (old == null) with data present is just as unsafe as a
+         changed basis: clear in BOTH cases. */
+      clearCalibration(key);
       localStorage.setItem(sk, sig);
-      return changed;
+      return old != null;   // 'changed' only when a previous basis existed
+    } catch (e) { return false; }
+  }
+  /* v4.6 (feedback A): one-line opt-out of the one-time reset - adopt the
+     CURRENT basis without clearing, for the case where nothing has actually
+     changed since the build and the old data is still valid. */
+  function adoptCurrentBasis(key) {
+    try {
+      localStorage.setItem((key || DEFAULTS.calibrationKey) + '_sig', calibrationSignature(getConfig()));
+      return true;
     } catch (e) { return false; }
   }
   try { refreshCalibrationSignature(DEFAULTS.calibrationKey, getConfig()); } catch (e) {}
@@ -1510,7 +1650,7 @@ window.ExpectedValueEngine = (function () {
         if (ok) row.usableBuckets++;
       }
     });
-    var meta = loadStore(key + '_meta');
+    var meta = loadParts(key).meta;
     return { buckets: buckets, usableBuckets: usable, outcomes: total, symbols: Object.keys(meta).length, byHorizon: byHorizon };
   }
 
@@ -1547,10 +1687,7 @@ window.ExpectedValueEngine = (function () {
      used for the bucket display. The verdict is computed from one
      observation per week (clusterSummary), not from row-level variance
      divided by week count. */
-  function recordReliability(rows, key) {
-    key = key || DEFAULTS.calibrationKey;
-    var rk = key + '_rel';
-    var st = loadStore(rk);
+  function applyReliabilityRows(st, rows) {
     if (!st.all) st.all = blankAcc();
     if (!st.elig) st.elig = blankAcc();
     if (!st.bins) st.bins = { all: [], elig: [] };
@@ -1560,41 +1697,78 @@ window.ExpectedValueEngine = (function () {
       ['all'].concat(r.elig ? ['elig'] : []).forEach(function (grp) {
         addAcc(st[grp], r.pred, r.raw, r.real, r.realRaw);
         var b = relBin(r.pred);
-        var cell = st.bins[grp][b] || { n: 0, sp: 0, sr: 0 };
+        var cell = st.bins[grp][b];
+        if (!cell) cell = st.bins[grp][b] = { n: 0, sp: 0, sr: 0, weeks: {} };
+        if (!cell.weeks) cell.weeks = {};
         cell.n++; cell.sp += r.pred; cell.sr += r.real;
-        st.bins[grp][b] = cell;
+        /* v4.6 (feedback E1): per-bin weekly aggregates — the bucket verdicts
+           get a week-clustered z-score instead of a raw gap threshold. */
+        if (r.date) {
+          var bwk = weekKeyOf(r.date);
+          if (bwk) {
+            var bw = cell.weeks[bwk];
+            if (!bw) bw = cell.weeks[bwk] = { n: 0, sp: 0, sr: 0, srw: 0 };
+            bw.n++; bw.sp += r.pred; bw.sr += r.real;
+            bw.srw = (bw.srw || 0) + (isFinite(r.realRaw) ? r.realRaw : r.real);
+          }
+        }
       });
       if (r.date) {
         var wk = weekKeyOf(r.date);
         if (wk) {
           var wa = st.weeks[wk];
-          if (!wa) wa = st.weeks[wk] = { n: 0, sp: 0, sr: 0, eN: 0, eSP: 0, eSR: 0 };
+          if (!wa) wa = st.weeks[wk] = { n: 0, sp: 0, sr: 0, srw: 0, eN: 0, eSP: 0, eSR: 0, eSRW: 0 };
           wa.n++; wa.sp += r.pred; wa.sr += r.real;
-          if (r.elig) { wa.eN++; wa.eSP += r.pred; wa.eSR += r.real; }
+          /* v4.6 (feedback C): raw realized sums — the cluster test can run on
+             raw money, not just the detrended number. */
+          wa.srw = (wa.srw || 0) + (isFinite(r.realRaw) ? r.realRaw : r.real);
+          if (r.elig) {
+            wa.eN++; wa.eSP += r.pred; wa.eSR += r.real;
+            wa.eSRW = (wa.eSRW || 0) + (isFinite(r.realRaw) ? r.realRaw : r.real);
+          }
         }
       }
       added++;
     });
-    if (added) {
-      st.updated = Date.now();
-      if (!saveStore(rk, st)) return -1;
-    }
     return added;
+  }
+  function recordReliability(rows, key) {
+    key = key || DEFAULTS.calibrationKey;
+    var parts = loadParts(key);
+    var added = applyReliabilityRows(parts.rel, rows);
+    if (!added) return 0;
+    parts.rel.updated = Date.now();
+    /* v4.6 (feedback D): row-level prediction store (fire-and-forget). */
+    try { rowStorePut((rows || []).map(rowStoreShape)); } catch (e) {}
+    return commitBatch(key, parts) ? added : -1;
   }
 
   /* v4.4: clusterSummary — one observation per week. Returns null if fewer
-     than 3 usable weeks (too few for a cluster SE). */
-  function clusterSummary(weeks, mode) {
+     than 3 usable weeks (too few for a cluster SE).
+     v4.6 (feedback C): opts.raw selects the raw (undetrended) realized sums
+     (srw/eSRW); opts.subtractPred=false returns the raw MONEY mean per week
+     ("does it make money") instead of the gap vs prediction. */
+  function clusterSummary(weeks, mode, opts) {
     if (!weeks) return null;
+    opts = opts || {};
+    var raw = !!opts.raw, sub = opts.subtractPred !== false;
     var keys = Object.keys(weeks);
     var weekResiduals = [];   // one entry per usable week
     for (var i = 0; i < keys.length; i++) {
       var w = weeks[keys[i]];
+      if (!w) continue;
       var nw = mode === 'elig' ? (w.eN || 0) : (w.n || 0);
       if (!(nw > 0)) continue;
       var swP = mode === 'elig' ? (w.eSP || 0) : (w.sp || 0);
-      var swR = mode === 'elig' ? (w.eSR || 0) : (w.sr || 0);
-      weekResiduals.push((swR - swP) / nw);
+      var swR;
+      if (raw) {
+        var rawField = mode === 'elig' ? w.eSRW : w.srw;
+        if (rawField == null) continue;   // legacy week without raw sums
+        swR = rawField;
+      } else {
+        swR = mode === 'elig' ? (w.eSR || 0) : (w.sr || 0);
+      }
+      weekResiduals.push((swR - (sub ? swP : 0)) / nw);
     }
     var nW = weekResiduals.length;
     if (nW < 3) return null;
@@ -1605,7 +1779,7 @@ window.ExpectedValueEngine = (function () {
     for (k = 0; k < nW; k++) ss += Math.pow(weekResiduals[k] - bias, 2);
     var sd = Math.sqrt(ss / (nW - 1));
     var se = sd / Math.sqrt(nW);
-    return { bias: bias, se: se, z: se > 0 ? bias / se : 0, nWeeks: nW };
+    return { mean: bias, bias: bias, se: se, z: se > 0 ? bias / se : 0, nWeeks: nW };
   }
 
   /* v4.4: summarizeAcc now prefers clusterSummary. Row-level accumulators
@@ -1617,18 +1791,39 @@ window.ExpectedValueEngine = (function () {
     if (!g || !g.n) return { n: 0, verdict: 'collecting' };
     var n = g.n, mp = g.sp / n, mr = g.sr / n;
     var varP = g.spp / n - mp * mp;
-    var slope = varP > 1e-6 ? (g.spr / n - mp * mr) / varP : null;
+    var sxy = g.spr / n - mp * mr;
+    var slope = varP > 1e-6 ? sxy / varP : null;
+    /* v4.6 (feedback E2): slope standard error (OLS on the row-level
+       accumulators) — "clearly below 1" needs an uncertainty band. */
+    var slopeSe = null;
+    if (slope != null && n > 2 && varP > 1e-6) {
+      var syy = g.srr / n - mr * mr;
+      var sse = Math.max(0, n * (syy - slope * sxy));
+      slopeSe = Math.sqrt(sse / (n - 2) / (n * varP));
+    }
     var sdPred = Math.sqrt(Math.max(0, varP));
     var result = {
       n: n,
       meanPredicted: mp, meanRealized: mr, meanRawPredicted: g.sraw / n,
       meanRealizedRaw: g.srw != null ? g.srw / n : null,   // v4.5 (F4): raw, undetrended realized P&L
-      slope: slope, sdPredicted: sdPred,
+      slope: slope, slopeSe: slopeSe, sdPredicted: sdPred,
       /* "consistent" means INTERNALLY COHERENT: predicted and realized are
          detrended by the same drift. meanRealizedRaw answers "did it make
          money". The walk-forward uses the own-history layer only (no
          calibration / ML), so it validates that layer, not the blend. */
       basis: 'predicted_own_history_ev_vs_realized_detrended_pnl'
+    };
+    /* v4.6 (feedback C): "does it make money" — raw mean with a cluster
+       standard error (one observation per week), next to the detrended
+       comparison that remains the model-consistency test. */
+    var rawCluster = clusterSummary(weeks, mode, { raw: true, subtractPred: false });
+    result.raw = {
+      mean: g.srw != null ? g.srw / n : null,
+      stdErr: rawCluster ? rawCluster.se : null,
+      z: rawCluster ? rawCluster.z : null,
+      nWeeks: rawCluster ? rawCluster.nWeeks : null,
+      method: rawCluster ? 'cluster' : 'row',
+      basis: 'raw_executable_pnl'
     };
     var cluster = clusterSummary(weeks, mode);
     if (cluster) {
@@ -1663,14 +1858,23 @@ window.ExpectedValueEngine = (function () {
 
   function reliabilityCore(key) {
     key = key || DEFAULTS.calibrationKey;
-    var st = loadStore(key + '_rel');
+    var st = loadParts(key).rel;
     function bins(arr) {
       return (arr || []).map(function (c, k) {
         if (!c || !c.n) return null;
         var mp = c.sp / c.n, mr = c.sr / c.n, gap = mr - mp;
+        /* v4.6 (feedback E1): bucket verdicts from the per-week clustered
+           z-score (per-bin weekly aggregates); the raw gap threshold is only
+           a fallback for legacy bins without week data. */
+        var cl = c.weeks ? clusterSummary(c.weeks, 'all') : null;
+        var verdict;
+        if (c.n < 30) verdict = 'collecting';
+        else if (cl) verdict = cl.z < -2 ? 'optimistic' : (cl.z > 2 ? 'conservative' : 'ok');
+        else verdict = gap < -0.15 ? 'optimistic' : (gap > 0.15 ? 'conservative' : 'ok');
         return {
           bin: k, label: BIN_LABELS[k], n: c.n, meanPredicted: mp, meanRealized: mr, gap: gap,
-          verdict: c.n < 30 ? 'collecting' : (gap < -0.15 ? 'optimistic' : (gap > 0.15 ? 'conservative' : 'ok'))
+          z: cl ? cl.z : null, nWeeks: cl ? cl.nWeeks : 0,
+          verdict: verdict
         };
       }).filter(Boolean);
     }
@@ -1699,6 +1903,10 @@ window.ExpectedValueEngine = (function () {
 
   function reliabilityStatus(key) {
     var out = reliabilityCore(key);
+    /* v4.6 (feedback E3): both population verdicts are exposed so the UI can
+       show the all-setups weak-ranking even when Buy-grade is the headline. */
+    out.verdictAll = out.all ? out.all.verdict : 'collecting';
+    out.verdictElig = out.elig ? out.elig.verdict : 'collecting';
     out.trust = buildTrust(out, key);
     return out;
   }
@@ -1710,7 +1918,7 @@ window.ExpectedValueEngine = (function () {
      path when fewer than 4 usable weeks. */
   function gateReport(key) {
     key = key || DEFAULTS.calibrationKey;
-    var st = loadStore(key + '_rel');
+    var st = loadParts(key).rel;
     var A = st.all, E = st.elig;
     if (!A || !E || !A.n) return { verdict: 'collecting', eligible: { n: E ? E.n : 0 }, notEligible: { n: 0 } };
     var N = { n: A.n - E.n, sp: A.sp - E.sp, sr: A.sr - E.sr, srr: A.srr - E.srr };
@@ -1722,7 +1930,7 @@ window.ExpectedValueEngine = (function () {
     var e = sm(E), nn = sm(N);
     var out = { eligible: e, notEligible: nn, edge: null, z: null, verdict: 'collecting' };
 
-    var weekDiffs = [];
+    var weekDiffs = [], weekDiffsRaw = [];
     if (st.weeks) {
       var keys = Object.keys(st.weeks);
       for (var i = 0; i < keys.length; i++) {
@@ -1733,29 +1941,58 @@ window.ExpectedValueEngine = (function () {
         var meanE = (w.eSR || 0) / nE;
         var meanNE = ((w.sr || 0) - (w.eSR || 0)) / nNE;
         weekDiffs.push(meanE - meanNE);
+        /* v4.6 (feedback C): parallel RAW money diff — weeks without raw sums
+           (legacy stores) are skipped; every week has them after rebuild. */
+        if (w.srw != null && w.eSRW != null) {
+          var meanEr = w.eSRW / nE;
+          var meanNEr = (w.srw - w.eSRW) / nNE;
+          weekDiffsRaw.push(meanEr - meanNEr);
+        }
       }
     }
 
-    if (weekDiffs.length >= 4 && e.n >= 50 && nn.n >= 50) {
+    function clusterStats(diffs) {
+      if (!diffs || diffs.length < 4) return null;
       var s = 0, k;
-      for (k = 0; k < weekDiffs.length; k++) s += weekDiffs[k];
-      var bias = s / weekDiffs.length;
+      for (k = 0; k < diffs.length; k++) s += diffs[k];
+      var bias = s / diffs.length;
       var ss = 0;
-      for (k = 0; k < weekDiffs.length; k++) ss += Math.pow(weekDiffs[k] - bias, 2);
-      var sd = Math.sqrt(ss / (weekDiffs.length - 1));
-      var se = sd / Math.sqrt(weekDiffs.length);
-      out.edge = bias;
-      out.z = se > 0 ? bias / se : 0;
-      out.nWeeks = weekDiffs.length;
-      out.method = 'cluster';
+      for (k = 0; k < diffs.length; k++) ss += Math.pow(diffs[k] - bias, 2);
+      var sd = Math.sqrt(ss / (diffs.length - 1));
+      var se = sd / Math.sqrt(diffs.length);
+      return { edge: bias, se: se, z: se > 0 ? bias / se : 0, nWeeks: diffs.length, method: 'cluster' };
+    }
+
+    var modelCl = (e.n >= 50 && nn.n >= 50) ? clusterStats(weekDiffs) : null;
+    var rawCl = (e.n >= 50 && nn.n >= 50) ? clusterStats(weekDiffsRaw) : null;
+
+    if (modelCl) {
+      out.edge = modelCl.edge; out.z = modelCl.z;
+      out.nWeeks = modelCl.nWeeks; out.method = 'cluster';
     } else if (e.n >= 100 && nn.n >= 100) {
       out.edge = e.meanRealized - nn.meanRealized;
       var se2 = Math.sqrt(e.varRealized / Math.max(1, e.n / 4) + nn.varRealized / Math.max(1, nn.n / 4));
       out.z = se2 > 0 ? out.edge / se2 : 0;
       out.method = 'row';
     }
-    if (out.z != null) {
-      out.verdict = out.z > 2 ? 'gate-adds-value' : (out.z < -2 ? 'gate-hurts' : 'gate-no-better');
+    out.model = modelCl
+      ? { edge: modelCl.edge, z: modelCl.z, nWeeks: modelCl.nWeeks, method: 'cluster' }
+      : (out.z != null ? { edge: out.edge, z: out.z, method: out.method } : null);
+    if (rawCl) {
+      out.raw = { edge: rawCl.edge, z: rawCl.z, nWeeks: rawCl.nWeeks, method: 'cluster' };
+    } else if (e.n >= 100 && nn.n >= 100 && A.srw != null && E.srw != null) {
+      /* row fallback: raw edge from raw sums; SE proxied by the detrended
+         variance (no raw row-level variance is kept in the store). */
+      var rawEdge = (E.srw / E.n) - ((A.srw - E.srw) / Math.max(1, A.n - E.n));
+      out.raw = { edge: rawEdge, z: out.z, method: 'row-proxy' };
+    }
+    /* v4.6 (feedback C): the verdict runs on RAW money ("did the gate make
+       money"), falling back to the detrended basis only when raw data is
+       missing. out.edge/out.z stay as the detrended compat aliases. */
+    var v = out.raw || out.model;
+    if (v && v.z != null) {
+      out.verdictBasis = out.raw ? 'raw' : 'detrended';
+      out.verdict = v.z > 2 ? 'gate-adds-value' : (v.z < -2 ? 'gate-hurts' : 'gate-no-better');
     }
     return out;
   }
@@ -1857,6 +2094,10 @@ window.ExpectedValueEngine = (function () {
       decideAfterTax: cfg.decideAfterTax !== false,
       taxRatePct: num(cfg.taxRatePct, 0),
       taxLossCredit: num(cfg.taxLossCredit, 0),
+      /* v4.6 (feedback A): snapshot the OUTCOME-LABEL basis at prediction
+         time so settlement uses the original basis, not today's. */
+      driftKeep: num(cfg.driftKeep, 0.5),
+      lookbackBars: num(cfg.lookbackBars, 500),
       exit: { armFrac: currentExit.armFrac, trailFrac: currentExit.trailFrac, lockDelay: currentExit.lockDelay }
     };
     st.records.push({
@@ -1925,12 +2166,20 @@ window.ExpectedValueEngine = (function () {
       var i = byDate[rec.date];
       if (i == null) return;
       var complete = i + rec.h <= daily.length - 1;
+      /* v4.6 (feedback A): settlement uses the ORIGINAL outcome basis —
+         driftKeep / lookbackBars snapshotted at prediction time (records
+         without a snapshot fall back to the current config; note the explicit
+         null checks — num(null, fb) would return 0, not fb). */
+      var snap = rec.decisionSnapshot || null;
+      var lbSrc = (snap && snap.lookbackBars != null) ? snap.lookbackBars : cfg.lookbackBars;
+      var dkSrc = (snap && snap.driftKeep != null) ? snap.driftKeep : cfg.driftKeep;
+      var lbBars = Math.max(1, num(lbSrc, 500));
+      var driftKeepI = clamp(num(dkSrc, 0.5), 0, 1);
       var muI = 0, mc = 0;
-      for (var q = Math.max(1, i - cfg.lookbackBars + 1); q <= i; q++) {
+      for (var q = Math.max(1, i - lbBars + 1); q <= i; q++) {
         if (daily[q - 1].c > 0 && daily[q].c > 0) { muI += Math.log(daily[q].c / daily[q - 1].c); mc++; }
       }
-      var removedI = (1 - clamp(num(cfg.driftKeep, 0.5), 0, 1)) * (mc ? muI / mc : 0);
-      var snap = rec.decisionSnapshot || null;
+      var removedI = (1 - driftKeepI) * (mc ? muI / mc : 0);
       var settlementCfg = cfg;
       if (snap) {
         settlementCfg = {};
@@ -2043,6 +2292,20 @@ window.ExpectedValueEngine = (function () {
     if (!g || !g.n || g.verdict === 'collecting') raise('collecting', 'Walk-forward self-check is still collecting history.');
     else if (g.verdict === 'overconfident') raise('stale', 'Self-check says the EVs have been optimistic (predicted ' + round(g.meanPredicted, 2) + '% vs realized ' + round(g.meanRealized, 2) + '%).');
     else if (g.verdict === 'weak-ranking') raise('caution', 'Levels match, but higher-EV picks have not done better than lower-EV picks.');
+    /* v4.6 (feedback E2): a slope clearly below 1 says so directly — the
+       bucket flag is a noisy late indicator of the same problem. */
+    if (g && g.slope != null && g.slopeSe != null && g.slope + 2 * g.slopeSe < 1) {
+      raise('caution', 'Predictions vary about ' + round(1 / Math.max(0.05, g.slope), 1) +
+        'x as much as outcomes (slope ' + round(g.slope, 2) + ' +/- ' + round(g.slopeSe, 2) +
+        '): EV magnitudes are over-dispersed — shrinkage retune recommended.');
+    }
+    /* v4.6 (feedback E3): the all-setups weak-ranking verdict stays visible
+       even when Buy-grade (n >= 100) is the headline group. */
+    if (g && g.verdict === 'consistent') {
+      var wr = (rel.all && rel.all.verdict === 'weak-ranking') ? rel.all
+        : ((rel.elig && rel.elig.verdict === 'weak-ranking') ? rel.elig : null);
+      if (wr) raise('caution', 'Levels match, but higher-EV picks have not done better than lower-EV picks (slope ' + round(wr.slope, 2) + ' on ' + wr.n + ' rows).');
+    }
     if (rel.topBucket && rel.topBucket.verdict === 'optimistic') raise('caution', 'The top EV bucket (' + rel.topBucket.label + ') realized ' + round(rel.topBucket.gap, 2) + '% vs predicted.');
     if (rel.ageDays != null && rel.ageDays > num(cfg.staleCalibrationDays, 21)) raise('stale', 'Calibration has not been refreshed for ' + Math.round(rel.ageDays) + ' days.');
     var live = livePerformance();
@@ -2075,6 +2338,82 @@ window.ExpectedValueEngine = (function () {
       bestSymbol: best ? best.symbol : null, bestNetEVPct: best ? best.expectedValue.netPct : null,
       trust: trust
     };
+  }
+
+  /* ── Row-level prediction store + offline shrinkage retune (feedback D) ──
+     The raw ingredients of every stored prediction — unshrunk EV, standard
+     error, prior mean, haircut, horizon — so tau (evPriorStdPct) can be
+     re-tuned offline in milliseconds without a replay. IndexedDB when
+     available (the full ~9k-row history is too much for localStorage); a
+     capped in-memory ring otherwise (same-session use only). */
+  var _rowMem = [], _rowMemMax = 2000;
+  function rowStoreShape(r) {
+    return {
+      date: r.date, pred: r.pred, raw: r.raw, real: r.real, realRaw: r.realRaw,
+      elig: !!r.elig, basisEV: r.basisEV, stdErrPct: r.stdErrPct,
+      haircutPct: r.haircutPct, priorMeanPct: r.priorMeanPct, horizonDays: r.horizonDays
+    };
+  }
+  function rowStorePut(rows) {
+    (rows || []).forEach(function (r) {
+      _rowMem.push(r);
+      if (_rowMem.length > _rowMemMax) _rowMem.splice(0, _rowMem.length - _rowMemMax);
+    });
+    try {
+      if (typeof indexedDB === 'undefined' || !indexedDB) return _rowMem.length;
+      var req = indexedDB.open('stox_ev_rows', 1);
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains('rows')) db.createObjectStore('rows', { keyPath: 'id', autoIncrement: true });
+      };
+      req.onsuccess = function () {
+        var tx = req.result.transaction('rows', 'readwrite');
+        var os = tx.objectStore('rows');
+        (rows || []).forEach(function (r) { try { os.put(r); } catch (e) {} });
+      };
+    } catch (e) {}
+    return _rowMem.length;
+  }
+  function rowStoreRows() { return _rowMem.slice(); }
+
+  function olsSlope(xs, ys) {
+    var n = xs.length, mx = 0, my = 0, i;
+    if (n < 3) return null;
+    for (i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; }
+    mx /= n; my /= n;
+    var sxy = 0, sxx = 0;
+    for (i = 0; i < n; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) * (xs[i] - mx); }
+    return sxx > 1e-12 ? sxy / sxx : null;
+  }
+
+  /* Re-tune evPriorStdPct from stored rows: pred(tau) is deterministic from
+     the stored ingredients, so the regression slope of realized on
+     re-shrunk predictions is a millisecond grid search. A well-shrunk
+     predictor slopes ~1; pick the tauBase whose slope is closest to 1. */
+  function retuneTau(rows, opts) {
+    opts = opts || {};
+    var grid = opts.grid || [0.15, 0.2, 0.25, 0.28, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.75, 1.0];
+    var defH = num(opts.defaultHorizon, 10);
+    var usable = (rows || []).filter(function (r) {
+      return r && isFinite(r.basisEV) && isFinite(r.stdErrPct) && isFinite(r.real) && isFinite(r.horizonDays);
+    });
+    if (usable.length < 30) return { ok: false, reason: 'insufficient_rows', n: usable.length };
+    var best = null, out = [];
+    grid.forEach(function (tauBase) {
+      var preds = usable.map(function (r) {
+        var tau = Math.max(0.05, tauBase * Math.sqrt(Math.max(1, num(r.horizonDays, defH)) / defH));
+        var s = Math.max(0.02, num(r.stdErrPct, 0.5));
+        var lam = tau * tau / (tau * tau + s * s);
+        var pm = num(r.priorMeanPct, 0);
+        return pm + lam * (r.basisEV - pm) - num(r.haircutPct, 0);
+      });
+      var slope = olsSlope(preds, usable.map(function (r) { return r.real; }));
+      var dev = slope == null ? Infinity : Math.abs(slope - 1);
+      var rec = { tauBase: tauBase, slope: slope, deviation: dev };
+      out.push(rec);
+      if (!best || dev < best.deviation) best = rec;
+    });
+    return { ok: true, n: usable.length, best: best, grid: out, currentTauBase: num(getConfig().evPriorStdPct, 0.5) };
   }
 
   function retSeries(daily, lookback) {
@@ -2197,9 +2536,10 @@ window.ExpectedValueEngine = (function () {
       if (weekOf(ord) !== weekOf(prev)) eligible.push(i);
     }
 
-    var metaKey = key + '_meta';
-    var metaAll = loadStore(metaKey);
-    var meta = metaAll[symbol] || { newest: null, oldest: null, count: 0 };
+    /* v4.6 (feedback B): meta lives in the same envelope as calibration and
+       reliability — the whole batch commits atomically below. */
+    var parts = loadParts(key);
+    var meta = parts.meta[symbol] || { newest: null, oldest: null, count: 0 };
 
     var fresh = [], older = [];
     eligible.forEach(function (idx) {
@@ -2266,7 +2606,15 @@ window.ExpectedValueEngine = (function () {
                   pred: b.expectedValue.netPct, raw: b.expectedValue.rawBasisPct,
                   real: cfg.decideAfterTax !== false ? rv.aft : rv.pre,
                   realRaw: rvr ? (cfg.decideAfterTax !== false ? rvr.aft : rvr.pre) : null,
-                  elig: score >= buyTh
+                  elig: score >= buyTh,
+                  /* v4.6 (feedback D): shrinkage re-tune ingredients — the
+                     unshrunk EV, its standard error, the prior mean, the
+                     haircut and the horizon (see retuneTau). */
+                  basisEV: b.expectedValue.rawBasisPct,
+                  stdErrPct: b.expectedValue.stdErrPct,
+                  haircutPct: b.expectedValue.haircutPct,
+                  priorMeanPct: b.expectedValue.priorMeanPct,
+                  horizonDays: b.horizonDays
                 });
               }
             }
@@ -2279,28 +2627,29 @@ window.ExpectedValueEngine = (function () {
       out.processed++;
     });
 
-    var outcomesAdded = recordOutcomes(rows, key);
-    if (outcomesAdded < 0) { out.reason = 'store_write_failed'; return out; }
+    /* v4.6 (feedback B): ONE atomic commit for calibration + reliability +
+       meta. A failed commit leaves everything as it was (the meta ledger
+       included), so the retry is clean and can never double-count dates. */
+    var outcomesAdded = applyOutcomeRows(parts.cal, rows);
+    applyReliabilityRows(parts.rel, relRows);
+    if (relRows.length) parts.rel.updated = Date.now();
+    parts.meta[symbol] = meta;
+    if (!commitBatch(key, parts)) { out.reason = 'store_write_failed'; return out; }
     out.rows = outcomesAdded;
-
-    if (relRows.length) {
-      var relAdded = recordReliability(relRows, key);
-      if (relAdded < 0) { out.reason = 'reliability_write_failed'; return out; }
-    }
-
-    metaAll[symbol] = meta;
-    saveStore(metaKey, metaAll);
+    /* v4.6 (feedback D): row-level prediction ingredients (fire-and-forget). */
+    if (relRows.length) { try { rowStorePut(relRows.map(rowStoreShape)); } catch (e) {} }
     return out;
   }
 
   return {
     version: VERSION,
-    getConfig: function () { return getConfig(); },
+    getConfig: function (o) { return getConfig(o); },
     totalRoundTripCost: totalRoundTripCost,
     analyze: analyze,
     optimize: optimize,
     recordOutcome: recordOutcome,
     recordOutcomes: recordOutcomes,
+    recordReliability: recordReliability,
     calibrateFromHistory: calibrateFromHistory,
     calibrationStatus: calibrationStatus,
     reliabilityStatus: reliabilityStatus,
@@ -2318,6 +2667,9 @@ window.ExpectedValueEngine = (function () {
     upsideBaseline: upsideBaseline,
     returnSeries: function (daily, lookback) { return retSeries(daily, lookback || 90); },
     clearCalibration: clearCalibration,
+    adoptCurrentBasis: adoptCurrentBasis,
+    retuneTau: retuneTau,
+    rowStoreRows: rowStoreRows,
     reliabilityVerdict: reliabilityVerdict,
     _test: {
       windowOutcome: windowOutcome, buildWindowWeights: buildWindowWeights,
@@ -2333,7 +2685,13 @@ window.ExpectedValueEngine = (function () {
       setupBlindPrior: setupBlindPrior,
       combineProbability: combineProbability,
       weekKeyOf: weekKeyOf,
-      clusterSummary: clusterSummary
+      clusterSummary: clusterSummary,
+      calibrationSignature: calibrationSignature,
+      refreshCalibrationSignature: refreshCalibrationSignature,
+      shortHash: shortHash,
+      loadParts: loadParts, commitBatch: commitBatch,
+      applyOutcomeRows: applyOutcomeRows, applyReliabilityRows: applyReliabilityRows,
+      olsSlope: olsSlope
     }
   };
 })();
