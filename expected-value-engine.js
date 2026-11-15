@@ -808,8 +808,16 @@ window.ExpectedValueEngine = (function () {
     for (var i = 0; i < candidates.length; i++) {
       if (typeof candidates[i] === 'function') {
         try {
-          var p = Number(candidates[i](context));
-          if (isFinite(p)) { if (p > 1) p /= 100; return clamp(p, 0.01, 0.99); }
+          var raw = candidates[i](context);
+          /* v4.6 (ML audit): a provider returning null/undefined means "no
+             estimate", NOT zero — Number(null) === 0 is finite and would
+             silently become p=0.01 (near-certain no-target) and poison the
+             blend. Skip to the next provider instead. */
+          if (raw == null) continue;
+          var p = Number(raw);
+          if (!isFinite(p)) continue;
+          if (p > 1) p /= 100;
+          return clamp(p, 0.01, 0.99);
         } catch (e) {}
       }
     }
@@ -1029,7 +1037,8 @@ window.ExpectedValueEngine = (function () {
     var prior = noHist ? null : setupBlindPrior(horizon, targetPct, pre.stopPct, cfg.calibrationKey);
     var ml = noHist ? null : mlProbability({
       symbol: input.symbol, dailyCandles: daily, hourlyCandles: hourly, indexCandles: indexCandles,
-      setup: pre.setup, horizonDays: horizon, targetPct: targetPct
+      setup: pre.setup, horizonDays: horizon, targetPct: targetPct,
+      stopPct: pre.stopPct   /* v4.6 ML audit: the provider needs the plan's barriers to map to its event */
     });
 
     var probability = combineProbability(tb, hist, prior, ml, cfg, pre.gapFactor);
@@ -2211,11 +2220,28 @@ window.ExpectedValueEngine = (function () {
     return null;
   }
 
+  /* v4.6 (scan-safety): during market hours the daily feed's last bar may be
+     today's FORMING session — outcome labels written from it (live settlement,
+     walk-forward window labels) would freeze intraday half-truths that the
+     idempotent stores never correct. Detection (recordPrediction) is
+     deliberately NOT guarded: forming setups must still be found intraday.
+     opts.allowPartialBar opts out; opts.nowMs makes the check deterministic
+     (tests). IST wall clock via the +5:30 shift trick. */
+  function barMayBeForming(daily, nowMs) {
+    if (!daily || !daily.length) return false;
+    var last = String(daily[daily.length - 1].t).slice(0, 10);
+    if (!last) return false;
+    var now = new Date((nowMs != null ? nowMs : Date.now()) + 5.5 * 3600 * 1000);
+    if (now.toISOString().slice(0, 10) !== last) return false;   // feed bar is not today: complete
+    return (now.getUTCHours() * 60 + now.getUTCMinutes()) < (15 * 60 + 30);   // before 15:30 IST
+  }
+
   function settlePredictions(symbol, dailyCandles, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
     var daily = dailyCandles || [], settled = 0;
     if (!daily.length) return { settled: 0 };
+    var partialGuard = !opts.allowPartialBar && barMayBeForming(daily, opts.nowMs);
     var byDate = {};
     daily.forEach(function (b, k) { byDate[String(b.t).slice(0, 10)] = k; });
     /* v4.6: sweep EVERY basis store — episodes opened under an older model
@@ -2228,6 +2254,11 @@ window.ExpectedValueEngine = (function () {
       if (rec.status !== 'open' || rec.symbol !== symbol) return;
       var i = byDate[rec.date];
       if (i == null) return;
+      /* v4.6 scan-safety: never write a settlement label from a bar that may
+         still be forming — defer records whose outcome window reaches the
+         last bar to the next after-close run (status stays open, nothing is
+         lost). Windows that closed on earlier COMPLETE bars settle normally. */
+      if (partialGuard && i + rec.h >= daily.length - 1) return;
       var complete = i + rec.h <= daily.length - 1;
       /* v4.6 (feedback A): settlement uses the ORIGINAL outcome basis —
          driftKeep / lookbackBars snapshotted at prediction time (records
@@ -2669,6 +2700,11 @@ window.ExpectedValueEngine = (function () {
     var cap = opts.capPerStock || 60;
     var maxH = Math.max.apply(null, cfg.horizons);
     var lastStart = daily.length - 1 - maxH;
+    /* v4.6 scan-safety: while today's bar may still be forming, defer the
+       windows whose horizon reaches the last bar — their outcome labels would
+       read the forming bar. The meta ledger has not recorded them yet, so the
+       next after-close run picks them up (idempotent: nothing is lost). */
+    if (!opts.allowPartialBar && barMayBeForming(daily, opts.nowMs)) lastStart = daily.length - 2 - maxH;
 
     function weekOf(ord) { return Math.floor((ord + 3) / 7); }
     var eligible = [];
@@ -2838,6 +2874,7 @@ window.ExpectedValueEngine = (function () {
       calibrationSignature: calibrationSignature,
       refreshCalibrationSignature: refreshCalibrationSignature,
       shortHash: shortHash,
+      barMayBeForming: barMayBeForming,
       loadParts: loadParts, commitBatch: commitBatch,
       applyOutcomeRows: applyOutcomeRows, applyReliabilityRows: applyReliabilityRows,
       olsSlope: olsSlope

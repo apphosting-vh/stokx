@@ -407,9 +407,11 @@ window.LiveML = (function () {
   }
 
   /**
-   * Compute ML-estimated expected 1-day change based on win probability
-   * and historical base rate. Uses Kelly-inspired heuristic: if model says
-   * X% win probability and base rate is Y%, expected return is scaled.
+   * Heuristic expected 1-day change (display only — feeds predictedClose).
+   * NOTE (audit): despite the old comment this is NOT model- or base-rate-
+   * derived — it is a fixed feature heuristic (direction from MACD/EMA slope,
+   * magnitude from the entry score). The baseRate parameter is unused. Not
+   * consumed by the EV engine.
    */
   function computeExpectedChg(features, baseRate) {
     // Use entry score and feature alignment to estimate expected change
@@ -602,13 +604,13 @@ window.LiveML = (function () {
     try { lastDates = (await window.PatternStore.getMeta(KEY_LAST_DATES)) || {}; } catch (e) {}
     var isFirstRun = Object.keys(lastDates).length === 0;
 
+    var total = universe.length;
     onProgress(0, total, "Reading offline candle store...");
     var offlineMap = await loadOfflineMap();
     var loadMsg = isFirstRun
       ? "First run — loading candles from offline store (live fallback capped at 15s/symbol)..."
       : "Subsequent run — fetching live close prices from Yahoo (offline fallback capped at 15s/symbol)...";
     onProgress(0, total, loadMsg);
-    var total = universe.length;
     var processed = 0, skipped = 0, newSamples = 0, liveFetches = 0, offlineHits = 0;
     var fallbackNoted = false, staleNoted = false;
 
@@ -953,6 +955,7 @@ window.LiveML = (function () {
         } catch (e) {}
       }
       if (model && model.network && model.network.inputSize === window.MLTrainer.FEATURE_KEYS.length) {
+        _cachedEvModel = model;   /* warm the sync EV bridge cache */
         var pred = window.MLTrainer.predictSync(f, model);
         if (pred) {
           winProbability = pred.winProbability;
@@ -1023,6 +1026,7 @@ window.LiveML = (function () {
       championModel = await window.PatternStore.getMeta(MODEL_KEYS.champion);
       if (!championModel) championModel = await window.PatternStore.getMeta(MODEL_KEYS.legacy);
     } catch (e) {}
+    if (championModel) _cachedEvModel = championModel;   /* warm the sync EV bridge cache */
     var scanCtx = { baseRate: baseRate, model: championModel };
 
     /* Offline map load is guarded too — an IDB open without onblocked can stall. */
@@ -1211,12 +1215,24 @@ window.LiveML = (function () {
       d.picks.forEach(function (p) { if (p.resolved) allPicks.push(p); });
     });
     var totalHits = allPicks.filter(function (p) { return p.hit; }).length;
+    /* Audit fix (accuracy honesty): a hit-rate means nothing without its
+       baseline — the training corpus base rate (P(up)) is the no-skill
+       benchmark, so report the edge next to the raw rate. */
+    var bench = null;
+    try {
+      var statusMeta = await getStatusMeta();
+      if (statusMeta && statusMeta.corpus && statusMeta.corpus.baseRate != null) bench = statusMeta.corpus.baseRate;
+    } catch (e) {}
     var summary = {
       total: allPicks.length,
       resolved: allPicks.length,
       hits: totalHits,
       misses: allPicks.length - totalHits,
-      hitRate: allPicks.length > 0 ? Math.round((totalHits / allPicks.length) * 1000) / 10 : null
+      hitRate: allPicks.length > 0 ? Math.round((totalHits / allPicks.length) * 1000) / 10 : null,
+      benchmarkBaseRate: bench,
+      edgeVsBase: (bench != null && allPicks.length > 0)
+        ? round2(Math.round((totalHits / allPicks.length) * 1000) / 10 - bench)
+        : null
     };
 
     return { days: validationDays, summary: summary };
@@ -1261,6 +1277,109 @@ window.LiveML = (function () {
     };
   }
 
+  /* ── EV engine bridge (audit fix) ─────────────────────────────────────────
+     The EV engine's mlProbability() calls window.LiveML.getCalibratedProbability
+     SYNCHRONOUSLY. Before this existed, neither provider module exported that
+     function — the ML layer was silently disconnected from the EV blend and
+     mlProbability() always returned null.
+
+     Event honesty: the model predicts NEXT-BAR UP probability, not the plan's
+     "hit target before stop within h days" event, so the output is mapped to
+     the plan event with a documented Wiener first-passage approximation:
+       nu         = (2*p_up - 1) * sigma * sqrt(2/pi)   (drift tilt from the
+                    calibrated up-probability; E|r| = sigma*sqrt(2/pi))
+       a = ln(1 + target/100),  b = |ln(1 - stop/100)|   (log barriers)
+       share(nu)  = (1 - e^(-2*nu*b/s^2)) / (1 - e^(-2*nu*(a+b)/s^2))
+                    nu -> 0 limit is b/(a+b) — the engine's own zero-edge
+                    barrier share — so the mapping degrades exactly to the
+                    model-free prior when the model has no edge.
+       P(target-first within h) ~= share(nu) * (1 - e^(-h / (a*b/s^2)))
+                    where a*b/s^2 is the zero-drift mean exit time in days.
+     Returns null ("no estimate") whenever the model is missing/unwarmed or
+     the context cannot be mapped — never a made-up number. The EV blend caps
+     the ML share at cfg.blend.ml (0.20). */
+
+  var _cachedEvModel = null;
+
+  function warmEvModel() {
+    try {
+      window.PatternStore.init().then(function () {
+        return window.PatternStore.getMeta(MODEL_KEYS.champion);
+      }).then(function (m) {
+        return m || window.PatternStore.getMeta(MODEL_KEYS.legacy);
+      }).then(function (m) {
+        if (m && m.network) _cachedEvModel = m;
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
+  function dailySigma(candles) {
+    if (!candles || candles.length < 22) return null;
+    var rets = [];
+    for (var i = candles.length - 20; i < candles.length; i++) {
+      var a = candles[i - 1] && candles[i - 1].c, b = candles[i] && candles[i].c;
+      if (a > 0 && b > 0) rets.push(Math.log(b / a));
+    }
+    if (rets.length < 10) return null;
+    var m = rets.reduce(function (s, x) { return s + x; }, 0) / rets.length;
+    var v = rets.reduce(function (s, x) { return s + (x - m) * (x - m); }, 0) / (rets.length - 1);
+    return Math.sqrt(v);
+  }
+
+  function mapUpProbToPlanEvent(pUp, plan, candles) {
+    if (pUp == null || !isFinite(Number(pUp))) return null;
+    var t = Number(plan && plan.targetPct), h = Number(plan && plan.horizonDays);
+    if (!(t > 0) || !(h > 0)) return null;
+    var stopPct = Number(plan && plan.stopPct);
+    if (!(stopPct > 0)) stopPct = Math.max(1, t * 0.75);   /* documented fallback */
+    var sigma = dailySigma(candles);
+    if (!(sigma > 0)) return null;
+    var a = Math.log(1 + Math.min(50, t) / 100);
+    var b = Math.abs(Math.log(1 - Math.min(90, stopPct) / 100));
+    if (!(a > 0) || !(b > 0)) return null;
+    var p = Math.max(0.01, Math.min(0.99, Number(pUp)));
+    var nu = (2 * p - 1) * sigma * Math.sqrt(2 / Math.PI);
+    var share;
+    if (Math.abs(nu) < 1e-12) share = b / (a + b);
+    else {
+      var x = -2 * nu / (sigma * sigma);
+      share = (1 - Math.exp(x * b)) / (1 - Math.exp(x * (a + b)));
+    }
+    if (!isFinite(share)) return null;
+    var meanExitDays = (a * b) / (sigma * sigma);
+    var horizonFactor = meanExitDays > 0 ? (1 - Math.exp(-h / meanExitDays)) : 1;
+    var out = share * horizonFactor;
+    return isFinite(out) ? Math.max(0.01, Math.min(0.99, out)) : null;
+  }
+
+  /* Sync EV adapter: the first call of a session warms the model cache and
+     returns null; subsequent calls produce the mapped probability. */
+  function getCalibratedProbability(context) {
+    try {
+      if (!context || !window.MLTrainer) return null;
+      var candles = context.dailyCandles;
+      if (!candles || candles.length < WARMUP + 2) return null;
+      var model = _cachedEvModel;
+      if (!model && window.MLTrainer.getCachedModel) {
+        var batchModel = window.MLTrainer.getCachedModel();
+        if (batchModel && batchModel.network) model = batchModel;   /* acceptable fallback: same next-bar-up event */
+      }
+      if (!model) {
+        warmEvModel();
+        if (window.MLTrainer.warmCache) window.MLTrainer.warmCache();
+        return null;   /* warmed for the next call */
+      }
+      if (!model.network || model.network.inputSize !== window.MLTrainer.FEATURE_KEYS.length) return null;
+      var ind = computeIndicators(candles);
+      var f = featuresAt(candles.length - 1, candles, ind, context.symbol, context.indexCandles || null);
+      var pred = window.MLTrainer.predictSync(f, model);
+      if (!pred || pred.winProbability == null) return null;
+      return mapUpProbToPlanEvent(pred.winProbability, {
+        targetPct: context.targetPct, horizonDays: context.horizonDays, stopPct: context.stopPct
+      }, candles);
+    } catch (e) { return null; }
+  }
+
   return {
     collect: collect,
     retrain: retrain,
@@ -1276,6 +1395,9 @@ window.LiveML = (function () {
     loadMorningScan: loadMorningScan,
     saveLiveLog: saveLiveLog,
     loadLiveLog: loadLiveLog,
+    getCalibratedProbability: getCalibratedProbability,
+    mapUpProbToPlanEvent: mapUpProbToPlanEvent,
+    warmEvModel: warmEvModel,
     BUCKETS: BUCKETS
   };
 })();

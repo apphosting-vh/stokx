@@ -347,9 +347,17 @@ window.MLTrainer = (function () {
      larger |return| samples dominate the loss so the model focuses on the most
      impactful outcomes. Expiry exits (return near 0) get a mild floor weight. */
   function computeSampleWeight(label) {
-    var r = label && label.return_10d != null ? Math.abs(label.return_10d) : 0;
-    var w = 1 / (1 + 0.5 * r);
-    w = Math.min(3, w);
+    /* Expectancy weighting (audit fix): the weight must GROW with |return| so
+       impactful outcomes dominate the loss — the old formula 1/(1+0.5*r) did
+       the OPPOSITE of its own comment and made the Math.min(3, ·) cap a
+       no-op. Also: live-corpus labels carry return_1d, not return_10d, so the
+       weighting silently did nothing in the LiveML stream — fall back to it. */
+    var r = 0;
+    if (label) {
+      if (label.return_10d != null && isFinite(Number(label.return_10d))) r = Math.abs(Number(label.return_10d));
+      else if (label.return_1d != null && isFinite(Number(label.return_1d))) r = Math.abs(Number(label.return_1d));
+    }
+    var w = Math.min(3, 1 + 0.5 * r);
     if (label && label.barrier === "TIMEOUT") w = Math.max(w, 0.7);
     
     /* CRITICAL FIX: The dataset is ~67% winners. Without this, the network 
@@ -611,6 +619,7 @@ window.MLTrainer = (function () {
    */
   function computePermutationImportance(nn, normalizer, samples, opts) {
     opts = opts || {};
+    if (!samples || samples.length === 0) return [];
     var topK = opts.topK || FEATURE_KEYS.length;
 
     // Baseline accuracy
@@ -895,6 +904,14 @@ window.MLTrainer = (function () {
     var avgAcc = completedFolds.length > 0 ? totalAcc / completedFolds.length : 0;
     var avgAuc = completedFolds.length > 0 ? totalAuc / completedFolds.length : 0;
 
+    /* Audit fix (accuracy honesty): raw accuracy means nothing on an imbalanced
+       corpus (~67% winners) — always-predict-WIN scores the majority share.
+       Report that baseline next to walkForwardAcc so "accuracy" claims are
+       always interpretable (AUC is already baseline-immune). */
+    var winsAll = 0;
+    validSamples.forEach(function (s) { if (s.label.is_winner) winsAll++; });
+    var baselineAcc = Math.round(Math.max(winsAll, validSamples.length - winsAll) / Math.max(1, validSamples.length) * 1000) / 10;
+
     // Build prediction distribution for drift detection reference
     var predBins = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0];
     var predDist = new Array(predBins.length - 1).fill(0);
@@ -912,6 +929,7 @@ window.MLTrainer = (function () {
       numFolds: numFolds,
       completedFolds: completedFolds.length,
       walkForwardAcc: Math.round(avgAcc * 10) / 10,
+      baselineAcc: baselineAcc,
       avgAuc: Math.round(avgAuc * 1000) / 1000,
       bestFoldAcc: Math.round(bestFoldAcc * 10) / 10,
       bestFold: bestFoldIdx + 1,
@@ -938,7 +956,14 @@ window.MLTrainer = (function () {
     if (bestFoldIdx >= 0 && bestFoldResult) {
       var bestFold = bestFoldResult;
       // Retrain on full dataset up to best fold's validation boundary for best model
-      var bestTrainEnd = Math.min((bestFoldIdx + 1) * foldSize, validSamples.length);
+      /* Audit fix: the LAST fold uses the overridden boundary
+         (trainEnd = len - foldSize), so (bestFoldIdx+1)*foldSize would train
+         the production model on part of its own validation window AND leave
+         the Platt calibration with the tiny remainder (usually < 20 samples ->
+         no calibration at all). Use the boundary the fold actually used. */
+      var bestTrainEnd = (bestFoldIdx === numFolds - 1)
+        ? Math.max(0, validSamples.length - foldSize)
+        : Math.min((bestFoldIdx + 1) * foldSize, validSamples.length);
       var fullTrainSamples = validSamples.slice(0, bestTrainEnd);
 
       var fullNormalizer = createNormalizer();
@@ -1555,6 +1580,25 @@ window.MLTrainer = (function () {
     _loadModel().catch(function () {});
   }
 
+  /* Synchronous accessor for the already-loaded model — the EV engine's
+     mlProbability() path is synchronous and cannot await IndexedDB. */
+  function getCachedModel() { return _cachedModel; }
+  function warmCache() { _loadModel().catch(function () {}); }
+
+  /* EV bridge (audit fix): plan-event probability. The feature pipeline and
+     the first-passage mapping live in LiveML (it owns the live feature
+     builder and the model's next-bar-up semantics); this delegate keeps the
+     engine's second provider candidate working. Returns null ("no estimate")
+     rather than guessing. */
+  function getCalibratedProbability(context) {
+    try {
+      if (window.LiveML && typeof window.LiveML.getCalibratedProbability === "function") {
+        return window.LiveML.getCalibratedProbability(context);
+      }
+    } catch (e) {}
+    return null;
+  }
+
   /* Synchronous check — true when a model is already loaded in memory (no I/O). */
   function hasCachedModel() { return _cachedModel != null; }
 
@@ -1619,6 +1663,9 @@ window.MLTrainer = (function () {
     predict: predict,
     predictSync: predictSync,
     getActiveModel: _loadModel,
+    getCachedModel: getCachedModel,
+    warmCache: warmCache,
+    getCalibratedProbability: getCalibratedProbability,
     getModelInfo: getModelInfo,
     hasModel: hasModel,
     hasCachedModel: hasCachedModel,
