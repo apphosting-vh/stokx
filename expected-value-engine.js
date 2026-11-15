@@ -50,6 +50,12 @@
         clearly below 1 ("predictions vary about Nx as much as outcomes");
         the all-setups weak-ranking verdict stays visible even when
         Buy-grade has 100 or more rows.
+     COSTS (user decision): default slippage 0.05 -> 0 %/side — fills are
+        consistently at/near the open; round-trip costs are now the
+        statutory stack (~0.24%), matching the official fee schedule
+        (STT 0.20 + stamp 0.015 + txn 0.006 + SEBI/GST ~0.002 + DP ~0.016).
+        The basis signature picks the change up automatically: the
+        calibration family resets and the live store rotates on next load.
 
    v4.4.1 -> v4.5 (merged build: the audit fix set completed, keeping the
    v4.4.1 open-episode API and the v4.4 cluster statistics)
@@ -232,7 +238,7 @@ window.ExpectedValueEngine = (function () {
       sebi: 0.001,             // GST & SEBI charges, ~0.001% per side; GST folded in, so gst below is 0
       gst: 0,
       stampDuty: 0.015,        // buy side only
-      slippage: 0.05,          // 0.05%/side modeled slippage (next-open entry of an EOD signal). Zero slippage overstated the shrunk EV by ~0.1-0.25%/trade against the 0.30% minNetEV gate; set 0 only if your fills are consistently at the open.
+      slippage: 0,             // fills at/near the open (user-confirmed) -> NO modeled slippage; round-trip costs are now the statutory stack (~0.24%), matching the official fee schedule. If entries ever become market orders, set 0.05%/side again: zero slippage overstated the shrunk EV by ~0.1-0.25%/trade against the 0.30% minNetEV gate.
       dpChargeRs: 15.93,       // DP charge per scrip on the sell day (13.5 + 18% GST), converted to a % via positionSizeRs
       positionSizeRs: 100000
     },

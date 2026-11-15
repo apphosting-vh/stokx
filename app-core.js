@@ -9839,7 +9839,21 @@ function StockScreener(props) {
     lines.push("Trust-adjusted " + (ev.evBasis || "after-tax") + " EV: " + f(ev.netEV));
     if (ev.rawEV != null) lines.push("Data say " + f(ev.rawEV) + ", minus " + (ev.haircut != null ? Number(ev.haircut).toFixed(2) : "0.00") + "% best-of-25 selection inflation,");
     if (ev.evStdErr != null) lines.push("pulled toward the zero-edge EV for +/-" + Number(ev.evStdErr).toFixed(2) + "% sampling error");
-    if (ev.grossEV != null) lines.push("Gross " + f(ev.grossEV) + " - costs " + Number(ev.costPct).toFixed(2) + "% - tax " + Number(ev.taxPct || 0).toFixed(2) + "%");
+    if (ev.grossEV != null) {
+      /* v4.6: split statutory fees from MODELED SLIPPAGE so "costs" can be
+         benchmarked against an official fee schedule (the slippage is a fill
+         assumption for next-open entries, not an official charge). */
+      var costTxt = Number(ev.costPct).toFixed(2) + "%";
+      try {
+        var cc = window.ExpectedValueEngine && window.ExpectedValueEngine.getConfig
+          ? window.ExpectedValueEngine.getConfig().costs : null;
+        var slipRT = cc ? Number(cc.slippage) * 2 : 0;
+        if (slipRT > 0 && slipRT < Number(ev.costPct)) {
+          costTxt += " (statutory " + (ev.costPct - slipRT).toFixed(3) + "% + modeled slippage " + slipRT.toFixed(2) + "%)";
+        }
+      } catch (_csErr) {}
+      lines.push("Gross " + f(ev.grossEV) + " - costs " + costTxt + " - tax " + Number(ev.taxPct || 0).toFixed(2) + "%");
+    }
     if (ev.pEvPositive != null) lines.push("P(true EV > 0): " + Math.round(Number(ev.pEvPositive) * 100) + "%");
     if (ev.stopPct != null) lines.push("Stop -" + Number(ev.stopPct).toFixed(1) + "%" + (ev.pStop != null ? ", P(stop) " + Math.round(Number(ev.pStop) * 100) + "%" : ""));
     if (ev.windows != null) lines.push("Measured on " + ev.windows + " historical windows");
