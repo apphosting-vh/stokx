@@ -35,9 +35,14 @@
         estimate). Optional extra shipped: row-level prediction store
         (unshrunk EV, stdErr, horizon, haircut; IndexedDB when available,
         capped in-memory otherwise) plus retuneTau(), which re-tunes the
-        prior offline in milliseconds without a replay. Live key bumped
-        v6 -> v7 so the live scorecard never mixes predictions frozen
-        under different shrinkage regimes.
+        prior offline in milliseconds without a replay. The live store name
+        now derives from the basis signature (stox_ev_live_<hash>), so model
+        changes rotate the scorecard automatically — no manual key bumps;
+        older-basis episodes keep settling on their own snapshotted basis.
+        Follow-up: fully-settled old-basis stores idle for
+        live.keepSettledDays (default 90) are rolled up into a tiny tombstone
+        summary (basis, n, means, date range) and pruned; stores with open
+        records and the current basis are never pruned.
      E. SIGNIFICANCE-BASED FLAGS (feedback E): per-bin weekly aggregates
         give the EV-bucket verdicts a week-clustered z-score (the raw gap
         threshold is only a legacy fallback); summarizeAcc reports a slope
@@ -280,9 +285,17 @@ window.ExpectedValueEngine = (function () {
     correlation: { lookbackBars: 120, minOverlap: 60, threshold: 0.7, penalty: 0.5, maxPicks: 5, maxPerGroup: 1, groupPrefixes: ['ADANI', 'TATA', 'BAJAJ'] },
     /* v4.4: v4 cleared — record id changes from symbol|date|h|t|mode
        to symbol|signalDate, incompatible with existing rows.
-       v4.6 (feedback D): v6 cleared — v6 open episodes carry tau=0.5
-       predictions and would mix with the tau=0.3 retune in one scorecard. */
-    live: { key: 'stox_ev_live_v7', maxRecords: 4000 },
+       v4.6: `key` is now a BASE PREFIX — the actual store name is derived
+       from the basis signature (liveBase + '_' + sig hash), so model changes
+       rotate the scorecard automatically instead of needing manual bumps.
+       keepSettledDays: pruning policy for OLD-basis stores — a non-current
+       store that is fully settled and idle for N days (default 90 = 3x the
+       20-bar settlement bound and one quarter of out-of-sample comparison
+       per model basis) is rolled up into a tiny tombstone summary and
+       removed; stores with open records and the current-basis store are
+       NEVER pruned. 0 disables. Deliberately NOT part of the basis
+       signature (storage hygiene, not model basis). */
+    live: { key: 'stox_ev_live', maxRecords: 4000, keepSettledDays: 90 },
     staleCalibrationDays: 21,
     noTrade: { minPPositive: 0.5 },
     upside: { horizons: [3, 5, 10, 15, 20], targets: [2, 3, 4, 5, 6], shrinkK: 8 }
@@ -294,7 +307,8 @@ window.ExpectedValueEngine = (function () {
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v10' + sfx); });  // v10 _rel accumulator has no srw (raw realized sum); v11 rebuilds it
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v9' + sfx); });
     ['', '_meta', '_rel', '_sig'].forEach(function (sfx) { localStorage.removeItem('stox_ev_calibration_v8' + sfx); });
-    localStorage.removeItem('stox_ev_live_v6');               // v6 predictions were made with tau=0.5; v7 scorecard is uniformly tau=0.3
+    localStorage.removeItem('stox_ev_live_v7');               // literal v-names are legacy; v4.6 stores are name-derived (stox_ev_live_<sig hash>) and kept for settlement
+    localStorage.removeItem('stox_ev_live_v6');               // v6 predictions were made with tau=0.5
     localStorage.removeItem('stox_ev_live_v5');               // v5 settled rows have no realRaw / outcomeRaw; v6 scorecard rebuilds
     localStorage.removeItem('stox_ev_live_v4');
     localStorage.removeItem('stox_ev_live_v3');
@@ -2003,7 +2017,32 @@ window.ExpectedValueEngine = (function () {
   }
 
   /* ── Live tracking ───────────────────────────────────────────────────── */
-  function liveKey(cfg) { return (cfg.live && cfg.live.key) || 'stox_ev_live_v1'; }
+  /* v4.6: the live store NAME derives from the basis signature (which
+     contains BASIS_REV and every stored-basis parameter), so any model
+     change — a tau retune included — rotates the scorecard automatically;
+     predictions frozen under different shrinkage regimes never mix in one
+     aggregate. Records from earlier bases keep settling on their own
+     snapshotted basis (feedback A): settlement and episode reads SWEEP every
+     live store; only the scorecard aggregate is current-basis. Literal
+     v-numbered names (stox_ev_live_v1..v7) are legacy and cleaned at load. */
+  function liveBase(cfg) { return (cfg.live && cfg.live.key) || 'stox_ev_live'; }
+  function liveKey(cfg) {
+    var sig = calibrationSignature(cfg);
+    return liveBase(cfg) + '_' + sig.slice(sig.indexOf('|') + 1);
+  }
+  function liveStoreKeys(cfg) {
+    var base = liveBase(cfg), keys = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf(base) === 0 && k !== TOMB_KEY) keys.push(k);
+      }
+    } catch (e) {}
+    var cur = liveKey(cfg);
+    keys.sort(function (a, b) { return a === cur ? -1 : (b === cur ? 1 : 0); });
+    if (keys.indexOf(cur) < 0) keys.unshift(cur);
+    return keys;
+  }
   function loadLive(cfg) { var d = loadStore(liveKey(cfg)); if (!d.records) d.records = []; return d; }
 
   /* v4.4.1: expose the "latest assessment" of an open episode so the caller
@@ -2139,21 +2178,28 @@ window.ExpectedValueEngine = (function () {
   }
 
   /* Pure read for the UI: is this symbol in an open episode, and has the
-     signal changed since the episode opened? Returns null if not open. */
+     signal changed since the episode opened? Returns null if not open.
+     v4.6: sweeps every basis store — an episode opened under an older model
+     is still a live trade; the basis is reported so the UI can say so. */
   function getOpenEpisode(symbol, opts) {
     var cfg = getConfig(opts && opts.config);
-    var st = loadLive(cfg);
-    for (var i = 0; i < st.records.length; i++) {
-      if (st.records[i].symbol === symbol && st.records[i].status === 'open') {
-        return {
-          id: st.records[i].id,
-          signalDate: st.records[i].signalDate,
-          h: st.records[i].h, t: st.records[i].t,
-          pred: st.records[i].pred, score: st.records[i].score,
-          latest: st.records[i].latest || null,
-          latestChanged: !!st.records[i].latestChanged,
-          latestDelta: st.records[i].latestDelta || null
-        };
+    var keys = liveStoreKeys(cfg), curKey = liveKey(cfg);
+    for (var ki = 0; ki < keys.length; ki++) {
+      var st = loadStore(keys[ki]);
+      for (var i = 0; i < (st.records || []).length; i++) {
+        if (st.records[i].symbol === symbol && st.records[i].status === 'open') {
+          return {
+            id: st.records[i].id,
+            basis: keys[ki] === curKey ? 'current' : 'older',
+            basisIsCurrent: keys[ki] === curKey,
+            signalDate: st.records[i].signalDate,
+            h: st.records[i].h, t: st.records[i].t,
+            pred: st.records[i].pred, score: st.records[i].score,
+            latest: st.records[i].latest || null,
+            latestChanged: !!st.records[i].latestChanged,
+            latestDelta: st.records[i].latestDelta || null
+          };
+        }
       }
     }
     return null;
@@ -2162,11 +2208,17 @@ window.ExpectedValueEngine = (function () {
   function settlePredictions(symbol, dailyCandles, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
-    var st = loadLive(cfg), daily = dailyCandles || [], settled = 0, changed = false;
+    var daily = dailyCandles || [], settled = 0;
     if (!daily.length) return { settled: 0 };
     var byDate = {};
     daily.forEach(function (b, k) { byDate[String(b.t).slice(0, 10)] = k; });
-    st.records.forEach(function (rec) {
+    /* v4.6: sweep EVERY basis store — episodes opened under an older model
+       keep settling on their own snapshotted basis (feedback A). */
+    liveStoreKeys(cfg).forEach(function (storeKey) {
+      var st = loadStore(storeKey);
+      if (!st.records || !st.records.length) return;
+      var changed = false;
+      st.records.forEach(function (rec) {
       if (rec.status !== 'open' || rec.symbol !== symbol) return;
       var i = byDate[rec.date];
       if (i == null) return;
@@ -2216,8 +2268,9 @@ window.ExpectedValueEngine = (function () {
       rec.outcome = o.tP >= 0.5 ? 'target' : (o.sP >= 0.5 ? 'stop' : 'timeout');
       rec.status = 'settled'; rec.settledAt = Date.now();
       settled++; changed = true;
+      });
+      if (changed) saveStore(storeKey, st);
     });
-    if (changed) saveStore(liveKey(cfg), st);
     return { settled: settled };
   }
 
@@ -2242,6 +2295,18 @@ window.ExpectedValueEngine = (function () {
       rawBasis: 'predicted_model_ev_vs_realized_raw_executable_pnl',
       note: 'meanRealized is on the same detrended basis as meanPredicted, so it validates the model ("consistent" = internally coherent). meanRealizedRaw shows what an actual trade would have made; the difference is the drift the model deliberately removes.'
     };
+    /* v4.6: the aggregate is CURRENT-BASIS only (model changes rotate the
+       store name); older-basis episodes keep settling on their own snapshot
+       but are counted separately so the UI can say so. */
+    out.basis = liveKey(cfg).slice(liveBase(cfg).length + 1);
+    out.otherBases = { open: 0, settled: 0 };
+    liveStoreKeys(cfg).forEach(function (k) {
+      if (k === liveKey(cfg)) return;
+      var s2 = loadStore(k);
+      (s2.records || []).forEach(function (r) {
+        if (r.status === 'settled') out.otherBases.settled++; else out.otherBases.open++;
+      });
+    });
     if (!done.length) return out;
     var sp = 0, sr = 0, sd = 0, sdd = 0;
     done.forEach(function (r) { var d = r.real - r.pred; sp += r.pred; sr += r.real; sd += d; sdd += d * d; });
@@ -2283,7 +2348,73 @@ window.ExpectedValueEngine = (function () {
     return out;
   }
   function clearLive(opts) {
-    try { localStorage.removeItem(liveKey(getConfig(opts && opts.config))); return true; } catch (e) { return false; }
+    try {
+      var cfg = getConfig(opts && opts.config);
+      liveStoreKeys(cfg).forEach(function (k) { localStorage.removeItem(k); });
+      localStorage.removeItem(TOMB_KEY);   // clearLive = clean slate, tombstones included
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /* ── Old-basis store pruning + tombstone rollup (follow-up to feedback D) ─
+     A non-current basis store that is FULLY SETTLED and idle for
+     keepSettledDays (default 90) is rolled up into a tiny tombstone summary
+     and removed. Rationale for 90: 3x the 20-bar (≈29-day) settlement bound,
+     and one quarter of out-of-sample comparison per model basis — the audit
+     window you want after a tau retune. Stores with ANY open record are never
+     pruned; the current-basis store is never pruned; keepSettledDays = 0
+     disables. The tombstone keeps cross-model history (n, mean predicted vs
+     realized, raw mean, date range) at summary level after the rows go. */
+  var TOMB_KEY = 'stox_ev_live_tombstones';
+  function liveTombstones() {
+    var t = loadStore(TOMB_KEY);
+    return Array.isArray(t.entries) ? t.entries : [];
+  }
+  function pruneLiveStores(cfg, opts) {
+    opts = opts || {};
+    cfg = cfg || getConfig();
+    var days = num(opts.keepSettledDays != null ? opts.keepSettledDays : (cfg.live && cfg.live.keepSettledDays), 90);
+    if (!(days > 0)) return { pruned: 0, disabled: true, cutoffDays: days };
+    var base = liveBase(cfg), cur = liveKey(cfg);
+    var cutoff = Date.now() - days * 86400000;
+    var pruned = 0;
+    liveStoreKeys(cfg).forEach(function (k) {
+      if (k === cur || k === TOMB_KEY) return;
+      var st = loadStore(k);
+      var recs = st.records || [];
+      if (!recs.length) { try { localStorage.removeItem(k); } catch (e) {} return; }
+      var open = 0, last = 0, n = 0, sp = 0, sr = 0, sRaw = 0, nRaw = 0, firstDate = null, lastDate = null;
+      recs.forEach(function (r) {
+        var t = num(r.settledAt, 0) || num(r.ts, 0);
+        if (t > last) last = t;
+        if (r.status !== 'settled') { open++; return; }
+        if (!isFinite(r.real)) return;
+        n++; sp += num(r.pred, 0); sr += r.real;
+        if (isFinite(r.realRaw)) { sRaw += r.realRaw; nRaw++; }
+        var d = String(r.date || '').slice(0, 10);
+        if (d && (!firstDate || d < firstDate)) firstDate = d;
+        if (d && (!lastDate || d > lastDate)) lastDate = d;
+      });
+      if (open > 0) return;              // never prune unsettled stores
+      if (!(last <= cutoff)) return;     // active within the retention window
+      var rollup = {
+        basis: k.indexOf(base + '_') === 0 ? k.slice(base.length + 1) : k,
+        n: n,
+        meanPredicted: n ? round(sp / n, 4) : null,
+        meanRealized: n ? round(sr / n, 4) : null,
+        meanRealizedRaw: nRaw ? round(sRaw / nRaw, 4) : null,
+        bias: n ? round((sr - sp) / n, 4) : null,
+        firstDate: firstDate, lastDate: lastDate,
+        lastSettledAt: last || null,
+        prunedAt: Date.now()
+      };
+      var tomb = loadStore(TOMB_KEY);
+      if (!Array.isArray(tomb.entries)) tomb.entries = [];
+      tomb.entries.push(rollup);
+      if (!saveStore(TOMB_KEY, tomb)) return;   // keep the rows if the rollup cannot be written
+      try { localStorage.removeItem(k); pruned++; } catch (e) {}
+    });
+    return { pruned: pruned, cutoffDays: days, tombstones: liveTombstones().length };
   }
 
   function buildTrust(rel, key) {
@@ -2646,6 +2777,9 @@ window.ExpectedValueEngine = (function () {
     return out;
   }
 
+  /* v4.6 follow-up: prune fully-settled idle old-basis stores at load. */
+  try { pruneLiveStores(getConfig()); } catch (e) {}
+
   return {
     version: VERSION,
     getConfig: function (o) { return getConfig(o); },
@@ -2665,6 +2799,10 @@ window.ExpectedValueEngine = (function () {
     settlePredictions: settlePredictions,
     livePerformance: livePerformance,
     clearLive: clearLive,
+    liveStoreKey: function (o) { return liveKey(getConfig(o)); },
+    liveStoreKeys: function (o) { return liveStoreKeys(getConfig(o)); },
+    pruneLiveStores: pruneLiveStores,
+    liveTombstones: liveTombstones,
     rankingVerdict: rankingVerdict,
     diversify: diversify,
     upsideProfile: upsideProfile,

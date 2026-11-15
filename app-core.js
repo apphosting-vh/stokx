@@ -9904,13 +9904,17 @@ function StockScreener(props) {
       var f = function(v) { return (v >= 0 ? "+" : "") + Number(v).toFixed(2) + "%"; };
       if (typeof EVX.livePerformance === "function") {
         var lp = EVX.livePerformance();
-        if (lp && (lp.settled > 0 || lp.open > 0)) {
+        if (lp && (lp.settled > 0 || lp.open > 0 || (lp.otherBases && (lp.otherBases.settled + lp.otherBases.open) > 0))) {
           if (lp.settled > 0) {
             var lc = lp.verdict === "overconfident" ? "#dc2626" : (lp.verdict === "collecting" ? "var(--text6)" : "#16a34a");
-            /* v4.6 (feedback C): raw realized next to the detrended number. */
+            /* v4.6 (feedback C): raw realized next to the detrended number.
+               v4.6: the scorecard is current-basis (model changes rotate the
+               store); older-basis episodes are counted, not aggregated. */
             var rawTxt = lp.meanRealizedRaw != null ? " | raw money " + f(lp.meanRealizedRaw) : "";
-            lines.push({ text: "Live scorecard (n=" + lp.settled + " settled, " + lp.open + " open): predicted " + f(lp.meanPredicted) + " vs realized " + f(lp.meanRealized) + rawTxt + " - " + lp.verdict, color: lc,
-              title: "Every Buy-grade prediction shown here is saved and compared with what the price actually did once the plan finished. Needs 30+ settled to judge. 'realized' is the DETRENDED model basis (comparable to the prediction); 'raw money' is the undetrended executable P&L — what an actual trade would have made." });
+            var obN = lp.otherBases ? (lp.otherBases.settled + lp.otherBases.open) : 0;
+            var obTxt = obN > 0 ? " (+" + obN + " older-model)" : "";
+            lines.push({ text: "Live scorecard (n=" + lp.settled + " settled, " + lp.open + " open" + obTxt + "): predicted " + f(lp.meanPredicted) + " vs realized " + f(lp.meanRealized) + rawTxt + " - " + lp.verdict, color: lc,
+              title: "Every Buy-grade prediction shown here is saved and compared with what the price actually did once the plan finished. Needs 30+ settled to judge. 'realized' is the DETRENDED model basis (comparable to the prediction); 'raw money' is the undetrended executable P&L — what an actual trade would have made. The aggregate covers the CURRENT model basis only; predictions made under earlier models settle on their own basis and are counted as older-model." });
           } else {
             lines.push({ text: "Live scorecard: " + lp.open + " predictions logged, waiting for them to play out.", color: "var(--text6)", title: "Predictions are settled automatically on later refreshes." });
           }
