@@ -205,7 +205,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.7.0';
+  var VERSION = 'EV-4.7.1';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -2339,6 +2339,133 @@ window.ExpectedValueEngine = (function () {
     return null;
   }
 
+  /* ══════════ v4.7.1 EPISODE PROGRESS (EPISODE_PROGRESS_V1) ══════════
+     Did the live prediction's plan reach its target (or stop)? Judged on the RAW price path the trader
+     sees (entry = next-session open, levels = entry x (1 +/- pct)), NOT on the scorecard's detrended
+     model-basis outcome, which can say "target" when price never reached the level (or the reverse).
+     Includes today's forming bar and the live price, so a same-session hit shows before the close.
+     status: pending_entry | running | target_hit | stop_hit | ambiguous_bar | expired */
+  function findEpisodeRecord(symbol, cfg, recentMs) {
+    var keys = liveStoreKeys(cfg), curKey = liveKey(cfg), now = Date.now(), best = null;
+    for (var ki = 0; ki < keys.length; ki++) {
+      var recs = (loadStore(keys[ki]).records || []);
+      for (var i = 0; i < recs.length; i++) {
+        var r = recs[i];
+        if (r.symbol !== symbol) continue;
+        var open = r.status === 'open';
+        var recent = r.status === 'settled' && r.settledAt && (now - r.settledAt) <= recentMs;
+        if (!open && !recent) continue;
+        var rank = open ? 2 : 1, ts = open ? (r.ts || 0) : (r.settledAt || 0);
+        if (!best || rank > best.rank || (rank === best.rank && ts > best.ts)) {
+          best = { rec: r, rank: rank, ts: ts, basisIsCurrent: keys[ki] === curKey };
+        }
+      }
+    }
+    return best;
+  }
+
+  function episodeProgress(symbol, dailyCandles, opts) {
+    opts = opts || {};
+    var cfg = getConfig(opts.config);
+    var daily = dailyCandles || [];
+    if (!symbol || !daily.length) return null;
+    var found = findEpisodeRecord(symbol, cfg, num(opts.recentDays, 1.5) * 86400000);
+    if (!found) return null;
+    var rec = found.rec, n = daily.length;
+    var byDate = {};
+    daily.forEach(function (b, k) { byDate[candleDate(b.t)] = k; });
+    var i = byDate[rec.date];
+    if (i == null) return null;
+
+    var h = Math.max(1, num(rec.h, 1)), T = num(rec.t, 0), S = num(rec.stop, 0);
+    var fixed = (rec.mode || 'fixed') === 'fixed';
+    var out = {
+      id: rec.id, symbol: symbol, signalDate: rec.date, settled: rec.status === 'settled',
+      basisIsCurrent: found.basisIsCurrent, horizonDays: h, targetPct: T, stopPct: S, exitMode: rec.mode || 'fixed',
+      status: 'pending_entry', source: null, entryDate: null, entryPrice: null, targetPrice: null, stopPrice: null,
+      hitDate: null, daysToHit: null, daysElapsed: 0, daysLeft: h, currentPct: null, peakPct: null
+    };
+    var entryBar = daily[i + 1];
+    if (!entryBar || !(entryBar.o > 0)) return out;               // entry (next open) has not happened yet
+
+    var entry = entryBar.o, tgt = entry * (1 + T / 100), stp = entry * (1 - S / 100);
+    out.entryDate = candleDate(entryBar.t); out.entryPrice = round(entry, 2);
+    out.targetPrice = round(tgt, 2); out.stopPrice = round(stp, 2);
+
+    var lastBar = daily[n - 1];
+    var livePx = num(opts.livePrice, 0);
+    if (!(livePx > 0)) {
+      var hr = opts.hourlyCandles && opts.hourlyCandles.length ? opts.hourlyCandles[opts.hourlyCandles.length - 1] : null;
+      livePx = (hr && hr.c > 0 && candleDate(hr.t) >= candleDate(lastBar.t)) ? hr.c : lastBar.c;
+    }
+
+    var last = Math.min(n - 1, i + h), hi = -Infinity, kind = null, hitIdx = -1;
+    for (var k = i + 1; k <= last; k++) {
+      var b = daily[k];
+      if (!(b.h > 0) || !(b.l > 0)) continue;
+      if (b.h > hi) hi = b.h;
+      var gotT = b.h >= tgt, gotS = fixed && b.l <= stp;
+      if (gotT && gotS) {
+        /* both levels inside one bar: only an open beyond a level tells the order; otherwise it is unknowable from a daily bar */
+        kind = b.o >= tgt ? 'target' : (b.o <= stp ? 'stop' : 'ambiguous'); hitIdx = k; break;
+      }
+      if (gotT) { kind = 'target'; hitIdx = k; break; }
+      if (gotS) { kind = 'stop'; hitIdx = k; break; }
+    }
+    var source = 'bar';
+    if (!kind && livePx > 0) {
+      if (livePx >= tgt) { kind = 'target'; source = 'live'; }
+      else if (fixed && livePx <= stp) { kind = 'stop'; source = 'live'; }
+      if (kind) {
+        var today = istClock().date;
+        hitIdx = candleDate(lastBar.t) === today ? n - 1 : n;
+        if (livePx > hi) hi = livePx;
+      }
+    }
+    var completedLen = completedOnly(daily, cfg).length;
+    out.daysElapsed = Math.max(0, Math.min(h, completedLen - 1 - i));
+    out.daysLeft = Math.max(0, h - out.daysElapsed);
+    if (isFinite(hi) && hi > 0) out.peakPct = round((hi / entry - 1) * 100, 2);
+    out.currentPct = livePx > 0 ? round((livePx / entry - 1) * 100, 2) : null;
+
+    if (kind === 'target') out.status = 'target_hit';
+    else if (kind === 'stop') out.status = 'stop_hit';
+    else if (kind === 'ambiguous') out.status = 'ambiguous_bar';
+    else out.status = (completedLen - 1 >= i + h) ? 'expired' : 'running';
+    if (kind && kind !== 'ambiguous') {
+      out.source = source;
+      out.hitDate = source === 'live' ? istClock().date : candleDate(daily[hitIdx].t);
+      out.daysToHit = hitIdx - i;
+    }
+    /* a settled record's own raw-basis outcome is authoritative for the final state */
+    if (rec.status === 'settled' && rec.outcomeRaw) {
+      if (rec.outcomeRaw === 'target') { out.status = 'target_hit'; out.source = out.source || 'settled'; }
+      else if (rec.outcomeRaw === 'stop') { out.status = 'stop_hit'; out.source = out.source || 'settled'; }
+      else if (rec.outcomeRaw === 'timeout') out.status = 'expired';
+    }
+    return out;
+  }
+
+  /* Recently settled predictions (raw-basis outcome), newest first, for a "Recent results" strip. */
+  function recentResults(opts) {
+    opts = opts || {};
+    var cfg = getConfig(opts.config), now = Date.now(), maxAge = num(opts.days, 7) * 86400000, out = [];
+    liveStoreKeys(cfg).forEach(function (key) {
+      (loadStore(key).records || []).forEach(function (r) {
+        if (r.status !== 'settled' || !r.settledAt || now - r.settledAt > maxAge) return;
+        out.push({
+          symbol: r.symbol, signalDate: r.signalDate || r.date, entryDate: r.entryDate || null,
+          entryPrice: r.entryPrice || null, horizonDays: r.h, targetPct: r.t, stopPct: r.stop,
+          outcome: r.outcomeRaw || r.outcome, modelOutcome: r.outcome,
+          realizedRawPct: r.realRaw != null && isFinite(r.realRaw) ? round(r.realRaw, 2) : null,
+          predictedPct: r.pred != null ? round(r.pred, 2) : null, settledAt: r.settledAt
+        });
+      });
+    });
+    out.sort(function (a, b) { return b.settledAt - a.settledAt; });
+    return out.slice(0, Math.max(1, num(opts.limit, 12)));
+  }
+
   function settlePredictions(symbol, dailyCandles, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
@@ -2918,6 +3045,8 @@ window.ExpectedValueEngine = (function () {
   return {
     version: VERSION,
     sessionState: function (daily, hourly, o) { return sessionState(daily, hourly, getConfig(o)); },
+    episodeProgress: function (symbol, daily, o) { try { return episodeProgress(symbol, daily, o); } catch (e) { return null; } },
+    recentResults: function (o) { try { return recentResults(o); } catch (e) { return []; } },
     getConfig: function (o) { return getConfig(o); },
     totalRoundTripCost: totalRoundTripCost,
     analyze: analyze,

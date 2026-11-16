@@ -9719,6 +9719,9 @@ function StockScreener(props) {
         baseDecision: baseDecision || null,
         baseScore: baseScore != null ? baseScore : null
       });
+      /* EV_EPISODE_UI_V1: settle earlier predictions for EVERY scanned stock, not only today's candidates
+         (a stock that stopped being a Buy-grade candidate never settled, so its outcome never showed up). */
+      try { if (typeof EVX.settlePredictions === "function") EVX.settlePredictions(symbol, dailyCandles); } catch (_stlErr) {}
       var best = opt && opt.best ? opt.best : null;
       if (!best || !best.expectedValue) return null;
       var ex = best.expectedValue, pr = best.probability || {}, dist = best.distribution || {};
@@ -9726,7 +9729,6 @@ function StockScreener(props) {
          then log today's prediction (every eligible row, so the check is unbiased). */
       var episodeState = null;
       try {
-        if (typeof EVX.settlePredictions === 'function') EVX.settlePredictions(symbol, dailyCandles);
         /* v4.4.1 UI integration: capture per-row open-episode state so the table
            can show an OPEN / CHG badge without re-reading localStorage per row
            at render time. */
@@ -9763,6 +9765,9 @@ function StockScreener(props) {
           EVX.recordPrediction(best, { symbol: symbol, dailyCandles: dailyCandles });
         }
       } catch (_liveErr) {}
+      /* EV_EPISODE_UI_V1: did this stock's open prediction reach its target / stop (raw path + live price)? */
+      var progress = null;
+      try { if (typeof EVX.episodeProgress === "function") progress = EVX.episodeProgress(symbol, dailyCandles, { hourlyCandles: hourlyCandles }); } catch (_pgErr) {}
       return {
         version: best.version,
         decision: best.decision || null,
@@ -9813,9 +9818,67 @@ function StockScreener(props) {
         exitMode: best.exitMode || "fixed",
         exitRule: best.exitRule || null,
         rets: typeof EVX.returnSeries === "function" ? EVX.returnSeries(dailyCandles, 90) : null,
-        episode: episodeState   /* v4.4.1 UI integration */
+        episode: episodeState,   /* v4.4.1 UI integration */
+        progress: progress       /* EV_EPISODE_UI_V1 */
       };
     } catch (_evErr) { return null; }
+  };
+
+  /* === EV_EPISODE_UI_V1: target / stop reached highlight for the EV table ===
+     Driven by ExpectedValueEngine.episodeProgress (raw price path from the prediction's entry,
+     including today's forming bar and the live price) and recentResults (settled, raw basis). */
+  var stoxEvProgressStyle = function(pg) {
+    var st = { borderBottom: "1px solid var(--border)", height: 40 };
+    if (pg && pg.status === "target_hit") st.background = "rgba(22,163,74,0.12)";
+    else if (pg && pg.status === "stop_hit") st.background = "rgba(220,38,38,0.09)";
+    return st;
+  };
+  var stoxEvProgressBadge = function(pg) {
+    if (!pg || (pg.status !== "target_hit" && pg.status !== "stop_hit")) return null;
+    var pc = function(v) { return v == null ? "-" : (v >= 0 ? "+" : "") + Number(v).toFixed(1) + "%"; };
+    var rs = function(v) { return v == null ? "-" : "\u20B9" + Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 }); };
+    var hit = pg.status === "target_hit";
+    var when = (pg.hitDate ? " on " + pg.hitDate : "") + (pg.daysToHit ? " (day " + pg.daysToHit + " of " + pg.horizonDays + ")" : "");
+    var live = pg.source === "live" ? "\nLive price, not yet a closed bar - can still reverse before the close." : "";
+    var title = (hit ? "Target reached" : "Stop reached") + when + live +
+      "\nEntry " + rs(pg.entryPrice) + (pg.entryDate ? " (" + pg.entryDate + ")" : "") + "; target " + rs(pg.targetPrice) + ", stop " + rs(pg.stopPrice) +
+      "\nPlan: +" + pg.targetPct + "% / -" + pg.stopPct + "% within " + pg.horizonDays + " days" +
+      "\nPeak " + pc(pg.peakPct) + ", now " + pc(pg.currentPct) +
+      "\nJudged on the raw price path from the next-session open.";
+    return React.createElement("span", {
+      title: title,
+      style: {
+        marginLeft: 5, fontSize: 8, fontWeight: 800, padding: "1px 4px", borderRadius: 3, cursor: "help", whiteSpace: "nowrap",
+        color: hit ? "#15803d" : "#b91c1c",
+        background: hit ? "rgba(22,163,74,0.16)" : "rgba(220,38,38,0.12)",
+        border: "1px solid " + (hit ? "rgba(22,163,74,0.5)" : "rgba(220,38,38,0.45)")
+      }
+    }, (hit ? "\u2713 TARGET" : "\u2717 STOP") + (pg.source === "live" ? " (live)" : ""));
+  };
+  var stoxEvRecentStrip = function(list, onOpen) {
+    if (!list || !list.length) return null;
+    var chips = list.map(function(r, i) {
+      var sym = String(r.symbol || "").replace(".NS", "");
+      var hit = r.outcome === "target", stop = r.outcome === "stop";
+      var label = sym + " " + (hit ? "+" + r.targetPct + "%" : (stop ? "-" + r.stopPct + "%" : "timeout"));
+      var title = (hit ? "Target reached" : (stop ? "Stop reached" : "Window ended without touching target or stop")) +
+        " - plan +" + r.targetPct + "% / -" + r.stopPct + "% within " + r.horizonDays + " days" +
+        (r.entryDate ? "\nEntered " + r.entryDate + (r.entryPrice ? " at \u20B9" + Number(r.entryPrice).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "") : "") +
+        (r.realizedRawPct != null ? "\nRaw result after costs: " + (r.realizedRawPct >= 0 ? "+" : "") + r.realizedRawPct + "%" : "") +
+        (r.predictedPct != null ? " (predicted EV " + (r.predictedPct >= 0 ? "+" : "") + r.predictedPct + "%)" : "");
+      return React.createElement("span", {
+        key: "evr" + i, title: title,
+        onClick: function() { if (onOpen && sym) onOpen(sym); },
+        style: {
+          fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 9, whiteSpace: "nowrap", cursor: onOpen ? "pointer" : "default",
+          color: hit ? "#15803d" : (stop ? "#b91c1c" : "var(--text5)"),
+          background: hit ? "rgba(22,163,74,0.14)" : (stop ? "rgba(220,38,38,0.10)" : "var(--bg5)"),
+          border: "1px solid " + (hit ? "rgba(22,163,74,0.45)" : (stop ? "rgba(220,38,38,0.4)" : "var(--border2)"))
+        }
+      }, (hit ? "\u2713 " : (stop ? "\u2717 " : "\u2022 ")) + label);
+    });
+    return React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", marginTop: 4 } },
+      React.createElement("span", { style: { fontSize: 9, color: "var(--text6)" } }, "Recent results (7d):"), chips);
   };
 
   /* Rank = evidence-adjusted trust-adjusted net EV per sqrt(day) from the optimizer
@@ -9958,7 +10021,9 @@ function StockScreener(props) {
         if (tb) lines.push({ text: "Top EV bucket (" + tb.label + ", n=" + tb.n + "): predicted " + f(tb.meanPredicted) + " vs realized " + f(tb.meanRealized) + (tb.z != null ? " (z=" + Number(tb.z).toFixed(2) + ", " + tb.nWeeks + "w)" : ""), color: tb.verdict === "optimistic" ? "#d97706" : "var(--text6)", title: "Calibration by EV bucket: are the highest-EV picks really delivering? " + (tb.z != null ? "Verdict from the week-clustered z-score (a raw gap threshold alone is noisy)." : "Legacy gap threshold (this bucket has no per-week data).") });
       }
     } catch (_hErr) {}
-    return { lines: lines };
+    var recent = [];
+    try { var EVR = window.ExpectedValueEngine; if (EVR && typeof EVR.recentResults === "function") recent = EVR.recentResults({ days: 7, limit: 12 }) || []; } catch (_rcErr) {}
+    return { lines: lines, recent: recent };
   };
 
   /* Background walk-forward calibration + reliability. Fills the engine's stores
@@ -11240,7 +11305,8 @@ function StockScreener(props) {
             evVerdict ? React.createElement("div", { title: evVerdict.trust && evVerdict.trust.messages ? evVerdict.trust.messages.join("\n") : "", style: { fontSize: 10, fontWeight: 700, marginTop: 4, color: evVerdictColor } }, (evVerdict.verdict === "NO_TRADE" ? "NO TRADE TODAY - " : (evVerdict.verdict === "WEAK" ? "WEAK DAY - " : (evVerdict.verdict === "TRADE" ? "TRADES AVAILABLE - " : ""))) + evVerdict.message) : null,
             React.createElement("div", { title: evRel.title, style: { fontSize: 9, marginTop: 2, color: evRel.color } }, evRel.text),
             evRel.extra ? React.createElement("div", { title: evRel.extra.title, style: { fontSize: 9, marginTop: 2, color: evRel.extra.color } }, evRel.extra.text) : null,
-            evHealth.lines.map(function(ln, i) { return React.createElement("div", { key: "evh" + i, title: ln.title, style: { fontSize: 9, marginTop: 2, color: ln.color } }, ln.text); })
+            evHealth.lines.map(function(ln, i) { return React.createElement("div", { key: "evh" + i, title: ln.title, style: { fontSize: 9, marginTop: 2, color: ln.color } }, ln.text); }),
+            stoxEvRecentStrip(evHealth.recent, onOpenStock)
           ),
           React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, evTradeRows.length + " trade candidates")
         ),
@@ -11261,7 +11327,7 @@ function StockScreener(props) {
             React.createElement("tbody", null, evTradeRows.slice(0,200).map(function(r) {
               var ev = r.ev || {}, baseDecision = stoxBaseDecision(r), es = stoxBaseSignalStyle(baseDecision);
               var net = ev.bestNetEV != null ? ev.bestNetEV : ev.netEV;
-              return React.createElement("tr", { key:"ev-"+r.s.t, style:{ borderBottom:"1px solid var(--border)", height:40 } },
+              return React.createElement("tr", { key:"ev-"+r.s.t, style: stoxEvProgressStyle(ev.progress) },
                 React.createElement("td",{style:{padding:"5px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},
                   React.createElement("button",{onClick:function(){if(onOpenStock) onOpenStock(r.s.t.replace(".NS",""));},style:{border:"none",background:"transparent",padding:0,cursor:"pointer",color:"var(--text)",fontWeight:700,fontSize:11,fontFamily:"var(--font-heading)"}},r.s.t.replace(".NS","")),
                   (function() {
@@ -11292,6 +11358,7 @@ function StockScreener(props) {
                     style: { marginLeft: 5, fontSize: 8, fontWeight: 700, color: "var(--text5)", background: "var(--bg5)", border: "1px solid var(--border2)", padding: "1px 4px", borderRadius: 3, cursor: "help" }
                   }, "OPEN");
                 })(),
+                stoxEvProgressBadge(ev.progress),
                   ev.reasons && ev.reasons.length ? React.createElement("div",{title:ev.reasons.join("\n"),style:{fontSize:8,fontWeight:500,color:"var(--text6)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:1}},ev.reasons[0]) : null
                 ),
                 React.createElement("td",{style:{padding:"5px 10px",whiteSpace:"nowrap",textAlign:"left"}},
@@ -14551,7 +14618,7 @@ function InfoPage() {
         evSec("evRead", "12. Reading the EV-First Trade Ranking Table"),
         evBody("evRead",
           Tbl(["Column", "What it means", "How to read it"], [
-            ["Stock", "Ticker with badges (PICK, CORR, OPEN, CHG) and the top plain-English reasons for the plan.", "Click to open the stock. Reasons are the engine\u2019s own warnings (thin evidence, wide stop, costs eating the target, edge inside noise)."],
+            ["Stock", "Ticker with badges (PICK, CORR, OPEN, CHG, TARGET, STOP) and the top plain-English reasons for the plan.", "Click to open the stock. Reasons are the engine\u2019s own warnings (thin evidence, wide stop, costs eating the target, edge inside noise)."],
             ["Signal", "The base Entry-Score decision (Strong Buy / Buy).", "EV never overrides this gate."],
             ["Net EV", "Trust-adjusted expected % return per trade over the plan\u2019s horizon, after costs. The 90% range is shown below it.", "Average of many similar trades, not a forecast for one. If the range\u2019s lower end is below 0, the edge is not proven."],
             ["EV Conf.", "Probability the true EV is above zero after shrinkage.", "Qualified Trade needs \u2265 " + pc(minEvC) + "; High Conviction \u2265 90%."],
@@ -14570,7 +14637,8 @@ function InfoPage() {
             "Look at the stop width and Worst 5%: can you actually tolerate that loss?",
             "Prefer PICK rows. A CORR row repeats a bet you can already take through a better-ranked stock.",
             "Respect Size as a maximum, and treat the target / horizon pair as the plan the numbers were built for.",
-            "OPEN means an earlier prediction for this stock is still running; CHG means the latest scan differs materially from it (hover for details)."
+            "OPEN means an earlier prediction for this stock is still running; CHG means the latest scan differs materially from it (hover for details).",
+            "A green row with \u2713 TARGET means the price has reached the plan's target since entry (red \u2717 STOP: the stop). It is judged on the raw price path from the next-session open, including today's forming bar and the live price, so '(live)' can still reverse before the close. Results of the last 7 days are listed above the table."
           ])),
           Box("Common misreadings", Ul([
             "Net EV is not an annual return. The annualised figure in the tooltip is simple and uncompounded and assumes you can repeat the trade perfectly.",
