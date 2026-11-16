@@ -205,7 +205,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.6.0';
+  var VERSION = 'EV-4.7.0';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -220,7 +220,19 @@ window.ExpectedValueEngine = (function () {
        historical layer contributes its setup-specific lift at full strength;
        these weights now only set the ML share against the combined model
        (statistical + historical = 0.80 vs ml = 0.20 when ML fires). */
-    blend: { statistical: 0.55, historical: 0.25, ml: 0.20 },
+    blend: { statistical: 0.55, historical: 0.25 },   /* legacy, unused since v4.4; the ML share was removed in v4.7 */
+    /* v4.7: forming-candle (intraday) policy. NOT part of the calibration signature
+       (live decisions only; calibration backtests run on historical slices).
+       partialBar 'exclude': the daily/index series fed to every statistic, the setup
+         score and the scorecard contains COMPLETED sessions only (a half-formed bar has
+         partial range/volume/ATR and is not comparable to the calibration buckets);
+         today's price enters through the hourly data and the live price below.
+         'include' keeps whatever the caller passed (v4.6 behaviour).
+       remainingDistance: levels stay anchored to the last COMPLETED close; entry is the
+         live price, so target/stop distances are re-measured from it before the
+         window statistics and the EV are computed.
+       maxMovePct: beyond this intraday move the plan is not priced (status 'move_too_large'). */
+    intraday: { enabled: true, partialBar: 'exclude', remainingDistance: true, maxMovePct: 8, minTargetPct: 0.5, minStopPct: 0.5, negligibleMovePct: 0.1 },
     /* All values are PERCENT of traded value unless stated.
        brokerage, exchange, sebi, slippage are PER SIDE; stt is ROUND TRIP
        (0.1% on buy + 0.1% on sell for delivery); stampDuty is buy side only;
@@ -800,30 +812,6 @@ window.ExpectedValueEngine = (function () {
     return { p: clamp(totalWins / totalN, 0.01, 0.99), n: totalN };
   }
 
-  function mlProbability(context) {
-    var candidates = [
-      window.LiveML && window.LiveML.getCalibratedProbability,
-      window.MLTrainer && window.MLTrainer.getCalibratedProbability
-    ];
-    for (var i = 0; i < candidates.length; i++) {
-      if (typeof candidates[i] === 'function') {
-        try {
-          var raw = candidates[i](context);
-          /* v4.6 (ML audit): a provider returning null/undefined means "no
-             estimate", NOT zero — Number(null) === 0 is finite and would
-             silently become p=0.01 (near-certain no-target) and poison the
-             blend. Skip to the next provider instead. */
-          if (raw == null) continue;
-          var p = Number(raw);
-          if (!isFinite(p)) continue;
-          if (p > 1) p /= 100;
-          return clamp(p, 0.01, 0.99);
-        } catch (e) {}
-      }
-    }
-    return null;
-  }
-
   /* v4.5: setup-aware decomposition (audit F1/F7).
      The statistical layer walks every start bar (setup-blind), so the
      calibration's only unique information is how TODAY'S setup differs from
@@ -852,7 +840,6 @@ window.ExpectedValueEngine = (function () {
     var sources = [];
     if (ownBase != null) sources.push(ownBase);
     if (hist) sources.push(hist.p);
-    if (ml != null) sources.push(ml);
     var disagreement = null;
     if (sources.length > 1) {
       var mean = sources.reduce(function (a, b) { return a + b; }, 0) / sources.length;
@@ -863,15 +850,7 @@ window.ExpectedValueEngine = (function () {
     /* v4.5 (F7): with no own-history windows but a usable calibration bucket,
        fall back to hist.p instead of dropping the plan. */
     var model = ownBase != null ? clamp(ownBase + lift, 0.01, 0.99) : (hist ? hist.p : null);
-    var p = null;
-    if (model != null && ml != null) {
-      var mlW = num(cfg.blend.ml, 0.2);
-      p = clamp(model * (1 - mlW) + ml * mlW, 0.01, 0.99);
-    } else if (model != null) {
-      p = model;
-    } else if (ml != null) {
-      p = ml;
-    }
+    var p = model;   /* v4.7: ML layer removed; the `ml` argument is ignored (kept for call compatibility). */
 
     return {
       p: p, contributors: sources.length, disagreement: disagreement, parts: sources,
@@ -980,6 +959,132 @@ window.ExpectedValueEngine = (function () {
     return { perSidePct: clamp(imp, 0, num(lc.maxPerSidePct, 1)), participation: part, advRs: adv };
   }
 
+  /* ══════════ v4.7 INTRADAY: partial-bar policy + remaining distance ══════════ */
+  var IST_MS = 5.5 * 3600 * 1000;
+
+  function istClock(nowMs) {
+    var d = new Date((nowMs == null ? Date.now() : nowMs) + IST_MS);
+    return { date: d.toISOString().slice(0, 10), minutes: d.getUTCHours() * 60 + d.getUTCMinutes(), dow: d.getUTCDay() };
+  }
+  /* 09:15-15:30 IST Mon-Fri, plus 10 minutes for the data vendor to finalise the daily bar.
+     Exchange holidays are not known here; on a holiday no bar dated today exists, so nothing is "forming". */
+  function sessionIsOpen(c) { return c.dow >= 1 && c.dow <= 5 && c.minutes >= 9 * 60 + 15 && c.minutes <= 15 * 60 + 40; }
+  /* Calendar date (IST) of a candle: ISO strings as-is (the engine's existing convention), epoch s/ms converted. */
+  function candleDate(t) {
+    if (t == null) return null;
+    if (typeof t === 'number' && isFinite(t)) return new Date((t < 1e11 ? t * 1000 : t) + IST_MS).toISOString().slice(0, 10);
+    var s = String(t);
+    if (/^\d{9,13}$/.test(s)) return candleDate(Number(s));
+    return s.slice(0, 10);
+  }
+  function intradayCfg(cfg) {
+    var c = (cfg && cfg.intraday) || {};
+    return {
+      enabled: c.enabled !== false,
+      partialBar: c.partialBar === 'include' ? 'include' : 'exclude',
+      remainingDistance: c.remainingDistance !== false,
+      maxMovePct: Math.abs(num(c.maxMovePct, 8)),
+      minTargetPct: num(c.minTargetPct, 0.5),
+      minStopPct: num(c.minStopPct, 0.5),
+      negligibleMovePct: Math.abs(num(c.negligibleMovePct, 0.1))
+    };
+  }
+  /* Drop today's forming bar from a daily-type series (daily or index) when policy says exclude. */
+  function completedOnly(candles, cfg, nowMs) {
+    var ic = intradayCfg(cfg);
+    if (!candles || !candles.length) return candles || [];
+    if (!ic.enabled || ic.partialBar !== 'exclude') return candles;
+    var clock = istClock(nowMs);
+    if (sessionIsOpen(clock) && candleDate(candles[candles.length - 1].t) === clock.date) return candles.slice(0, -1);
+    return candles;
+  }
+  /* What is today's session doing to this stock's data? Reference = last COMPLETED close; live price =
+     latest hourly close dated after the reference (also covers a stale daily snapshot after the close),
+     else the forming daily bar's close. */
+  function sessionState(daily, hourly, cfg, nowMs) {
+    var ic = intradayCfg(cfg), clock = istClock(nowMs);
+    var out = {
+      enabled: ic.enabled, today: clock.date, sessionOpen: sessionIsOpen(clock),
+      formingBar: false, partialBarExcluded: false, completedDaily: daily || [],
+      referencePrice: null, referenceDate: null, livePrice: null, liveSource: null, liveAsOf: null, movePct: null
+    };
+    if (!ic.enabled || !daily || !daily.length) return out;
+    var lastBar = daily[daily.length - 1];
+    var forming = out.sessionOpen && candleDate(lastBar.t) === clock.date;
+    if (forming) {
+      out.formingBar = true;
+      if (ic.partialBar === 'exclude') { out.completedDaily = daily.slice(0, -1); out.partialBarExcluded = true; }
+    }
+    var refBar = forming ? daily[daily.length - 2] : lastBar;
+    if (!refBar || !(refBar.c > 0)) return out;
+    out.referencePrice = refBar.c; out.referenceDate = candleDate(refBar.t);
+    var h = hourly && hourly.length ? hourly[hourly.length - 1] : null, hDate = h ? candleDate(h.t) : null;
+    if (h && h.c > 0 && hDate && hDate > out.referenceDate && hDate <= clock.date) {
+      out.livePrice = h.c; out.liveSource = 'hourly'; out.liveAsOf = h.t;
+    } else if (forming && lastBar.c > 0) {
+      out.livePrice = lastBar.c; out.liveSource = 'daily_forming'; out.liveAsOf = lastBar.t;
+    }
+    if (out.livePrice != null) out.movePct = (out.livePrice / out.referencePrice - 1) * 100;
+    return out;
+  }
+  /* Normalise an analysis input ONCE so every downstream statistic sees the same completed series.
+     Skipped for calibration/backtest slices (historical, hourly-free). */
+  function withSession(input, cfg, internal, nowMs) {
+    if (internal && (internal.noHist || internal.setupScoreOverride != null)) return input;
+    var s = sessionState(input.dailyCandles || [], input.hourlyCandles || [], cfg, nowMs);
+    var out = {};
+    Object.keys(input).forEach(function (k) { out[k] = input[k]; });
+    out.dailyCandles = s.completedDaily;
+    out.indexCandles = completedOnly(input.indexCandles || [], cfg, nowMs);
+    out._session = s;
+    return out;
+  }
+  /* Remaining-distance adjustment. Levels are fixed in PRICE at the last completed close:
+        target level = ref x (1+T),  stop level = ref x (1-S);
+     entry is the live price P0, so the distances the window statistics and EV must use are
+        effT = (1+T) x ref/P0 - 1,   effS = 1 - (1-S) x ref/P0.
+     Up 2% intraday: a 4% target is 1.96% away but a 3.6% stop is 5.5% away (chasing worsens R:R);
+     down 2%: target 6.1% away, stop 1.6% away. */
+  function intradayBarriers(session, cfg, targetPct, stopPct) {
+    var ic = intradayCfg(cfg);
+    var base = { active: false, status: 'none', effTargetPct: targetPct, effStopPct: stopPct, movePct: null, targetPrice: null, stopPrice: null };
+    if (!session || !ic.enabled || !ic.remainingDistance || session.livePrice == null || !(session.referencePrice > 0) || stopPct == null) return base;
+    var ref = session.referencePrice, px = session.livePrice;
+    base.movePct = (px / ref - 1) * 100;
+    if (Math.abs(base.movePct) < ic.negligibleMovePct) { base.status = 'negligible_move'; return base; }
+    if (Math.abs(base.movePct) > ic.maxMovePct) { base.status = 'move_too_large'; return base; }
+    var effT = ((1 + targetPct / 100) * ref / px - 1) * 100;
+    var effS = (1 - (1 - stopPct / 100) * ref / px) * 100;
+    base.targetPrice = ref * (1 + targetPct / 100); base.stopPrice = ref * (1 - stopPct / 100);
+    base.effTargetPct = effT; base.effStopPct = effS;
+    if (!(effT >= ic.minTargetPct)) { base.status = 'target_reached'; return base; }
+    if (!(effS >= ic.minStopPct)) { base.status = 'stop_breached'; return base; }
+    base.active = true; base.status = 'adjusted';
+    return base;
+  }
+  function intradayBlocked(adj) { return adj.status === 'target_reached' || adj.status === 'stop_breached' || adj.status === 'move_too_large'; }
+  function sessionReport(s) {
+    if (!s) return null;
+    return {
+      sessionOpen: s.sessionOpen, formingBar: s.formingBar, partialBarExcluded: s.partialBarExcluded,
+      referencePrice: s.referencePrice, referenceDate: s.referenceDate,
+      livePrice: s.livePrice, liveSource: s.liveSource, liveAsOf: s.liveAsOf,
+      movePct: s.movePct != null ? round(s.movePct, 2) : null
+    };
+  }
+  function planIntraday(core, pre) {
+    var s = sessionReport(pre.session);
+    if (!s) return null;
+    var a = core.intraday || {};
+    s.status = a.status || 'none';
+    s.adjusted = !!a.active;
+    s.effTargetPct = a.effTargetPct != null ? round(a.effTargetPct, 2) : null;
+    s.effStopPct = a.effStopPct != null ? round(a.effStopPct, 2) : null;
+    s.targetPrice = a.targetPrice != null ? round(a.targetPrice, 2) : null;
+    s.stopPrice = a.stopPrice != null ? round(a.stopPrice, 2) : null;
+    return s;
+  }
+
   function prepare(input, cfg, internal) {
     var daily = input.dailyCandles || [];
     var hourly = input.hourlyCandles || [];
@@ -1019,7 +1124,8 @@ window.ExpectedValueEngine = (function () {
       atrPct: atrPct, stopPct: stopFromAtr(atrPct, cfg), volClass: volClassOf(atrPct),
       dataCompleteness: dataCompleteness,
       costs: totalRoundTripCost(cfg.costs) + liq.perSidePct * 2,
-      liquidity: liq, weights: ww.weights, regime: ww.regime
+      liquidity: liq, weights: ww.weights, regime: ww.regime,
+      session: input._session || null
     };
   }
 
@@ -1031,21 +1137,20 @@ window.ExpectedValueEngine = (function () {
     var noHist = !!(internal && internal.noHist) || mode !== 'fixed';
     var noTouch = !!(internal && internal.noTouch);
 
-    var tb = tripleBarrierWindows(daily, horizon, targetPct, pre.stopPct, cfg, pre.costs, pre.weights, mode);
-    var touch = (noHist || noTouch) ? null : statisticalTouch(hourly, daily, indexCandles, horizon, targetPct);
+    /* v4.7: remaining distance from the live price (levels anchored at the last completed close). The
+       calibration lookups below stay keyed by the NOMINAL plan: only the setup LIFT (hist - prior) transfers. */
+    var adj = noHist ? intradayBarriers(null, cfg, targetPct, pre.stopPct) : intradayBarriers(pre.session, cfg, targetPct, pre.stopPct);
+    var effT = adj.effTargetPct, effS = adj.effStopPct;
+    var tb = intradayBlocked(adj) ? null : tripleBarrierWindows(daily, horizon, effT, effS, cfg, pre.costs, pre.weights, mode);
+    var touch = (noHist || noTouch || intradayBlocked(adj)) ? null : statisticalTouch(hourly, daily, indexCandles, horizon, effT);
     var hist = noHist ? null : historicalProbability(horizon, targetPct, pre.setupCalScore, pre.volClass, pre.stopPct, cfg.calibrationKey);
     var prior = noHist ? null : setupBlindPrior(horizon, targetPct, pre.stopPct, cfg.calibrationKey);
-    var ml = noHist ? null : mlProbability({
-      symbol: input.symbol, dailyCandles: daily, hourlyCandles: hourly, indexCandles: indexCandles,
-      setup: pre.setup, horizonDays: horizon, targetPct: targetPct,
-      stopPct: pre.stopPct   /* v4.6 ML audit: the provider needs the plan's barriers to map to its event */
-    });
-
-    var probability = combineProbability(tb, hist, prior, ml, cfg, pre.gapFactor);
+    var probability = combineProbability(tb, hist, prior, null, cfg, pre.gapFactor);
 
     var core = {
       horizonDays: horizon, targetPct: targetPct, exitMode: mode,
-      tb: tb, touch: touch, hist: hist, prior: prior, ml: ml,
+      intraday: adj, econTargetPct: effT, econStopPct: effS,
+      tb: tb, touch: touch, hist: hist, prior: prior,
       probability: probability, dist: null, ev: null, pReturnPositive: null
     };
     if (!tb || probability.p == null) return core;
@@ -1057,11 +1162,11 @@ window.ExpectedValueEngine = (function () {
     var c = pre.costs;
     var dist = {
       pTarget: pT, pStop: pS, pTimeout: pO,
-      targetReturnPct: targetPct, stopReturnPct: tb.meanStopRet, timeoutReturnPct: tb.meanTimeoutRet
+      targetReturnPct: effT, stopReturnPct: tb.meanStopRet, timeoutReturnPct: tb.meanTimeoutRet
     };
-    var gross = pT * targetPct + pS * tb.meanStopRet + pO * tb.meanTimeoutRet;
-    var preNet = pT * (targetPct - c) + pS * (tb.meanStopRet - c) + pO * (tb.meanTimeoutRet - c);
-    var aftNet = pT * afterTax(targetPct - c, cfg) + pS * tb.meanAfStop + pO * tb.meanAfTimeout;
+    var gross = pT * effT + pS * tb.meanStopRet + pO * tb.meanTimeoutRet;
+    var preNet = pT * (effT - c) + pS * (tb.meanStopRet - c) + pO * (tb.meanTimeoutRet - c);
+    var aftNet = pT * afterTax(effT - c, cfg) + pS * tb.meanAfStop + pO * tb.meanAfTimeout;
     core.dist = dist;
     core.ev = { grossPct: gross, costPct: c, preTaxNetPct: preNet, afterTaxNetPct: aftNet, taxPct: preNet - aftNet };
     core.basisEV = cfg.decideAfterTax !== false ? aftNet : preNet;
@@ -1094,7 +1199,7 @@ window.ExpectedValueEngine = (function () {
          subtracted AFTER shrinkage. Subtracting it before shrink multiplied it
          by lambda (bigger effect at short horizons), stacking a conservatism
          layer unevenly across the grid. */
-      var cst = core.ev.costPct, Tg = core.targetPct, Sg = Math.abs(tb.meanStopRet);
+      var cst = core.ev.costPct, Tg = core.econTargetPct != null ? core.econTargetPct : core.targetPct, Sg = Math.abs(tb.meanStopRet);
       var pT0 = Sg / (Tg + Sg) * (1 - tb.pTimeout), pS0 = Tg / (Tg + Sg) * (1 - tb.pTimeout);
       var rate = cfg.decideAfterTax !== false ? num(cfg.taxRatePct, 0) / 100 : 0;
       var m0 = -cst - rate * pT0 * Math.max(0, Tg - cst) + rate * clamp(num(cfg.taxLossCredit, 0), 0, 1) * pS0 * (Sg + cst);
@@ -1131,8 +1236,8 @@ window.ExpectedValueEngine = (function () {
     }
 
     var decision = classify(ev ? ev.netPct : null, ev ? ev.pPositive : null, core.pReturnPositive, evidence, setup.score, cfg);
-    var be = core.dist ? breakEvenTargetProb(core.dist, tb, core.targetPct, pre.costs) : null;
-    var sizing = ev ? computeSizing(core.dist, tb, core.targetPct, pre.costs, pre.stopPct, ev, cfg) : null;
+    var be = core.dist ? breakEvenTargetProb(core.dist, tb, core.econTargetPct != null ? core.econTargetPct : core.targetPct, pre.costs) : null;
+    var sizing = ev ? computeSizing(core.dist, tb, core.econTargetPct != null ? core.econTargetPct : core.targetPct, pre.costs, core.econStopPct != null ? core.econStopPct : pre.stopPct, ev, cfg) : null;
     var downside = tb && core.dist ? {
       pStop: core.dist.pStop, stopReturnPct: tb.meanStopRet,
       expectedShortfall5Pct: tb.cvar5Pct, p5Pct: tb.p5Pct, worstWindowPct: tb.worstPct,
@@ -1159,8 +1264,7 @@ window.ExpectedValueEngine = (function () {
         method: probability.method,                       // own_base_plus_setup_lift
         statisticalBase: probability.statisticalBase,     // setup-blind own-history rate
         setupLift: probability.setupLift,                 // gapFactor x (histP - priorP)
-        historicalN: hist ? hist.n : 0,
-        ml: core.ml
+        historicalN: hist ? hist.n : 0
       },
       windows: tb ? {
         n: tb.n, nEff: round(tb.nEff, 1),
@@ -1168,6 +1272,7 @@ window.ExpectedValueEngine = (function () {
         removedDriftPerDayPct: round(tb.removedDriftPerDayPct, 3)
       } : null,
       distribution: core.dist,
+      intraday: planIntraday(core, pre),   // v4.7: targetPct/stopPct above are the NOMINAL plan; intraday.eff* are what EV was priced on
       stopPct: pre.stopPct, atrPct: pre.atrPct, volClass: pre.volClass,
       costsPct: pre.costs, calScoreGap: pre.scoreGap, calScoreFactor: pre.gapFactor,
       expectedValue: ev,
@@ -1184,7 +1289,7 @@ window.ExpectedValueEngine = (function () {
       downside: downside,
       signalStrength: signalStrength(ev),
       reasons: (core.dist && ev) ? plainReasons(core, pre, ev, evidence, be, haircut) : [],
-      explanation: buildExplanation(setup, probability, ev, evidence, decision, tb, pre)
+      explanation: buildExplanation(setup, probability, ev, evidence, decision, tb, pre, core.intraday)
     };
   }
 
@@ -1254,7 +1359,7 @@ window.ExpectedValueEngine = (function () {
 
   function plainReasons(core, pre, ev, evidence, be, haircut) {
     var tb = core.tb, out = [];
-    var T = core.targetPct, S = Math.abs(tb.meanStopRet), pT = core.dist.pTarget;
+    var T = core.econTargetPct != null ? core.econTargetPct : core.targetPct, S = Math.abs(tb.meanStopRet), pT = core.dist.pTarget;
     if (be != null) {
       var gap = (pT - be) * 100;
       if (gap >= 0) out.push('Target-first chance ' + pct(pT) + '% is ' + round(gap, 1) + ' pts above the ' + pct(be) + '% needed to break even.');
@@ -1277,10 +1382,10 @@ window.ExpectedValueEngine = (function () {
      philosophy. */
   function upsideProfile(dailyCandles, indexCandles, overrides) {
     var cfg = getConfig(overrides), uc = cfg.upside || {};
-    var daily = dailyCandles || [], n = daily.length;
+    var daily = completedOnly(dailyCandles || [], cfg), n = daily.length;
     if (n < 60) return null;
     var H = uc.horizons || [3, 5, 10, 15, 20], T = uc.targets || [2, 3, 4, 5, 6];
-    var ww = buildWindowWeights(daily, indexCandles || [], cfg);
+    var ww = buildWindowWeights(daily, completedOnly(indexCandles || [], cfg), cfg);
     var last = n - 1, firstStart = Math.max(1, n - cfg.lookbackBars);
     var s1 = 0, s2 = 0, c = 0, k;
     /* Per-window, look-ahead-free trailing drift (same convention as
@@ -1349,12 +1454,21 @@ window.ExpectedValueEngine = (function () {
     var cfg = getConfig(overrides);
     var horizon = clamp(num(input.horizonDays, cfg.defaultHorizon), 3, 20);
     var targetPct = clamp(num(input.targetPct, cfg.defaultTargetPct), 1, 10);
+    input = withSession(input, cfg, null);
     var pre = prepare(input, cfg);
     return finalizePlan(corePlan(pre, input, cfg, horizon, targetPct), pre, input, cfg, 0);
   }
 
-  function buildExplanation(setup, probability, ev, evidence, decision, tb, pre) {
+  function buildExplanation(setup, probability, ev, evidence, decision, tb, pre, adj) {
     var items = [];
+    var ss = pre && pre.session;
+    if (ss && ss.partialBarExcluded) items.push('today\'s forming daily bar excluded from statistics (completed sessions only)');
+    if (adj && adj.status === 'adjusted' && ss) {
+      items.push('intraday: live ' + round(ss.livePrice, 2) + ' is ' + (adj.movePct >= 0 ? '+' : '') + round(adj.movePct, 2) + '% vs last completed close ' + round(ss.referencePrice, 2) +
+        '; levels anchored there, so remaining distance is +' + round(adj.effTargetPct, 2) + '% to target and -' + round(adj.effStopPct, 2) + '% to stop');
+    } else if (adj && adj.status === 'target_reached') items.push('intraday: price has already reached/passed the target level; plan not priced');
+    else if (adj && adj.status === 'stop_breached') items.push('intraday: price is at/through the stop level; plan not priced');
+    else if (adj && adj.status === 'move_too_large') items.push('intraday: move of ' + round(adj.movePct, 1) + '% since the last close is too large to price against the original levels');
     if (setup.score != null) items.push('Setup quality ' + round(setup.score, 0) + '/100');
     if (probability.p != null) items.push('target-first probability ' + pct(probability.p) + '%');
     if (probability.ownBase != null && probability.adjustment != null)
@@ -1450,7 +1564,7 @@ window.ExpectedValueEngine = (function () {
       };
     }
 
-    input = input || {};
+    input = withSession(input || {}, cfg, internal);
     var pre = prepare(input, cfg, internal);
 
     var horizons = (cfg.horizons || []).slice();
@@ -1517,7 +1631,8 @@ window.ExpectedValueEngine = (function () {
     if (best && best.probability && !(internal && (internal.noHist || internal.noTouch)) &&
         input.hourlyCandles && input.hourlyCandles.length) {
       try {
-        var tBest = statisticalTouch(input.hourlyCandles, input.dailyCandles || [], input.indexCandles || [], best.horizonDays, best.targetPct);
+        var tBest = statisticalTouch(input.hourlyCandles, input.dailyCandles || [], input.indexCandles || [], best.horizonDays,
+          best.intraday && best.intraday.adjusted ? best.intraday.effTargetPct : best.targetPct);
         if (tBest) best.probability.touch = tBest.p;
       } catch (e) {}
     }
@@ -1536,6 +1651,7 @@ window.ExpectedValueEngine = (function () {
 
     return {
       best: tradeBest,
+      intraday: sessionReport(pre.session),
       baseline: baseline,
       candidates: results,
       eligibility: eligibility,
@@ -2068,11 +2184,14 @@ window.ExpectedValueEngine = (function () {
   function recordPredictionDetailed(best, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
-    var daily = opts.dailyCandles || [];
+    var daily = completedOnly(opts.dailyCandles || [], cfg);
     var symbol = opts.symbol || (best && best.symbol);
     if (!best || !best.expectedValue || !symbol || !daily.length) {
       return { recorded: false, reason: 'invalid_input' };
     }
+    /* v4.7: the scorecard settles every record on the nominal next-open convention. An EV priced on
+       intraday remaining distances is a different bet, so it is not scored (the post-close rescan is). */
+    if (best.intraday && best.intraday.adjusted) return { recorded: false, reason: 'intraday_adjusted' };
     var signalDate = String(daily[daily.length - 1].t).slice(0, 10);
     var id = symbol + '|' + signalDate;
     var st = loadLive(cfg);
@@ -2220,28 +2339,11 @@ window.ExpectedValueEngine = (function () {
     return null;
   }
 
-  /* v4.6 (scan-safety): during market hours the daily feed's last bar may be
-     today's FORMING session — outcome labels written from it (live settlement,
-     walk-forward window labels) would freeze intraday half-truths that the
-     idempotent stores never correct. Detection (recordPrediction) is
-     deliberately NOT guarded: forming setups must still be found intraday.
-     opts.allowPartialBar opts out; opts.nowMs makes the check deterministic
-     (tests). IST wall clock via the +5:30 shift trick. */
-  function barMayBeForming(daily, nowMs) {
-    if (!daily || !daily.length) return false;
-    var last = String(daily[daily.length - 1].t).slice(0, 10);
-    if (!last) return false;
-    var now = new Date((nowMs != null ? nowMs : Date.now()) + 5.5 * 3600 * 1000);
-    if (now.toISOString().slice(0, 10) !== last) return false;   // feed bar is not today: complete
-    return (now.getUTCHours() * 60 + now.getUTCMinutes()) < (15 * 60 + 30);   // before 15:30 IST
-  }
-
   function settlePredictions(symbol, dailyCandles, opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config);
-    var daily = dailyCandles || [], settled = 0;
+    var daily = completedOnly(dailyCandles || [], cfg), settled = 0;
     if (!daily.length) return { settled: 0 };
-    var partialGuard = !opts.allowPartialBar && barMayBeForming(daily, opts.nowMs);
     var byDate = {};
     daily.forEach(function (b, k) { byDate[String(b.t).slice(0, 10)] = k; });
     /* v4.6: sweep EVERY basis store — episodes opened under an older model
@@ -2254,11 +2356,6 @@ window.ExpectedValueEngine = (function () {
       if (rec.status !== 'open' || rec.symbol !== symbol) return;
       var i = byDate[rec.date];
       if (i == null) return;
-      /* v4.6 scan-safety: never write a settlement label from a bar that may
-         still be forming — defer records whose outcome window reaches the
-         last bar to the next after-close run (status stays open, nothing is
-         lost). Windows that closed on earlier COMPLETE bars settle normally. */
-      if (partialGuard && i + rec.h >= daily.length - 1) return;
       var complete = i + rec.h <= daily.length - 1;
       /* v4.6 (feedback A): settlement uses the ORIGINAL outcome basis —
          driftKeep / lookbackBars snapshotted at prediction time (records
@@ -2590,6 +2687,7 @@ window.ExpectedValueEngine = (function () {
   }
 
   function retSeries(daily, lookback) {
+    daily = completedOnly(daily, getConfig());
     var m = {}, n = daily ? daily.length : 0;
     for (var i = Math.max(1, n - lookback); i < n; i++) {
       var a = daily[i - 1].c, b = daily[i].c, o = dayOrdinal(daily[i].t);
@@ -2700,11 +2798,6 @@ window.ExpectedValueEngine = (function () {
     var cap = opts.capPerStock || 60;
     var maxH = Math.max.apply(null, cfg.horizons);
     var lastStart = daily.length - 1 - maxH;
-    /* v4.6 scan-safety: while today's bar may still be forming, defer the
-       windows whose horizon reaches the last bar — their outcome labels would
-       read the forming bar. The meta ledger has not recorded them yet, so the
-       next after-close run picks them up (idempotent: nothing is lost). */
-    if (!opts.allowPartialBar && barMayBeForming(daily, opts.nowMs)) lastStart = daily.length - 2 - maxH;
 
     function weekOf(ord) { return Math.floor((ord + 3) / 7); }
     var eligible = [];
@@ -2824,6 +2917,7 @@ window.ExpectedValueEngine = (function () {
 
   return {
     version: VERSION,
+    sessionState: function (daily, hourly, o) { return sessionState(daily, hourly, getConfig(o)); },
     getConfig: function (o) { return getConfig(o); },
     totalRoundTripCost: totalRoundTripCost,
     analyze: analyze,
@@ -2874,10 +2968,11 @@ window.ExpectedValueEngine = (function () {
       calibrationSignature: calibrationSignature,
       refreshCalibrationSignature: refreshCalibrationSignature,
       shortHash: shortHash,
-      barMayBeForming: barMayBeForming,
       loadParts: loadParts, commitBatch: commitBatch,
       applyOutcomeRows: applyOutcomeRows, applyReliabilityRows: applyReliabilityRows,
-      olsSlope: olsSlope
+      olsSlope: olsSlope,
+      sessionState: sessionState, intradayBarriers: intradayBarriers, completedOnly: completedOnly,
+      withSession: withSession, candleDate: candleDate, istClock: istClock, sessionIsOpen: sessionIsOpen
     }
   };
 })();
