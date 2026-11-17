@@ -2,6 +2,23 @@
    StoX Expected Value & Probability-Calibrated Trade Engine
    Version 4.6  (EV_V4_ENGINE)
 
+   v4.7.1 -> v4.7.2 (duplicate-episode fix set):
+     1. RECENT-RESULTS DEDUP: the same episode can live in several basis
+        stores (it was re-logged after a model/config change rotated the live
+        store while the trade was still open), so the "Recent results" strip
+        showed the identical trade 2-3 times with bit-identical P&L.
+        recentResults() now dedupes by record id (symbol|signalDate), keeping
+        the current-basis store's copy (liveStoreKeys lists it first), and
+        rounds target/stop percentages so chips never print raw floats like
+        -5.3337585533684%.
+     2. CROSS-STORE EPISODE GUARD: recordPredictionDetailed() only deduped
+        inside the current-basis store. Before creating a fresh episode it now
+        sweeps EVERY basis store: if any store already holds the same
+        signal date, or an open episode whose holding window still covers
+        today, the record is NOT re-created (reason 'same_day' /
+        'already_open' with otherBasis: true). One trade = one live record;
+        older-basis records keep settling on their own snapshot basis.
+
    v4.5 -> v4.6 (audit feedback fix set A-E):
      A. BASIS SIGNATURE (feedback A): the store signature now hashes a
         canonical dump of every parameter that decides what is stored -
@@ -205,7 +222,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.7.1';
+  var VERSION = 'EV-4.7.2';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -2266,6 +2283,47 @@ window.ExpectedValueEngine = (function () {
       }
     }
 
+    /* v4.7.2 (dup-episode fix): the SAME trade must never be logged in two
+       basis stores. A model/config change rotates the live store, but a
+       signal already recorded elsewhere - or a still-open episode that
+       already covers today - is one trade, not two. Sweep EVERY basis store
+       before creating; the other store's record keeps settling on its own
+       snapshot basis. */
+    var curKey = liveKey(cfg);
+    var allKeys = liveStoreKeys(cfg);
+    for (var okI = 0; okI < allKeys.length; okI++) {
+      var oKey = allKeys[okI];
+      if (oKey === curKey) continue;
+      var orecs = (loadStore(oKey).records || []);
+      for (var oi = 0; oi < orecs.length; oi++) {
+        var orec = orecs[oi];
+        if (orec.symbol !== symbol) continue;
+        if (orec.id === id || ((orec.signalDate || orec.date) === signalDate)) {
+          return {
+            recorded: false, reason: 'same_day', existing: orec,
+            otherBasis: true, storeKey: oKey, changes: null, anyChange: false
+          };
+        }
+        if (orec.status === 'open') {
+          var oDate = orec.signalDate || orec.date;
+          var oElapsed = null, oq;
+          for (oq = 0; oq < daily.length; oq++) {
+            if (String(daily[oq].t).slice(0, 10) === oDate) { oElapsed = (daily.length - 1) - oq; break; }
+          }
+          if (oElapsed == null) {
+            var odA = dayOrdinal(signalDate), odB = dayOrdinal(oDate);
+            if (odA != null && odB != null) oElapsed = odA - odB;
+          }
+          if (!(oElapsed != null && oElapsed >= Math.max(1, num(orec.h, 1)))) {
+            return {
+              recorded: false, reason: 'already_open', existing: orec,
+              otherBasis: true, storeKey: oKey, changes: null, anyChange: false
+            };
+          }
+        }
+      }
+    }
+
     /* Fresh episode. */
     var currentExit = exitOpts(cfg);
     var decisionSnapshot = {
@@ -2450,12 +2508,22 @@ window.ExpectedValueEngine = (function () {
   function recentResults(opts) {
     opts = opts || {};
     var cfg = getConfig(opts.config), now = Date.now(), maxAge = num(opts.days, 7) * 86400000, out = [];
+    /* v4.7.2: the same episode can sit in several basis stores (re-logged
+       after a model change rotated the live store while it was still open).
+       Show each trade ONCE - liveStoreKeys() lists the current-basis store
+       first, so the current-basis copy wins. */
+    var seen = {};
     liveStoreKeys(cfg).forEach(function (key) {
       (loadStore(key).records || []).forEach(function (r) {
         if (r.status !== 'settled' || !r.settledAt || now - r.settledAt > maxAge) return;
+        var eid = r.id || ((r.symbol || '') + '|' + (r.signalDate || r.date || ''));
+        if (seen[eid]) return;
+        seen[eid] = true;
         out.push({
           symbol: r.symbol, signalDate: r.signalDate || r.date, entryDate: r.entryDate || null,
-          entryPrice: r.entryPrice || null, horizonDays: r.h, targetPct: r.t, stopPct: r.stop,
+          entryPrice: r.entryPrice || null, horizonDays: r.h,
+          targetPct: r.t != null ? round(num(r.t, 0), 2) : null,
+          stopPct: r.stop != null ? round(num(r.stop, 0), 2) : null,
           outcome: r.outcomeRaw || r.outcome, modelOutcome: r.outcome,
           realizedRawPct: r.realRaw != null && isFinite(r.realRaw) ? round(r.realRaw, 2) : null,
           predictedPct: r.pred != null ? round(r.pred, 2) : null, settledAt: r.settledAt
