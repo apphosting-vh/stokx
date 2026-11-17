@@ -12060,6 +12060,47 @@ function StockScreener(props) {
             stoxEvRecentStrip(evHealth.recent, onOpenStock)
           ),
           React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 } },
+            /* v24: re-tune tracker - big vibrant settled counter. Stage drives
+               the color: red <30 (floor), amber 30-49 (direction only),
+               vibrant green 50-99 (time to re-tune tau), glowing green 100+
+               (full grid re-tune ready). Weeks gate: 50+ rows still show
+               amber until 12 distinct signal weeks have settled. */
+            (function () {
+              var lp = null;
+              try { var _evx = window.ExpectedValueEngine; if (_evx && typeof _evx.livePerformance === "function") lp = _evx.livePerformance(); } catch (_lpErr) {}
+              var nS = lp ? (lp.settled || 0) : 0;
+              var nO = lp ? (lp.open || 0) : 0;
+              var nW = lp && lp.weeks != null ? lp.weeks : null;
+              var ob = lp && lp.otherBases ? (lp.otherBases.settled + lp.otherBases.open) : 0;
+              var stage = 0;
+              if (nS >= 100) stage = 3;
+              else if (nS >= 50 && (nW == null || nW >= 12)) stage = 2;
+              else if (nS >= 30) stage = 1;
+              var st = [
+                { fg: "#ef4444", bg: "rgba(239,68,68,0.14)", bd: "rgba(239,68,68,0.50)", head: "COLLECTING", sub: "re-tune floor is 30 settled" },
+                { fg: "#f59e0b", bg: "rgba(245,158,11,0.16)", bd: "rgba(245,158,11,0.55)", head: "DIRECTION ONLY", sub: "apply a tau move at 50 settled" },
+                { fg: "#22c55e", bg: "rgba(34,197,94,0.22)", bd: "rgba(34,197,94,0.80)", head: "TIME TO RE-TUNE \u03C4", sub: "one grid step; full re-tune at 100" },
+                { fg: "#10b981", bg: "rgba(16,185,129,0.28)", bd: "#10b981", head: "FULL \u03C4 RE-TUNE READY", sub: "run Re-tune \u03C4 and apply the best" }
+              ][stage];
+              var tip = "Settled live episodes (current model basis): " + nS + " settled, " + nO + " open" +
+                (nW != null ? ", " + nW + " distinct signal weeks" : "") + (ob > 0 ? " (+" + ob + " older-model)" : "") +
+                "\nRe-tune guide: 30 = engine floor (slope too noisy to act on); 50 = safe to move tau one step; 100+ = full grid re-tune." +
+                "\nAlso wait for \u2265 12 distinct signal weeks and a normal mix of stops/timeouts before trusting the slope." +
+                "\nEvery tau change rotates the model basis (scorecard restarts) - batch re-tunes.";
+              return React.createElement("div", {
+                title: tip,
+                style: {
+                  display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2,
+                  padding: "6px 12px", borderRadius: 8, cursor: "help",
+                  background: st.bg, border: "2px solid " + st.bd,
+                  boxShadow: stage >= 2 ? "0 0 14px " + st.bd : "none"
+                }
+              },
+                React.createElement("div", { style: { fontSize: 20, fontWeight: 900, lineHeight: 1.05, color: st.fg, fontFamily: "var(--font-heading)", letterSpacing: 0.5 } }, nS + " SETTLED"),
+                React.createElement("div", { style: { fontSize: 9, fontWeight: 800, color: st.fg, letterSpacing: 0.6 } }, st.head),
+                React.createElement("div", { style: { fontSize: 8, color: "var(--text5)", whiteSpace: "nowrap" } }, nO + " open" + (nW != null ? " \u00b7 " + nW + "w" : "") + (ob > 0 ? " \u00b7 +" + ob + " old" : "") + " \u2014 " + st.sub)
+              );
+            })(),
             React.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } },
               React.createElement("button", { title: "Tune every EV engine parameter (shrinkage, gates, windows, costs, tax, sizing...). Saved in this browser.", onClick: function() { evTunerOpenModal(false); }, style: evHdrBtnStyle }, "\u2699 Tune EV"),
               React.createElement("button", { title: "Re-tune the shrinkage strength (tau) from the settled live prediction rows so realized-on-predicted slope is closest to 1.", onClick: function() { evTunerOpenModal(true); }, style: evHdrBtnStyle }, "\u2191 Re-tune \u03C4"),
