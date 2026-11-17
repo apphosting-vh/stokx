@@ -1797,6 +1797,22 @@ window.ExpectedValueEngine = (function () {
       return true;
     } catch (e) { return false; }
   }
+  /* v4.7.2: tuner bootstrap - persist the UI-tuned parameter overrides in
+     localStorage ('stox_ev_ui_config') and merge them into
+     window.STOX_EV_CONFIG BEFORE the basis signature is first computed, so
+     the signature, the live store name and the calibration family all agree
+     with the tuned basis regardless of script load order. The tuner UI in
+     app-core.js writes this key and updates window.STOX_EV_CONFIG at runtime. */
+  try {
+    var _uiCfgRaw = localStorage.getItem('stox_ev_ui_config');
+    if (_uiCfgRaw) {
+      var _uiCfg = JSON.parse(_uiCfgRaw);
+      if (_uiCfg && typeof _uiCfg === 'object') {
+        window.STOX_EV_CONFIG = Object.assign({}, window.STOX_EV_CONFIG || {}, _uiCfg);
+      }
+    }
+  } catch (e) {}
+
   try { refreshCalibrationSignature(DEFAULTS.calibrationKey, getConfig()); } catch (e) {}
 
   function calibrationStatus(key) {
