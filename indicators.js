@@ -3334,8 +3334,33 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
      6/72/60, spike points folded into the hard cap, lowExpansion −6.
      Bumped 16→17 at the mod16 lock-in pass (2026-09-12): pillarMax
      {28,28,12,22,4}, classification {62,60,58,34} re-derived under the V16
-     tempered modifiers and OOS-validated. */
-  var SCORE_CONFIG_VERSION = 38;
+     tempered modifiers and OOS-validated.
+
+     ══════════════════════════════════════════════════════════════
+     VERSION 39 — 2026-11-18  (EV-aligned scoring pass)
+     ────────────────────────────────────────────────────────────────
+     The weights above were locked against a "touch +3% in N days, no
+     stop" forward-sim objective. The EV engine prices triple-barrier
+     trades with stops and costs, and the gate report showed the score is
+     ANTI-SELECTIVE on that real objective (accepted Buy-grade realized
+     −0.77% vs rejected −0.53%): the biggest pillar (rangeAdequacy, 35
+     pts) was a pure ATR% boost and the confidence gate passed high-vol
+     names on a vol-inflated touch prior. This pass:
+       1. rangeAdequacy: new default mode 'plan' — scores the
+          plan-relative reachability ratio target/(ATR%·√h) times a
+          stop-asymmetry factor (k = stop/target → clamp(1−(k−1)·0.35,
+          0.3, 1)); the raw-ATR smoothstep stays available as
+          curve.mode='atr' for A/B runs.
+       2. confidence belowBreakEven gate: flat 0.55 → plan-aware
+          break-even target-first chance (stop+cost)/(target+stop).
+       3. breakout pillar unchanged (its 1.5-ATR extension cap already
+          binds; max 5 pts).
+     pillarMax budgets and classification thresholds are UNTOUCHED (the
+     100-point total is preserved); only what the range/confidence pillars
+     MEASURE changed. Re-derive weights with
+     window.stoxRunScorePillarAudit() (app-core) once enough history is
+     cached. */
+  var SCORE_CONFIG_VERSION = 39;
   function getScoreConfig() { return JSON.parse(JSON.stringify(SCORE_CONFIG)); }
   function getTargetPctDisplay() { return (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null) ? Math.round(SCORE_CONFIG.forwardSim.targetPct * 1000) / 10 : 4; }
   function getScoreConfigVersion() { return SCORE_CONFIG_VERSION; }
@@ -3356,30 +3381,81 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
     if (window.TechIndicators) window.TechIndicators._scoreConfigClassification = null;
   }
 
+  /* v39 (EV-aligned scoring): plan geometry shared by the range and
+     confidence pillars. stopPct mirrors the EV engine defaults
+     (stopATR x ATR clamped to [min,max]); roundTripCostPct matches the
+     statutory ~0.24% stack. */
+  function planTargetPct() {
+    return (SCORE_CONFIG.forwardSim && SCORE_CONFIG.forwardSim.targetPct != null)
+      ? Number(SCORE_CONFIG.forwardSim.targetPct) * 100 : 3.0;
+  }
+  function planHorizonDays() {
+    return Number(SCORE_CONFIG.horizonDays || 10);
+  }
+  function planStopPct(atrPct) {
+    var rc = SCORE_CONFIG.rangeAdequacy || {};
+    var stopATR = (rc.stopATR != null && isFinite(rc.stopATR)) ? Number(rc.stopATR) : 1.8;
+    var lo = (rc.minStopPct != null && isFinite(rc.minStopPct)) ? Number(rc.minStopPct) : 1.5;
+    var hi = (rc.maxStopPct != null && isFinite(rc.maxStopPct)) ? Number(rc.maxStopPct) : 6.0;
+    return Math.max(lo, Math.min(hi, stopATR * Number(atrPct)));
+  }
+  /* Break-even target-first chance for target T and stop S, costs included:
+     p* x T - (1 - p*) x S - costs = 0  ->  p* = (S + costs) / (T + S).
+     Same first-passage split the EV engine reports as breakEvenTargetProb. */
+  function planBreakEvenTargetProb(targetPct, stopPct) {
+    var rc = SCORE_CONFIG.rangeAdequacy || {};
+    var cost = (rc.roundTripCostPct != null && isFinite(rc.roundTripCostPct)) ? Number(rc.roundTripCostPct) : 0.24;
+    if (!(targetPct > 0) || !(stopPct > 0)) return 0.55;
+    return Math.max(0.05, Math.min(0.95, (stopPct + cost) / (targetPct + stopPct)));
+  }
   function calcRangeAdequacyScore(sn) {
     if (!sn || sn.atr14 == null || sn.c == null || sn.c <= 0) return 0;
     var atrPct = (sn.atr14 / sn.c) * 100;
     var maxPts = SCORE_CONFIG.pillarMax.rangeAdequacy;
-    
-    // Honour SCORE_CONFIG.rangeAdequacy.curve. The old hardcoded peak=4%,
-    // sigma=2 ignored the config entirely, so tuning the curve in the Score
-    // Config UI silently did nothing.
     var _curve = (SCORE_CONFIG.rangeAdequacy && SCORE_CONFIG.rangeAdequacy.curve) || {};
-    var _peak = (_curve.peakAtr != null && isFinite(_curve.peakAtr)) ? Number(_curve.peakAtr) : 3.5;
-    var _lo   = (_curve.minAtr  != null && isFinite(_curve.minAtr))  ? Number(_curve.minAtr)  : 1.0;
-    var _hi   = (_curve.maxAtr  != null && isFinite(_curve.maxAtr))  ? Number(_curve.maxAtr)  : 9.0;
-    // Smoothstep honouring all three config points:
-    //   0 at atrPct <= minAtr, 1 at atrPct == peakAtr, 0 at atrPct >= maxAtr.
-    var _smooth = function(t) { t = Math.max(0, Math.min(1, t)); return t*t*(3 - 2*t); };
-    var _ramp;
-    if (atrPct <= _lo || atrPct >= _hi) _ramp = 0;
-    else if (atrPct <= _peak) _ramp = _smooth((atrPct - _lo) / Math.max(0.01, _peak - _lo));
-    else _ramp = _smooth((_hi - atrPct) / Math.max(0.01, _hi - _peak));
-    return round(maxPts * _ramp, 1);
+    var _smooth = function(t) { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+
+    /* Legacy ATR% smoothstep (curve.mode = 'atr'): 0 below minAtr, 1 at
+       peakAtr, 0 at/above maxAtr. Kept for A/B comparisons only. */
+    if (_curve.mode === 'atr') {
+      var _peak = (_curve.peakAtr != null && isFinite(_curve.peakAtr)) ? Number(_curve.peakAtr) : 3.5;
+      var _lo   = (_curve.minAtr  != null && isFinite(_curve.minAtr))  ? Number(_curve.minAtr)  : 1.0;
+      var _hi   = (_curve.maxAtr  != null && isFinite(_curve.maxAtr))  ? Number(_curve.maxAtr)  : 9.0;
+      var _ramp;
+      if (atrPct <= _lo || atrPct >= _hi) _ramp = 0;
+      else if (atrPct <= _peak) _ramp = _smooth((atrPct - _lo) / Math.max(0.01, _peak - _lo));
+      else _ramp = _smooth((_hi - atrPct) / Math.max(0.01, _hi - _peak));
+      return round(maxPts * _ramp, 1);
+    }
+
+    /* v39 default (curve.mode = 'plan'): plan-relative reachability
+           ratio = target / (atr% x sqrt(horizon))
+       — the share of typical horizon travel the target needs — with a
+       smoothstep band peaking where the target is comfortably reachable but
+       not trivial, multiplied by a stop-asymmetry factor
+           k = stop / target  ->  factor = clamp(1 - (k-1) * 0.35, 0.3, 1)
+       so plans whose stop is far wider than their target (the bad payoff
+       asymmetry that eats EV) cannot earn the full cap. This replaces the
+       old pure-ATR curve that handed up to 35 of 100 points for volatility
+       alone and made the score anti-selective on realized EV. */
+    var targetPct = planTargetPct();
+    var horizon = planHorizonDays();
+    if (!(atrPct > 0) || !(targetPct > 0)) return 0;
+    var ratio = targetPct / (atrPct * Math.sqrt(Math.max(1, horizon)));
+    var rLo   = (_curve.minRatio  != null && isFinite(_curve.minRatio))  ? Number(_curve.minRatio)  : 0.08;
+    var rPeak = (_curve.peakRatio != null && isFinite(_curve.peakRatio)) ? Number(_curve.peakRatio) : 0.30;
+    var rHi   = (_curve.maxRatio  != null && isFinite(_curve.maxRatio))  ? Number(_curve.maxRatio)  : 0.90;
+    var reach;
+    if (ratio <= rLo || ratio >= rHi) reach = 0;
+    else if (ratio <= rPeak) reach = _smooth((ratio - rLo) / Math.max(0.01, rPeak - rLo));
+    else reach = _smooth((rHi - ratio) / Math.max(0.01, rHi - rPeak));
+    var k = planStopPct(atrPct) / targetPct;
+    var asym = Math.max(0.3, Math.min(1, 1 - (k - 1) * 0.35));
+    return round(maxPts * reach * asym, 1);
   }
 
   function calcConfidencePillarScore(hourlyCandles, dailyCandles, indexCandles) {
-    var fallback = { score: 0, p_shrunk: null, belowBreakEven: false };
+    var fallback = { score: 0, p_shrunk: null, breakEvenP: null, belowBreakEven: false };
     if (!hourlyCandles || hourlyCandles.length < 60) return fallback;
     if (!dailyCandles || dailyCandles.length < 30) return fallback;
     try {
@@ -3412,10 +3488,18 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
         score = Math.min(1, excess / 0.15) * max;
       }
       
+      /* v39 (EV-aligned gating): the break-even gate is PLAN-AWARE. The old
+         flat 0.55 threshold compared a TOUCH probability against a constant,
+         so high-volatility names passed automatically (their vol-scaled
+         prior clears 0.55 with zero evidence) while their wide stops need a
+         much higher touch rate to break even. The correct break-even
+         target-first chance for target T and stop S is (S + costs) / (T + S). */
+      var beP = planBreakEvenTargetProb(planTargetPct(), planStopPct(atrPct));
       return {
         score: round(score, 1),
         p_shrunk: p_shrunk,
-        belowBreakEven: p_shrunk < 0.55
+        breakEvenP: round(beP, 3),
+        belowBreakEven: p_shrunk < beP
       };
     } catch (e) { return fallback; }
   }
@@ -6435,6 +6519,14 @@ function computeMarketRegimeFeatures(indexCandles, atBar, precomputedSeries) {
     interpret: interpret,
     computeExitScore: computeExitScore,
     computeEntryScore: computeEntryScore,
+    /* v39 (EV-aligned scoring) internals, exported for audits/tests */
+    _evAlign: {
+      calcRangeAdequacyScore: calcRangeAdequacyScore,
+      planStopPct: planStopPct,
+      planBreakEvenTargetProb: planBreakEvenTargetProb,
+      planTargetPct: planTargetPct,
+      planHorizonDays: planHorizonDays
+    },
     computeMultiTFEntryScore: computeMultiTFEntryScore,
     computeMultiTFExitScore: computeMultiTFExitScore,
     computeCompatExitScore: computeCompatExitScore,

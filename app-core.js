@@ -10565,6 +10565,134 @@ function StockScreener(props) {
     } finally { window.__stoxEvCalRunning = false; }
   };
 
+  /* ═══════════════ STOP-AWARE PILLAR HARNESS (v24) ══════════════════
+     The pillar weights were locked by a "touch +3% in N days, no stop"
+     forward-sim harness. This measures every pillar against the trade's REAL
+     objective instead: the triple-barrier realized P&L (target / ATR stop /
+     time) after costs, sampled walk-forward over cached daily history.
+
+     Run from the browser console after a scan (or with explicit tickers):
+         stoxRunScorePillarAudit()
+         stoxRunScorePillarAudit({ tickers: ['TCS','INFY'], maxSamplesPerStock: 30 })
+     Prints a score-band table and a quintile table per pillar, returns the
+     same data as an object. Read it like the old harness notes: a pillar
+     whose TOP quintile mean EV is below the headline mean EV is
+     anti-selective on the real objective and should LOSE weight.
+     Diagnostics only — nothing is written to any store. */
+  var stoxRunScorePillarAudit = async function(opts) {
+    opts = opts || {};
+    var EVX = window.ExpectedValueEngine, TI = window.TechIndicators;
+    if (!EVX || !EVX._test || !TI || typeof TI.computeEntryScore !== "function" || !DF) {
+      console.warn("[ScoreAudit] engine, indicators or data fetcher unavailable");
+      return { ok: false, reason: "engine/indicators/fetcher unavailable" };
+    }
+    var tickers = (opts.tickers || []).slice(0, Number(opts.maxStocks) || 25).filter(Boolean);
+    if (!tickers.length) { console.warn("[ScoreAudit] no tickers"); return { ok: false, reason: "no tickers" }; }
+    var horizon = Number(opts.horizonDays) || 10;
+    var targetPct = opts.targetPct != null ? Number(opts.targetPct) : 3;
+    var stopATR = opts.stopATR != null ? Number(opts.stopATR) : 1.8;
+    var maxSamples = Number(opts.maxSamplesPerStock) || 20;
+    var costPct = EVX.totalRoundTripCost();
+    var cfg = EVX.getConfig();
+    var wo = EVX._test.windowOutcome, ov = EVX._test.outcomeValues;
+    var idx = [];
+    try { var idxR = await DF.fetchOHLCVCached("^NSEI", "daily"); idx = (idxR && idxR.data) || []; } catch (_ie) {}
+    var samples = [];
+    for (var ti = 0; ti < tickers.length; ti++) {
+      var sym = tickers[ti], res = null;
+      try { res = await DF.fetchOHLCVCached(sym, "daily"); } catch (_fe) { continue; }
+      var daily = (res && res.data) || [];
+      var n = daily.length;
+      if (n < 120) continue;
+      var lo = Math.max(60, n - 500), hi = n - horizon - 2;
+      if (hi <= lo) continue;
+      var step = Math.max(5, Math.ceil((hi - lo) / maxSamples));
+      for (var i = lo; i <= hi; i += step) {
+        var tStr = String(daily[i].t).slice(0, 10);
+        var idxSlice = idx.filter(function(c) { return String(c.t).slice(0, 10) <= tStr; });
+        if (idxSlice.length < 50) continue;
+        var slice = daily.slice(0, i + 1);
+        var sc = null;
+        try { sc = TI.computeEntryScore(slice, idxSlice, sym, null); } catch (_se) { continue; }
+        if (!sc || sc.entry_score == null) continue;
+        var atrArr = null, atr = null;
+        try { atrArr = TI.atr(slice, 14); atr = atrArr && atrArr[atrArr.length - 1]; } catch (_ae) {}
+        var close = slice[slice.length - 1].c;
+        if (!(atr > 0) || !(close > 0)) continue;
+        var atrPct = atr / close * 100;
+        var stopPct = Math.max(1.5, Math.min(6, stopATR * atrPct));
+        var up = Math.log(1 + targetPct / 100), dn = Math.log(1 - stopPct / 100);
+        var o = wo(daily, i, horizon, up, dn, 0, stopPct, "fixed", { lockDelay: true });
+        if (!o) continue;
+        var v = ov(o, targetPct, costPct, cfg);
+        samples.push({
+          symbol: sym, date: tStr, score: sc.entry_score,
+          rangeAdequacy: Number(sc.rangeAdequacy) || 0,
+          trendHealth: Number(sc.trendHealth) || 0,
+          pullbackQuality: Number(sc.pullbackQuality) || 0,
+          swingPotential: Number(sc.swingPotential) || 0,
+          breakoutContinuation: Number(sc.breakoutContinuation) || 0,
+          regimeAlignment: Number(sc.regimeAlignment) || 0,
+          win: o.tP >= 0.5 ? 1 : 0, ev: v.pre
+        });
+      }
+      await new Promise(function(r) { setTimeout(r, 0); });
+    }
+    if (!samples.length) { console.warn("[ScoreAudit] no samples produced"); return { ok: false, reason: "no samples", n: 0 }; }
+    var mean = function(arr) { var s = 0; for (var i2 = 0; i2 < arr.length; i2++) s += arr[i2]; return s / arr.length; };
+    var stat = function(rows) {
+      var evs = rows.map(function(r) { return r.ev; });
+      var m = mean(evs), ss = 0;
+      for (var i3 = 0; i3 < evs.length; i3++) ss += (evs[i3] - m) * (evs[i3] - m);
+      var se = evs.length > 1 ? Math.sqrt(ss / (evs.length - 1)) / Math.sqrt(evs.length) : null;
+      return { n: rows.length, winRate: mean(rows.map(function(r) { return r.win; })), meanEV: m, se: se };
+    };
+    var quintiles = function(key) {
+      var sorted = samples.slice().sort(function(a, b) { return a[key] - b[key]; });
+      var out = [], qSize = Math.ceil(sorted.length / 5);
+      for (var q = 0; q < 5; q++) {
+        var chunk = sorted.slice(q * qSize, (q + 1) * qSize);
+        if (!chunk.length) continue;
+        var st = stat(chunk);
+        st.quintile = q + 1; st.valueFrom = chunk[0][key]; st.valueTo = chunk[chunk.length - 1][key];
+        out.push(st);
+      }
+      return out;
+    };
+    var pillars = ["rangeAdequacy", "trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"];
+    var byPillar = {};
+    pillars.forEach(function(p) { byPillar[p] = quintiles(p); });
+    var byScoreBand = [];
+    for (var b = 0; b <= 90; b += 15) {
+      var chunk2 = samples.filter(function(r) { return r.score >= b && r.score < b + 15; });
+      if (chunk2.length >= 5) {
+        var st2 = stat(chunk2);
+        st2.band = b + "-" + (b + 15);
+        byScoreBand.push(st2);
+      }
+    }
+    var report = {
+      ok: true, n: samples.length, stocks: tickers.length, headline: stat(samples),
+      byPillar: byPillar, byScoreBand: byScoreBand,
+      settings: { horizonDays: horizon, targetPct: targetPct, stopATR: stopATR, costPct: costPct, basis: "raw realized triple-barrier P&L after costs (no detrend, no tax); row-level SE, no week clustering" },
+      notes: [
+        "Objective = realized triple-barrier P&L with an ATR stop (the EV engine's windowOutcome), NOT target-touch.",
+        "Compare each pillar's top-quintile meanEV against the headline meanEV: a pillar whose top quintile is BELOW the base is anti-selective on the real objective and should LOSE pillarMax weight.",
+        "The confidence pillar is excluded (historical hourly data is not available per sample).",
+        "This is the stop-aware replacement for the 'touch +3%, no stop' harness that locked the current weights."
+      ]
+    };
+    try {
+      console.info("[ScoreAudit] " + report.n + " samples across " + report.stocks + " stocks | headline mean EV " + report.headline.meanEV.toFixed(3) + "% (win " + (report.headline.winRate * 100).toFixed(1) + "%, se " + (report.headline.se != null ? report.headline.se.toFixed(3) : "n/a") + ")");
+      console.table(byScoreBand.map(function(r) { return { band: r.band, n: r.n, win: (r.winRate * 100).toFixed(1) + "%", meanEV: r.meanEV.toFixed(3), se: r.se != null ? r.se.toFixed(3) : null }; }));
+      pillars.forEach(function(p) {
+        console.info("[ScoreAudit] pillar " + p);
+        console.table(byPillar[p].map(function(r) { return { quintile: r.quintile, from: r.valueFrom, to: r.valueTo, n: r.n, win: (r.winRate * 100).toFixed(1) + "%", meanEV: r.meanEV.toFixed(3), se: r.se != null ? r.se.toFixed(3) : null }; }));
+      });
+    } catch (_prErr) {}
+    return report;
+  };
+
   var evDecisionKey = function(r) {
     var d = r && r.ev && r.ev.decision;
     if (!d) return "none"; /* EV_V2_KEY */
@@ -11418,6 +11546,18 @@ function StockScreener(props) {
      hand from the console: stoxRunEvCalibration(). Guarded by the ticker set, so
      it starts once per page load and never overlaps a running job. */
   window.stoxRunEvCalibration = function() { return runEvCalibration(Array.isArray(results) ? results : []); };
+  /* v24: stop-aware pillar audit — see stoxRunScorePillarAudit below.
+     Defaults to the scanned tickers; can also be called with an explicit
+     ticker list from the console. */
+  window.stoxRunScorePillarAudit = function(opts) {
+    opts = opts || {};
+    if (!opts.tickers) {
+      opts.tickers = (Array.isArray(results) ? results : []).map(function(r) {
+        return r && r.s && r.s.t ? String(r.s.t).replace(".NS", "") : null;
+      }).filter(Boolean);
+    }
+    return stoxRunScorePillarAudit(opts);
+  };
   (function() {
     var rowsNow = Array.isArray(results) ? results : [];
     if (!rowsNow.length || (typeof scanning !== "undefined" && scanning)) return;
@@ -14607,13 +14747,13 @@ function InfoPage() {
         return React.createElement("div", { style: { padding: "12px 14px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", marginBottom: 10 } },
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 } },
             React.createElement("span", { style: { fontSize: 16, fontWeight: 800, color: "var(--accent)", fontFamily: "var(--font-heading)" } }, "\u25C9"),
-            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)" } }, "Range Adequacy (ATR%)"),
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--text)" } }, "Range Adequacy (plan-relative)"),
             React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, pts + " pts max")
           ),
           React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65, margin: 0 } },
-            "Can the stock actually move 3% in 10 days? This pillar scores the Average True Range (ATR) as a percentage of price. Higher ATR means the stock routinely makes larger daily swings, making a +3% move statistically easier to achieve. Scores peak at 4-6% ATR and decline above that. Below 1.5% ATR scores 0. ",
+            "Can the stock move the plan's +3% within 10 days \u2014 without the stop being far wider than the target? Since score v39 the pillar scores the plan-RELATIVE reachability (target \u00f7 typical travel ATR%\u00d7\u221a10) on a smoothstep band that peaks when the target is comfortably reachable but not trivial, and multiplies by a stop-asymmetry factor (k = stop \u00f7 target \u2014 plans whose stop is 2-3x the target lose up to 70% of the cap). Volatility alone no longer earns points. ",
             React.createElement("strong", { style: { color: "var(--text2)" } }, "Why it matters: "),
-            "This is the strongest empirical predictor of hitting a short-term target. If a stock's daily range is only 1%, asking for 3% in two weeks is a stretch. If its ATR is 3%, it's a normal Tuesday."
+            "The old ATR-only curve handed up to 35 of 100 points for volatility and made Buy-grade anti-selective on realized EV: high-ATR names touch targets often, but their stop tail eats the trade. Reachability plus payoff symmetry is what predicts a good trade. (Set SCORE_CONFIG.rangeAdequacy.curve.mode = 'atr' to run the old curve for comparison.)"
           )
         );
       })(),
@@ -14628,7 +14768,7 @@ function InfoPage() {
             React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "var(--accentbg)", padding: "2px 8px", borderRadius: 6 } }, pts + " pts max")
           ),
           React.createElement("p", { style: { fontSize: 12, color: "var(--text4)", lineHeight: 1.65, margin: 0 } },
-            "What are the statistical odds of hitting the target? This pillar runs the 10-day forward confidence model (barrier-touch probability with volatility and drift), calibrated against actual outcomes. If the model gives a 60% or lower chance, it contributes little. If it gives an 80%+ chance, it contributes full points. ",
+            "What are the statistical odds of hitting the target? This pillar runs the 10-day forward confidence model (barrier-touch probability with volatility and drift), calibrated against actual outcomes. If the model gives a 60% or lower chance, it contributes little. If it gives an 80%+ chance, it contributes full points. Since score v39 the BUY gate compares the shrunk touch probability against the PLAN-AWARE break-even chance (stop + costs) \u00f7 (target + stop) \u2014 not a flat 55% \u2014 so names with wide stops must show proportionally stronger evidence before they can be graded Buy. ",
             React.createElement("strong", { style: { color: "var(--text2)" } }, "Why it matters: "),
             "It forces the score to respect the underlying probability math rather than just technical shapes."
           )
