@@ -3234,9 +3234,17 @@ function calcBetaLagged(stockCandles, indexCandles, n) {
       relMomentum: 0,
       relMomBars: 21,
     },
-    /* v28: Gaussian ATR curve to prevent cliff edges */
+    /* v28: Gaussian ATR curve to prevent cliff edges.
+       v39: curve.mode selects the scoring basis - 'plan' (default;
+       plan-relative reachability x stop-asymmetry, band = minRatio /
+       peakRatio / maxRatio) or 'atr' (legacy ATR% smoothstep using
+       minAtr / peakAtr / maxAtr). stopATR / minStopPct / maxStopPct mirror
+       the EV engine's stop defaults; roundTripCostPct matches the statutory
+       stack and feeds the plan-aware break-even gate in the confidence
+       pillar: gate = (stop + costs) / (target + stop). */
     rangeAdequacy: {
-      curve: { peakAtr: 3.5, minAtr: 1.0, maxAtr: 9.0 }
+      curve: { mode: 'plan', peakAtr: 3.5, minAtr: 1.0, maxAtr: 9.0, peakRatio: 0.30, minRatio: 0.08, maxRatio: 0.90 },
+      stopATR: 1.8, minStopPct: 1.5, maxStopPct: 6.0, roundTripCostPct: 0.24
     },
     confidence: { pillarMin: 40, pillarMax: 90 },
     /* Modifiers — magnitudes tempered @2026-09-12 by a 5y NIFTY 200

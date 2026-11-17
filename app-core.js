@@ -1664,7 +1664,7 @@ function StockAnalysis({ ticker: initialTicker, prices, holdings, onBack }) {
         ),
         React.createElement("div", null,
           React.createElement("span", { style: { fontWeight: 600, color: "var(--text)" } }, "Scoring: "),
-          "The Entry/Exit Score (0\u2013100) aggregates all indicators into five pillars. " + (holding ? "Your holding: entry " + INR(holding.buyPrice, 2) + " on " + new Date(holding.buyDate).toLocaleDateString() + "." : "")
+          "The Entry/Exit Score (0\u2013100) aggregates all indicators into seven pillars (Range Adequacy, Confidence, Trend Health, Pullback Quality, Swing Potential, Breakout Continuation, Market/RS Alignment). " + (holding ? "Your holding: entry " + INR(holding.buyPrice, 2) + " on " + new Date(holding.buyDate).toLocaleDateString() + "." : "")
         )
       )
     ),
@@ -2177,7 +2177,7 @@ function EntryScoreAnalysis({ entry, onBack }) {
                   _sc("darvasBox", price >= activeInd.darvasBox.boxTop)
                 ),
                 React.createElement("div", { style: { padding: "4px 6px", borderRadius: 4, background: "var(--bg4)", fontSize: 9, color: "var(--text6)" } },
-                  "Signals are rule-based (price vs indicator). Scores aggregate across the Trend Health, Pullback Quality, Swing Potential, Breakout Continuation, and Market/RS Alignment pillars. Switch timeframes above for multi-TF context."
+                  "Signals are rule-based (price vs indicator). Scores aggregate across the Range Adequacy, Confidence, Trend Health, Pullback Quality, Swing Potential, Breakout Continuation, and Market/RS Alignment pillars. Switch timeframes above for multi-TF context."
                 )
               )
             )
@@ -8607,9 +8607,28 @@ const ScoreTunerPanel = () => {
     var parts = path.split(".");
     var newCfg = JSON.parse(JSON.stringify(scoreConfig));
     var obj = newCfg;
-    for (var i = 0; i < parts.length - 1; i++) { obj = obj[parts[i]]; }
+    for (var i = 0; i < parts.length - 1; i++) {
+      if (typeof obj[parts[i]] !== "object" || obj[parts[i]] == null) obj[parts[i]] = {};
+      obj = obj[parts[i]];
+    }
     obj[parts[parts.length - 1]] = parseFloat(value) || 0;
 
+    setScoreConfigState(newCfg);
+    newCfg._v = (TI.getScoreConfigVersion) ? TI.getScoreConfigVersion() : undefined;
+    try { localStorage.setItem("stox_score_config", JSON.stringify(newCfg)); } catch(e) {}
+    if (TI.setScoreConfig) TI.setScoreConfig(newCfg);
+  }
+
+  /* v39: string-valued config fields (e.g. rangeAdequacy.curve.mode) */
+  function updateScoreConfigStr(path, value) {
+    var parts = path.split(".");
+    var newCfg = JSON.parse(JSON.stringify(scoreConfig));
+    var obj = newCfg;
+    for (var i = 0; i < parts.length - 1; i++) {
+      if (typeof obj[parts[i]] !== "object" || obj[parts[i]] == null) obj[parts[i]] = {};
+      obj = obj[parts[i]];
+    }
+    obj[parts[parts.length - 1]] = String(value);
     setScoreConfigState(newCfg);
     newCfg._v = (TI.getScoreConfigVersion) ? TI.getScoreConfigVersion() : undefined;
     try { localStorage.setItem("stox_score_config", JSON.stringify(newCfg)); } catch(e) {}
@@ -8930,7 +8949,7 @@ const ScoreTunerPanel = () => {
       const sweepResult = await engine.sweepEntryScore(dataMap, {
         symbols: Object.keys(dataMap),
         scoreThresholds: [40, 45, 50, 55, 60, 65, 70, 75, 80],
-        pillarSweep: { trendHealth: [0, 5, 10, 15, 20, 25, 30], pullbackQuality: [0, 5, 10, 15, 20, 25, 30], swingPotential: [0, 6, 12, 18, 24, 30], regimeAlignment: [0, 2, 4, 6, 8, 10] },
+        pillarSweep: { rangeAdequacy: [0, 5, 10, 15, 20, 25, 30, 35], confidence: [0, 5, 10, 15, 20, 25], trendHealth: [0, 3, 6, 9, 12, 15], pullbackQuality: [0, 2, 4, 6, 8, 10], swingPotential: [0, 1, 2, 3, 4, 5], breakoutContinuation: [0, 1, 2, 3, 4, 5], regimeAlignment: [0, 1, 2, 3, 4, 5] },
         sampleEvery: sampleEvery
       }, {
         onProgress: (done, total, label) => { if (!cancelRef.current) setProgress({ phase: label, done, total }); }
@@ -9254,17 +9273,17 @@ const ScoreTunerPanel = () => {
             React.createElement("button", { onClick: resetScoreConfig, className: "stx-btn", style: { fontSize: 11, padding: "6px 10px", border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text4)", cursor: "pointer" } }, "Reset Defaults")
           )
         ),
-        /* Pillar Max Scores */
+        /* Confidence Horizon */
         React.createElement("div", { style: { marginBottom: 16 } },
           React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Confidence Horizon"),
           React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 8 } },
             React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "Forward horizon (trading days)"),
-            React.createElement("input", { className: "inp", type: "range", min: 3, max: 30, step: 1, value: scoreConfig.horizonDays || 13, onChange: function(e) { updateScoreConfig("horizonDays", e.target.value); }, style: { width: 160, accentColor: "var(--accent)" } }),
-            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-mono)", minWidth: 30 } }, scoreConfig.horizonDays || 13),
+            React.createElement("input", { className: "inp", type: "range", min: 3, max: 30, step: 1, value: scoreConfig.horizonDays || 10, onChange: function(e) { updateScoreConfig("horizonDays", e.target.value); }, style: { width: 160, accentColor: "var(--accent)" } }),
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-mono)", minWidth: 30 } }, scoreConfig.horizonDays || 10),
             React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "days")
           ),
           (function () {
-            var _tp = (scoreConfig.forwardSim && scoreConfig.forwardSim.targetPct != null && isFinite(scoreConfig.forwardSim.targetPct)) ? Number(scoreConfig.forwardSim.targetPct) : 0.035;
+            var _tp = (scoreConfig.forwardSim && scoreConfig.forwardSim.targetPct != null && isFinite(scoreConfig.forwardSim.targetPct)) ? Number(scoreConfig.forwardSim.targetPct) : 0.03;
             var _tpPct = Math.round(_tp * 1000) / 10;
             return React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
               React.createElement("span", { style: { fontSize: 11, color: "var(--text5)" } }, "Target Percentage"),
@@ -9289,17 +9308,35 @@ const ScoreTunerPanel = () => {
             );
           })()
         ),
-        /* Pillar Max Scores */
+        /* Pillar Max Scores (v39 design: 7 pillars, budget total = 100) */
         React.createElement("div", { style: { marginBottom: 16 } },
-          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar Max Scores"),
-
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 } },
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar Max Scores"),
+            (function () {
+              var _pm = scoreConfig.pillarMax || {};
+              var _sum = ["rangeAdequacy", "confidence", "trendHealth", "pullbackQuality", "swingPotential", "breakoutContinuation", "regimeAlignment"]
+                .reduce(function (a, k) { return a + (Number(_pm[k]) || 0); }, 0);
+              return React.createElement("span", {
+                title: "Sum of all pillar budgets. The score is 0-100, so the v39 design total is 100.",
+                style: { fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 6, color: _sum === 100 ? "#16a34a" : "#d97706", background: _sum === 100 ? "rgba(34,197,94,0.10)" : "rgba(217,119,6,0.10)", border: "1px solid " + (_sum === 100 ? "rgba(34,197,94,0.30)" : "rgba(217,119,6,0.30)") }
+              }, "Total " + _sum + " / 100");
+            })()
+          ),
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8 } }, "Seven pillars (v39 design), largest first. Range Adequacy and Confidence carry the plan geometry - see their editor sections below. Classification thresholds are at the bottom of this tab."),
           React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap" } },
-            [["pillarMax.trendHealth", "Trend Health"], ["pillarMax.pullbackQuality", "Pullback Quality"], ["pillarMax.swingPotential", "Swing Potential"], ["pillarMax.breakoutContinuation", "Breakout Continuation"], ["pillarMax.regimeAlignment", "Market/RS Alignment"]].map(([path, label]) =>
-              React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
-                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 110 } }, label),
+            [["pillarMax.rangeAdequacy", "Range Adequacy", "Plan-relative reachability x stop-asymmetry (v39 design max 35)"],
+             ["pillarMax.confidence", "Confidence", "10-day barrier-touch model vs the plan-aware break-even gate (v39 design max 25)"],
+             ["pillarMax.trendHealth", "Trend Health", "Trend structure: MAs, ADX/DI, Mansfield RS, MACD (v39 design max 15)"],
+             ["pillarMax.pullbackQuality", "Pullback Quality", "Pullback geometry, squeeze, oversold quality (v39 design max 10)"],
+             ["pillarMax.swingPotential", "Swing Potential", "Swing structure potential (v39 design max 5)"],
+             ["pillarMax.breakoutContinuation", "Breakout Continuation", "Breakout-state continuation, capped at 1.5 ATR extension (v39 design max 5)"],
+             ["pillarMax.regimeAlignment", "Market/RS Alignment", "Stock-level relative strength vs NIFTY (v39 design max 5)"]].map(function (p) {
+              var path = p[0], label = p[1], tip = p[2];
+              return React.createElement("div", { key: path, title: tip, style: { display: "flex", alignItems: "center", gap: 6 } },
+                React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 155 } }, label),
                 React.createElement("input", { className: "inp", type: "number", value: scoreConfig.pillarMax[path.split(".")[1]], onChange: e => updateScoreConfig(path, e.target.value), style: { width: 75, fontSize: 11 } })
-              )
-            )
+              );
+            })
           )
         ),
         /* MTF Weights */
@@ -9314,9 +9351,82 @@ const ScoreTunerPanel = () => {
             )
           )
         ),
-        /* Pillar 1: Trend Health */
+        /* Pillar 1: Range Adequacy (plan-relative) - v39 */
+        (function () {
+          var _g = function (path, dflt) {
+            try {
+              var v = path.split(".").reduce(function (o, k) { return (o == null) ? o : o[k]; }, scoreConfig);
+              return (v != null && isFinite(v)) ? v : dflt;
+            } catch (e) { return dflt; }
+          };
+          var _mode = "plan";
+          try { _mode = (scoreConfig.rangeAdequacy && scoreConfig.rangeAdequacy.curve && scoreConfig.rangeAdequacy.curve.mode) || "plan"; } catch (e) {}
+          var num = function (path, label, min, max, step, dflt) {
+            return React.createElement("div", { key: path, style: { display: "flex", alignItems: "center", gap: 6 } },
+              React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 175 } }, label),
+              React.createElement("input", { className: "inp", type: "number", step: step || 0.05, min: min, max: max, value: _g(path, dflt), onChange: e => updateScoreConfig(path, e.target.value), style: { width: 75, fontSize: 11 } })
+            );
+          };
+          var _gateLine = (function () {
+            try {
+              var _ea = TI && TI._evAlign;
+              if (!_ea) return null;
+              var _be = _ea.planBreakEvenTargetProb(_ea.planTargetPct(), _ea.planStopPct(2));
+              return React.createElement("div", { style: { marginTop: 8, fontSize: 10, color: "var(--text6)" } },
+                "Stop geometry feeds the Confidence BUY gate: break-even target-first chance = (stop + costs) / (target + stop). At 2% ATR with the current plan that gate sits at " + Math.round(_be * 100) + "%.");
+            } catch (e) { return null; }
+          })();
+          return React.createElement("div", { style: { marginBottom: 16 } },
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 1: Range Adequacy (plan-relative)"),
+            React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8, lineHeight: 1.6 } },
+              "v39 design: scores the plan-relative reachability ratio = target / (ATR% x sqrt(horizon)) on a smoothstep band (peak at the Plan Peak ratio), multiplied by a stop-asymmetry factor (k = stop / target; full cap at k <= 1, -35% of the cap per extra x of stop). Volatility alone earns nothing. The legacy ATR% curve is kept for A/B runs."),
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } },
+              React.createElement("span", { style: { fontSize: 11, color: "var(--text5)", minWidth: 175 } }, "Scoring mode"),
+              React.createElement("select", { className: "inp", value: _mode, onChange: function (e) { updateScoreConfigStr("rangeAdequacy.curve.mode", e.target.value); }, style: { width: 150, fontSize: 11 } },
+                React.createElement("option", { value: "plan" }, "plan (v39 default)"),
+                React.createElement("option", { value: "atr" }, "atr (legacy curve)")
+              ),
+              React.createElement("span", { style: { fontSize: 10, color: "var(--text6)" } }, "plan = reachability x stop asymmetry; atr = legacy ATR% smoothstep")
+            ),
+            _mode === "atr"
+              ? React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 } },
+                  num("rangeAdequacy.curve.minAtr", "Legacy: Min ATR %", 0, 5, 0.1, 1.0),
+                  num("rangeAdequacy.curve.peakAtr", "Legacy: Peak ATR %", 1, 8, 0.1, 3.5),
+                  num("rangeAdequacy.curve.maxAtr", "Legacy: Max ATR %", 3, 15, 0.1, 9.0)
+                )
+              : React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 } },
+                  num("rangeAdequacy.curve.minRatio", "Plan: Band Min (ratio)", 0.01, 0.5, 0.01, 0.08),
+                  num("rangeAdequacy.curve.peakRatio", "Plan: Peak (ratio)", 0.05, 1, 0.01, 0.30),
+                  num("rangeAdequacy.curve.maxRatio", "Plan: Band Max (ratio)", 0.2, 2, 0.01, 0.90)
+                ),
+            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8, marginTop: 8 } },
+              num("rangeAdequacy.stopATR", "Stop Width (x ATR)", 0.5, 4, 0.1, 1.8),
+              num("rangeAdequacy.minStopPct", "Min Stop %", 0.5, 4, 0.1, 1.5),
+              num("rangeAdequacy.maxStopPct", "Max Stop %", 2, 12, 0.5, 6.0),
+              num("rangeAdequacy.roundTripCostPct", "Round-trip Cost %", 0, 1.5, 0.01, 0.24)
+            ),
+            _gateLine
+          );
+        })(),
+        /* Pillar 2: Confidence (touch model + break-even gate) - v39 */
+        (function () {
+          var _gateEx = null;
+          try {
+            var _ea = TI && TI._evAlign;
+            if (_ea) _gateEx = _ea.planBreakEvenTargetProb(_ea.planTargetPct(), _ea.planStopPct(2));
+          } catch (e) {}
+          return React.createElement("div", { style: { marginBottom: 16 } },
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 2: Confidence (touch model + break-even gate)"),
+            React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", lineHeight: 1.6 } },
+              "Scores how far the 10-day barrier-touch probability runs above the volatility-scaled prior (full marks at +15 pts of excess). Since v39 the BUY gate is plan-aware: Buy / Strong Buy is downgraded unless the shrunk touch chance beats the break-even target-first chance (stop + costs) / (target + stop)" +
+              (_gateEx != null ? " - currently about " + Math.round(_gateEx * 100) + "% at 2% ATR." : "."),
+              React.createElement("div", { style: { marginTop: 6, fontSize: 10, color: "var(--text6)" } }, "Forward horizon and target are set in the Confidence Horizon section above; stop geometry and costs are set in Pillar 1: Range Adequacy.")
+            )
+          );
+        })(),
+        /* Pillar 3: Trend Health */
         React.createElement("div", { style: { marginBottom: 16 } },
-          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 1: Trend Health"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 3: Trend Health"),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 } },
             [["trendHealth.priceAboveSMA50", "Price > SMA50", 0, 10], ["trendHealth.SMA20AboveSMA50", "SMA20 > SMA50", 0, 10], ["trendHealth.priceAboveSMA20_or_VWAP", "Price > SMA20/VWAP", 0, 10],
              ["trendHealth.ADX_DI", "ADX + DI", 0, 10], ["trendHealth.adxThreshold", "ADX Threshold", 10, 40], ["trendHealth.mansfieldRS", "Mansfield RS", 0, 10],
@@ -9330,9 +9440,9 @@ const ScoreTunerPanel = () => {
             )
           )
         ),
-        /* Pillar 2: Pullback Quality */
+        /* Pillar 4: Pullback Quality */
         React.createElement("div", { style: { marginBottom: 16 } },
-          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 2: Pullback Quality"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 4: Pullback Quality"),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8 } },
             [["pullbackQuality.distATR_inner", "ATR Dist Inner", 0, 15], ["pullbackQuality.distATR_innerRange", "Inner Range (ATR)", 0.5, 3],
              ["pullbackQuality.distATR_outer", "ATR Dist Outer", 0, 10], ["pullbackQuality.distATR_outerRange", "Outer Range (ATR)", 1, 5],
@@ -9350,9 +9460,9 @@ const ScoreTunerPanel = () => {
             )
           )
         ),
-        /* Pillar 3: Swing Potential */
+        /* Pillar 5: Swing Potential */
         React.createElement("div", { style: { marginBottom: 16 } },
-          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 3: Swing Potential"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 5: Swing Potential"),
           React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8 } }, "Daily-only (max " + (__pm().swingPotential) + "). Pullback state = 4\u201325% depth from the 20-day swing high, 2\u201315 bars since. Reversal probability: empirical share of similar pullbacks that recovered to +targetPct% above entry inside the horizon (needs \u22658 samples), else a mean-reversion lognormal reflection; logit-calibrated (P0=0.57, K=41) and scaled to the Reversal Prob weight. Turn-confirmation sub-scores (higher low / hammer / RSI upturn) add on top, capped at Turn Confirm. Fwd-sim target/stop feed the diagnostics R/R and entry confidence."),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 8 } },
             [["swingPotential.reversalProbability", "Reversal Prob Weight", 0, 20], ["swingPotential.turnConfirm", "Turn Confirm Cap", 0, 6],
@@ -9366,9 +9476,9 @@ const ScoreTunerPanel = () => {
 )
          )
        ),
-        /* Pillar 4: Breakout Continuation */
+        /* Pillar 6: Breakout Continuation */
         React.createElement("div", { style: { marginBottom: 16 } },
-          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 4: Breakout Continuation"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 6: Breakout Continuation"),
           React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8 } }, "Daily-only (max " + (__pm().breakoutContinuation) + "). Breakout-side mirror of Swing Potential: zero unless the stock is in a fresh confirmed breakout (close above the prior-bar Donchian upper within 2 bars, extension <= 1.5 ATRs, not in a pullback). Probability: empirical continuation rate over the stock's own history (fraction of similar fresh-breakout windows that touched +targetPct% inside horizonDays, needs \u22658 samples), else a momentum-drift lognormal barrier touch; logit-calibrated (P0=0.57, K=31) and scaled to the continuation-probability weight. Runs on the measured residual budget (24\u00d70.936\u224822) after Trend/Pullback/Swing claim 24 each, keeping the total at 100."),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 8 } },
             [["breakoutContinuation.continuationProbability", "Continuation Prob Weight", 0, 22]
@@ -9380,9 +9490,9 @@ const ScoreTunerPanel = () => {
              )
           )
         ),
-        /* Pillar 5: Market/RS Alignment */
+        /* Pillar 7: Market/RS Alignment */
         React.createElement("div", { style: { marginBottom: 16 } },
-          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 5: Market/RS Alignment (stock-level)"),
+          React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, "Pillar 7: Market/RS Alignment (stock-level)"),
           React.createElement("div", { style: { fontSize: 11, color: "var(--text5)", marginBottom: 8 } }, "Per-stock alignment with the market. RS(52w) is the only sub-signal with a validated forward slope \u2014 points ramp continuously: positive RS earns RS/RS-Saturation of the RS Max (fully saturating at the saturation value). Trend & momentum default OFF (tested flat-to-negative); raise their Max + values to re-enable."),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 } },
             [["regimeAlignment.rs", "RS Max +", 0, 10], ["regimeAlignment.rsSaturation", "RS Saturation", 5, 50], ["regimeAlignment.longTrend", "SMA Trend Max +", 0, 10], ["regimeAlignment.longSmaBars", "Long SMA Bars", 50, 200], ["regimeAlignment.relMomentum", "Rel. Momentum Max +", 0, 10], ["regimeAlignment.relMomBars", "Momentum Window (bars)", 5, 60]
@@ -14738,7 +14848,7 @@ function InfoPage() {
     /* Pillars Explained \u2014 simple plain-English section */
     React.createElement("div", { className: "stx-card", style: { marginBottom: 20 } },
       React.createElement("h3", { style: { fontSize: 14, fontWeight: 700, marginBottom: 4, color: "var(--text)" } }, "Entry Score \u2014 Pillars Explained"),
-      React.createElement("p", { style: { fontSize: 11, color: "var(--text5)", lineHeight: 1.6, marginBottom: 14 } }, "The Entry Score (0\u2013100) tells you how strong a stock's setup looks right now. It is built from five independent pillars that each measure a different aspect of the trade. Think of them as five lenses \u2014 each one asks a different question about the stock before you buy."),
+      React.createElement("p", { style: { fontSize: 11, color: "var(--text5)", lineHeight: 1.6, marginBottom: 14 } }, "The Entry Score (0\u2013100) tells you how strong a stock's setup looks right now. It is built from seven independent pillars that each measure a different aspect of the trade. Think of them as seven lenses \u2014 each one asks a different question about the stock before you buy."),
 
       /* Pillar: Range Adequacy */
       (function() {
@@ -14774,7 +14884,7 @@ function InfoPage() {
           )
         );
       })(),
-      /* Pillar 1: Trend Health */
+      /* Pillar 3: Trend Health */
       (function() {
         var _pm = __pm();
         var pts = _pm.trendHealth;
@@ -14792,7 +14902,7 @@ function InfoPage() {
         );
       })(),
 
-      /* Pillar 2: Pullback Quality */
+      /* Pillar 4: Pullback Quality */
       (function() {
         var _pm = __pm();
         var pts = _pm.pullbackQuality;
@@ -14810,7 +14920,7 @@ function InfoPage() {
         );
       })(),
 
-      /* Pillar 3: Swing Potential */
+      /* Pillar 5: Swing Potential */
       (function() {
         var _pm = __pm();
         var pts = _pm.swingPotential;
@@ -14828,7 +14938,7 @@ function InfoPage() {
         );
       })(),
 
-      /* Pillar 4: Breakout Continuation */
+      /* Pillar 6: Breakout Continuation */
       (function() {
         var _pm = __pm();
         var pts = _pm.breakoutContinuation;
@@ -14846,7 +14956,7 @@ function InfoPage() {
         );
       })(),
 
-      /* Pillar 5: Market/RS Alignment */
+      /* Pillar 7: Market/RS Alignment */
       (function() {
         var _pm = __pm();
         var pts = _pm.regimeAlignment;
