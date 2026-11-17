@@ -9819,7 +9819,22 @@ function StockScreener(props) {
         exitRule: best.exitRule || null,
         rets: typeof EVX.returnSeries === "function" ? EVX.returnSeries(dailyCandles, 90) : null,
         episode: episodeState,   /* v4.4.1 UI integration */
-        progress: progress       /* EV_EPISODE_UI_V1 */
+        progress: progress,       /* EV_EPISODE_UI_V1 */
+        /* v4.7.2: full inline texts + model detail for the Excel export */
+        explanation: best.explanation || null,
+        probDetail: {
+          statistical: pr.statistical != null ? pr.statistical : null,
+          historical: pr.historical != null ? pr.historical : null,
+          priorP: pr.priorP != null ? pr.priorP : null,
+          setupLift: pr.setupLift != null ? pr.setupLift : null,
+          setupAdjustment: pr.setupAdjustment != null ? pr.setupAdjustment : null,
+          statisticalBase: pr.statisticalBase != null ? pr.statisticalBase : null,
+          method: pr.method || null
+        },
+        distDetail: dist || null,
+        windowsDetail: best.windows || null,
+        intraday: best.intraday || null,
+        basePlan: best.baseModelPlan || null
       };
     } catch (_evErr) { return null; }
   };
@@ -9827,6 +9842,12 @@ function StockScreener(props) {
   /* === EV_EPISODE_UI_V1: target / stop reached highlight for the EV table ===
      Driven by ExpectedValueEngine.episodeProgress (raw price path from the prediction's entry,
      including today's forming bar and the live price) and recentResults (settled, raw basis). */
+  /* v4.7.2: plan percentages can carry full float precision (e.g. a stop from
+     ATR = 5.3337585533684%); display them rounded everywhere. */
+  var evFmtPct = function(v) {
+    if (v == null || !isFinite(Number(v))) return "?";
+    return String(Math.round(Number(v) * 100) / 100);
+  };
   var stoxEvProgressStyle = function(pg) {
     var st = { borderBottom: "1px solid var(--border)", height: 40 };
     if (pg && pg.status === "target_hit") st.background = "rgba(22,163,74,0.12)";
@@ -9842,7 +9863,7 @@ function StockScreener(props) {
     var live = pg.source === "live" ? "\nLive price, not yet a closed bar - can still reverse before the close." : "";
     var title = (hit ? "Target reached" : "Stop reached") + when + live +
       "\nEntry " + rs(pg.entryPrice) + (pg.entryDate ? " (" + pg.entryDate + ")" : "") + "; target " + rs(pg.targetPrice) + ", stop " + rs(pg.stopPrice) +
-      "\nPlan: +" + pg.targetPct + "% / -" + pg.stopPct + "% within " + pg.horizonDays + " days" +
+      "\nPlan: +" + evFmtPct(pg.targetPct) + "% / -" + evFmtPct(pg.stopPct) + "% within " + pg.horizonDays + " days" +
       "\nPeak " + pc(pg.peakPct) + ", now " + pc(pg.currentPct) +
       "\nJudged on the raw price path from the next-session open.";
     return React.createElement("span", {
@@ -9860,9 +9881,9 @@ function StockScreener(props) {
     var chips = list.map(function(r, i) {
       var sym = String(r.symbol || "").replace(".NS", "");
       var hit = r.outcome === "target", stop = r.outcome === "stop";
-      var label = sym + " " + (hit ? "+" + r.targetPct + "%" : (stop ? "-" + r.stopPct + "%" : "timeout"));
+      var label = sym + " " + (hit ? "+" + evFmtPct(r.targetPct) + "%" : (stop ? "-" + evFmtPct(r.stopPct) + "%" : "timeout"));
       var title = (hit ? "Target reached" : (stop ? "Stop reached" : "Window ended without touching target or stop")) +
-        " - plan +" + r.targetPct + "% / -" + r.stopPct + "% within " + r.horizonDays + " days" +
+        " - plan +" + evFmtPct(r.targetPct) + "% / -" + evFmtPct(r.stopPct) + "% within " + r.horizonDays + " days" +
         (r.entryDate ? "\nEntered " + r.entryDate + (r.entryPrice ? " at \u20B9" + Number(r.entryPrice).toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "") : "") +
         (r.realizedRawPct != null ? "\nRaw result after costs: " + (r.realizedRawPct >= 0 ? "+" : "") + r.realizedRawPct + "%" : "") +
         (r.predictedPct != null ? " (predicted EV " + (r.predictedPct >= 0 ? "+" : "") + r.predictedPct + "%)" : "");
@@ -10026,6 +10047,477 @@ function StockScreener(props) {
     return { lines: lines, recent: recent };
   };
 
+  /* ═══════════════ EV TUNER (v4.7.2 UI) ═══════════════════════════════
+     Every engine parameter in one modal, backed by window.STOX_EV_CONFIG
+     (merged by the engine's getConfig on every call) and persisted in
+     localStorage 'stox_ev_ui_config' (read at engine load, before the basis
+     signature is computed). */
+  var evTunerGroups = [
+    { title: "Shrinkage & decision gates", fields: [
+      { path: "evPriorStdPct", label: "Shrinkage prior sd (tau)", type: "number", step: 0.01, min: 0.05, max: 2, tip: "Smaller = predictions pulled harder toward the zero-edge prior. Re-tune from the settled-row slope instead of guessing." },
+      { path: "minNetEV", label: "Min Net EV to qualify (%)", type: "number", step: 0.05, tip: "QUALIFIED_TRADE needs at least this trust-adjusted Net EV." },
+      { path: "minPositiveProbability", label: "Min P(positive return)", type: "number", step: 0.01, min: 0, max: 1 },
+      { path: "minEvidence", label: "Min Evidence score", type: "number", step: 1, min: 0, max: 100 },
+      { path: "minEvConfidence", label: "Min EV confidence P(true EV>0)", type: "number", step: 0.01, min: 0, max: 1 },
+      { path: "selectionHaircut", label: "Best-of-N selection haircut", type: "bool", tip: "Subtract selection inflation AFTER shrinkage. Turn off only when the self-check says the model is conservative." }
+    ] },
+    { title: "Outcome model (windows)", fields: [
+      { path: "driftKeep", label: "Drift kept in outcomes (0-1)", type: "number", step: 0.05, min: 0, max: 1, tip: "0.5 = half the trailing drift removed from window outcomes; 1 = keep full market drift (optimistic in uptrends)." },
+      { path: "lookbackBars", label: "Lookback (bars)", type: "number", step: 50 },
+      { path: "minWindows", label: "Min windows per plan", type: "number", step: 5 },
+      { path: "stopATR", label: "Stop width (x ATR)", type: "number", step: 0.1 },
+      { path: "minStopPct", label: "Min stop (%)", type: "number", step: 0.1 },
+      { path: "maxStopPct", label: "Max stop (%)", type: "number", step: 0.1 },
+      { path: "defaultHorizon", label: "Default horizon (days)", type: "number", step: 1 },
+      { path: "defaultTargetPct", label: "Default target (%)", type: "number", step: 0.5 }
+    ] },
+    { title: "Plan grid & exits", fields: [
+      { path: "horizons", label: "Horizons (comma separated)", type: "csv" },
+      { path: "targets", label: "Targets % (comma separated)", type: "csv" },
+      { path: "exitVariants", label: "Exit variants (fixed/breakeven/trail)", type: "csv" },
+      { path: "exit.armFrac", label: "Arm fraction", type: "number", step: 0.05, min: 0, max: 1 },
+      { path: "exit.trailFrac", label: "Trail fraction", type: "number", step: 0.05, min: 0, max: 1 }
+    ] },
+    { title: "Costs & tax", fields: [
+      { path: "costs.brokerage", label: "Brokerage %/side", type: "number", step: 0.001 },
+      { path: "costs.stt", label: "STT % round trip", type: "number", step: 0.005 },
+      { path: "costs.exchange", label: "Exchange %/side", type: "number", step: 0.001 },
+      { path: "costs.sebi", label: "SEBI+GST %/side", type: "number", step: 0.001 },
+      { path: "costs.stampDuty", label: "Stamp duty % (buy)", type: "number", step: 0.005 },
+      { path: "costs.slippage", label: "Slippage %/side", type: "number", step: 0.01, tip: "Current default is 0 (fills at/near the open). Raise it if entries become market orders." },
+      { path: "costs.dpChargeRs", label: "DP charge (Rs/scrip)", type: "number", step: 0.01 },
+      { path: "costs.positionSizeRs", label: "Position size Rs (for DP %)", type: "number", step: 5000 },
+      { path: "taxRatePct", label: "Capital-gains tax %", type: "number", step: 0.5, tip: "0 = tax NOT deducted from Net EV." },
+      { path: "taxLossCredit", label: "Loss offset share (0-1)", type: "number", step: 0.1, min: 0, max: 1 },
+      { path: "decideAfterTax", label: "Decide on after-tax basis", type: "bool" }
+    ] },
+    { title: "Weighting, regime & prior", fields: [
+      { path: "recency.halfLifeBars", label: "Recency half-life (bars)", type: "number", step: 25 },
+      { path: "regime.enabled", label: "Regime weighting", type: "bool" },
+      { path: "regime.mismatchWeight", label: "Regime mismatch weight", type: "number", step: 0.1, min: 0, max: 1 },
+      { path: "pooledPrior.enabled", label: "Pooled cross-stock prior", type: "bool" },
+      { path: "pooledPrior.maxWeight", label: "Pooled prior max weight", type: "number", step: 0.05, min: 0, max: 1 },
+      { path: "pooledPrior.k", label: "Pooled prior strength (k)", type: "number", step: 5 }
+    ] },
+    { title: "Sizing", fields: [
+      { path: "sizing.kellyFraction", label: "Kelly fraction", type: "number", step: 0.05, min: 0, max: 1 },
+      { path: "sizing.maxPositionPct", label: "Max position %", type: "number", step: 1 },
+      { path: "sizing.maxRiskPerTradePct", label: "Max risk per trade %", type: "number", step: 0.1 }
+    ] },
+    { title: "Intraday (v4.7)", fields: [
+      { path: "intraday.enabled", label: "Intraday live-price pricing", type: "bool" },
+      { path: "intraday.maxMovePct", label: "Max intraday move % (no price beyond)", type: "number", step: 0.5 }
+    ] }
+  ];
+
+  var evCfgGet = function(path, cfg) {
+    var parts = path.split("."), v = cfg;
+    for (var i = 0; i < parts.length; i++) { if (v == null) return null; v = v[parts[i]]; }
+    return v;
+  };
+  var evCfgSet = function(obj, path, value) {
+    var parts = path.split("."), o = obj;
+    for (var i = 0; i < parts.length - 1; i++) {
+      if (typeof o[parts[i]] !== "object" || o[parts[i]] == null) o[parts[i]] = {};
+      o = o[parts[i]];
+    }
+    o[parts[parts.length - 1]] = value;
+    return obj;
+  };
+  var evCfgDraftValue = function(field, cfg) {
+    var v = evCfgGet(field.path, cfg);
+    if (field.type === "bool") return v === true || v === "true";
+    if (field.type === "csv") return Array.isArray(v) ? v.join(", ") : (v == null ? "" : String(v));
+    return v == null ? "" : String(v);
+  };
+  var evCfgFlatten = function(cfg, prefix, out) {
+    out = out || [];
+    Object.keys(cfg || {}).forEach(function(k) {
+      var v = cfg[k], p = prefix ? prefix + "." + k : k;
+      if (v && typeof v === "object" && !Array.isArray(v)) evCfgFlatten(v, p, out);
+      else out.push([p, Array.isArray(v) ? v.join(", ") : String(v)]);
+    });
+    return out;
+  };
+
+  var evTunerSet = function(path, v) {
+    setEvTunerDraft(function(prev) { var c = Object.assign({}, prev || {}); c[path] = v; return c; });
+  };
+  var evTunerApply = function() {
+    try {
+      var override = {};
+      try { override = JSON.parse(JSON.stringify(window.STOX_EV_CONFIG || {})); } catch (_cpErr) { override = {}; }
+      evTunerGroups.forEach(function(g) { g.fields.forEach(function(f) {
+        var raw = evTunerDraft ? evTunerDraft[f.path] : null;
+        if (raw == null) return;
+        if (f.type === "bool") { evCfgSet(override, f.path, raw === true || raw === "true"); return; }
+        if (f.type === "csv") {
+          var arr = String(raw).split(",").map(function(x) { return Number(x.trim()); }).filter(function(x) { return isFinite(x); });
+          if (arr.length) evCfgSet(override, f.path, arr);
+          return;
+        }
+        var n = Number(raw);
+        if (isFinite(n)) evCfgSet(override, f.path, n);
+      }); });
+      window.STOX_EV_CONFIG = override;
+      try { localStorage.setItem("stox_ev_ui_config", JSON.stringify(override)); } catch (_pe) {}
+      setEvTunerMsg("Saved. Re-run the scan to reprice with the new parameters. After changing basis parameters (drift/lookback/stop/tau/grid/recency/regime), reload the page so the model basis rotates cleanly and the calibration rebuilds in the background.");
+      try { if (typeof showToast === "function") showToast("EV parameters saved", 3500); } catch (_t) {}
+    } catch (_apErr) { setEvTunerMsg("Apply failed: " + ((_apErr && _apErr.message) || _apErr)); }
+  };
+  var evTunerReset = function() {
+    try { localStorage.removeItem("stox_ev_ui_config"); } catch (_re) {}
+    try { delete window.STOX_EV_CONFIG; } catch (_re2) { window.STOX_EV_CONFIG = {}; }
+    var cfg = (window.ExpectedValueEngine && window.ExpectedValueEngine.getConfig) ? window.ExpectedValueEngine.getConfig() : {};
+    var draft = {};
+    evTunerGroups.forEach(function(g) { g.fields.forEach(function(f) { draft[f.path] = evCfgDraftValue(f, cfg); }); });
+    setEvTunerDraft(draft);
+    setEvTunerMsg("Defaults restored (saved override cleared). Reload the page so the basis rotates back and the calibration family rebuilds.");
+  };
+  var evTunerRetune = function() {
+    try {
+      var EVX = window.ExpectedValueEngine;
+      if (!EVX || typeof EVX.retuneTau !== "function") { setEvTunerMsg("Engine unavailable"); return null; }
+      var rows = typeof EVX.rowStoreRows === "function" ? EVX.rowStoreRows() : [];
+      var res = EVX.retuneTau(rows);
+      if (!res || !res.ok) {
+        setEvTunerMsg("Re-tuning needs at least 30 settled prediction rows with recorded EV + realized P&L (have " + (res ? res.n : 0) + "). Let episodes settle first.");
+        return null;
+      }
+      var msg = "Tau scan on " + res.n + " settled rows: best tau = " + res.best.tauBase +
+        " (realized-on-predicted slope " + (res.best.slope != null ? res.best.slope.toFixed(2) : "n/a") +
+        ", |slope-1| = " + (isFinite(res.best.deviation) ? res.best.deviation.toFixed(3) : "n/a") +
+        "); current tau = " + res.currentTauBase + ". ";
+      if (res.best.tauBase !== res.currentTauBase) {
+        evTunerSet("evPriorStdPct", String(res.best.tauBase));
+        msg += "The tau field has been set to " + res.best.tauBase + " - review it and click Apply & Save.";
+      } else {
+        msg += "Current tau is already the best value on the grid.";
+      }
+      setEvTunerMsg(msg);
+      return res;
+    } catch (_rtErr) { setEvTunerMsg("Retune failed: " + ((_rtErr && _rtErr.message) || _rtErr)); return null; }
+  };
+  var evTunerOpenModal = function(runRetune) {
+    try {
+      var cfg = (window.ExpectedValueEngine && window.ExpectedValueEngine.getConfig) ? window.ExpectedValueEngine.getConfig() : {};
+      var draft = {};
+      evTunerGroups.forEach(function(g) { g.fields.forEach(function(f) { draft[f.path] = evCfgDraftValue(f, cfg); }); });
+      setEvTunerDraft(draft);
+    } catch (_omErr) {}
+    setEvTunerMsg(runRetune
+      ? "Re-tuning shrinkage from the settled live rows..."
+      : "Tune the parameters, then Apply & Save. Values persist in this browser and are re-applied on load.");
+    setEvTunerOpen(true);
+    if (runRetune) setTimeout(function() { try { evTunerRetune(); } catch (_e) {} }, 60);
+  };
+
+  var evTunerModal = function() {
+    var draft = evTunerDraft || {};
+    var inpStyle = { width: 118, padding: "3px 6px", fontSize: 10, border: "1px solid var(--border2)", borderRadius: 4, background: "var(--bg3)", color: "var(--text)" };
+    var btn = function(label, onClick, primary) {
+      return React.createElement("button", { onClick: onClick, style: {
+        padding: "5px 12px", fontSize: 10, fontWeight: 700, borderRadius: 5, cursor: "pointer",
+        border: "1px solid " + (primary ? "var(--accent)" : "var(--border2)"),
+        background: primary ? "var(--accent)" : "var(--bg4)", color: primary ? "#fff" : "var(--text)"
+      } }, label);
+    };
+    return React.createElement("div", { onClick: function() { setEvTunerOpen(false); }, style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 } },
+      React.createElement("div", { onClick: function(e) { e.stopPropagation(); }, style: { background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, width: "min(880px, 96vw)", maxHeight: "88vh", overflowY: "auto", padding: 14 } },
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
+          React.createElement("div", { style: { fontSize: 13, fontWeight: 800, color: "var(--text)" } }, "EV Engine \u2014 Tune Parameters"),
+          btn("Close", function() { setEvTunerOpen(false); }, false)
+        ),
+        React.createElement("div", { style: { fontSize: 9, color: "var(--text6)", marginBottom: 8, lineHeight: 1.5 } },
+          "Stored in this browser (localStorage stox_ev_ui_config) and re-applied on load. Changes to outcome / basis parameters (drift, lookback, stops, tau, grid, recency, regime) rotate the model basis: the live store turns over and the calibration family rebuilds in the background \u2014 the engine handles this automatically."),
+        evTunerGroups.map(function(g, gi) {
+          return React.createElement("div", { key: "tg" + gi, style: { marginBottom: 10 } },
+            React.createElement("div", { style: { fontSize: 10, fontWeight: 800, color: "var(--text3)", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 } }, g.title),
+            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 6 } },
+              g.fields.map(function(f, fi) {
+                return React.createElement("label", { key: "tf" + fi, title: f.tip || f.path, style: { display: "flex", alignItems: "center", gap: 6, fontSize: 9, color: "var(--text4)" } },
+                  React.createElement("span", { style: { flex: 1 } }, f.label),
+                  f.type === "bool"
+                    ? React.createElement("input", { type: "checkbox", checked: draft[f.path] === true || draft[f.path] === "true", onChange: function(e) { evTunerSet(f.path, e.target.checked); } })
+                    : React.createElement("input", { type: f.type === "number" ? "number" : "text", step: f.step != null ? f.step : "any", min: f.min, max: f.max, value: draft[f.path] != null ? draft[f.path] : "", onChange: function(e) { evTunerSet(f.path, e.target.value); }, style: inpStyle })
+                );
+              })
+            )
+          );
+        }),
+        evTunerMsg ? React.createElement("div", { style: { fontSize: 9, color: "#d97706", background: "rgba(217,119,6,0.08)", border: "1px solid rgba(217,119,6,0.25)", borderRadius: 6, padding: "6px 8px", margin: "8px 0", whiteSpace: "pre-wrap", lineHeight: 1.5 } }, evTunerMsg) : null,
+        React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 } },
+          btn("Apply & Save", evTunerApply, true),
+          btn("Re-tune \u03C4 from settled rows", function() { evTunerRetune(); }, false),
+          btn("Reset to defaults", evTunerReset, false)
+        )
+      )
+    );
+  };
+
+  var evHdrBtnStyle = { padding: "4px 10px", fontSize: 9, fontWeight: 700, borderRadius: 5, border: "1px solid var(--border2)", background: "var(--bg4)", color: "var(--text3)", cursor: "pointer", whiteSpace: "nowrap" };
+
+  /* ═══════════════ EXCEL EXPORT (v4.7.2 UI) ══════════════════════════
+     Minimal XLSX writer (store-only ZIP + SpreadsheetML inline strings) +
+     a 3-sheet export of the EV table: numbers sheet, full inline texts sheet,
+     scorecard + active-config snapshot sheet. */
+  /*__XLSX_BEGIN__*/
+  var stoxXlsxBuild = function(sheets) {
+    var esc = function(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+    };
+    var colName = function(i0) {
+      var s = "", i = i0 + 1;
+      while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - m - 1) / 26); }
+      return s;
+    };
+    var utf8 = (typeof TextEncoder !== "undefined")
+      ? function(str) { return new TextEncoder().encode(str); }
+      : function(str) {
+          var out = [];
+          for (var i = 0; i < str.length; i++) {
+            var c = str.charCodeAt(i);
+            if (c >= 0xD800 && c <= 0xDBFF && i + 1 < str.length) {
+              var c2 = str.charCodeAt(i + 1);
+              if (c2 >= 0xDC00 && c2 <= 0xDFFF) {
+                var cp = 0x10000 + ((c - 0xD800) << 10) + (c2 - 0xDC00); i++;
+                out.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
+                continue;
+              }
+            }
+            if (c < 0x80) out.push(c);
+            else if (c < 0x800) out.push(0xC0 | (c >> 6), 0x80 | (c & 63));
+            else out.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+          }
+          return new Uint8Array(out);
+        };
+    var crcTable = [];
+    for (var tc = 0; tc < 256; tc++) {
+      var cc = tc;
+      for (var kk = 0; kk < 8; kk++) cc = (cc & 1) ? (0xEDB88320 ^ (cc >>> 1)) : (cc >>> 1);
+      crcTable[tc] = cc >>> 0;
+    }
+    var crc32 = function(u8) {
+      var c = 0xFFFFFFFF;
+      for (var i = 0; i < u8.length; i++) c = crcTable[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+      return (c ^ 0xFFFFFFFF) >>> 0;
+    };
+    var sheetXml = function(sh) {
+      var x = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+        '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>';
+      if (sh.cols && sh.cols.length) {
+        x += '<cols>';
+        for (var ci = 0; ci < sh.cols.length; ci++) {
+          x += '<col min="' + (ci + 1) + '" max="' + (ci + 1) + '" width="' + (Number(sh.cols[ci]) || 14) + '" customWidth="1"/>';
+        }
+        x += '</cols>';
+      }
+      x += '<sheetData>';
+      (sh.rows || []).forEach(function(row, ri) {
+        x += '<row r="' + (ri + 1) + '">';
+        (row || []).forEach(function(cell, ci2) {
+          if (cell == null) return;
+          var ref = colName(ci2) + (ri + 1);
+          if (typeof cell === "number" && isFinite(cell)) {
+            x += '<c r="' + ref + '"><v>' + cell + '</v></c>';
+          } else {
+            x += '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + esc(cell) + '</t></is></c>';
+          }
+        });
+        x += '</row>';
+      });
+      x += '</sheetData></worksheet>';
+      return x;
+    };
+    var sheetNames = sheets.map(function(s) { return String(s.name || "Sheet").replace(/[\[\]\*\/\\\?:]/g, " ").slice(0, 31); });
+    var contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
+    for (var si = 0; si < sheets.length; si++) {
+      contentTypes += '<Override PartName="/xl/worksheets/sheet' + (si + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+    }
+    contentTypes += '</Types>';
+    var rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+    var workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>';
+    var wbRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+    for (var wi = 0; wi < sheets.length; wi++) {
+      workbook += '<sheet name="' + esc(sheetNames[wi]) + '" sheetId="' + (wi + 1) + '" r:id="rId' + (wi + 1) + '"/>';
+      wbRels += '<Relationship Id="rId' + (wi + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (wi + 1) + '.xml"/>';
+    }
+    workbook += '</sheets></workbook>';
+    wbRels += '</Relationships>';
+    var files = [
+      { name: '[Content_Types].xml', data: contentTypes },
+      { name: '_rels/.rels', data: rootRels },
+      { name: 'xl/workbook.xml', data: workbook },
+      { name: 'xl/_rels/workbook.xml.rels', data: wbRels }
+    ];
+    sheets.forEach(function(sh, i2) { files.push({ name: 'xl/worksheets/sheet' + (i2 + 1) + '.xml', data: sheetXml(sh) }); });
+    var chunks = [], central = [], offset = 0;
+    files.forEach(function(f) {
+      var nameU8 = utf8(f.name), dataU8 = utf8(f.data), crc = crc32(dataU8);
+      var local = new Uint8Array(30 + nameU8.length), dv = new DataView(local.buffer);
+      dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true); dv.setUint16(6, 0x0800, true);
+      dv.setUint16(8, 0, true); dv.setUint16(10, 0, true); dv.setUint16(12, 0x21, true);
+      dv.setUint32(14, crc, true); dv.setUint32(18, dataU8.length, true); dv.setUint32(22, dataU8.length, true);
+      dv.setUint16(26, nameU8.length, true); dv.setUint16(28, 0, true);
+      local.set(nameU8, 30);
+      chunks.push(local, dataU8);
+      var cen = new Uint8Array(46 + nameU8.length), cv = new DataView(cen.buffer);
+      cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+      cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true); cv.setUint16(12, 0, true); cv.setUint16(14, 0x21, true);
+      cv.setUint32(16, crc, true); cv.setUint32(20, dataU8.length, true); cv.setUint32(24, dataU8.length, true);
+      cv.setUint16(28, nameU8.length, true); cv.setUint16(30, 0, true); cv.setUint16(32, 0, true);
+      cv.setUint16(34, 0, true); cv.setUint16(36, 0, true); cv.setUint32(38, 0, true);
+      cv.setUint32(42, offset, true);
+      cen.set(nameU8, 46);
+      central.push(cen);
+      offset += local.length + dataU8.length;
+    });
+    var cdSize = 0;
+    central.forEach(function(c) { cdSize += c.length; });
+    var eocd = new Uint8Array(22), evdv = new DataView(eocd.buffer);
+    evdv.setUint32(0, 0x06054b50, true); evdv.setUint16(4, 0, true); evdv.setUint16(6, 0, true);
+    evdv.setUint16(8, files.length, true); evdv.setUint16(10, files.length, true);
+    evdv.setUint32(12, cdSize, true); evdv.setUint32(16, offset, true); evdv.setUint16(20, 0, true);
+    return new Blob(chunks.concat(central, [eocd]), { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  };
+  /*__XLSX_END__*/
+
+  var evNum = function(v) { var n = Number(v); return v == null || !isFinite(n) ? null : n; };
+  var evStr = function(v) { return v == null ? "" : String(v); };
+  var evProgressText = function(pg) {
+    if (!pg) return "";
+    var pc = function(v) { return v == null ? "-" : (v >= 0 ? "+" : "") + Number(v).toFixed(2) + "%"; };
+    return evStr(pg.status) + (pg.hitDate ? " on " + pg.hitDate : "") +
+      "; entry " + (pg.entryDate || "?") + (pg.entryPrice ? " @ " + Number(pg.entryPrice).toFixed(2) : "") +
+      "; peak " + pc(pg.peakPct) + "; now " + pc(pg.currentPct) +
+      (pg.source ? " (source: " + pg.source + ")" : "") +
+      (pg.daysElapsed != null ? "; day " + pg.daysElapsed + " of " + (pg.horizonDays || "?") : "");
+  };
+  var stoxEvDownloadExcel = function(rows, health, rel, verdict) {
+    var EVX = window.ExpectedValueEngine;
+    var fileName = "stox-ev-table-" + new Date().toISOString().slice(0, 10) + ".xlsx";
+
+    /* Sheet 1: EV Table (numbers + categories, one row per trade candidate) */
+    var h1 = ["Stock","Signal","EV Decision","Net EV %","90% lo","90% hi","EV Conf %","Win %","Evidence","Setup","Target %","Stop %","Days","Size %","EV/day %","Worst 5%","Price","Today %","1M %","Raw EV %","Haircut %","Shrink factor","Prior %","Zero-edge %","Pooled prior %","Pooled weight","Gross EV %","Costs %","Tax %","P(target)","P(stop)","P(timeout)","Touch %","Historical N","Windows n","Exit mode","Cal score gap","Break-even P(target)","Full Kelly %","Size binding","Optimizer utility","Entry score","Signal strength"];
+    var rows1 = (rows || []).map(function(r) {
+      var ev = r.ev || {}, dd = ev.distDetail || {};
+      var net = ev.bestNetEV != null ? ev.bestNetEV : ev.netEV;
+      return [
+        evStr(String((r.s && r.s.t) || "").replace(".NS", "")),
+        evStr(stoxBaseDecision(r)),
+        evStr(ev.decision && ev.decision.label),
+        evNum(net), evNum(ev.rangeLo), evNum(ev.rangeHi),
+        evNum(ev.pEvPositive != null ? ev.pEvPositive * 100 : null),
+        evNum(ev.probability != null ? ev.probability * 100 : null),
+        evNum(ev.evidence), evNum(ev.setupQuality),
+        evNum(ev.targetPct), evNum(ev.stopPct), evNum(ev.horizonDays),
+        evNum(ev.sizePct), evNum(ev.evPerDay),
+        evNum(ev.downside && ev.downside.expectedShortfall5Pct),
+        evNum(r.lc), evNum(r.todayChg), evNum(r.monthChg),
+        evNum(ev.rawEV), evNum(ev.haircut), evNum(ev.shrinkFactor),
+        evNum(ev.priorMean), evNum(ev.zeroEdgePrior), evNum(ev.pooledMean), evNum(ev.pooledWeight),
+        evNum(ev.grossEV), evNum(ev.costPct), evNum(ev.taxPct),
+        evNum(dd.pTarget), evNum(dd.pStop), evNum(dd.pTimeout),
+        evNum(ev.probTouch), evNum(ev.historicalN), evNum(ev.windows),
+        evStr(ev.exitMode), evNum(ev.calScoreGap), evNum(ev.breakEvenProb),
+        evNum(ev.kellyFullPct), evStr(ev.sizeBinding),
+        evNum(ev.utility), evNum(r.result && r.result.finalScore),
+        evStr(ev.strength && ev.strength.tier)
+      ];
+    });
+
+    /* Sheet 2: every inline text / tooltip / reason in full */
+    var h2 = ["Stock","Signal","EV Decision","Reasons (all lines)","Explanation (engine)","Net EV tooltip (full inline detail)","Exit rule","Regime","Downside","Sizing","Open episode","Target/stop progress","Intraday","Base plan","Probability detail","Window detail"];
+    var rows2 = (rows || []).map(function(r) {
+      var ev = r.ev || {}, dd = ev.distDetail || {}, pd = ev.probDetail || {};
+      var regime = ev.regime ? ("trend: " + evStr(ev.regime.trend) + ", vol: " + evStr(ev.regime.volatility) + (ev.regime.matchedShare != null ? ", matched history " + Math.round(ev.regime.matchedShare * 100) + "%" : "")) : "";
+      var down = ev.downside ? ("expected shortfall 5%: " + evStr(ev.downside.expectedShortfall5Pct) +
+        "; p5: " + evStr(ev.downside.p5Pct) + "; worst window: " + evStr(ev.downside.worstWindowPct) +
+        "; mean MAE: " + evStr(ev.downside.meanAdverseExcursionPct) + "; p90 MAE: " + evStr(ev.downside.p90AdverseExcursionPct)) : "";
+      var sizing = ev.sizePct != null ? ("suggested " + evStr(ev.sizePct) + "% of capital" + (ev.kellyFullPct != null ? ", full Kelly " + evStr(ev.kellyFullPct) + "%" : "") + (ev.sizeBinding ? ", limited by " + evStr(ev.sizeBinding) : "")) : "";
+      var ep = ev.episode ? (ev.episode.open ? ("OPEN since " + evStr(ev.episode.signalDate) + (ev.episode.changed ? " (CHANGED: " + evStr(ev.episode.tooltip) + ")" : "")) : "") : "";
+      var prob = pd ? ("method: " + evStr(pd.method) + "; own base: " + evStr(pd.statisticalBase) +
+        "; setup lift: " + evStr(pd.setupLift) + "; prior P: " + evStr(pd.priorP) +
+        "; historical P: " + evStr(pd.historical) + "; statistical P: " + evStr(pd.statistical) +
+        "; P(target): " + evStr(dd.pTarget) + "; P(stop): " + evStr(dd.pStop) + "; P(timeout): " + evStr(dd.pTimeout)) : "";
+      var win = ev.windowsDetail ? ("n: " + evStr(ev.windowsDetail.n) + "; nEff: " + evStr(ev.windowsDetail.nEff) +
+        "; own drift/day: " + evStr(ev.windowsDetail.ownDriftPerDayPct) + "; removed drift/day: " + evStr(ev.windowsDetail.removedDriftPerDayPct)) : "";
+      return [
+        evStr(String((r.s && r.s.t) || "").replace(".NS", "")),
+        evStr(stoxBaseDecision(r)),
+        evStr(ev.decision && ev.decision.label),
+        evStr((ev.reasons || []).join("\n")),
+        evStr(ev.explanation),
+        evStr(stoxEvTitle(ev)),
+        evStr(ev.exitRule),
+        regime, down, sizing, ep,
+        evProgressText(ev.progress),
+        evStr(ev.intraday ? (ev.intraday.status || "") : ""),
+        evStr(ev.basePlan ? JSON.stringify(ev.basePlan) : ""),
+        prob, win
+      ];
+    });
+
+    /* Sheet 3: scorecard lines + recent results + active config snapshot */
+    var rows3 = [["Section", "Item", "Value"]];
+    rows3.push(["Export", "Generated", new Date().toString()]);
+    rows3.push(["Export", "Engine version", evStr(EVX && EVX.version)]);
+    rows3.push(["Verdict", "EV day", evStr(verdict && verdict.message)]);
+    (health && health.lines ? health.lines : []).forEach(function(ln, i) {
+      rows3.push(["Scorecard", "Line " + (i + 1), evStr(ln.text)]);
+    });
+    if (rel) {
+      rows3.push(["Reliability", "Self-check", evStr(rel.text)]);
+      if (rel.extra) rows3.push(["Reliability", "Raw money", evStr(rel.extra.text)]);
+    }
+    rows3.push(["Recent results", "Header", "symbol | outcome | plan | realized raw | predicted | entry | settled"]);
+    (health && health.recent ? health.recent : []).forEach(function(rr) {
+      rows3.push(["Recent results", evStr(rr.symbol),
+        evStr(rr.outcome) + " | +" + evStr(rr.targetPct) + "%/-" + evStr(rr.stopPct) + "% " + evStr(rr.horizonDays) + "d" +
+        " | realized " + evStr(rr.realizedRawPct) + "% | predicted " + evStr(rr.predictedPct) + "%" +
+        (rr.entryDate ? " | entry " + evStr(rr.entryDate) + (rr.entryPrice ? " @ " + evStr(rr.entryPrice) : "") : "") +
+        " | settled " + (rr.settledAt ? new Date(rr.settledAt).toISOString().slice(0, 10) : "")]);
+    });
+    try {
+      var cfgFlat = evCfgFlatten(EVX && EVX.getConfig ? EVX.getConfig() : {});
+      rows3.push(["Config (active)", "Header", "parameter | value"]);
+      cfgFlat.forEach(function(pv) { rows3.push(["Config (active)", pv[0], pv[1]]); });
+    } catch (_cfgErr) {}
+
+    var blob = stoxXlsxBuild([
+      { name: "EV Table", cols: h1.map(function(_, i) { return i < 3 ? 14 : 11; }), rows: [h1].concat(rows1) },
+      { name: "Texts & Reasons", cols: h2.map(function(_, i) { return i < 3 ? 14 : (i < 6 ? 60 : 30); }), rows: [h2].concat(rows2) },
+      { name: "Scorecard & Config", cols: [18, 30, 90], rows: rows3 }
+    ]);
+    var a = document.createElement("a");
+    var url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch (_e) {} }, 2500);
+    return fileName;
+  };
+  var evExportNow = function() {
+    try {
+      var name = stoxEvDownloadExcel(evTradeRows, evHealth, evRel, evVerdict);
+      try { if (typeof showToast === "function") showToast("EV table exported: " + name, 3500); } catch (_t) {}
+    } catch (_exErr) {
+      try { if (typeof showToast === "function") showToast("Excel export failed: " + ((_exErr && _exErr.message) || _exErr), 6000); } catch (_t2) {}
+    }
+  };
+
   /* Background walk-forward calibration + reliability. Fills the engine's stores
      with real historical target-first outcomes and predicted-vs-realized EV so the
      historical probability, the evidence score and the self-check can become real.
@@ -10136,6 +10628,14 @@ function StockScreener(props) {
   var _unicornsLoadedRef = useRef(false);
   var _resultsRef = useRef(results);
   _resultsRef.current = results;
+
+  /* EV tuner modal state (v4.7.2 UI) */
+  var _sEvTuner = useState(false);
+  var evTunerOpen = _sEvTuner[0], setEvTunerOpen = _sEvTuner[1];
+  var _sEvTunerDraft = useState(null);
+  var evTunerDraft = _sEvTunerDraft[0], setEvTunerDraft = _sEvTunerDraft[1];
+  var _sEvTunerMsg = useState("");
+  var evTunerMsg = _sEvTunerMsg[0], setEvTunerMsg = _sEvTunerMsg[1];
 
   /* Load cached data from IndexedDB on mount */
   React.useEffect(function() {
@@ -10996,6 +11496,7 @@ function StockScreener(props) {
 
 
   return React.createElement("div", { style: { marginTop: 4 } },
+    evTunerOpen ? evTunerModal() : null,
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 } },
       React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: "var(--text)", fontFamily: "var(--font-heading)" } }, "Nifty 200 Screener"),
@@ -11308,7 +11809,14 @@ function StockScreener(props) {
             evHealth.lines.map(function(ln, i) { return React.createElement("div", { key: "evh" + i, title: ln.title, style: { fontSize: 9, marginTop: 2, color: ln.color } }, ln.text); }),
             stoxEvRecentStrip(evHealth.recent, onOpenStock)
           ),
-          React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, evTradeRows.length + " trade candidates")
+          React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 } },
+            React.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } },
+              React.createElement("button", { title: "Tune every EV engine parameter (shrinkage, gates, windows, costs, tax, sizing...). Saved in this browser.", onClick: function() { evTunerOpenModal(false); }, style: evHdrBtnStyle }, "\u2699 Tune EV"),
+              React.createElement("button", { title: "Re-tune the shrinkage strength (tau) from the settled live prediction rows so realized-on-predicted slope is closest to 1.", onClick: function() { evTunerOpenModal(true); }, style: evHdrBtnStyle }, "\u2191 Re-tune \u03C4"),
+              React.createElement("button", { title: "Export the EV table to Excel: one sheet with all numbers, one with every inline text/tooltip/reason in full, one with the scorecard and the active parameter snapshot.", onClick: evExportNow, style: evHdrBtnStyle }, "\u2B07 Excel")
+            ),
+            React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, evTradeRows.length + " trade candidates")
+          )
         ),
         React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", { style: { width: "100%", minWidth: 1260, borderCollapse: "collapse", tableLayout: "fixed" } },
@@ -11366,7 +11874,22 @@ function StockScreener(props) {
                 ),
                 React.createElement("td",{title:stoxEvTitle(ev),style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:800,color:evStrengthColor(ev),fontFamily:"var(--font-mono)"}},
                   net!=null?(Number(net)>=0?"+":"")+Number(net).toFixed(2)+"%":"—",
-                  ev.rangeLo!=null&&ev.rangeHi!=null?React.createElement("div",{style:{fontSize:8,fontWeight:500,color:"var(--text6)"}},"("+Number(ev.rangeLo).toFixed(2)+" to "+(Number(ev.rangeHi)>=0?"+":"")+Number(ev.rangeHi).toFixed(2)+")"):null
+                  /* v4.7.2: defensive repair of the 90% range - the engine
+                     centers it on the point estimate, but stale/older rows can
+                     disagree; show a range that is ordered and contains the
+                     displayed Net EV (width preserved). */
+                  (function(){
+                    if(ev.rangeLo==null||ev.rangeHi==null) return null;
+                    var lo=Number(ev.rangeLo), hi=Number(ev.rangeHi), n=Number(net);
+                    if(!(isFinite(lo)&&isFinite(hi))) return null;
+                    if(lo>hi){var tmp=lo;lo=hi;hi=tmp;}
+                    if(isFinite(n)&&(n<lo||n>hi)){
+                      var half=(hi-lo)/2; lo=n-half; hi=n+half;
+                      try{console.warn("[EV] 90% range did not contain the point estimate for a row; recentered for display");}catch(_wrErr){}
+                    }
+                    var sgn=function(v){return (v>=0?"+":"")+v.toFixed(2);};
+                    return React.createElement("div",{style:{fontSize:8,fontWeight:500,color:"var(--text6)"}},"("+sgn(lo)+" to "+sgn(hi)+")");
+                  })()
                 ),
                 React.createElement("td",{title:"Probability that the true EV is above zero, after shrinking for sampling noise",style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:ev.pEvPositive==null?"var(--text6)":(Number(ev.pEvPositive)>=0.8?"#16a34a":(Number(ev.pEvPositive)>=0.5?"#d97706":"var(--text6)"))}},ev.pEvPositive!=null?Math.round(Number(ev.pEvPositive)*100)+"%":"—"),
                 React.createElement("td",{style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700}},ev.probability!=null?(Number(ev.probability)*100).toFixed(0)+"%":"—"),
