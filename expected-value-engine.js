@@ -983,7 +983,7 @@ window.ExpectedValueEngine = (function () {
     var d = new Date((nowMs == null ? Date.now() : nowMs) + IST_MS);
     return { date: d.toISOString().slice(0, 10), minutes: d.getUTCHours() * 60 + d.getUTCMinutes(), dow: d.getUTCDay() };
   }
-  /* 09:15-15:30 IST Mon-Fri, plus 10 minutes for the data vendor to finalise the daily bar.
+  /* 09:15-15:40 IST Mon-Fri (15:30 close + 10 min vendor buffer).
      Exchange holidays are not known here; on a holiday no bar dated today exists, so nothing is "forming". */
   function sessionIsOpen(c) { return c.dow >= 1 && c.dow <= 5 && c.minutes >= 9 * 60 + 15 && c.minutes <= 15 * 60 + 40; }
   /* Calendar date (IST) of a candle: ISO strings as-is (the engine's existing convention), epoch s/ms converted. */
@@ -2741,7 +2741,7 @@ window.ExpectedValueEngine = (function () {
         if (d && (!lastDate || d > lastDate)) lastDate = d;
       });
       if (open > 0) return;              // never prune unsettled stores
-      if (!(last <= cutoff)) return;     // active within the retention window
+      if (!(last <= cutoff)) return;     // last activity within retention window: keep
       var rollup = {
         basis: k.indexOf(base + '_') === 0 ? k.slice(base.length + 1) : k,
         n: n,
@@ -2885,7 +2885,7 @@ window.ExpectedValueEngine = (function () {
         var tau = Math.max(0.05, tauBase * Math.sqrt(Math.max(1, num(r.horizonDays, defH)) / defH));
         var s = Math.max(0.02, num(r.stdErrPct, 0.5));
         var lam = tau * tau / (tau * tau + s * s);
-        var pm = num(r.priorMeanPct, 0);
+        var pm = isFinite(r.priorMeanPct) ? r.priorMeanPct : 0;
         return pm + lam * (r.basisEV - pm) - num(r.haircutPct, 0);
       });
       var slope = olsSlope(preds, usable.map(function (r) { return r.real; }));
