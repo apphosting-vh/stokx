@@ -2756,12 +2756,32 @@ const ExpectedValueTradePanel = ({ ticker }) => {
           [2,3,4,5,6].map(x => React.createElement("option", { key: x, value: x }, "+" + x + "%"))
         )
       ),
-      optimized && optimized.best && React.createElement("span", { style: { fontSize: 10, color: "var(--accent)" } },
-        "Best EV plan: +" + optimized.best.targetPct + "% / " + optimized.best.horizonDays + "d"
+      optimized && optimized.best && React.createElement("span", {
+        style: { fontSize: 10, color: "var(--accent)" },
+        title: (function() {
+          var b = optimized.best.expectedValue;
+          if (!b) return "";
+          var sgn = function(v) { return (v >= 0 ? "+" : "") + Number(v).toFixed(2); };
+          var sig = Number(b.shrinkFactor) * (Number(b.rawBasisPct) - Number(b.priorMeanPct));
+          return "Score anatomy: zero-edge prior " + sgn(b.priorMeanPct) + "% + edge signal " + sgn(sig) + "% - selection penalty " + sgn(b.haircutPct) + "% = " + sgn(b.netPct) + "%";
+        })()
+      },
+        "Best EV plan: +" + optimized.best.targetPct + "% / " + optimized.best.horizonDays + "d" +
+        (optimized.best.expectedValue && Number(optimized.best.expectedValue.haircutPct) > 0.005
+          ? " (sel −" + Math.abs(Number(optimized.best.expectedValue.haircutPct)).toFixed(2) + "%)" : "")
       )
     ),
     React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 } },
-      metric("Net Expected Value", ev ? (ev.netPct >= 0 ? "+" : "") + ev.netPct.toFixed(2) + "%" : "—", "after modeled costs"),
+      metric("Net Expected Value", ev ? (ev.netPct >= 0 ? "+" : "") + ev.netPct.toFixed(2) + "%" : "—",
+        /* v4.7.3 UI (score anatomy): prior + edge signal - selection penalty */
+        (function() {
+          if (!ev || !isFinite(Number(ev.priorMeanPct)) || !isFinite(Number(ev.shrinkFactor)) || !isFinite(Number(ev.rawBasisPct))) return "after modeled costs";
+          var sgn = function(v) { return (v >= 0 ? "+" : "") + v.toFixed(2); };
+          var sig = Number(ev.shrinkFactor) * (Number(ev.rawBasisPct) - Number(ev.priorMeanPct));
+          var hc = isFinite(Number(ev.haircutPct)) ? Number(ev.haircutPct) : 0;
+          return "prior " + sgn(Number(ev.priorMeanPct)) + " + edge " + sgn(sig) + " \u2212 sel " + sgn(hc) + "%";
+        })()),
+      metric("Selection Penalty", ev && isFinite(Number(ev.haircutPct)) ? "−" + Math.abs(Number(ev.haircutPct)).toFixed(2) + "%" : "0.00%", "best-of-N winner's-curse haircut"),
       metric("Target Probability", a.probability.target != null ? (a.probability.target * 100).toFixed(1) + "%" : "—", a.probability.contributors + " model inputs"),
       metric("Evidence Confidence", a.evidenceConfidence.toFixed(0) + "/100", "data completeness " + a.dataCompleteness.toFixed(0) + "%"),
       metric("Setup Quality", a.setupQuality != null ? a.setupQuality.toFixed(0) + "/100" : "—", "not a direct buy signal")
@@ -9891,6 +9911,8 @@ function StockScreener(props) {
         costPct: ex.costPct,
         taxPct: ex.taxPct,
         haircut: ex.haircutPct,
+        haircutRaw: ex.haircutRawPct != null ? ex.haircutRawPct : ex.haircutPct,
+        haircutCoef: ex.haircutCoef != null ? ex.haircutCoef : 1,
         shrinkFactor: ex.shrinkFactor,
         evStdErr: ex.stdErrPct,
         pEvPositive: ex.pPositive,
@@ -10025,13 +10047,41 @@ function StockScreener(props) {
     return isFinite(net) ? net / Math.sqrt(h) : -999999;
   };
 
+  /* ══ EV SCORE ANATOMY (v4.7.3 UI) ══════════════════════════════════════
+     Decompose the displayed Net EV into its three real parts:
+       net = zero-edge prior + edge signal - best-of-N selection penalty
+         edge signal = shrinkFactor x (rawEV - priorMean)
+     The ev-ab-test.js re-scoring of 20k walk-forward rows showed that the
+     score's cross-sectional ranking is dominated by the selection haircut
+     (corr(score, -haircut) = 0.95-0.97 vs 0.17-0.20 for the edge signal),
+     so the parts are surfaced separately and a dominance flag is raised
+     whenever the penalty outweighs the signal. */
+  var stoxEvAnatomy = function(ev) {
+    if (!ev) return null;
+    var prior = Number(ev.priorMean), raw = Number(ev.rawEV), lam = Number(ev.shrinkFactor), hc = Number(ev.haircut);
+    if (!(isFinite(prior) && isFinite(raw) && isFinite(lam))) return null;
+    if (!isFinite(hc)) hc = 0;
+    var signal = lam * (raw - prior);
+    return {
+      prior: prior, signal: signal, haircut: hc,
+      net: prior + signal - hc,
+      dominated: Math.abs(hc) > Math.abs(signal) * 1.5 && Math.abs(hc) > 0.05
+    };
+  };
+
   /* Tooltip: how the displayed Net EV was built. */
   var stoxEvTitle = function(ev) {
     if (!ev) return "";
     var f = function(v) { return v == null || !isFinite(Number(v)) ? "n/a" : (Number(v) >= 0 ? "+" : "") + Number(v).toFixed(2) + "%"; };
     var lines = [];
     lines.push("Trust-adjusted " + (ev.evBasis || "after-tax") + " EV: " + f(ev.netEV));
-    if (ev.rawEV != null) lines.push("Data say " + f(ev.rawEV) + ", minus " + (ev.haircut != null ? Number(ev.haircut).toFixed(2) : "0.00") + "% best-of-25 selection inflation,");
+    var an = stoxEvAnatomy(ev);
+    if (an) {
+      lines.push("Score anatomy: zero-edge prior " + f(an.prior) + " + edge signal " + f(an.signal) + " - selection penalty " + f(an.haircut) + " = " + f(an.net));
+      if (an.dominated) lines.push("NOTE: this score is driven mainly by the best-of-N selection penalty (plan-search stability), not by edge magnitude. Read the ranking as 'least luck-dependent plan' and check the edge signal on its own before sizing.");
+    }
+    if (ev.rawEV != null) lines.push("Data say " + f(ev.rawEV) + ", minus " + (ev.haircut != null ? Number(ev.haircut).toFixed(2) : "0.00") + "% best-of-N plan-selection inflation (split-half winner's-curse estimate),");
+    if (ev.haircutCoef != null && isFinite(Number(ev.haircutCoef)) && Number(ev.haircutCoef) !== 1) lines.push("Selection-haircut coefficient x" + Number(ev.haircutCoef).toFixed(2) + " applied to the raw " + (ev.haircutRaw != null ? Number(ev.haircutRaw).toFixed(2) : "?") + "% split-half estimate (fitted by the joint re-tune).");
     if (ev.evStdErr != null) lines.push("pulled toward the zero-edge EV for +/-" + Number(ev.evStdErr).toFixed(2) + "% sampling error");
     if (ev.grossEV != null) {
       /* v4.6: split statutory fees from MODELED SLIPPAGE so "costs" can be
@@ -10164,7 +10214,8 @@ function StockScreener(props) {
      signature is computed). */
   var evTunerGroups = [
     { title: "Shrinkage & decision gates", fields: [
-      { path: "evPriorStdPct", label: "Shrinkage prior sd (tau)", type: "number", step: 0.01, min: 0.05, max: 2, tip: "Smaller = predictions pulled harder toward the zero-edge prior. Re-tune from the settled-row slope instead of guessing." },
+      { path: "evPriorStdPct", label: "Shrinkage prior sd (tau)", type: "number", step: 0.01, min: 0.05, max: 2, tip: "Smaller = predictions pulled harder toward the zero-edge prior. Re-tune from the settled-row joint fit instead of guessing (v4.8: identified from the edge signal alone)." },
+      { path: "haircutCoef", label: "Selection-haircut coefficient", type: "number", step: 0.05, min: 0, max: 1.5, tip: "v4.8: multiplier on the best-of-N selection penalty (1 = full split-half estimate, the v4.5-v4.7 behaviour). Re-tune fits it jointly with tau from the settled rows." },
       { path: "minNetEV", label: "Min Net EV to qualify (%)", type: "number", step: 0.05, tip: "QUALIFIED_TRADE needs at least this trust-adjusted Net EV." },
       { path: "minPositiveProbability", label: "Min P(positive return)", type: "number", step: 0.01, min: 0, max: 1 },
       { path: "minEvidence", label: "Min Evidence score", type: "number", step: 1, min: 0, max: 100 },
@@ -10287,22 +10338,38 @@ function StockScreener(props) {
   var evTunerRetune = function() {
     try {
       var EVX = window.ExpectedValueEngine;
-      if (!EVX || typeof EVX.retuneTau !== "function") { setEvTunerMsg("Engine unavailable"); return null; }
+      /* v4.8: prefer the joint re-tune (tau from the signal component alone +
+         fitted haircut coefficient); fall back to the legacy tau scan. */
+      var tune = EVX && (typeof EVX.retuneTuning === "function" ? EVX.retuneTuning : EVX.retuneTau);
+      if (!EVX || typeof tune !== "function") { setEvTunerMsg("Engine unavailable"); return null; }
       var rows = typeof EVX.rowStoreRows === "function" ? EVX.rowStoreRows() : [];
-      var res = EVX.retuneTau(rows);
+      var res = tune.call(EVX, rows);
       if (!res || !res.ok) {
         setEvTunerMsg("Re-tuning needs at least 30 settled prediction rows with recorded EV + realized P&L (have " + (res ? res.n : 0) + "). Let episodes settle first.");
         return null;
       }
-      var msg = "Tau scan on " + res.n + " settled rows: best tau = " + res.best.tauBase +
-        " (realized-on-predicted slope " + (res.best.slope != null ? res.best.slope.toFixed(2) : "n/a") +
-        ", |slope-1| = " + (isFinite(res.best.deviation) ? res.best.deviation.toFixed(3) : "n/a") +
+      var msg = "Joint fit on " + res.n + " settled rows: best tau = " + res.best.tauBase +
+        " (signal coefficient " + (res.best.slope != null ? res.best.slope.toFixed(2) : "n/a") +
+        ", target 1; |slope-1| = " + (isFinite(res.best.deviation) ? res.best.deviation.toFixed(3) : "n/a") +
         "); current tau = " + res.currentTauBase + ". ";
       if (res.best.tauBase !== res.currentTauBase) {
         evTunerSet("evPriorStdPct", String(res.best.tauBase));
-        msg += "The tau field has been set to " + res.best.tauBase + " - review it and click Apply & Save.";
+        msg += "The tau field has been set to " + res.best.tauBase + " - review it and click Apply & Save. ";
       } else {
-        msg += "Current tau is already the best value on the grid.";
+        msg += "Current tau is already the best value on the grid. ";
+      }
+      /* v4.8: haircut coefficient from the same joint fit (null when the rows
+         carry no haircut variation to identify it on). */
+      if (res.suggestedHaircutCoef != null && isFinite(res.suggestedHaircutCoef)) {
+        var curK = res.currentHaircutCoef != null ? res.currentHaircutCoef : 1;
+        if (Math.abs(res.suggestedHaircutCoef - curK) > 0.02) {
+          evTunerSet("haircutCoef", String(Math.round(res.suggestedHaircutCoef * 100) / 100));
+          msg += "Selection-haircut coefficient " + res.suggestedHaircutCoef.toFixed(2) + " (currently " + curK + ") - the field has been set; review and Apply & Save.";
+        } else {
+          msg += "Selection-haircut coefficient is already at the fitted value (" + curK + ").";
+        }
+      } else {
+        msg += "Haircut coefficient not identified (settled rows carry no selection-haircut variation); left unchanged.";
       }
       setEvTunerMsg(msg);
       return res;
@@ -10316,7 +10383,7 @@ function StockScreener(props) {
       setEvTunerDraft(draft);
     } catch (_omErr) {}
     setEvTunerMsg(runRetune
-      ? "Re-tuning shrinkage from the settled live rows..."
+      ? "Joint re-tuning (tau + selection-haircut coefficient) from the settled live rows..."
       : "Tune the parameters, then Apply & Save. Values persist in this browser and are re-applied on load.");
     setEvTunerOpen(true);
     if (runRetune) setTimeout(function() { try { evTunerRetune(); } catch (_e) {} }, 60);
@@ -12103,7 +12170,7 @@ function StockScreener(props) {
             })(),
             React.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } },
               React.createElement("button", { title: "Tune every EV engine parameter (shrinkage, gates, windows, costs, tax, sizing...). Saved in this browser.", onClick: function() { evTunerOpenModal(false); }, style: evHdrBtnStyle }, "\u2699 Tune EV"),
-              React.createElement("button", { title: "Re-tune the shrinkage strength (tau) from the settled live prediction rows so realized-on-predicted slope is closest to 1.", onClick: function() { evTunerOpenModal(true); }, style: evHdrBtnStyle }, "\u2191 Re-tune \u03C4"),
+              React.createElement("button", { title: "Joint re-tune from the settled live rows (v4.8): identifies tau from the edge signal alone (coefficient target 1) and fits the selection-haircut coefficient, instead of regressing on the full score.", onClick: function() { evTunerOpenModal(true); }, style: evHdrBtnStyle }, "\u2191 Re-tune \u03C4 + haircut"),
               React.createElement("button", { title: "Export the EV table to Excel: one sheet with all numbers, one with every inline text/tooltip/reason in full, one with the scorecard and the active parameter snapshot.", onClick: evExportNow, style: evHdrBtnStyle }, "\u2B07 Excel")
             ),
             React.createElement("div", { style: { fontSize: 9, color: "var(--text6)" } }, evTradeRows.length + " trade candidates")
@@ -12115,7 +12182,7 @@ function StockScreener(props) {
               ["Stock","Signal","Net EV","EV Conf.","Win %","Evidence","Setup","Target","Days","Size","EV/day","Worst 5%","Price"].map(function(h) {
                 var left = h === "Stock" || h === "Signal";
                 var widths = { Stock:"15%", Signal:"9%", "Net EV":"12%", "EV Conf.":"6%", "Win %":"5%", Evidence:"6%", Setup:"5%", Target:"5%", Days:"5%", Size:"6%", "EV/day":"7%", "Worst 5%":"8%", Price:"11%" };
-                var hTitles = { Size:"Suggested position as % of capital: fractional Kelly, capped by risk per trade and a maximum position", "EV/day":"Net EV divided by the holding days: how fast the edge is earned", "Worst 5%":"Average result of the worst 5% of historical trades for this plan (expected shortfall)", "Net EV":"Trust-adjusted net EV with its 90% range underneath" };
+                var hTitles = { Size:"Suggested position as % of capital: fractional Kelly, capped by risk per trade and a maximum position", "EV/day":"Net EV divided by the holding days: how fast the edge is earned", "Worst 5%":"Average result of the worst 5% of historical trades for this plan (expected shortfall)", "Net EV":"Trust-adjusted net EV with its 90% range underneath, then the score anatomy: edge signal (shrunken data EV vs the zero-edge prior) and the best-of-N selection penalty. Hover the cell for the full breakdown." };
                 return React.createElement("th", { key:h, title:hTitles[h], style:{
                   padding:"6px 10px", fontSize:9, fontWeight:700, color:"var(--text6)",
                   textAlign:left ? "left" : "right", borderBottom:"1px solid var(--border)",
@@ -12180,6 +12247,19 @@ function StockScreener(props) {
                     }
                     var sgn=function(v){return (v>=0?"+":"")+v.toFixed(2);};
                     return React.createElement("div",{style:{fontSize:8,fontWeight:500,color:"var(--text6)"}},"("+sgn(lo)+" to "+sgn(hi)+")");
+                  })(),
+                  /* v4.7.3 UI (score anatomy): edge signal vs selection penalty under the
+                     point estimate, so the cell shows WHY the number is what it is. The
+                     penalty chip turns amber when it outweighs the edge signal. */
+                  (function(){
+                    var an = stoxEvAnatomy(ev);
+                    if (!an) return null;
+                    var sgn = function(v){ return (v >= 0 ? "+" : "") + v.toFixed(2); };
+                    return React.createElement("div",{
+                      title: "Score anatomy: zero-edge prior " + sgn(an.prior) + "% + edge signal " + sgn(an.signal) + "% - selection penalty " + sgn(an.haircut) + "% = " + sgn(an.net) + "%" +
+                        (an.dominated ? "\nDominated by the selection penalty: the ranking is mostly plan-search stability, not edge size." : ""),
+                      style:{fontSize:7.5,fontWeight:600,color:an.dominated ? "#b45309" : "var(--text6)",whiteSpace:"nowrap",cursor:"help"}
+                    }, "edge " + sgn(an.signal) + " \u00B7 sel " + sgn(an.haircut));
                   })()
                 ),
                 React.createElement("td",{title:"Probability that the true EV is above zero, after shrinking for sampling noise",style:{padding:"5px 10px",textAlign:"right",fontSize:10,fontWeight:700,color:ev.pEvPositive==null?"var(--text6)":(Number(ev.pEvPositive)>=0.8?"#16a34a":(Number(ev.pEvPositive)>=0.5?"#d97706":"var(--text6)"))}},ev.pEvPositive!=null?Math.round(Number(ev.pEvPositive)*100)+"%":"—"),

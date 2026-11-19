@@ -1,6 +1,41 @@
 /* ══════════════════════════════════════════════════════════════════════
    StoX Expected Value & Probability-Calibrated Trade Engine
-   Version 4.6  (EV_V4_ENGINE)
+   Version 4.8  (EV_V4_ENGINE)
+
+   v4.7.2 -> v4.8 (ev-ab-test feedback: score identification & decomposition):
+     1. SIGNAL-ONLY TAU IDENTIFICATION (retuneTuning): the A/B re-scoring of
+        20,264 walk-forward rows showed the score's cross-sectional variance
+        is dominated by the selection haircut (corr(score, -haircut) =
+        0.95-0.97 vs 0.17-0.20 for the shrunk signal), so the v4.6 retune -
+        which regressed REALIZED on the FULL score - was fitting tau against
+        haircut variance that tau cannot fix (the 0.48 -> 0.19 slope never
+        resolved). retuneTuning() now identifies tau from the SIGNAL
+        component alone: per tau-grid point a joint OLS
+            realized - priorMean = b1 x signal(tau) + b2 x (-haircutRaw)
+            signal(tau) = lam(tau) x (basisEV - priorMean)
+        is fitted, and the best tau is the one whose b1 is closest to 1
+        (the coefficient the scoring formula puts on the signal). The old
+        retuneTau() is kept as a compatibility wrapper (same return shape;
+        its 'slope' is now the signal coefficient, not the full-score slope).
+     2. HAIRCUT AS A FITTED REGRESSOR (haircutCoef): the best-of-N penalty is
+        no longer hard-subtracted at coefficient 1. DEFAULTS.haircutCoef
+        (default 1 = exactly v4.5-v4.7 behaviour) scales the penalty in
+        finalizePlan; retuneTuning reports the joint-fit b2 as the suggested
+        haircutCoef (clamped 0..1.5). expectedValue.haircutPct now reports
+        the EFFECTIVE penalty (coef x raw) so every consumer (UI, row store,
+        explanation text, the A/B recompute check) keeps reading 'what was
+        actually subtracted'; haircutRawPct / haircutCoef carry the raw
+        split-half estimate and the coefficient.
+     3. ROW STORE: rows carry haircutRawPct + haircutCoef next to the
+        effective haircutPct; pre-v4.8 rows fall back to haircutPct as the
+        raw estimate (they were stored at coefficient 1).
+     4. BASIS: haircutCoef is part of the calibration signature, so a
+        coefficient change rotates the live store and rebuilds the
+        calibration family automatically. BASIS_REV is deliberately NOT
+        bumped - at coef = 1 the v4.8 predictions are bit-identical to
+        v4.7.2. (The signature hash itself changes once on upgrade because
+        the canon gains a field; that one-time background rebuild is noted
+        here so it is not mistaken for drift.)
 
    v4.7.1 -> v4.7.2 (duplicate-episode fix set):
      1. RECENT-RESULTS DEDUP: the same episode can live in several basis
@@ -222,7 +257,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.7.2';
+  var VERSION = 'EV-4.8';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -293,6 +328,12 @@ window.ExpectedValueEngine = (function () {
        further; retuneTau() + the row-level store re-tune this offline. */
     evPriorStdPct: 0.3,             // prior sd of the TRUE gross edge per trade at h=defaultHorizon, % (shrinkage strength); scales with sqrt(h/defaultHorizon) so lambda is horizon-neutral
     selectionHaircut: true,
+    /* v4.8: multiplier on the best-of-N selection haircut (1 = v4.5-v4.7
+       behaviour: subtract the full split-half estimate after shrinkage).
+       Fitted offline by retuneTuning() (joint OLS of realized on the shrunk
+       signal and the raw haircut); part of the calibration signature, so
+       changing it rotates the live store and rebuilds calibration. */
+    haircutCoef: 1,
     scoreGapFree: 8,
     scoreGapRange: 25,
     stopATR: 1.8,
@@ -1215,7 +1256,9 @@ window.ExpectedValueEngine = (function () {
       /* v4.5 (F2): the best-of-N selection haircut is plan-independent and is
          subtracted AFTER shrinkage. Subtracting it before shrink multiplied it
          by lambda (bigger effect at short horizons), stacking a conservatism
-         layer unevenly across the grid. */
+         layer unevenly across the grid.
+         v4.8: scaled by haircutCoef (fitted by retuneTuning); the ev object's
+         haircutPct is the EFFECTIVE penalty actually subtracted. */
       var cst = core.ev.costPct, Tg = core.econTargetPct != null ? core.econTargetPct : core.targetPct, Sg = Math.abs(tb.meanStopRet);
       var pT0 = Sg / (Tg + Sg) * (1 - tb.pTimeout), pS0 = Tg / (Tg + Sg) * (1 - tb.pTimeout);
       var rate = cfg.decideAfterTax !== false ? num(cfg.taxRatePct, 0) / 100 : 0;
@@ -1227,14 +1270,17 @@ window.ExpectedValueEngine = (function () {
         pooledW = Math.min(num(pp.maxWeight, 0.5), hist.bucket.nv / (hist.bucket.nv + num(pp.k, 60))) * pre.gapFactor;
         priorMean = m0 + pooledW * (pooledMean - m0);
       }
-      var shrunk = priorMean + lam * (core.basisEV - priorMean) - haircut;
+      var hcK = num(cfg.haircutCoef, 1);
+      var shrunk = priorMean + lam * (core.basisEV - priorMean) - hcK * haircut;
       var postSd = Math.sqrt(tau * tau * s * s / (tau * tau + s * s));
       ev = {
         grossPct: core.ev.grossPct, costPct: core.ev.costPct, taxPct: core.ev.taxPct,
         preTaxNetPct: core.ev.preTaxNetPct, afterTaxNetPct: core.ev.afterTaxNetPct,
         basis: cfg.decideAfterTax !== false ? 'after-tax' : 'net of costs',
         rawBasisPct: core.basisEV,
-        haircutPct: haircut,
+        haircutPct: hcK * haircut,
+        haircutRawPct: haircut,
+        haircutCoef: hcK,
         shrinkFactor: lam,
         priorMeanPct: priorMean,
         zeroEdgePriorPct: m0,
@@ -1305,7 +1351,7 @@ window.ExpectedValueEngine = (function () {
       sizing: sizing,
       downside: downside,
       signalStrength: signalStrength(ev),
-      reasons: (core.dist && ev) ? plainReasons(core, pre, ev, evidence, be, haircut) : [],
+      reasons: (core.dist && ev) ? plainReasons(core, pre, ev, evidence, be, ev ? ev.haircutPct : haircut) : [],
       explanation: buildExplanation(setup, probability, ev, evidence, decision, tb, pre, core.intraday)
     };
   }
@@ -1771,6 +1817,7 @@ window.ExpectedValueEngine = (function () {
       evPriorStdPct: num(cfg.evPriorStdPct, 0.5),
       defaultHorizon: num(cfg.defaultHorizon, 10),
       selectionHaircut: cfg.selectionHaircut !== false ? 1 : 0,
+      haircutCoef: num(cfg.haircutCoef, 1),
       minWindows: num(cfg.minWindows, 30),
       recency: cfg.recency || null,
       regime: cfg.regime || null
@@ -2832,7 +2879,10 @@ window.ExpectedValueEngine = (function () {
     return {
       date: r.date, pred: r.pred, raw: r.raw, real: r.real, realRaw: r.realRaw,
       elig: !!r.elig, basisEV: r.basisEV, stdErrPct: r.stdErrPct,
-      haircutPct: r.haircutPct, priorMeanPct: r.priorMeanPct, horizonDays: r.horizonDays
+      /* v4.8: haircutPct is the EFFECTIVE penalty (coef x raw); haircutRawPct
+         is the raw split-half estimate the coefficient is fitted on. */
+      haircutPct: r.haircutPct, haircutRawPct: r.haircutRawPct, haircutCoef: r.haircutCoef,
+      priorMeanPct: r.priorMeanPct, horizonDays: r.horizonDays
     };
   }
   function rowStorePut(rows) {
@@ -2867,11 +2917,26 @@ window.ExpectedValueEngine = (function () {
     return sxx > 1e-12 ? sxy / sxx : null;
   }
 
-  /* Re-tune evPriorStdPct from stored rows: pred(tau) is deterministic from
-     the stored ingredients, so the regression slope of realized on
-     re-shrunk predictions is a millisecond grid search. A well-shrunk
-     predictor slopes ~1; pick the tauBase whose slope is closest to 1. */
-  function retuneTau(rows, opts) {
+  /* ── Joint offline re-tune (v4.8; supersedes the v4.6 tau scan) ──────────
+     The v4.6 retune regressed realized on the FULL score to tune tau. The
+     ev-ab-test.js re-scoring showed the score's variance is dominated by the
+     selection haircut (corr(score, -haircut) = 0.95-0.97), so that slope was
+     mostly haircut dispersion - tau was being asked to fix noise it cannot
+     reach, and the target never stabilized. v4.8 identifies the two levers
+     jointly, on their own regressors:
+
+        realized - priorMean  =  b1 x signal(tau)  +  b2 x (-haircutRaw) + e
+        signal(tau) = lam(tau) x (basisEV - priorMean),
+        lam(tau)   = tau^2 / (tau^2 + s^2)  (s = stdErrPct)
+
+     The scoring formula puts coefficient 1 on both terms, so a well-shrunk,
+     well-penalized predictor has (b1, b2) = (1, 1):
+       - best tau  = the grid point whose b1 is closest to 1,
+       - haircutCoef suggestion = clamp(b2, 0, 1.5).
+     Plain centered OLS (2 regressors, implicit intercept); coefficients only
+     - for inference use the row store with week-clustered errors (ev-ab-test
+     style). Rows without haircutRawPct (pre-v4.8) use haircutPct as raw. */
+  function retuneTuning(rows, opts) {
     opts = opts || {};
     var grid = opts.grid || [0.15, 0.2, 0.25, 0.28, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.75, 1.0];
     var defH = num(opts.defaultHorizon, 10);
@@ -2879,22 +2944,64 @@ window.ExpectedValueEngine = (function () {
       return r && isFinite(r.basisEV) && isFinite(r.stdErrPct) && isFinite(r.real) && isFinite(r.horizonDays);
     });
     if (usable.length < 30) return { ok: false, reason: 'insufficient_rows', n: usable.length };
+
+    var pm = usable.map(function (r) { return isFinite(r.priorMeanPct) ? r.priorMeanPct : 0; });
+    var y = usable.map(function (r, i) { return r.real - pm[i]; });
+    var hcRaw = usable.map(function (r) {
+      var h = (r.haircutRawPct != null && isFinite(r.haircutRawPct)) ? r.haircutRawPct : num(r.haircutPct, 0);
+      return isFinite(h) ? h : 0;
+    });
+
+    /* centered 2-regressor OLS; degenerate columns return null coefficients */
+    function avg(a) { var t = 0, i; for (i = 0; i < a.length; i++) t += a[i]; return a.length ? t / a.length : NaN; }
+    function fit2(x1, x2, yy) {
+      var n = x1.length, m1 = avg(x1), m2 = avg(x2), my = avg(yy), j;
+      var s11 = 0, s22 = 0, s12 = 0, s1y = 0, s2y = 0;
+      for (j = 0; j < n; j++) {
+        var a1 = x1[j] - m1, a2 = x2[j] - m2, ay = yy[j] - my;
+        s11 += a1 * a1; s22 += a2 * a2; s12 += a1 * a2; s1y += a1 * ay; s2y += a2 * ay;
+      }
+      if (!(s11 > 0)) return { b1: null, b2: null };
+      if (!(s22 > 0)) return { b1: s1y / s11, b2: null };
+      var det = s11 * s22 - s12 * s12;
+      if (!(Math.abs(det) > 1e-12)) return { b1: s1y / s11, b2: null };
+      return { b1: (s1y * s22 - s2y * s12) / det, b2: (s2y * s11 - s1y * s12) / det };
+    }
+
     var best = null, out = [];
     grid.forEach(function (tauBase) {
-      var preds = usable.map(function (r) {
+      var sig = usable.map(function (r, k) {
         var tau = Math.max(0.05, tauBase * Math.sqrt(Math.max(1, num(r.horizonDays, defH)) / defH));
         var s = Math.max(0.02, num(r.stdErrPct, 0.5));
         var lam = tau * tau / (tau * tau + s * s);
-        var pm = isFinite(r.priorMeanPct) ? r.priorMeanPct : 0;
-        return pm + lam * (r.basisEV - pm) - num(r.haircutPct, 0);
+        return lam * (r.basisEV - pm[k]);
       });
-      var slope = olsSlope(preds, usable.map(function (r) { return r.real; }));
-      var dev = slope == null ? Infinity : Math.abs(slope - 1);
-      var rec = { tauBase: tauBase, slope: slope, deviation: dev };
+      var f = fit2(sig, hcRaw, y);
+      var dev = f.b1 == null ? Infinity : Math.abs(f.b1 - 1);
+      /* fit2 runs on +hcRaw, so its second coefficient is MINUS the penalty
+         weight the formula uses; negate it back (target = 1). */
+      var rec = { tauBase: tauBase, slope: f.b1, signalSlope: f.b1, haircutCoefFit: f.b2 == null ? null : -f.b2, deviation: dev };
       out.push(rec);
       if (!best || dev < best.deviation) best = rec;
     });
-    return { ok: true, n: usable.length, best: best, grid: out, currentTauBase: num(getConfig().evPriorStdPct, 0.5) };
+    return {
+      ok: true, n: usable.length, best: best, grid: out,
+      currentTauBase: num(getConfig().evPriorStdPct, 0.5),
+      currentHaircutCoef: num(getConfig().haircutCoef, 1),
+      suggestedHaircutCoef: (best && best.haircutCoefFit != null && isFinite(best.haircutCoefFit)) ? clamp(best.haircutCoefFit, 0, 1.5) : null
+    };
+  }
+
+  /* Back-compat wrapper: the pre-v4.8 shape ({best:{tauBase, slope, deviation},
+     grid, currentTauBase}) so existing callers keep working. NOTE: 'slope' is
+     now the SIGNAL coefficient from the joint fit (target 1), not the old
+     full-score slope. */
+  function retuneTau(rows, opts) {
+    var r = retuneTuning(rows, opts);
+    if (!r.ok) return r;
+    r.best = { tauBase: r.best.tauBase, slope: r.best.slope, deviation: r.best.deviation };
+    r.grid = r.grid.map(function (g) { return { tauBase: g.tauBase, slope: g.slope, deviation: g.deviation }; });
+    return r;
   }
 
   function retSeries(daily, lookback) {
@@ -3095,6 +3202,8 @@ window.ExpectedValueEngine = (function () {
                   basisEV: b.expectedValue.rawBasisPct,
                   stdErrPct: b.expectedValue.stdErrPct,
                   haircutPct: b.expectedValue.haircutPct,
+                  haircutRawPct: b.expectedValue.haircutRawPct,
+                  haircutCoef: b.expectedValue.haircutCoef,
                   priorMeanPct: b.expectedValue.priorMeanPct,
                   horizonDays: b.horizonDays
                 });
@@ -3161,6 +3270,7 @@ window.ExpectedValueEngine = (function () {
     clearCalibration: clearCalibration,
     adoptCurrentBasis: adoptCurrentBasis,
     retuneTau: retuneTau,
+    retuneTuning: retuneTuning,
     rowStoreRows: rowStoreRows,
     reliabilityVerdict: reliabilityVerdict,
     _test: {
