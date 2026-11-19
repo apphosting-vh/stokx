@@ -2,6 +2,43 @@
    StoX Expected Value & Probability-Calibrated Trade Engine
    Version 4.8  (EV_V4_ENGINE)
 
+   v4.8 -> v4.9 (ev-ab-test P1/P2 fix set):
+     1. ZERO-EDGE PRIOR ANCHOR (priorAnchor, P1): m0 (costs/tax only, ~-0.24%)
+        sat well above the observed walk-forward mean realized (-0.56% all /
+        -0.72% Buy-grade detrended in the ev-ab-test sample), flattering
+        P(true EV > 0) through Phi(shrunk/postSd). m0 is now blended toward
+        the reliability store's walk-forward realized mean: m0 += w x
+        (wfMean - m0), default w = 0.35, gated at 100 settled rows. The pooled
+        bucket prior still adds setup-specific information on top. Final
+        basis sentences about tax note the effective basis via
+        zeroEdgePriorPct (anchored) and priorAnchorPct/priorAnchorWeight.
+     2. REPEATED-SPLIT HAIRCUT (P1): the winner's-curse estimate now averages
+        over three deterministic partitions of the window sample (halves,
+        first-vs-last third, odd-vs-even) instead of trusting one cut - same
+        estimator, lower variance. tb.splits carries the two extra pairs.
+     3. HAIRCUT COUNT-SHRINK (haircutShrink.k, P1, default 0 = OFF): optional
+        shrink of the haircut toward 0 by candidate count, nValid/(nValid+k).
+        Shipped OFF because the A/B could not validate it; decide with the
+        new holdout harness before turning it on.
+     4. SELECTION FEATURES (P1): expectedValue.selectionCandidates (plan
+        count) and winnerGapPct (winner's utility margin) are recorded and
+        stored in the row store - features for the fitted score, not more
+        hard-coded penalties.
+     5. ROWS CARRY A SYMBOL HASH (P2): rowStoreShape gains sym =
+        shortHash(symbol), planCount, winnerGapPct, so the A/B harness can
+        de-duplicate and cluster per symbol; rows still store no raw symbol.
+     6. PER-ELIGIBILITY FITS (P1): retuneTuning() reports byElig fits - the
+        A/B showed the haircut's ranking value lives mostly outside
+        Buy-grade, so one global coefficient may be wrong for the rows that
+        actually trade. The engine still applies one global haircutCoef; the
+        tuner flags divergence.
+     7. NEGATIVE-POOL GATING SIGNAL (P2): buildTrust raises a caution when the
+        week-clustered raw realized mean is below zero with t < -2 - ranking
+        well inside a losing pool still loses money; the message points at
+        the EV gates instead of the ranking.
+     8. BASIS: priorAnchor + haircutShrink enter the calibration signature and
+        BASIS_REV is bumped 2 -> 3 (the anchor changes stored predictions).
+
    v4.7.2 -> v4.8 (ev-ab-test feedback: score identification & decomposition):
      1. SIGNAL-ONLY TAU IDENTIFICATION (retuneTuning): the A/B re-scoring of
         20,264 walk-forward rows showed the score's cross-sectional variance
@@ -257,7 +294,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.8';
+  var VERSION = 'EV-4.9';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -334,6 +371,16 @@ window.ExpectedValueEngine = (function () {
        signal and the raw haircut); part of the calibration signature, so
        changing it rotates the live store and rebuilds calibration. */
     haircutCoef: 1,
+    /* v4.9 (P1): blend the zero-edge prior m0 toward the walk-forward
+       empirical realized mean (detrended basis, from the reliability store).
+       weight = min(maxWeight, ...) applied only once minRows settled rows
+       exist; enabled:false restores the pure cost/tax prior. Part of the
+       calibration signature. */
+    priorAnchor: { enabled: true, maxWeight: 0.35, minRows: 100 },
+    /* v4.9 (P1): count-shrink of the selection haircut toward 0,
+       haircut x nValid/(nValid + k). Default 0 = OFF (the A/B could not
+       validate the shrink; decide with the holdout harness first). */
+    haircutShrink: { k: 0 },
     scoreGapFree: 8,
     scoreGapRange: 25,
     stopATR: 1.8,
@@ -686,6 +733,17 @@ window.ExpectedValueEngine = (function () {
     for (i2 = 0; i2 < m; i2++) maeMean += ws[i2] * maes[i2];
     maeMean /= W;
 
+    /* v4.9: two extra deterministic splits (first-vs-last third, odd-vs-even)
+       so selectionHaircutMeta can average the winner's-curse estimate over
+       partitions instead of trusting the single halves cut. */
+    var t3 = Math.floor(m / 3), qA = 0, qAw = 0, qB = 0, qBw = 0, oA = 0, oAw = 0, eB = 0, eBw = 0;
+    for (i2 = 0; i2 < t3; i2++) { qA += ws[i2] * vals[i2]; qAw += ws[i2]; }
+    for (i2 = m - t3; i2 < m; i2++) { qB += ws[i2] * vals[i2]; qBw += ws[i2]; }
+    for (i2 = 0; i2 < m; i2++) {
+      if (i2 % 2 === 0) { oA += ws[i2] * vals[i2]; oAw += ws[i2]; }
+      else { eB += ws[i2] * vals[i2]; eBw += ws[i2]; }
+    }
+
     return {
       pTarget: sT / W, pStop: sS / W, pTimeout: sO / W,
       meanStopRet: sS > 0 ? sRetW / sS : -stopPct,
@@ -698,6 +756,10 @@ window.ExpectedValueEngine = (function () {
       stdErr: sd / Math.sqrt(Math.max(1, nEff)),
       halfA: half > 0 && wA > 0 ? hA / wA : null,
       halfB: m - half > 0 && wB > 0 ? hB / wB : null,
+      splits: [
+        [t3 > 0 && qAw > 0 && qBw > 0 ? qA / qAw : null, t3 > 0 && qAw > 0 && qBw > 0 ? qB / qBw : null],
+        [oAw > 0 && eBw > 0 ? oA / oAw : null, eBw > 0 ? eB / eBw : null]
+      ],
       driftPerDayPct: sumMuW / W * 100,
       removedDriftPerDayPct: sumRemW / W * 100,
       cvar5Pct: wTailMean(pairs, 0.05),
@@ -751,6 +813,32 @@ window.ExpectedValueEngine = (function () {
     }
     return { v: 2, cal: {}, rel: blankRel(), meta: {} };
   }
+
+  /* v4.9 (P1): walk-forward realized means (detrended + raw) from the
+     reliability accumulator - the empirical anchor for the zero-edge prior.
+     Memoized because finalizePlan runs per plan and loadStore parses JSON on
+     every call; the cache is invalidated on every batch commit and expires
+     after 60s as a belt-and-braces bound. */
+  var _wfMeanCache = { key: null, at: 0, val: null };
+  function walkForwardMean(key, maxAgeMs) {
+    var now = Date.now();
+    if (_wfMeanCache.key === key && _wfMeanCache.val && (now - _wfMeanCache.at) < (maxAgeMs || 60000)) return _wfMeanCache.val;
+    var val = null;
+    try {
+      var rel = loadParts(key).rel || {};
+      var g = rel.all || {};
+      if (g.n > 0 && isFinite(g.sr)) {
+        val = {
+          mean: g.sr / g.n, n: g.n,
+          rawMean: isFinite(g.srw) ? g.srw / g.n : null,
+          eligMean: rel.elig && rel.elig.n > 0 ? rel.elig.sr / rel.elig.n : null,
+          eligN: rel.elig ? rel.elig.n : 0
+        };
+      }
+    } catch (e) {}
+    _wfMeanCache = { key: key, at: now, val: val };
+    return val;
+  }
   function commitBatch(key, parts) {
     key = key || DEFAULTS.calibrationKey;
     parts.v = 2;
@@ -758,6 +846,7 @@ window.ExpectedValueEngine = (function () {
     /* Invalidate the calibration cache on EVERY attempt: a failed commit must
        not leave a mutated in-memory object behind. */
     _calCacheVer[key] = (_calCacheVer[key] || 0) + 1;
+    _wfMeanCache.at = 0;
     return saveStore(key + '_txn', parts);
   }
 
@@ -1177,12 +1266,23 @@ window.ExpectedValueEngine = (function () {
     var ww = buildWindowWeights(daily, indexCandles, cfg);
     var liq = liquidityCostPct(daily, atrPct, cfg);
 
+    /* v4.9 (P1): zero-edge prior anchor (computed once per call; the walk-
+       forward mean comes from the reliability store, memoized below). */
+    var anchor = null;
+    var ancCfg = cfg.priorAnchor || {};
+    if (ancCfg.enabled !== false) {
+      var wf = walkForwardMean(cfg.calibrationKey);
+      if (wf && wf.n >= num(ancCfg.minRows, 100) && isFinite(wf.mean)) {
+        anchor = { mean: wf.mean, n: wf.n, weight: clamp(num(ancCfg.maxWeight, 0.35), 0, 1) };
+      }
+    }
+
     return {
       setup: setup, setupCalScore: setupCalScore, scoreGap: gap, gapFactor: gapFactor,
       atrPct: atrPct, stopPct: stopFromAtr(atrPct, cfg), volClass: volClassOf(atrPct),
       dataCompleteness: dataCompleteness,
       costs: totalRoundTripCost(cfg.costs) + liq.perSidePct * 2,
-      liquidity: liq, weights: ww.weights, regime: ww.regime,
+      liquidity: liq, weights: ww.weights, regime: ww.regime, priorAnchor: anchor,
       session: input._session || null
     };
   }
@@ -1263,6 +1363,15 @@ window.ExpectedValueEngine = (function () {
       var pT0 = Sg / (Tg + Sg) * (1 - tb.pTimeout), pS0 = Tg / (Tg + Sg) * (1 - tb.pTimeout);
       var rate = cfg.decideAfterTax !== false ? num(cfg.taxRatePct, 0) / 100 : 0;
       var m0 = -cst - rate * pT0 * Math.max(0, Tg - cst) + rate * clamp(num(cfg.taxLossCredit, 0), 0, 1) * pS0 * (Sg + cst);
+      /* v4.9 (P1): anchor the zero-edge prior to the walk-forward empirical
+         realized mean. The cost/tax-only m0 (~-0.24%) sat well above the
+         observed mean realized (~-0.56% all / -0.72% Buy-grade detrended in
+         the ev-ab-test sample), flattering P(true EV > 0) through
+         Phi(shrunk/postSd). The pooled bucket prior below still adds the
+         setup-specific layer on top of the anchored base. */
+      if (pre.priorAnchor && pre.priorAnchor.weight > 0) {
+        m0 = m0 + pre.priorAnchor.weight * (pre.priorAnchor.mean - m0);
+      }
       var pp = cfg.pooledPrior || {};
       var priorMean = m0, pooledMean = null, pooledW = 0;
       if (pp.enabled && hist && hist.bucket && hist.bucket.nv >= num(pp.minN, 30)) {
@@ -1286,6 +1395,8 @@ window.ExpectedValueEngine = (function () {
         zeroEdgePriorPct: m0,
         pooledMeanPct: pooledMean,
         pooledWeight: pooledW,
+        priorAnchorPct: pre.priorAnchor ? pre.priorAnchor.mean : null,
+        priorAnchorWeight: pre.priorAnchor ? pre.priorAnchor.weight : 0,
         shrunkPct: shrunk,
         stdErrPct: s,
         postSdPct: postSd,
@@ -1577,27 +1688,57 @@ window.ExpectedValueEngine = (function () {
     return u - corner;
   }
 
-  function selectionHaircutOf(cores, cfg) {
-    if (!cfg.selectionHaircut) return 0;
+  /* v4.9 (P1): the selection haircut as a proper feature pipeline - averaged
+     over three deterministic partitions of the window sample (halves,
+     first-vs-last third, odd-vs-even) instead of one cut, with the plan count
+     and the winner's utility margin returned as selection features. The
+     per-split estimator is unchanged (v4.5 F8 sign-aware winners, cross-half
+     gap / sqrt(2), clamped 0..3); only its variance and its metadata change.
+     Optional count-shrink toward 0 (haircutShrink.k, default 0 = OFF). */
+  function selectionHaircutMeta(cores, cfg) {
+    var meta = { haircut: 0, nCandidates: 0, winnerGap: null, splits: 0 };
+    if (!cfg.selectionHaircut) return meta;
     try {
-      if (reliabilityVerdict(cfg.calibrationKey) === 'conservative') return 0;
+      if (reliabilityVerdict(cfg.calibrationKey) === 'conservative') return meta;
     } catch (e) {}
     var valid = cores.filter(function (c) { return c.tb && c.tb.halfA != null && c.tb.halfB != null; });
-    if (valid.length < 3) return 0;
-    var ia = -1, ib = -1, ua = -Infinity, ub = -Infinity;
-    /* v4.5 (F8): the halves are ranked with the same sign-aware rule as the
-       optimizer (ev/sqrt(h) only for positive EV), so negative-EV grids do
-       not pick their "winner" through the long-horizon sign artifact. */
-    valid.forEach(function (c, k) {
-      var h = Math.sqrt(Math.max(1, c.horizonDays));
-      var a = c.tb.halfA > 0 ? c.tb.halfA / h : c.tb.halfA;
-      var b = c.tb.halfB > 0 ? c.tb.halfB / h : c.tb.halfB;
-      if (a > ua) { ua = a; ia = k; }
-      if (b > ub) { ub = b; ib = k; }
+    meta.nCandidates = valid.length;
+    if (valid.length < 3) return meta;
+    var ua = function (x, h) { h = Math.sqrt(Math.max(1, h)); return x > 0 ? x / h : x; };
+    /* split pairs: [halves (as computed), first-vs-last third, odd-vs-even] */
+    var splitPairs = [[], [], []];
+    valid.forEach(function (c) {
+      splitPairs[0].push(c);
+      var s = c.tb.splits || [];
+      if (s[0] && s[0][0] != null && s[0][1] != null) splitPairs[1].push({ horizonDays: c.horizonDays, tb: { halfA: s[0][0], halfB: s[0][1] } });
+      if (s[1] && s[1][0] != null && s[1][1] != null) splitPairs[2].push({ horizonDays: c.horizonDays, tb: { halfA: s[1][0], halfB: s[1][1] } });
     });
-    var optA = valid[ia].tb.halfA - valid[ia].tb.halfB;
-    var optB = valid[ib].tb.halfB - valid[ib].tb.halfA;
-    return clamp(Math.max(0, (optA + optB) / 2) / Math.SQRT2, 0, 3);
+    var hcs = [];
+    splitPairs.forEach(function (sp) {
+      if (sp.length < 3) return;
+      var ia = -1, ib = -1, uA = -Infinity, uB = -Infinity, second = -Infinity;
+      sp.forEach(function (c, k) {
+        var a = ua(c.tb.halfA, c.horizonDays), b = ua(c.tb.halfB, c.horizonDays);
+        if (a > uA) { second = uA; uA = a; ia = k; } else if (a > second) second = a;
+        if (b > uB) { uB = b; ib = k; }
+      });
+      if (meta.winnerGap == null && ia >= 0 && isFinite(second) && second > -Infinity) meta.winnerGap = uA - second;
+      var optA = sp[ia].tb.halfA - sp[ia].tb.halfB;
+      var optB = sp[ib].tb.halfB - sp[ib].tb.halfA;
+      hcs.push(clamp(Math.max(0, (optA + optB) / 2) / Math.SQRT2, 0, 3));
+    });
+    if (!hcs.length) return meta;
+    var hc = 0, i;
+    for (i = 0; i < hcs.length; i++) hc += hcs[i];
+    hc /= hcs.length;
+    meta.splits = hcs.length;
+    var k = num(cfg.haircutShrink && cfg.haircutShrink.k, 0);
+    if (k > 0) hc *= valid.length / (valid.length + k);
+    meta.haircut = clamp(hc, 0, 3);
+    return meta;
+  }
+  function selectionHaircutOf(cores, cfg) {
+    return selectionHaircutMeta(cores, cfg).haircut;
   }
 
   function optimize(input, overrides, internal) {
@@ -1654,12 +1795,16 @@ window.ExpectedValueEngine = (function () {
       });
     });
 
-    var haircut = selectionHaircutOf(cores, cfg);
+    var hcMeta = selectionHaircutMeta(cores, cfg);
+    var haircut = hcMeta.haircut;
 
     var results = [];
     cores.forEach(function (core) {
       var r = finalizePlan(core, pre, input, cfg, haircut);
       if (r.expectedValue && r.probability && r.probability.target != null) {
+        /* v4.9 (P1): selection features on every priced plan */
+        r.expectedValue.selectionCandidates = hcMeta.nCandidates;
+        r.expectedValue.winnerGapPct = hcMeta.winnerGap;
         r.optimizerUtility = optimizerUtility(r, gridCfg);
         r.isBaseModelPlan = !!core.isBaseline;
         r.eligibility = ungated ? 'UNGATED' : eligibility;
@@ -1775,6 +1920,7 @@ window.ExpectedValueEngine = (function () {
       localStorage.removeItem(key + '_txn');
       delete _calCache[key];
       _calCacheVer[key] = (_calCacheVer[key] || 0) + 1;
+      _wfMeanCache.at = 0;
       return true;
     } catch (e) { return false; }
   }
@@ -1790,7 +1936,8 @@ window.ExpectedValueEngine = (function () {
      plus BASIS_REV, bumped by hand whenever replay or optimizer logic
      changes. If it differs from the stored one - or no signature exists
      (unknown basis) - the whole family is cleared and rebuilds. */
-  var BASIS_REV = '2';
+  /* v4.9: bumped - priorAnchor changes stored predictions. */
+  var BASIS_REV = '3';
   function shortHash(str) {
     var h = 0x811c9dc5;
     for (var i = 0; i < str.length; i++) {
@@ -1818,6 +1965,8 @@ window.ExpectedValueEngine = (function () {
       defaultHorizon: num(cfg.defaultHorizon, 10),
       selectionHaircut: cfg.selectionHaircut !== false ? 1 : 0,
       haircutCoef: num(cfg.haircutCoef, 1),
+      priorAnchor: cfg.priorAnchor ? { e: cfg.priorAnchor.enabled !== false ? 1 : 0, w: num(cfg.priorAnchor.maxWeight, 0.35), n: num(cfg.priorAnchor.minRows, 100) } : null,
+      haircutShrinkK: num(cfg.haircutShrink && cfg.haircutShrink.k, 0),
       minWindows: num(cfg.minWindows, 30),
       recency: cfg.recency || null,
       regime: cfg.regime || null
@@ -2841,6 +2990,27 @@ window.ExpectedValueEngine = (function () {
     var gate = gateReport(key);
     if (gate.verdict === 'gate-hurts') raise('caution', 'Setups the Buy filter rejected did better than those it accepted.');
     else if (gate.verdict === 'gate-no-better') raise('caution', 'The Buy filter shows no detectable advantage over rejected setups.');
+    /* v4.9 (P2): a negative pool mean is a GATING problem, not a ranking one -
+       ranking well inside a losing pool still loses money. Week-clustered
+       raw-money t-test on the walk-forward plans. */
+    try {
+      var wk = rel.weeks || {}, xs = [];
+      Object.keys(wk).forEach(function (k) {
+        var w = wk[k];
+        if (w && w.n >= 5 && isFinite(w.srw)) xs.push(w.srw / w.n);
+      });
+      if (xs.length >= 12) {
+        var wm = 0, wi;
+        for (wi = 0; wi < xs.length; wi++) wm += xs[wi];
+        wm /= xs.length;
+        var wss = 0;
+        for (wi = 0; wi < xs.length; wi++) wss += (xs[wi] - wm) * (xs[wi] - wm);
+        var wse = xs.length > 1 ? Math.sqrt(wss / (xs.length - 1)) / Math.sqrt(xs.length) : NaN;
+        if (wm < 0 && isFinite(wse) && wm + 2 * wse < 0) {
+          raise('caution', 'The candidate pool loses money on average (raw realized ' + round(wm, 2) + '% per plan over ' + xs.length + ' weeks, t < -2): this is a gating problem, not a ranking one - consider raising minNetEV / minPositiveProbability before trusting any pick from this pool.');
+        }
+      }
+    } catch (_poolErr) {}
     return { level: level, messages: msgs };
   }
 
@@ -2882,6 +3052,8 @@ window.ExpectedValueEngine = (function () {
       /* v4.8: haircutPct is the EFFECTIVE penalty (coef x raw); haircutRawPct
          is the raw split-half estimate the coefficient is fitted on. */
       haircutPct: r.haircutPct, haircutRawPct: r.haircutRawPct, haircutCoef: r.haircutCoef,
+      /* v4.9 (P1/P2): symbol hash + selection features (plan count, winner gap) */
+      sym: r.sym, planCount: r.planCount, winnerGapPct: r.winnerGapPct,
       priorMeanPct: r.priorMeanPct, horizonDays: r.horizonDays
     };
   }
@@ -2984,8 +3156,29 @@ window.ExpectedValueEngine = (function () {
       out.push(rec);
       if (!best || dev < best.deviation) best = rec;
     });
+    /* v4.9 (P1): per-eligibility fits - the A/B showed the haircut's ranking
+       value lives mostly outside Buy-grade, so one global coefficient may be
+       wrong for the rows that actually trade. Reported so the tuner can flag
+       divergence; the engine still applies one global haircutCoef. */
+    var byElig = null;
+    if (best && usable.some(function (r) { return r.elig; }) && usable.some(function (r) { return !r.elig; })) {
+      var sigBest = usable.map(function (r, k) {
+        var tau = Math.max(0.05, best.tauBase * Math.sqrt(Math.max(1, num(r.horizonDays, defH)) / defH));
+        var s = Math.max(0.02, num(r.stdErrPct, 0.5));
+        var lam = tau * tau / (tau * tau + s * s);
+        return lam * (r.basisEV - pm[k]);
+      });
+      var fitSub = function (take) {
+        var x1 = [], x2 = [], ys = [], q;
+        for (q = 0; q < usable.length; q++) if (take(usable[q])) { x1.push(sigBest[q]); x2.push(hcRaw[q]); ys.push(y[q]); }
+        if (x1.length < 30) return { n: x1.length, b1: null, haircutCoefFit: null };
+        var f = fit2(x1, x2, ys);
+        return { n: x1.length, b1: f.b1, haircutCoefFit: f.b2 == null ? null : -f.b2 };
+      };
+      byElig = { elig: fitSub(function (r) { return !!r.elig; }), other: fitSub(function (r) { return !r.elig; }) };
+    }
     return {
-      ok: true, n: usable.length, best: best, grid: out,
+      ok: true, n: usable.length, best: best, grid: out, byElig: byElig,
       currentTauBase: num(getConfig().evPriorStdPct, 0.5),
       currentHaircutCoef: num(getConfig().haircutCoef, 1),
       suggestedHaircutCoef: (best && best.haircutCoefFit != null && isFinite(best.haircutCoefFit)) ? clamp(best.haircutCoefFit, 0, 1.5) : null
@@ -3204,6 +3397,11 @@ window.ExpectedValueEngine = (function () {
                   haircutPct: b.expectedValue.haircutPct,
                   haircutRawPct: b.expectedValue.haircutRawPct,
                   haircutCoef: b.expectedValue.haircutCoef,
+                  /* v4.9 (P2): hashed symbol for de-dup + clustering; selection
+                     features for the fitted score (plan count, winner gap). */
+                  sym: shortHash(symbol),
+                  planCount: b.expectedValue.selectionCandidates,
+                  winnerGapPct: b.expectedValue.winnerGapPct,
                   priorMeanPct: b.expectedValue.priorMeanPct,
                   horizonDays: b.horizonDays
                 });
@@ -3294,6 +3492,8 @@ window.ExpectedValueEngine = (function () {
       loadParts: loadParts, commitBatch: commitBatch,
       applyOutcomeRows: applyOutcomeRows, applyReliabilityRows: applyReliabilityRows,
       olsSlope: olsSlope,
+      selectionHaircutMeta: selectionHaircutMeta,
+      walkForwardMean: walkForwardMean,
       sessionState: sessionState, intradayBarriers: intradayBarriers, completedOnly: completedOnly,
       withSession: withSession, candleDate: candleDate, istClock: istClock, sessionIsOpen: sessionIsOpen
     }

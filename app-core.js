@@ -9913,6 +9913,11 @@ function StockScreener(props) {
         haircut: ex.haircutPct,
         haircutRaw: ex.haircutRawPct != null ? ex.haircutRawPct : ex.haircutPct,
         haircutCoef: ex.haircutCoef != null ? ex.haircutCoef : 1,
+        /* v4.9 (P1): selection features + prior anchor */
+        planCount: ex.selectionCandidates != null ? ex.selectionCandidates : null,
+        winnerGap: ex.winnerGapPct != null ? ex.winnerGapPct : null,
+        priorAnchorMean: ex.priorAnchorPct != null ? ex.priorAnchorPct : null,
+        priorAnchorWeight: ex.priorAnchorWeight != null ? ex.priorAnchorWeight : 0,
         shrinkFactor: ex.shrinkFactor,
         evStdErr: ex.stdErrPct,
         pEvPositive: ex.pPositive,
@@ -10082,6 +10087,8 @@ function StockScreener(props) {
     }
     if (ev.rawEV != null) lines.push("Data say " + f(ev.rawEV) + ", minus " + (ev.haircut != null ? Number(ev.haircut).toFixed(2) : "0.00") + "% best-of-N plan-selection inflation (split-half winner's-curse estimate),");
     if (ev.haircutCoef != null && isFinite(Number(ev.haircutCoef)) && Number(ev.haircutCoef) !== 1) lines.push("Selection-haircut coefficient x" + Number(ev.haircutCoef).toFixed(2) + " applied to the raw " + (ev.haircutRaw != null ? Number(ev.haircutRaw).toFixed(2) : "?") + "% split-half estimate (fitted by the joint re-tune).");
+    if (ev.priorAnchorWeight > 0 && ev.priorAnchorMean != null) lines.push("Zero-edge prior anchored: " + Math.round(Number(ev.priorAnchorWeight) * 100) + "% on the walk-forward realized mean (" + f(ev.priorAnchorMean) + " across settled plans) - the cost-only prior alone overstates the pool's edge.");
+    if (ev.planCount != null) lines.push("Plan grid: " + ev.planCount + " candidates scored" + (ev.winnerGap != null ? "; winner's utility margin " + Number(ev.winnerGap).toFixed(2) : "") + " (selection features for the fitted score).");
     if (ev.evStdErr != null) lines.push("pulled toward the zero-edge EV for +/-" + Number(ev.evStdErr).toFixed(2) + "% sampling error");
     if (ev.grossEV != null) {
       /* v4.6: split statutory fees from MODELED SLIPPAGE so "costs" can be
@@ -10258,7 +10265,10 @@ function StockScreener(props) {
       { path: "regime.mismatchWeight", label: "Regime mismatch weight", type: "number", step: 0.1, min: 0, max: 1 },
       { path: "pooledPrior.enabled", label: "Pooled cross-stock prior", type: "bool" },
       { path: "pooledPrior.maxWeight", label: "Pooled prior max weight", type: "number", step: 0.05, min: 0, max: 1 },
-      { path: "pooledPrior.k", label: "Pooled prior strength (k)", type: "number", step: 5 }
+      { path: "pooledPrior.k", label: "Pooled prior strength (k)", type: "number", step: 5 },
+      { path: "priorAnchor.enabled", label: "Anchor zero-edge prior to walk-forward mean", type: "bool", tip: "v4.9: blends the cost/tax-only zero-edge prior toward the settled walk-forward realized mean. The cost-only prior sat ~0.3% above what the pool actually delivered, flattering P(true EV > 0)." },
+      { path: "priorAnchor.maxWeight", label: "Prior anchor max weight", type: "number", step: 0.05, min: 0, max: 1, tip: "v4.9: maximum weight of the walk-forward realized mean in the zero-edge prior (applied after 100 settled rows)." },
+      { path: "haircutShrink.k", label: "Haircut count-shrink k (0 = off)", type: "number", step: 1, min: 0, tip: "v4.9: shrinks the best-of-N selection penalty toward 0 by candidate count, n/(n+k). Off by default - decide with the holdout A/B harness before enabling." }
     ] },
     { title: "Sizing", fields: [
       { path: "sizing.kellyFraction", label: "Kelly fraction", type: "number", step: 0.05, min: 0, max: 1 },
