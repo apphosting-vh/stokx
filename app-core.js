@@ -10223,8 +10223,8 @@ function StockScreener(props) {
     { title: "Shrinkage & decision gates", fields: [
       { path: "evPriorStdPct", label: "Shrinkage prior sd (tau)", type: "number", step: 0.01, min: 0.05, max: 2, tip: "Smaller = predictions pulled harder toward the zero-edge prior. Re-tune from the settled-row joint fit instead of guessing (v4.8: identified from the edge signal alone)." },
       { path: "haircutCoef", label: "Selection-haircut coefficient", type: "number", step: 0.05, min: 0, max: 1.5, tip: "v4.8: multiplier on the best-of-N selection penalty (1 = full split-half estimate, the v4.5-v4.7 behaviour). Re-tune fits it jointly with tau from the settled rows." },
-      { path: "minNetEV", label: "Min Net EV to qualify (%)", type: "number", step: 0.05, tip: "QUALIFIED_TRADE needs at least this trust-adjusted Net EV." },
-      { path: "minPositiveProbability", label: "Min P(positive return)", type: "number", step: 0.01, min: 0, max: 1 },
+      { path: "minNetEV", label: "Min Net EV to qualify (%)", type: "number", step: 0.05, tip: "QUALIFIED_TRADE needs at least this trust-adjusted Net EV. v4.9.1 default raised to 0.50: top Buy-grade picks were losing -0.73%/plan (t=-2.38) under the old gates." },
+      { path: "minPositiveProbability", label: "Min P(positive return)", type: "number", step: 0.01, min: 0, max: 1, tip: "v4.9.1 default raised to 0.60 (same holdout-harness gate fix as minNetEV)." },
       { path: "minEvidence", label: "Min Evidence score", type: "number", step: 1, min: 0, max: 100 },
       { path: "minEvConfidence", label: "Min EV confidence P(true EV>0)", type: "number", step: 0.01, min: 0, max: 1 },
       { path: "selectionHaircut", label: "Best-of-N selection haircut", type: "bool", tip: "Subtract selection inflation AFTER shrinkage. Turn off only when the self-check says the model is conservative." }

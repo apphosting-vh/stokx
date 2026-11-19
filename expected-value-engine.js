@@ -2,6 +2,21 @@
    StoX Expected Value & Probability-Calibrated Trade Engine
    Version 4.8  (EV_V4_ENGINE)
 
+   v4.9 -> v4.9.1 (holdout-harness gate fix, decision layer only):
+     The first v2 harness run on 20,366 walk-forward rows (63 weeks) confirmed
+     the gating diagnosis with significance: the top-20% Buy-grade picks by the
+     current score realized -0.73% per plan (t = -2.38) - WORSE than the pool
+     mean (-0.56%) - while every ranking variant stayed within noise of the
+     current one (the pre-registered holdout rejected the fit-period winner,
+     haircut x0.25, at dIC -0.031, FDR **). Fix the gate, not the ranking:
+       - minNetEV 0.30 -> 0.50
+       - minPositiveProbability 0.55 -> 0.60
+     These are DECISION gates only (classify()) - stored predictions, the
+     basis signature and the calibration family are untouched, so there is
+     NO basis rotation and no store rebuild on upgrade. HIGH_CONVICTION
+     thresholds are unchanged. Success metric on the next harness run:
+     top% elig >= 0.
+
    v4.8 -> v4.9 (ev-ab-test P1/P2 fix set):
      1. ZERO-EDGE PRIOR ANCHOR (priorAnchor, P1): m0 (costs/tax only, ~-0.24%)
         sat well above the observed walk-forward mean realized (-0.56% all /
@@ -294,15 +309,18 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.9';
+  var VERSION = 'EV-4.9.1';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
     targets: [2, 3, 4, 5, 6],
     defaultHorizon: 10,
     defaultTargetPct: 4,
-    minNetEV: 0.30,
-    minPositiveProbability: 0.55,
+    /* v4.9.1 (holdout-harness gate fix): raised from 0.30 / 0.55 - the
+       top-20% Buy-grade picks realized -0.73% per plan (t = -2.38) under the
+       old gates. Decision layer only (classify()); no basis change. */
+    minNetEV: 0.50,
+    minPositiveProbability: 0.60,
     minEvidence: 60,
     minEvConfidence: 0.80,
     /* v4.4+: not a dilution blend any more (see combineProbability). The

@@ -193,7 +193,29 @@
 
   /* ---------- load rows ---------- */
   async function loadRows() {
-    if (IS_NODE) return JSON.parse(require('fs').readFileSync(opts.file, 'utf8'));
+    if (IS_NODE) {
+      try {
+        return JSON.parse(require('fs').readFileSync(opts.file, 'utf8'));
+      } catch (e) {
+        if (e && e.code === 'ENOENT') {
+          console.error('rows.json not found at: ' + require('path').resolve(opts.file));
+          console.error('');
+          console.error('rows.json is YOUR walk-forward data - it is not shipped with the script.');
+          console.error('Export it from the browser page that hosts the EV engine:');
+          console.error('  1. open DevTools -> Console and run:');
+          console.error("     (async()=>{const q=indexedDB.open('stox_ev_rows');q.onsuccess=()=>{");
+          console.error("       const g=q.result.transaction('rows').objectStore('rows').getAll();");
+          console.error("       g.onsuccess=()=>{const a=document.createElement('a');");
+          console.error("         a.href=URL.createObjectURL(new Blob([JSON.stringify(g.result)]));");
+          console.error("         a.download='rows.json';a.click();};};})();");
+          console.error('  2. put the downloaded rows.json next to ev-ab-test.js');
+          console.error('  3. run: node ev-ab-test.js rows.json --holdout 0.5');
+          console.error('(If the export comes back empty, run stoxRunEvCalibration() first and let episodes settle.)');
+          process.exit(1);
+        }
+        throw e;
+      }
+    }
     var rows = [];
     try {
       var exists = true;
