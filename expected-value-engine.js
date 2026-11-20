@@ -2,6 +2,16 @@
    StoX Expected Value & Probability-Calibrated Trade Engine
    Version 4.8  (EV_V4_ENGINE)
 
+   v4.9.3b (calibrateFromHistory ledger fix): the v4.9.3 ordering change
+     classified unprocessed kept-window dates as 'fresh' and below-window
+     dates as 'older' under the range ledger, so long histories walked the
+     OLD side first and could exceed the retention cap (mid-rebuild exports
+     over-represent old weeks - the ev-ab-test holdout then sees a thin
+     recent half). Now: exact processed-date ledger (meta.dates), retention
+     = the newest `cap` weekly dates per symbol, strict oldest-to-newest
+     processing, legacy range metas flagged (meta.legacySpan) and skipped
+     in-range as before.
+
    v4.9.2 -> v4.9.3 (ev-ab-test-v3 root-cause fix set; BASIS CHANGE -
    BASIS_REV 4 -> 5: stored predictions change, the calibration family and
    the row store rebuild once on upgrade):
@@ -3649,25 +3659,34 @@ window.ExpectedValueEngine = (function () {
     /* v4.6 (feedback B): meta lives in the same envelope as calibration and
        reliability — the whole batch commits atomically below. */
     var parts = loadParts(key);
-    var meta = parts.meta[symbol] || { newest: null, oldest: null, count: 0 };
+    var meta = parts.meta[symbol] || { newest: null, oldest: null, count: 0, dates: [] };
 
-    var fresh = [], older = [];
-    eligible.forEach(function (idx) {
+    /* v4.9.3b: EXACT processed-date ledger + chronological walk. The
+       range ledger ([oldest, newest] = processed) can only follow one
+       contiguous walk; mixing window dates with extension dates in one
+       todo list silently skipped unprocessed dates or exceeded the cap
+       (a mid-rebuild export then over-represents OLD weeks). With
+       meta.dates every accepted date is known, so processing runs
+       strictly oldest -> newest (as-of anchor warm-up sees earlier weeks
+       first) while retention stays exactly the newest `cap` weekly dates
+       per symbol: dates below the retention window fill only while the
+       cap has spare slots. Legacy metas (range ledger, no `dates`) keep
+       the old in-range skip for their pre-existing span. */
+    var done = {};
+    (meta.dates || []).forEach(function (d) { done[d] = 1; });
+    if (!meta.dates && meta.newest != null) meta.legacySpan = true;
+
+    var keepFrom = eligible.length > cap ? eligible.length - cap : 0;
+    var windowTodo = [], extTodo = [];
+    eligible.forEach(function (idx, ei) {
       var dt = String(daily[idx].t).slice(0, 10);
-      if (meta.newest == null) older.push(idx);
-      else if (dt > meta.newest) fresh.push(idx);
-      else if (dt < meta.oldest) older.push(idx);
+      if (done[dt]) return;
+      if (meta.legacySpan && meta.newest != null && dt >= meta.oldest && dt <= meta.newest) return;
+      if (ei >= keepFrom) windowTodo.push(idx);
+      else extTodo.push(idx);
     });
-    /* v4.9.3 (P0): chronological processing within the retention window
-       (oldest -> newest). Retention is unchanged - the NEWEST `cap` dates
-       are kept - but the kept block now builds forward in time so the
-       anchor warm-up sees earlier weeks first. Past extension (`older`
-       when a ledger exists) still runs boundary-first (descending) so the
-       [oldest, newest] ledger never gains gaps. */
-    var olderBudget = Math.max(0, cap - meta.count);
-    var olderKeep = older.slice(Math.max(0, older.length - olderBudget));
-    if (meta.newest != null) olderKeep.reverse();
-    var todo = (meta.count < cap ? olderKeep : []).concat(fresh);
+    var extBudget = Math.max(0, cap - meta.count - windowTodo.length);
+    var todo = extTodo.slice(0, extBudget).concat(windowTodo);   /* ascending: oldest first */
     out.remaining = Math.max(0, todo.length - maxSamples);
     todo = todo.slice(0, maxSamples);
     if (!todo.length) { out.reason = 'up_to_date'; return out; }
@@ -3765,6 +3784,7 @@ window.ExpectedValueEngine = (function () {
       }
       if (meta.newest == null || date > meta.newest) meta.newest = date;
       if (meta.oldest == null || date < meta.oldest) meta.oldest = date;
+      (meta.dates = meta.dates || []).push(date);
       meta.count++;
       out.processed++;
     });
