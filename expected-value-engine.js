@@ -2,6 +2,73 @@
    StoX Expected Value & Probability-Calibrated Trade Engine
    Version 4.8  (EV_V4_ENGINE)
 
+   v4.9.2 -> v4.9.3 (ev-ab-test-v3 root-cause fix set; BASIS CHANGE -
+   BASIS_REV 4 -> 5: stored predictions change, the calibration family and
+   the row store rebuild once on upgrade):
+     1. AS-OF PRIOR ANCHOR (P0, look-ahead fix): the v4.9 zero-edge anchor
+        read walkForwardMean() = the LIFETIME reliability mean, while
+        calibrateFromHistory backfills dates out of order - so historical
+        rows were anchored on outcomes still in their FUTURE (and live
+        decisions were not: a walk-forward/live mismatch). The harness's
+        as-of variant (strictly earlier weeks only) was the ONLY score
+        change that improved ranking significantly (dIC +0.021, t=2.32,
+        FDR **). walkForwardMean(key, asOfDate) now aggregates the per-week
+        reliability sums (rel.weeks, ISO week keys) for weeks STRICTLY
+        EARLIER than the scored week, and prepare() passes the signal date
+        (last completed session) as the as-of boundary. When the store has
+        no per-week data the anchor stays OFF (never a lifetime mean).
+     2. CHRONOLOGICAL BACKFILL (P0): calibrateFromHistory processed its
+        first fill newest-first, so the anchor's minRows warm-up never saw
+        earlier weeks. Retention is unchanged (the newest `cap` weekly
+        dates per symbol) but dates are now processed oldest-to-newest;
+        forward extension stays ascending, past extension stays
+        boundary-first (the [oldest, newest] ledger never gains gaps).
+     3. ADAPTIVE HAIRCUT SWITCH REMOVED (P0): selectionHaircutMeta used to
+        drop the haircut entirely while reliabilityVerdict() ===
+        'conservative' (v4.3 #12). That switch was NOT in the calibration
+        signature - one basis could silently mix two scoring formulas and
+        poison every later A/B/retune. Scoring policy no longer mutates
+        with store contents.
+     4. FITTED SCORE COEFFICIENTS (scoreFit, P1): the score can now be the
+        fitted joint predictor
+            priorMean + b1 x lam x (basisEV - priorMean) - b2 x haircut
+        with SEPARATE haircut coefficients for Buy-grade rows (b2Buy) -
+        the A/B showed the haircut's ranking value lives outside the
+        tradeable pool (dIC t=-0.27 inside Buy-grade vs FDR ** pooled), so
+        one global haircutCoef cannot serve both populations. It also
+        stops the penalty from dominating the score variance (sd(-haircut)
+        0.17-0.20 vs sd(signal) 0.09: corr(score, signal) was 0.07-0.20).
+        retuneTuning() now returns .suggested (evPriorStdPct + scoreFit
+        with per-eligibility b2) and applyTuning() persists it through the
+        stox_ev_ui_config channel. scoreFit.enabled=false (default) keeps
+        bit-identical v4.9.2 scoring; b1 defaults to 1.
+     5. SELECTION BIAS TERM (selectionBias, P1, DEFAULT OFF): optional
+        max-of-N correction for the best-of-(h,t,mode) winner,
+        coef x stdErrPct x sqrt(2 ln planCount), clamped to maxPct and
+        subtracted after shrinkage like the haircut. Uses the stored
+        selection features (planCount/winnerGapPct). Set coef small
+        (0.2-0.4); do not stack at full strength with haircutCoef=1.
+        Off until validated on holdout rows.
+     6. REGIME -> VETO ONLY (P2): the A/B found no out-of-sample regime
+        effect (oosR2 -0.07 / -0.17), so regime.mismatchWeight defaults to
+        0 (history windows are no longer reweighted by regime mismatch;
+        the regime is still computed and reported for app-level vetoes)
+        and evidenceConfidence no longer credits regime (new
+        evidenceRegimePoints, default 0; was up to 15/100 of the evidence
+        gate). evidenceRegimePoints=15 restores v4.9.2 behaviour.
+     7. SHADOW GATE (shadowGate, P2; enabled by default, monitor-only): a
+        second, looser gate below QUALIFIED_TRADE returning decision.code 'SHADOW_QUALIFIED'
+        (monitor-only - no consumer trades it; the traded codes are
+        unchanged) so near-miss rows stay identifiable while the strict
+        gates are recalibrated on clean rows. The row store already keeps
+        every priced plan, so the learning set is unaffected.
+     8. ROWS CARRY THE SCORE RECIPE (P2): rowStoreShape gains signalScale
+        (effective b1), shrinkFactor and selBiasPct so the A/B harness and
+        the tuner reproduce stored predictions exactly.
+     Also: retuneTuning({asof:true}) de-contaminates stored priors before
+     fitting (as-of re-anchoring incl. the (1-lam) chain factor), so old
+     backfilled rows can still be used for fitting.
+
    v4.9 -> v4.9.1 (holdout-harness gate fix, decision layer only):
      The first v2 harness run on 20,366 walk-forward rows (63 weeks) confirmed
      the gating diagnosis with significance: the top-20% Buy-grade picks by the
@@ -309,7 +376,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.9.2';
+  var VERSION = 'EV-4.9.3';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -323,6 +390,10 @@ window.ExpectedValueEngine = (function () {
     minPositiveProbability: 0.60,
     minEvidence: 60,
     minEvConfidence: 0.80,
+    /* v4.9.3 (P2): max points evidenceConfidence may credit to the index
+       regime. Default 0 = regime is VETO-ONLY (the A/B found no
+       out-of-sample regime effect, oosR2 < 0); 15 restores v4.9.2. */
+    evidenceRegimePoints: 0,
     /* v4.4+: not a dilution blend any more (see combineProbability). The
        historical layer contributes its setup-specific lift at full strength;
        these weights now only set the ML share against the combined model
@@ -399,6 +470,22 @@ window.ExpectedValueEngine = (function () {
        haircut x nValid/(nValid + k). Default 0 = OFF (the A/B could not
        validate the shrink; decide with the holdout harness first). */
     haircutShrink: { k: 0 },
+    /* v4.9.3 (P1): fitted score coefficients (retuneTuning().suggested +
+       applyTuning()). enabled:false = classic scoring (bit-identical to
+       v4.9.2). When enabled, the score is
+         priorMean + b1 x lam x (basisEV - priorMean) - b2 x haircut
+       with b2Buy used instead of b2 for Buy-grade plans (setup score >=
+       buyThreshold): the A/B found the haircut ranks outside Buy-grade
+       only, so the tradeable pool wants its own coefficient. b2/b2Buy
+       null = fall back to haircutCoef. Part of the basis signature. */
+    scoreFit: { enabled: false, b1: 1, b2: null, b2Buy: null },
+    /* v4.9.3 (P1, DEFAULT OFF): parametric max-of-N selection bias for the
+       winning plan, subtracted after shrinkage:
+         coef x stdErrPct x sqrt(2 ln max(2, planCount)), clamped to maxPct.
+       Complements the split-half haircut at the source of the winner's
+       curse (best-of-(h,t,mode)); keep coef small (0.2-0.4) and do not
+       stack at full strength with haircutCoef=1. coef 0 = off. */
+    selectionBias: { coef: 0, maxPct: 3 },
     scoreGapFree: 8,
     scoreGapRange: 25,
     stopATR: 1.8,
@@ -415,11 +502,17 @@ window.ExpectedValueEngine = (function () {
     calibrationKey: 'stox_ev_calibration_v12',
 
     gate: { includeWatch: false, includeAvoid: false },
+    /* v4.9.3 (P2): shadow tier below QUALIFIED_TRADE - plans that fail the
+       strict gates but clear these looser ones get decision.code
+       'SHADOW_QUALIFIED' (monitor only; the traded codes and every
+       consumer filter are unchanged). Lets near-miss rows stay visible
+       while minNetEV & friends are recalibrated on clean rows. */
+    shadowGate: { enabled: true, minNetEV: 0.30, minPositiveProbability: 0.55, minEvConfidence: 0.75, minEvidence: 50 },
     exitVariants: ['fixed'],
     exit: { armFrac: 0.5, trailFrac: 0.6 },
     lockedLimitDelay: true,
     recency: { halfLifeBars: 250 },
-    regime: { enabled: true, mismatchWeight: 0.6, trendBars: 50, volBars: 20, minIndexBars: 80 },
+    regime: { enabled: true, mismatchWeight: 0, trendBars: 50, volBars: 20, minIndexBars: 80 },
     pooledPrior: { enabled: true, minN: 30, k: 60, maxWeight: 0.5 },
     liquidity: { enabled: false, impactCoef: 0.5, maxPerSidePct: 1.0, advBars: 20 },
     sizing: { kellyFraction: 0.25, maxPositionPct: 20, maxRiskPerTradePct: 1.0 },
@@ -836,25 +929,53 @@ window.ExpectedValueEngine = (function () {
      reliability accumulator - the empirical anchor for the zero-edge prior.
      Memoized because finalizePlan runs per plan and loadStore parses JSON on
      every call; the cache is invalidated on every batch commit and expires
-     after 60s as a belt-and-braces bound. */
+     after 60s as a belt-and-braces bound.
+     v4.9.3 (P0): AS-OF. With asOfDate the mean is rebuilt from the per-week
+     aggregates (rel.weeks) for weeks STRICTLY EARLIER than the scored week,
+     so a backfilled row can never anchor on outcomes that were still in its
+     future (the ev-ab-test-v3 as-of variant, the only FDR-significant
+     ranking improvement). If the store carries no per-week data the anchor
+     stays OFF - a lifetime mean would re-introduce the leak. */
   var _wfMeanCache = { key: null, at: 0, val: null };
-  function walkForwardMean(key, maxAgeMs) {
+  function walkForwardMean(key, asOfDate, maxAgeMs) {
     var now = Date.now();
-    if (_wfMeanCache.key === key && _wfMeanCache.val && (now - _wfMeanCache.at) < (maxAgeMs || 60000)) return _wfMeanCache.val;
+    var asOfWeek = asOfDate ? weekKeyOf(String(asOfDate).slice(0, 10)) : null;
+    var ck = key + '|' + (asOfWeek || 'all');
+    if (_wfMeanCache.key === ck && _wfMeanCache.val && (now - _wfMeanCache.at) < (maxAgeMs || 60000)) return _wfMeanCache.val;
     var val = null;
     try {
       var rel = loadParts(key).rel || {};
-      var g = rel.all || {};
-      if (g.n > 0 && isFinite(g.sr)) {
-        val = {
-          mean: g.sr / g.n, n: g.n,
-          rawMean: isFinite(g.srw) ? g.srw / g.n : null,
-          eligMean: rel.elig && rel.elig.n > 0 ? rel.elig.sr / rel.elig.n : null,
-          eligN: rel.elig ? rel.elig.n : 0
-        };
+      if (asOfWeek) {
+        var wk = rel.weeks || {};
+        var n = 0, s = 0, raw = 0, en = 0, es = 0;
+        Object.keys(wk).forEach(function (k2) {
+          if (!(k2 < asOfWeek)) return;   /* strictly earlier weeks only */
+          var w = wk[k2];
+          if (!w) return;
+          var wn = num(w.n, 0), wen = num(w.eN, 0);
+          if (wn > 0) { n += wn; s += num(w.sr, 0); raw += isFinite(w.srw) ? num(w.srw, 0) : num(w.sr, 0); }
+          if (wen > 0) { en += wen; es += num(w.eSR, 0); }
+        });
+        if (n > 0) {
+          val = {
+            mean: s / n, n: n, rawMean: raw / n,
+            eligMean: en > 0 ? es / en : null, eligN: en,
+            asOfWeek: asOfWeek
+          };
+        }
+      } else {
+        var g = rel.all || {};
+        if (g.n > 0 && isFinite(g.sr)) {
+          val = {
+            mean: g.sr / g.n, n: g.n,
+            rawMean: isFinite(g.srw) ? g.srw / g.n : null,
+            eligMean: rel.elig && rel.elig.n > 0 ? rel.elig.sr / rel.elig.n : null,
+            eligN: rel.elig ? rel.elig.n : 0
+          };
+        }
       }
     } catch (e) {}
-    _wfMeanCache = { key: key, at: now, val: val };
+    _wfMeanCache = { key: ck, at: now, val: val };
     return val;
   }
   function commitBatch(key, parts) {
@@ -1027,7 +1148,7 @@ window.ExpectedValueEngine = (function () {
     };
   }
 
-  function evidenceConfidence(input) {
+  function evidenceConfidence(input, cfg) {
     var ownScore = clamp((input.ownN || 0) / 40, 0, 1) * 12;
     var calScore = clamp((input.historicalN || 0) / 200, 0, 1) * 18;
     var dataScore = clamp(input.dataCompleteness == null ? 0 : input.dataCompleteness, 0, 1) * 15;
@@ -1036,8 +1157,14 @@ window.ExpectedValueEngine = (function () {
     var modelScore = contributors >= 3 ? 15 : contributors === 2 ? 11 : 7;
     var setupScore = input.setupScore == null ? 50 : input.setupScore;
     var stabilityScore = clamp((setupScore - 35) / 50, 0, 1) * 10;
+    /* v4.9.3 (P2): regime credits nothing by default (evidenceRegimePoints
+       0 = veto-only; the A/B found no out-of-sample regime effect). With
+       evidenceRegimePoints > 0 the v4.9.2 behaviour is restored (up to
+       that many points, null regime scores a third). */
+    var regimePts = num(cfg && cfg.evidenceRegimePoints, 0);
     var regimeMax = num(input.regimeMax, 5);
-    var regimeScore = input.regimeScore == null || regimeMax <= 0 ? 5 : clamp(input.regimeScore / regimeMax, 0, 1) * 15;
+    var regimeScore = regimePts <= 0 ? 0
+      : (input.regimeScore == null || regimeMax <= 0 ? regimePts / 3 : clamp(input.regimeScore / regimeMax, 0, 1) * regimePts);
     return round(clamp(ownScore + calScore + dataScore + agreementScore + modelScore + stabilityScore + regimeScore, 0, 100), 1);
   }
 
@@ -1048,6 +1175,14 @@ window.ExpectedValueEngine = (function () {
       return { code: 'HIGH_CONVICTION', label: 'HIGH CONVICTION', color: 'profit' };
     if (netEV >= cfg.minNetEV && pReturnPositive >= cfg.minPositiveProbability && evidence >= cfg.minEvidence && pEvPositive >= cfg.minEvConfidence)
       return { code: 'QUALIFIED_TRADE', label: 'QUALIFIED TRADE', color: 'profit' };
+    /* v4.9.3 (P2): shadow tier - monitor-only, never traded (consumers
+       filter on QUALIFIED_TRADE / HIGH_CONVICTION exactly as before). */
+    var sg = cfg.shadowGate;
+    if (sg && sg.enabled && netEV >= num(sg.minNetEV, 0.30) &&
+        (pReturnPositive == null || pReturnPositive >= num(sg.minPositiveProbability, 0.55)) &&
+        evidence >= num(sg.minEvidence, 50) &&
+        (pEvPositive == null || pEvPositive >= num(sg.minEvConfidence, 0.75)))
+      return { code: 'SHADOW_QUALIFIED', label: 'SHADOW (monitor only)', color: 'neutral', shadow: true };
     return { code: 'WATCH', label: 'WATCH', color: 'warn' };
   }
 
@@ -1086,7 +1221,12 @@ window.ExpectedValueEngine = (function () {
     var info = null;
     var reg = indexRegimes(indexCandles, cfg);
     if (reg) {
-      var mm = clamp(num(cfg.regime.mismatchWeight, 0.6), 0.05, 1);
+      /* v4.9.3 (P2): mismatchWeight <= 0 = regime VETO-ONLY - the regime is
+         still computed and reported below (app-level vetoes) but history
+         windows are not reweighted by regime mismatch. (The old clamp
+         floor of 0.05 meant a literal 0 still downweighted hard.) */
+      var mmRaw = num(cfg.regime.mismatchWeight, 0.6);
+      var mm = clamp(mmRaw, 0.05, 1);
       var state = new Array(n), p = -1;
       for (k = 0; k < n; k++) {
         var d = String(daily[k].t).slice(0, 10);
@@ -1099,8 +1239,7 @@ window.ExpectedValueEngine = (function () {
         for (k = 0; k < n; k++) {
           if (!state[k]) continue;
           var mism = (state[k][0] !== cur[0] ? 1 : 0) + (state[k][1] !== cur[1] ? 1 : 0);
-          var f = Math.pow(mm, mism);
-          w[k] *= f;
+          if (mmRaw > 0) w[k] *= Math.pow(mm, mism);
           totW += w[k]; if (!mism) matchW += w[k];
         }
         info = { trend: cur[0] ? 'up' : 'down', volatility: cur[1] ? 'high' : 'low', matchedShare: totW > 0 ? matchW / totW : null };
@@ -1285,11 +1424,14 @@ window.ExpectedValueEngine = (function () {
     var liq = liquidityCostPct(daily, atrPct, cfg);
 
     /* v4.9 (P1): zero-edge prior anchor (computed once per call; the walk-
-       forward mean comes from the reliability store, memoized below). */
+       forward mean comes from the reliability store, memoized below).
+       v4.9.3 (P0): as-of - anchored on weeks strictly before the signal
+       date (last completed session), never on same-or-later outcomes. */
     var anchor = null;
     var ancCfg = cfg.priorAnchor || {};
     if (ancCfg.enabled !== false) {
-      var wf = walkForwardMean(cfg.calibrationKey);
+      var asOfDate = daily.length ? String(daily[daily.length - 1].t).slice(0, 10) : null;
+      var wf = walkForwardMean(cfg.calibrationKey, asOfDate);
       if (wf) {
         /* v4.9.2 (A1): anchor to the Buy-grade (eligible) walk-forward mean -
            the population that is actually traded - when it has enough rows;
@@ -1358,7 +1500,7 @@ window.ExpectedValueEngine = (function () {
     return core;
   }
 
-  function finalizePlan(core, pre, input, cfg, haircut) {
+  function finalizePlan(core, pre, input, cfg, haircut, hcMeta) {
     var setup = pre.setup, tb = core.tb, probability = core.probability;
     var hist = core.hist;
 
@@ -1371,7 +1513,7 @@ window.ExpectedValueEngine = (function () {
       setupScore: setup.score,
       regimeScore: setup.components && setup.components.regime,
       regimeMax: setup.components && setup.components.regimeMax
-    });
+    }, cfg);
 
     var ev = null;
     if (core.ev) {
@@ -1406,7 +1548,28 @@ window.ExpectedValueEngine = (function () {
         priorMean = m0 + pooledW * (pooledMean - m0);
       }
       var hcK = num(cfg.haircutCoef, 1);
-      var shrunk = priorMean + lam * (core.basisEV - priorMean) - hcK * haircut;
+      /* v4.9.3 (P1): fitted score coefficients. b1 rescales the shrunk
+         signal (retuneTuning's joint OLS targets b1 = 1 via the tau grid);
+         b2/b2Buy replace haircutCoef per population - Buy-grade plans use
+         b2Buy (setup score >= buyThreshold) because the A/B found the
+         haircut ranks only OUTSIDE the tradeable pool. scoreFit disabled
+         (default) = classic scoring. */
+      var sf = cfg.scoreFit || {};
+      var sfOn = sf.enabled === true;
+      var b1 = sfOn ? num(sf.b1, 1) : 1;
+      if (sfOn) {
+        var buyGrade = pre.setupCalScore != null && pre.setupCalScore >= buyThreshold();
+        var pick = buyGrade ? (sf.b2Buy != null ? sf.b2Buy : sf.b2) : sf.b2;
+        if (pick != null && isFinite(Number(pick))) hcK = num(pick, hcK);
+      }
+      /* v4.9.3 (P1): parametric max-of-N selection bias on the winning plan
+         (selectionBias.coef > 0 only; clamped like the haircut). */
+      var selBias = 0;
+      var sbCoef = num(cfg.selectionBias && cfg.selectionBias.coef, 0);
+      if (sbCoef > 0 && hcMeta && hcMeta.nCandidates > 1) {
+        selBias = clamp(sbCoef * s * Math.sqrt(2 * Math.log(Math.max(2, hcMeta.nCandidates))), 0, num(cfg.selectionBias.maxPct, 3));
+      }
+      var shrunk = priorMean + b1 * lam * (core.basisEV - priorMean) - hcK * haircut - selBias;
       var postSd = Math.sqrt(tau * tau * s * s / (tau * tau + s * s));
       ev = {
         grossPct: core.ev.grossPct, costPct: core.ev.costPct, taxPct: core.ev.taxPct,
@@ -1417,6 +1580,9 @@ window.ExpectedValueEngine = (function () {
         haircutRawPct: haircut,
         haircutCoef: hcK,
         shrinkFactor: lam,
+        /* v4.9.3: the score recipe, so stored rows reproduce exactly */
+        signalScale: b1,
+        selBiasPct: selBias,
         priorMeanPct: priorMean,
         zeroEdgePriorPct: m0,
         pooledMeanPct: pooledMean,
@@ -1724,9 +1890,11 @@ window.ExpectedValueEngine = (function () {
   function selectionHaircutMeta(cores, cfg) {
     var meta = { haircut: 0, nCandidates: 0, winnerGap: null, splits: 0 };
     if (!cfg.selectionHaircut) return meta;
-    try {
-      if (reliabilityVerdict(cfg.calibrationKey) === 'conservative') return meta;
-    } catch (e) {}
+    /* v4.9.3 (P0): the v4.3 #12 conservatism bypass (drop the haircut while
+       reliabilityVerdict() === 'conservative') is REMOVED - it was not in
+       the calibration signature, so one basis could silently mix two
+       scoring formulas and poison later A/B runs and retunes. Scoring no
+       longer mutates with store contents. */
     var valid = cores.filter(function (c) { return c.tb && c.tb.halfA != null && c.tb.halfB != null; });
     meta.nCandidates = valid.length;
     if (valid.length < 3) return meta;
@@ -1826,7 +1994,7 @@ window.ExpectedValueEngine = (function () {
 
     var results = [];
     cores.forEach(function (core) {
-      var r = finalizePlan(core, pre, input, cfg, haircut);
+      var r = finalizePlan(core, pre, input, cfg, haircut, hcMeta);
       if (r.expectedValue && r.probability && r.probability.target != null) {
         /* v4.9 (P1): selection features on every priced plan */
         r.expectedValue.selectionCandidates = hcMeta.nCandidates;
@@ -1964,8 +2132,10 @@ window.ExpectedValueEngine = (function () {
      changes. If it differs from the stored one - or no signature exists
      (unknown basis) - the whole family is cleared and rebuilds. */
   /* v4.9: bumped - priorAnchor changes stored predictions.
-     v4.9.2: bumped again - the anchor population is now Buy-grade. */
-  var BASIS_REV = '4';
+     v4.9.2: bumped again - the anchor population is now Buy-grade.
+     v4.9.3: bumped - the anchor is now AS-OF (strictly earlier weeks), so
+     stored predictions change again; the row store rebuilds with them. */
+  var BASIS_REV = '5';
   function shortHash(str) {
     var h = 0x811c9dc5;
     for (var i = 0; i < str.length; i++) {
@@ -1995,6 +2165,15 @@ window.ExpectedValueEngine = (function () {
       haircutCoef: num(cfg.haircutCoef, 1),
       priorAnchor: cfg.priorAnchor ? { e: cfg.priorAnchor.enabled !== false ? 1 : 0, w: num(cfg.priorAnchor.maxWeight, 0.35), n: num(cfg.priorAnchor.minRows, 100), p: cfg.priorAnchor.population === 'all' ? 'all' : 'elig' } : null,
       haircutShrinkK: num(cfg.haircutShrink && cfg.haircutShrink.k, 0),
+      /* v4.9.3: fitted score coefficients + selection-bias term change
+         stored predictions -> part of the basis. */
+      scoreFit: cfg.scoreFit ? {
+        e: cfg.scoreFit.enabled === true ? 1 : 0,
+        b1: num(cfg.scoreFit.b1, 1),
+        b2: cfg.scoreFit.b2 == null ? null : num(cfg.scoreFit.b2, 1),
+        b2Buy: cfg.scoreFit.b2Buy == null ? null : num(cfg.scoreFit.b2Buy, 1)
+      } : null,
+      selBiasCoef: num(cfg.selectionBias && cfg.selectionBias.coef, 0),
       minWindows: num(cfg.minWindows, 30),
       recency: cfg.recency || null,
       regime: cfg.regime || null
@@ -3080,6 +3259,9 @@ window.ExpectedValueEngine = (function () {
       /* v4.8: haircutPct is the EFFECTIVE penalty (coef x raw); haircutRawPct
          is the raw split-half estimate the coefficient is fitted on. */
       haircutPct: r.haircutPct, haircutRawPct: r.haircutRawPct, haircutCoef: r.haircutCoef,
+      /* v4.9.3 (P2): score recipe (signal scale, effective shrinkage,
+         selection-bias term) */
+      signalScale: r.signalScale, shrinkFactor: r.shrinkFactor, selBiasPct: r.selBiasPct,
       /* v4.9 (P1/P2): symbol hash + selection features (plan count, winner gap) */
       sym: r.sym, planCount: r.planCount, winnerGapPct: r.winnerGapPct,
       priorMeanPct: r.priorMeanPct, horizonDays: r.horizonDays,
@@ -3163,6 +3345,45 @@ window.ExpectedValueEngine = (function () {
      Plain centered OLS (2 regressors, implicit intercept); coefficients only
      - for inference use the row store with week-clustered errors (ev-ab-test
      style). Rows without haircutRawPct (pre-v4.8) use haircutPct as raw. */
+  /* v4.9.3 (P1): as-of de-contamination of stored priors for offline fitting.
+     Rows backfilled before EV-4.9.3 were anchored on the LIFETIME reliability
+     mean (look-ahead); this re-anchors each row's prior on strictly earlier
+     weeks only, applying the correction the score would have carried:
+       pmClean = pm + (1 - lam) x (1 - pooledWeight) x anchorWeight
+                     x (asOfMean(earlier weeks) - anchorPct)
+     (the (1 - lam) chain factor is d(score)/d(prior); ev-ab-test v3 omitted
+     it). Rows built under v4.9.3+ are already as-of and shift ~ 0. */
+  function asOfPriors(rows, pm) {
+    var byW = {}, wkSet = {};
+    rows.forEach(function (r) {
+      var w = r.date ? weekKeyOf(String(r.date).slice(0, 10)) : null;
+      if (!w) return;
+      wkSet[w] = true;
+      if (r.elig) { var b = byW[w] = byW[w] || { n: 0, s: 0 }; b.n++; b.s += num(r.real, 0); }
+    });
+    var weeks = Object.keys(wkSet).sort();
+    var asOf = {}, n = 0, s = 0, minRows = 100;
+    weeks.forEach(function (w) {
+      asOf[w] = n >= minRows ? s / n : null;
+      if (byW[w]) { n += byW[w].n; s += byW[w].s; }
+    });
+    var tauBase = num(getConfig().evPriorStdPct, 0.3), defH = num(getConfig().defaultHorizon, 10);
+    return rows.map(function (r, i) {
+      var w = r.date ? weekKeyOf(String(r.date).slice(0, 10)) : null;
+      var a = w != null ? asOf[w] : null;
+      var aw = isFinite(r.anchorWeight) ? r.anchorWeight : 0;
+      var ap = isFinite(r.anchorPct) ? r.anchorPct : null;
+      var pw = isFinite(r.pooledWeight) ? r.pooledWeight : 0;
+      if (a == null || ap == null || !(aw > 0)) return pm[i];
+      var lam = isFinite(r.shrinkFactor) ? r.shrinkFactor : (function () {
+        var tau = Math.max(0.05, tauBase * Math.sqrt(Math.max(1, num(r.horizonDays, defH)) / defH));
+        var se = Math.max(0.02, num(r.stdErrPct, 0.5));
+        return tau * tau / (tau * tau + se * se);
+      })();
+      return pm[i] + (1 - lam) * (1 - pw) * aw * (a - ap);
+    });
+  }
+
   function retuneTuning(rows, opts) {
     opts = opts || {};
     var grid = opts.grid || [0.15, 0.2, 0.25, 0.28, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.75, 1.0];
@@ -3173,6 +3394,8 @@ window.ExpectedValueEngine = (function () {
     if (usable.length < 30) return { ok: false, reason: 'insufficient_rows', n: usable.length };
 
     var pm = usable.map(function (r) { return isFinite(r.priorMeanPct) ? r.priorMeanPct : 0; });
+    /* v4.9.3 (P1): default ON - fits must not learn from look-ahead priors. */
+    if (opts.asof !== false) pm = asOfPriors(usable, pm);
     var y = usable.map(function (r, i) { return r.real - pm[i]; });
     var hcRaw = usable.map(function (r) {
       var h = (r.haircutRawPct != null && isFinite(r.haircutRawPct)) ? r.haircutRawPct : num(r.haircutPct, 0);
@@ -3232,11 +3455,57 @@ window.ExpectedValueEngine = (function () {
       };
       byElig = { elig: fitSub(function (r) { return !!r.elig; }), other: fitSub(function (r) { return !r.elig; }) };
     }
+    var b2All = (best && best.haircutCoefFit != null && isFinite(best.haircutCoefFit)) ? clamp(best.haircutCoefFit, 0, 1.5) : null;
+    var b2Buy = (byElig && byElig.elig && byElig.elig.haircutCoefFit != null && isFinite(byElig.elig.haircutCoefFit)) ? clamp(byElig.elig.haircutCoefFit, 0, 1.5) : null;
     return {
       ok: true, n: usable.length, best: best, grid: out, byElig: byElig,
       currentTauBase: num(getConfig().evPriorStdPct, 0.5),
       currentHaircutCoef: num(getConfig().haircutCoef, 1),
-      suggestedHaircutCoef: (best && best.haircutCoefFit != null && isFinite(best.haircutCoefFit)) ? clamp(best.haircutCoefFit, 0, 1.5) : null
+      suggestedHaircutCoef: b2All,
+      /* v4.9.3 (P1): ready-to-apply patch - feed to applyTuning(). */
+      suggested: best ? {
+        evPriorStdPct: best.tauBase,
+        haircutCoef: b2All,
+        scoreFit: {
+          enabled: true,
+          b1: isFinite(best.slope) ? clamp(best.slope, 0.25, 4) : 1,
+          b2: b2All, b2Buy: b2Buy
+        }
+      } : null
+    };
+  }
+
+  /* v4.9.3 (P1): persist a retuneTuning() suggestion through the same
+     'stox_ev_ui_config' channel the Tune panel uses (v4.7.2), so the basis
+     signature, the live store name and the calibration family all follow
+     the tuned basis on the next load/call. Expect a one-time store rebuild:
+     these are prediction-affecting parameters. */
+  function applyTuning(fit) {
+    var s = fit && fit.suggested ? fit.suggested : fit;
+    if (!s || (!isFinite(s.evPriorStdPct) && !s.scoreFit && !isFinite(s.haircutCoef))) return { ok: false, reason: 'no_suggestion' };
+    var patch = {};
+    if (isFinite(s.evPriorStdPct)) patch.evPriorStdPct = num(s.evPriorStdPct, 0.3);
+    if (s.scoreFit && s.scoreFit.enabled !== false && (isFinite(s.scoreFit.b1) || s.scoreFit.b2 != null || s.scoreFit.b2Buy != null)) {
+      patch.scoreFit = {
+        enabled: true,
+        b1: num(s.scoreFit.b1, 1),
+        b2: s.scoreFit.b2 == null ? null : num(s.scoreFit.b2, 1),
+        b2Buy: s.scoreFit.b2Buy == null ? null : num(s.scoreFit.b2Buy, 1)
+      };
+    } else if (isFinite(s.haircutCoef)) {
+      patch.haircutCoef = num(s.haircutCoef, 1);
+    }
+    try {
+      var raw = localStorage.getItem('stox_ev_ui_config');
+      var cur = raw ? JSON.parse(raw) : {};
+      if (!cur || typeof cur !== 'object') cur = {};
+      Object.keys(patch).forEach(function (k) { cur[k] = patch[k]; });
+      localStorage.setItem('stox_ev_ui_config', JSON.stringify(cur));
+      window.STOX_EV_CONFIG = Object.assign({}, window.STOX_EV_CONFIG || {}, patch);
+    } catch (e) { return { ok: false, reason: 'config_write_failed' }; }
+    return {
+      ok: true, applied: patch,
+      note: 'prediction-affecting parameters changed: the calibration family clears and rebuilds on next use (basis signature ' + BASIS_REV + ').'
     };
   }
 
@@ -3366,8 +3635,12 @@ window.ExpectedValueEngine = (function () {
     var lastStart = daily.length - 1 - maxH;
 
     function weekOf(ord) { return Math.floor((ord + 3) / 7); }
+    /* v4.9.3 (P0): dates are enumerated OLDEST-FIRST. With the as-of anchor
+       the row VALUES no longer depend on processing order, but the anchor's
+       minRows warm-up should still see earlier weeks before later ones so a
+       rebuilt store reproduces what live decisions would have seen. */
     var eligible = [];
-    for (var i = lastStart; i >= minStart; i--) {
+    for (var i = minStart; i <= lastStart; i++) {
       var ord = dayOrdinal(daily[i].t), prev = dayOrdinal(daily[i - 1].t);
       if (ord == null || prev == null) { out.reason = 'bad_dates'; return out; }
       if (weekOf(ord) !== weekOf(prev)) eligible.push(i);
@@ -3385,8 +3658,16 @@ window.ExpectedValueEngine = (function () {
       else if (dt > meta.newest) fresh.push(idx);
       else if (dt < meta.oldest) older.push(idx);
     });
-    fresh.reverse();
-    var todo = fresh.concat(meta.count < cap ? older.slice(0, Math.max(0, cap - meta.count)) : []);
+    /* v4.9.3 (P0): chronological processing within the retention window
+       (oldest -> newest). Retention is unchanged - the NEWEST `cap` dates
+       are kept - but the kept block now builds forward in time so the
+       anchor warm-up sees earlier weeks first. Past extension (`older`
+       when a ledger exists) still runs boundary-first (descending) so the
+       [oldest, newest] ledger never gains gaps. */
+    var olderBudget = Math.max(0, cap - meta.count);
+    var olderKeep = older.slice(Math.max(0, older.length - olderBudget));
+    if (meta.newest != null) olderKeep.reverse();
+    var todo = (meta.count < cap ? olderKeep : []).concat(fresh);
     out.remaining = Math.max(0, todo.length - maxSamples);
     todo = todo.slice(0, maxSamples);
     if (!todo.length) { out.reason = 'up_to_date'; return out; }
@@ -3458,6 +3739,11 @@ window.ExpectedValueEngine = (function () {
                   sym: shortHash(symbol),
                   planCount: b.expectedValue.selectionCandidates,
                   winnerGapPct: b.expectedValue.winnerGapPct,
+                  /* v4.9.3 (P2): the score recipe - reproduces stored
+                     predictions exactly in the A/B and the tuner. */
+                  signalScale: b.expectedValue.signalScale,
+                  shrinkFactor: b.expectedValue.shrinkFactor,
+                  selBiasPct: b.expectedValue.selBiasPct,
                   priorMeanPct: b.expectedValue.priorMeanPct,
                   horizonDays: b.horizonDays,
                   /* v4.9.2 (A2): basis tag, anchor ingredients (as-of re-anchoring),
@@ -3536,6 +3822,7 @@ window.ExpectedValueEngine = (function () {
     adoptCurrentBasis: adoptCurrentBasis,
     retuneTau: retuneTau,
     retuneTuning: retuneTuning,
+    applyTuning: applyTuning,
     rowStoreRows: rowStoreRows,
     reliabilityVerdict: reliabilityVerdict,
     _test: {
@@ -3561,6 +3848,7 @@ window.ExpectedValueEngine = (function () {
       olsSlope: olsSlope,
       selectionHaircutMeta: selectionHaircutMeta,
       walkForwardMean: walkForwardMean,
+      asOfPriors: asOfPriors,
       sessionState: sessionState, intradayBarriers: intradayBarriers, completedOnly: completedOnly,
       withSession: withSession, candleDate: candleDate, istClock: istClock, sessionIsOpen: sessionIsOpen
     }
