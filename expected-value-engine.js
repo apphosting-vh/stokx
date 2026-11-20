@@ -309,7 +309,7 @@
 window.ExpectedValueEngine = (function () {
   'use strict';
 
-  var VERSION = 'EV-4.9.1';
+  var VERSION = 'EV-4.9.2';
 
   var DEFAULTS = {
     horizons: [3, 5, 10, 15, 20],
@@ -394,7 +394,7 @@ window.ExpectedValueEngine = (function () {
        weight = min(maxWeight, ...) applied only once minRows settled rows
        exist; enabled:false restores the pure cost/tax prior. Part of the
        calibration signature. */
-    priorAnchor: { enabled: true, maxWeight: 0.35, minRows: 100 },
+    priorAnchor: { enabled: true, maxWeight: 0.35, minRows: 100, population: 'elig' },
     /* v4.9 (P1): count-shrink of the selection haircut toward 0,
        haircut x nValid/(nValid + k). Default 0 = OFF (the A/B could not
        validate the shrink; decide with the holdout harness first). */
@@ -1290,8 +1290,16 @@ window.ExpectedValueEngine = (function () {
     var ancCfg = cfg.priorAnchor || {};
     if (ancCfg.enabled !== false) {
       var wf = walkForwardMean(cfg.calibrationKey);
-      if (wf && wf.n >= num(ancCfg.minRows, 100) && isFinite(wf.mean)) {
-        anchor = { mean: wf.mean, n: wf.n, weight: clamp(num(ancCfg.maxWeight, 0.35), 0, 1) };
+      if (wf) {
+        /* v4.9.2 (A1): anchor to the Buy-grade (eligible) walk-forward mean -
+           the population that is actually traded - when it has enough rows;
+           population:'all' restores the all-plan mean. */
+        var ancMinR = num(ancCfg.minRows, 100);
+        var ancElig = ancCfg.population !== 'all' && wf.eligN >= ancMinR && isFinite(wf.eligMean);
+        var ancMean = ancElig ? wf.eligMean : wf.mean, ancN = ancElig ? wf.eligN : wf.n;
+        if (ancN >= ancMinR && isFinite(ancMean)) {
+          anchor = { mean: ancMean, n: ancN, weight: clamp(num(ancCfg.maxWeight, 0.35), 0, 1), population: ancElig ? 'elig' : 'all' };
+        }
       }
     }
 
@@ -1939,6 +1947,7 @@ window.ExpectedValueEngine = (function () {
       delete _calCache[key];
       _calCacheVer[key] = (_calCacheVer[key] || 0) + 1;
       _wfMeanCache.at = 0;
+      rowStoreClear();   /* v4.9.2 (A3) */
       return true;
     } catch (e) { return false; }
   }
@@ -1954,8 +1963,9 @@ window.ExpectedValueEngine = (function () {
      plus BASIS_REV, bumped by hand whenever replay or optimizer logic
      changes. If it differs from the stored one - or no signature exists
      (unknown basis) - the whole family is cleared and rebuilds. */
-  /* v4.9: bumped - priorAnchor changes stored predictions. */
-  var BASIS_REV = '3';
+  /* v4.9: bumped - priorAnchor changes stored predictions.
+     v4.9.2: bumped again - the anchor population is now Buy-grade. */
+  var BASIS_REV = '4';
   function shortHash(str) {
     var h = 0x811c9dc5;
     for (var i = 0; i < str.length; i++) {
@@ -1983,7 +1993,7 @@ window.ExpectedValueEngine = (function () {
       defaultHorizon: num(cfg.defaultHorizon, 10),
       selectionHaircut: cfg.selectionHaircut !== false ? 1 : 0,
       haircutCoef: num(cfg.haircutCoef, 1),
-      priorAnchor: cfg.priorAnchor ? { e: cfg.priorAnchor.enabled !== false ? 1 : 0, w: num(cfg.priorAnchor.maxWeight, 0.35), n: num(cfg.priorAnchor.minRows, 100) } : null,
+      priorAnchor: cfg.priorAnchor ? { e: cfg.priorAnchor.enabled !== false ? 1 : 0, w: num(cfg.priorAnchor.maxWeight, 0.35), n: num(cfg.priorAnchor.minRows, 100), p: cfg.priorAnchor.population === 'all' ? 'all' : 'elig' } : null,
       haircutShrinkK: num(cfg.haircutShrink && cfg.haircutShrink.k, 0),
       minWindows: num(cfg.minWindows, 30),
       recency: cfg.recency || null,
@@ -3072,7 +3082,12 @@ window.ExpectedValueEngine = (function () {
       haircutPct: r.haircutPct, haircutRawPct: r.haircutRawPct, haircutCoef: r.haircutCoef,
       /* v4.9 (P1/P2): symbol hash + selection features (plan count, winner gap) */
       sym: r.sym, planCount: r.planCount, winnerGapPct: r.winnerGapPct,
-      priorMeanPct: r.priorMeanPct, horizonDays: r.horizonDays
+      priorMeanPct: r.priorMeanPct, horizonDays: r.horizonDays,
+      /* v4.9.2 (A2) */
+      basis: r.basis, ver: r.ver,
+      anchorPct: r.anchorPct, anchorWeight: r.anchorWeight, pooledWeight: r.pooledWeight,
+      pEv: r.pEv, pRet: r.pRet, evidence: r.evidence, setupQ: r.setupQ, code: r.code,
+      regTrend: r.regTrend, regVol: r.regVol
     };
   }
   function rowStorePut(rows) {
@@ -3096,6 +3111,28 @@ window.ExpectedValueEngine = (function () {
     return _rowMem.length;
   }
   function rowStoreRows() { return _rowMem.slice(); }
+  /* v4.9.2 (A3): a basis rotation used to clear localStorage but leave the
+     IndexedDB rows behind, so stale old-basis rows sat next to the rebuilt
+     ones. Never creates the database without its store (same upgrade
+     handler as rowStorePut), so a later rowStorePut still finds 'rows'. */
+  function rowStoreClear() {
+    _rowMem = [];
+    try {
+      if (typeof indexedDB === 'undefined' || !indexedDB) return;
+      var req = indexedDB.open('stox_ev_rows', 1);
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains('rows')) db.createObjectStore('rows', { keyPath: 'id', autoIncrement: true });
+      };
+      req.onsuccess = function () {
+        var db = req.result;
+        try {
+          if (db.objectStoreNames.contains('rows')) db.transaction('rows', 'readwrite').objectStore('rows').clear();
+        } catch (e) {}
+        db.close();
+      };
+    } catch (e) {}
+  }
 
   function olsSlope(xs, ys) {
     var n = xs.length, mx = 0, my = 0, i;
@@ -3355,6 +3392,7 @@ window.ExpectedValueEngine = (function () {
     if (!todo.length) { out.reason = 'up_to_date'; return out; }
 
     var doRel = opts.reliability !== false;
+    var sigNow = calibrationSignature(cfg);   /* v4.9.2 (A2): basis tag for every stored row */
     var buyTh = buyThreshold();
     var costPct = totalRoundTripCost(cfg.costs);
     var rows = [], relRows = [];
@@ -3421,7 +3459,18 @@ window.ExpectedValueEngine = (function () {
                   planCount: b.expectedValue.selectionCandidates,
                   winnerGapPct: b.expectedValue.winnerGapPct,
                   priorMeanPct: b.expectedValue.priorMeanPct,
-                  horizonDays: b.horizonDays
+                  horizonDays: b.horizonDays,
+                  /* v4.9.2 (A2): basis tag, anchor ingredients (as-of re-anchoring),
+                     live-gate inputs and the index regime at entry */
+                  basis: sigNow, ver: VERSION,
+                  anchorPct: b.expectedValue.priorAnchorPct, anchorWeight: b.expectedValue.priorAnchorWeight,
+                  pooledWeight: b.expectedValue.pooledWeight,
+                  pEv: b.expectedValue.pPositive,
+                  pRet: b.probability ? b.probability.positiveReturn : null,
+                  evidence: b.evidenceConfidence, setupQ: b.setupQuality,
+                  code: b.decision ? b.decision.code : null,
+                  regTrend: b.regime ? b.regime.trend : null,
+                  regVol: b.regime ? b.regime.volatility : null
                 });
               }
             }
