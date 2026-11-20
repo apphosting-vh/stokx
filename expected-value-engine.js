@@ -12,6 +12,18 @@
      processing, legacy range metas flagged (meta.legacySpan) and skipped
      in-range as before.
 
+   v4.9.3c (ledger/observability fix): v4.9.3b changed the replay walk
+     WITHOUT bumping BASIS_REV, so engines upgraded in place kept their
+     pre-b RANGE-ONLY meta ledger (count/oldest/newest, no dates) and the
+     new walk trusted that whole [oldest, newest] span as processed - after
+     a row-store clear (or on any interrupted rebuild) this permanently
+     skips dates and exports look "half empty" (old weeks only). BASIS_REV
+     is now bumped on ANY replay/ledger change (per the long-standing
+     convention), which clears the family once on load; metas going
+     forward carry the exact processed-date list (meta.dates), and
+     calibrateFromHistory reports out.legacySpan when it meets a pre-b
+     range-only ledger.
+
    v4.9.2 -> v4.9.3 (ev-ab-test-v3 root-cause fix set; BASIS CHANGE -
    BASIS_REV 4 -> 5: stored predictions change, the calibration family and
    the row store rebuild once on upgrade):
@@ -2144,8 +2156,10 @@ window.ExpectedValueEngine = (function () {
   /* v4.9: bumped - priorAnchor changes stored predictions.
      v4.9.2: bumped again - the anchor population is now Buy-grade.
      v4.9.3: bumped - the anchor is now AS-OF (strictly earlier weeks), so
-     stored predictions change again; the row store rebuilds with them. */
-  var BASIS_REV = '5';
+     stored predictions change again; the row store rebuilds with them.
+     v4.9.3c: bumped - the replay ledger/walk changed (exact meta.dates,
+     retention window); pre-b range-only metas must not be trusted. */
+  var BASIS_REV = '6';
   function shortHash(str) {
     var h = 0x811c9dc5;
     for (var i = 0; i < str.length; i++) {
@@ -3675,6 +3689,7 @@ window.ExpectedValueEngine = (function () {
     var done = {};
     (meta.dates || []).forEach(function (d) { done[d] = 1; });
     if (!meta.dates && meta.newest != null) meta.legacySpan = true;
+    if (meta.legacySpan) out.legacySpan = true;   /* v4.9.3c: caller visibility */
 
     var keepFrom = eligible.length > cap ? eligible.length - cap : 0;
     var windowTodo = [], extTodo = [];
